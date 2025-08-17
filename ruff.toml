@@ -15,7 +15,6 @@ exclude = [
 
 [lint]
 select = ["E", "F", "B", "W", "C90"]
-# Добавляем ВСЕ коды ошибок, которые мы видели в логах
 ignore = [
     "E501",  # Line too long
     "E401",  # Multiple imports on one line
@@ -45,3 +44,4 @@ unfixable = []
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
+
