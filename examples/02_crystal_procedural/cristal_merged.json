@@ -1,0 +1,1648 @@
+{
+    "skeleton": {
+        "hash": "fca6b0413b",
+        "spine": "4.2.29",
+        "x": 0.0,
+        "y": 15.93,
+        "width": 127.07,
+        "height": 95.21,
+        "images": "",
+        "audio": "./audio"
+    },
+    "bones": [
+        {
+            "name": "root"
+        },
+        {
+            "name": "cristal_main",
+            "parent": "root",
+            "y": 0.5
+        },
+        {
+            "name": "cristal",
+            "parent": "cristal_main"
+        },
+        {
+            "name": "cristal_scale_rotate_X",
+            "parent": "cristal",
+            "length": 64.0,
+            "y": -0.5,
+            "scaleX": 0
+        },
+        {
+            "name": "cristal_rotate_X",
+            "parent": "cristal_scale_rotate_X",
+            "color": "ff0000ff"
+        },
+        {
+            "name": "cristal_1_scale",
+            "parent": "cristal_rotate_X",
+            "length": 64.0,
+            "rotation": 90,
+            "y": -273.28,
+            "inherit": "onlyTranslation",
+            "color": "abe323ff"
+        },
+        {
+            "name": "cristal_1",
+            "parent": "cristal_1_scale",
+            "rotation": -90
+        },
+        {
+            "name": "cristal_2_scale",
+            "parent": "cristal_rotate_X",
+            "length": 64.0,
+            "rotation": 90,
+            "y": -146.69,
+            "inherit": "onlyTranslation",
+            "color": "abe323ff"
+        },
+        {
+            "name": "cristal_2",
+            "parent": "cristal_2_scale",
+            "rotation": -90
+        },
+        {
+            "name": "cristal_3_scale",
+            "parent": "cristal_rotate_X",
+            "length": 64.0,
+            "rotation": 90,
+            "y": 0.0,
+            "inherit": "onlyTranslation",
+            "color": "abe323ff"
+        },
+        {
+            "name": "cristal_3",
+            "parent": "cristal_3_scale",
+            "rotation": -90
+        },
+        {
+            "name": "cristal_4_scale",
+            "parent": "cristal_rotate_X",
+            "length": 64.0,
+            "rotation": 90,
+            "y": 146.69,
+            "inherit": "onlyTranslation",
+            "color": "abe323ff"
+        },
+        {
+            "name": "cristal_4",
+            "parent": "cristal_4_scale",
+            "rotation": -90
+        },
+        {
+            "name": "cristal_5_scale",
+            "parent": "cristal_rotate_X",
+            "length": 64.0,
+            "rotation": 90,
+            "y": 273.28,
+            "inherit": "onlyTranslation",
+            "color": "abe323ff"
+        },
+        {
+            "name": "cristal_5",
+            "parent": "cristal_5_scale",
+            "rotation": -90
+        },
+        {
+            "name": "cristal_rotation_X",
+            "parent": "cristal_main",
+            "length": 64.0,
+            "x": 128.0,
+            "y": 64.0,
+            "color": "ff0000ff"
+        },
+        {
+            "name": "cristal_rotation_Y",
+            "parent": "cristal_main",
+            "length": 64.0,
+            "x": 128.0,
+            "color": "00ff18ff"
+        },
+        {
+            "name": "cristal_rotation_Z",
+            "parent": "cristal_main",
+            "length": 64.0,
+            "x": 128.0,
+            "y": -64.0,
+            "color": "002cffff"
+        },
+        {
+            "name": "cristal_rotate_X_constraint",
+            "parent": "cristal",
+            "length": 64.0,
+            "rotation": 90,
+            "y": -0.5,
+            "color": "abe323ff"
+        },
+        {
+            "name": "cristal_rotate_X_constraint_scale_IK",
+            "parent": "cristal",
+            "y": 63.5,
+            "scaleX": 0
+        },
+        {
+            "name": "cristal_rotate_X_constraint_rotate_IK",
+            "parent": "cristal_rotate_X_constraint_scale_IK",
+            "x": -64.0
+        },
+        {
+            "name": "cristal_rotate_X_constraint_IK",
+            "parent": "cristal_rotate_X_constraint_rotate_IK",
+            "rotation": 90,
+            "x": 64.0,
+            "color": "ff3f00ff",
+            "icon": "ik"
+        },
+        {
+            "name": "cristal_Segment_0_vertex_0",
+            "parent": "cristal_3",
+            "x": 0.0,
+            "y": -181.02
+        },
+        {
+            "name": "cristal_Segment_0_vertex_1",
+            "parent": "cristal_3",
+            "x": -57.6,
+            "y": -97.17
+        },
+        {
+            "name": "cristal_Segment_0_vertex_2",
+            "parent": "cristal_2",
+            "x": -57.6,
+            "y": -0.0
+        },
+        {
+            "name": "cristal_Segment_0_vertex_3",
+            "parent": "cristal_1",
+            "x": 0.0,
+            "y": -0.0
+        },
+        {
+            "name": "cristal_Segment_1_vertex_0",
+            "parent": "cristal_3",
+            "x": 57.6,
+            "y": 97.17
+        },
+        {
+            "name": "cristal_Segment_1_vertex_1",
+            "parent": "cristal_4",
+            "x": 57.6,
+            "y": 0.0
+        },
+        {
+            "name": "cristal_Segment_1_vertex_2",
+            "parent": "cristal_3",
+            "x": 57.6,
+            "y": -97.17
+        },
+        {
+            "name": "cristal_Segment_1_vertex_3",
+            "parent": "cristal_2",
+            "x": 57.6,
+            "y": 0.0
+        },
+        {
+            "name": "cristal_Segment_3_vertex_0",
+            "parent": "cristal_3",
+            "x": -0.0,
+            "y": 181.02
+        },
+        {
+            "name": "cristal_Segment_3_vertex_1",
+            "parent": "cristal_5",
+            "x": -0.0,
+            "y": 0.0
+        },
+        {
+            "name": "cristal_Segment_6_vertex_0",
+            "parent": "cristal_3",
+            "x": -57.6,
+            "y": 97.17
+        },
+        {
+            "name": "cristal_Segment_6_vertex_3",
+            "parent": "cristal_4",
+            "x": -57.6,
+            "y": -0.0
+        }
+    ],
+    "slots": [
+        {
+            "name": "cristal_rotation_X",
+            "bone": "cristal_rotation_X",
+            "attachment": "cristal_rotation_X"
+        },
+        {
+            "name": "cristal_rotation_Z",
+            "bone": "cristal_rotation_Z",
+            "attachment": "cristal_rotation_Z"
+        },
+        {
+            "name": "cristal_rotation_Y",
+            "bone": "cristal_rotation_Y",
+            "attachment": "cristal_rotation_Y"
+        },
+        {
+            "name": "cristal_main",
+            "bone": "cristal_main",
+            "attachment": "cristal_main"
+        },
+        {
+            "name": "cristal_copy_for_uv",
+            "bone": "cristal_main",
+            "attachment": "cristal_copy_for_uv"
+        },
+        {
+            "name": "cristal_Segment_0",
+            "bone": "cristal_main",
+            "attachment": "cristal_Segment_0"
+        },
+        {
+            "name": "cristal_Segment_1",
+            "bone": "cristal_main",
+            "attachment": "cristal_Segment_1"
+        },
+        {
+            "name": "cristal_Segment_2",
+            "bone": "cristal_main",
+            "attachment": "cristal_Segment_2"
+        },
+        {
+            "name": "cristal_Segment_3",
+            "bone": "cristal_main",
+            "attachment": "cristal_Segment_3"
+        },
+        {
+            "name": "cristal_Segment_4",
+            "bone": "cristal_main",
+            "attachment": "cristal_Segment_4"
+        },
+        {
+            "name": "cristal_Segment_5",
+            "bone": "cristal_main",
+            "attachment": "cristal_Segment_5"
+        },
+        {
+            "name": "cristal_Segment_6",
+            "bone": "cristal_main",
+            "attachment": "cristal_Segment_6"
+        },
+        {
+            "name": "cristal_Segment_7",
+            "bone": "cristal_main",
+            "attachment": "cristal_Segment_7"
+        },
+        {
+            "name": "cristal_Segment_8",
+            "bone": "cristal_main",
+            "attachment": "cristal_Segment_8"
+        },
+        {
+            "name": "cristal_Segment_9",
+            "bone": "cristal_main",
+            "attachment": "cristal_Segment_9"
+        }
+    ],
+    "ik": [
+        {
+            "name": "cristal_scale_constraint_IK",
+            "order": 2,
+            "bones": [
+                "cristal_rotate_X_constraint"
+            ],
+            "target": "cristal_rotate_X_constraint_IK",
+            "compress": true,
+            "stretch": true
+        }
+    ],
+    "transform": [
+        {
+            "name": "cristal_rotation_X",
+            "bones": [
+                "cristal_1_scale",
+                "cristal_2_scale",
+                "cristal_3_scale",
+                "cristal_4_scale",
+                "cristal_5_scale",
+                "cristal"
+            ],
+            "target": "cristal_rotation_X",
+            "rotation": 90,
+            "local": true,
+            "relative": true,
+            "x": -256.0,
+            "y": -64.0,
+            "scaleX": -1,
+            "scaleY": -1,
+            "mixX": 0,
+            "mixScaleX": 0,
+            "mixShearY": 0
+        },
+        {
+            "name": "cristal_rotation_Y",
+            "order": 1,
+            "bones": [
+                "cristal_rotate_X",
+                "cristal_rotate_X_constraint_rotate_IK"
+            ],
+            "target": "cristal_rotation_Y",
+            "local": true,
+            "relative": true,
+            "x": 128.0,
+            "scaleX": -1,
+            "mixX": 0,
+            "mixScaleX": 0,
+            "mixShearY": 0
+        },
+        {
+            "name": "cristal_rotation_Z",
+            "order": 4,
+            "bones": [
+                "cristal_1",
+                "cristal_2",
+                "cristal_3",
+                "cristal_4",
+                "cristal_5"
+            ],
+            "target": "cristal_rotation_Z",
+            "local": true,
+            "mixX": 0,
+            "mixScaleX": 0,
+            "mixShearY": 0
+        },
+        {
+            "name": "cristal_scale_constraint",
+            "order": 3,
+            "bones": [
+                "cristal_1_scale",
+                "cristal_2_scale",
+                "cristal_3_scale",
+                "cristal_4_scale",
+                "cristal_5_scale"
+            ],
+            "target": "cristal_rotate_X_constraint",
+            "scaleX": -1,
+            "mixRotate": 0,
+            "mixX": 0,
+            "mixShearY": 0
+        }
+    ],
+    "skins": [
+        {
+            "name": "default",
+            "attachments": {
+                "cristal_main": {
+                    "cristal_main": {
+                        "type": "boundingbox",
+                        "vertexCount": 24,
+                        "vertices": [
+                            -21.11,
+                            20.72,
+                            -20.96,
+                            68.4,
+                            -43.49,
+                            68.1,
+                            -1.72,
+                            116.85,
+                            43.32,
+                            68.33,
+                            20.42,
+                            68.33,
+                            20.56,
+                            20.66,
+                            68.38,
+                            20.83,
+                            68.11,
+                            42.63,
+                            117.11,
+                            -1.92,
+                            68.53,
+                            -43.12,
+                            68.19,
+                            -20.49,
+                            20.8,
+                            -20.65,
+                            20.65,
+                            -68.22,
+                            42.87,
+                            -68.6,
+                            -1.65,
+                            -116.52,
+                            -42.84,
+                            -68.86,
+                            -20.52,
+                            -68.5,
+                            -20.68,
+                            -21.13,
+                            -68,
+                            -21.09,
+                            -68.23,
+                            -43.28,
+                            -117.01,
+                            -1.99,
+                            -68.32,
+                            43.2,
+                            -68.17,
+                            20.58
+                        ],
+                        "color": "df00ffff"
+                    }
+                },
+                "cristal_rotation_X": {
+                    "cristal_rotation_X": {
+                        "type": "boundingbox",
+                        "vertexCount": 64,
+                        "vertices": [
+                            33.35,
+                            -86.18,
+                            19.36,
+                            -57.86,
+                            6.36,
+                            -62.25,
+                            -4.44,
+                            -64.09,
+                            -18.35,
+                            -63.9,
+                            -33.54,
+                            -59.51,
+                            -45.63,
+                            -52.92,
+                            -55.88,
+                            -43.95,
+                            -63.57,
+                            -33.51,
+                            -69.78,
+                            -20.21,
+                            -72.89,
+                            -6.3,
+                            -72.71,
+                            7.43,
+                            -69.78,
+                            21.89,
+                            -62.09,
+                            35.44,
+                            -52.19,
+                            47.35,
+                            -39.92,
+                            56.13,
+                            -25.83,
+                            61.81,
+                            -8.98,
+                            63.46,
+                            9.22,
+                            61.63,
+                            25.33,
+                            53.75,
+                            37.77,
+                            43.14,
+                            48.39,
+                            27.94,
+                            53.34,
+                            12.38,
+                            54.98,
+                            -0.62,
+                            27.89,
+                            25.93,
+                            24.23,
+                            25.93,
+                            22.4,
+                            23.18,
+                            22.95,
+                            -10.5,
+                            23.86,
+                            -14.53,
+                            65.6,
+                            -56.82,
+                            69.63,
+                            -58.65,
+                            73.47,
+                            -58.65,
+                            75.78,
+                            -56.46,
+                            116.42,
+                            -15.08,
+                            118.44,
+                            -11.24,
+                            118.99,
+                            23.55,
+                            116.42,
+                            26.11,
+                            112.21,
+                            25.93,
+                            86.4,
+                            -0.25,
+                            86.09,
+                            9.86,
+                            84.81,
+                            22.13,
+                            80.05,
+                            35.13,
+                            73.82,
+                            48.31,
+                            65.58,
+                            60.94,
+                            53.88,
+                            72.75,
+                            39.97,
+                            82.27,
+                            25.87,
+                            89.23,
+                            8.3,
+                            93.81,
+                            -9.28,
+                            95.82,
+                            -26.57,
+                            94.17,
+                            -44.33,
+                            89.23,
+                            -61.54,
+                            80.26,
+                            -78.02,
+                            67.08,
+                            -91.56,
+                            49.32,
+                            -101.17,
+                            27.7,
+                            -105.19,
+                            5.18,
+                            -103.91,
+                            -18.8,
+                            -96.22,
+                            -42.97,
+                            -85.53,
+                            -59.08,
+                            -69.42,
+                            -75,
+                            -52.44,
+                            -86.57,
+                            -24.8,
+                            -95.17,
+                            0.46,
+                            -96.63,
+                            24.45,
+                            -90.78
+                        ],
+                        "color": "ff0000ff"
+                    }
+                },
+                "cristal_rotation_Y": {
+                    "cristal_rotation_Y": {
+                        "type": "boundingbox",
+                        "vertexCount": 64,
+                        "vertices": [
+                            33.45,
+                            -86.17,
+                            19.46,
+                            -57.86,
+                            6.46,
+                            -62.25,
+                            -4.34,
+                            -64.08,
+                            -18.25,
+                            -63.9,
+                            -33.45,
+                            -59.5,
+                            -45.53,
+                            -52.91,
+                            -55.78,
+                            -43.94,
+                            -63.47,
+                            -33.51,
+                            -69.68,
+                            -20.21,
+                            -72.79,
+                            -6.29,
+                            -72.61,
+                            7.44,
+                            -69.68,
+                            21.9,
+                            -61.99,
+                            35.45,
+                            -52.09,
+                            47.35,
+                            -39.83,
+                            56.14,
+                            -25.73,
+                            61.81,
+                            -8.89,
+                            63.46,
+                            9.31,
+                            61.63,
+                            25.42,
+                            53.76,
+                            37.87,
+                            43.14,
+                            48.49,
+                            27.95,
+                            53.43,
+                            12.38,
+                            55.08,
+                            -0.61,
+                            27.99,
+                            25.93,
+                            24.32,
+                            25.93,
+                            22.49,
+                            23.19,
+                            23.04,
+                            -10.5,
+                            23.96,
+                            -14.53,
+                            65.7,
+                            -56.82,
+                            69.73,
+                            -58.65,
+                            73.57,
+                            -58.65,
+                            75.88,
+                            -56.45,
+                            116.52,
+                            -15.08,
+                            118.53,
+                            -11.23,
+                            119.08,
+                            23.55,
+                            116.52,
+                            26.11,
+                            112.31,
+                            25.93,
+                            86.5,
+                            -0.25,
+                            86.19,
+                            9.87,
+                            84.91,
+                            22.13,
+                            80.15,
+                            35.13,
+                            73.92,
+                            48.31,
+                            65.68,
+                            60.94,
+                            53.98,
+                            72.76,
+                            40.07,
+                            82.28,
+                            25.97,
+                            89.23,
+                            8.4,
+                            93.81,
+                            -9.18,
+                            95.82,
+                            -26.48,
+                            94.18,
+                            -44.23,
+                            89.23,
+                            -61.44,
+                            80.26,
+                            -77.92,
+                            67.08,
+                            -91.47,
+                            49.32,
+                            -101.07,
+                            27.7,
+                            -105.09,
+                            5.19,
+                            -103.81,
+                            -18.8,
+                            -96.12,
+                            -42.96,
+                            -85.43,
+                            -59.07,
+                            -69.32,
+                            -75,
+                            -52.35,
+                            -86.56,
+                            -24.7,
+                            -95.17,
+                            0.56,
+                            -96.63,
+                            24.54,
+                            -90.77
+                        ],
+                        "color": "00ff18ff"
+                    }
+                },
+                "cristal_rotation_Z": {
+                    "cristal_rotation_Z": {
+                        "type": "boundingbox",
+                        "vertexCount": 64,
+                        "vertices": [
+                            33.45,
+                            -86.17,
+                            19.46,
+                            -57.86,
+                            6.46,
+                            -62.25,
+                            -4.34,
+                            -64.08,
+                            -18.26,
+                            -63.9,
+                            -33.45,
+                            -59.5,
+                            -45.53,
+                            -52.91,
+                            -55.79,
+                            -43.94,
+                            -63.48,
+                            -33.51,
+                            -69.68,
+                            -20.21,
+                            -72.79,
+                            -6.29,
+                            -72.61,
+                            7.44,
+                            -69.68,
+                            21.9,
+                            -61.99,
+                            35.45,
+                            -52.1,
+                            47.35,
+                            -39.83,
+                            56.14,
+                            -25.73,
+                            61.81,
+                            -8.89,
+                            63.46,
+                            9.31,
+                            61.63,
+                            25.42,
+                            53.76,
+                            37.87,
+                            43.14,
+                            48.49,
+                            27.95,
+                            53.43,
+                            12.38,
+                            55.08,
+                            -0.61,
+                            27.98,
+                            25.93,
+                            24.32,
+                            25.93,
+                            22.49,
+                            23.19,
+                            23.04,
+                            -10.5,
+                            23.96,
+                            -14.53,
+                            65.7,
+                            -56.82,
+                            69.72,
+                            -58.65,
+                            73.57,
+                            -58.65,
+                            75.87,
+                            -56.45,
+                            116.52,
+                            -15.08,
+                            118.53,
+                            -11.23,
+                            119.08,
+                            23.55,
+                            116.52,
+                            26.11,
+                            112.31,
+                            25.93,
+                            86.49,
+                            -0.25,
+                            86.18,
+                            9.87,
+                            84.9,
+                            22.13,
+                            80.14,
+                            35.13,
+                            73.92,
+                            48.31,
+                            65.68,
+                            60.94,
+                            53.98,
+                            72.76,
+                            40.06,
+                            82.28,
+                            25.97,
+                            89.23,
+                            8.39,
+                            93.81,
+                            -9.18,
+                            95.82,
+                            -26.48,
+                            94.18,
+                            -44.24,
+                            89.23,
+                            -61.45,
+                            80.26,
+                            -77.92,
+                            67.08,
+                            -91.47,
+                            49.32,
+                            -101.07,
+                            27.7,
+                            -105.1,
+                            5.19,
+                            -103.82,
+                            -18.8,
+                            -96.13,
+                            -42.96,
+                            -85.44,
+                            -59.07,
+                            -69.33,
+                            -75,
+                            -52.35,
+                            -86.56,
+                            -24.71,
+                            -95.17,
+                            0.56,
+                            -96.63,
+                            24.54,
+                            -90.77
+                        ],
+                        "color": "002cffff"
+                    }
+                },
+                "cristal_Segment_0": {
+                    "cristal_Segment_0": {
+                        "type": "mesh",
+                        "path": "cristal_texturing_Baked_",
+                        "uvs": [
+                            0.49636754393577576,
+                            0.5387576818466187,
+                            0.3822448253631592,
+                            0.46316269040107727,
+                            0.1177552118897438,
+                            0.575208306312561,
+                            0.0036324902903288603,
+                            0.7474947571754456
+                        ],
+                        "triangles": [
+                            0,
+                            2,
+                            1,
+                            0,
+                            3,
+                            2
+                        ],
+                        "vertices": [
+                            1,
+                            22,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            23,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            24,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            25,
+                            0.0,
+                            0.0,
+                            1.0
+                        ],
+                        "hull": 4,
+                        "edges": [
+                            4,
+                            2,
+                            0,
+                            2,
+                            0,
+                            6,
+                            4,
+                            6,
+                            0,
+                            4
+                        ],
+                        "width": 128,
+                        "height": 128,
+                        "sequence": {
+                            "count": 1,
+                            "start": 3,
+                            "digits": 4,
+                            "setup": 0
+                        }
+                    }
+                },
+                "cristal_Segment_1": {
+                    "cristal_Segment_1": {
+                        "type": "mesh",
+                        "path": "cristal_texturing_Baked_",
+                        "uvs": [
+                            0.8822448253631592,
+                            0.46316269040107727,
+                            0.8822447657585144,
+                            0.17591895163059235,
+                            0.6177551746368408,
+                            0.2879645526409149,
+                            0.6177551746368408,
+                            0.5752082467079163
+                        ],
+                        "triangles": [
+                            0,
+                            2,
+                            1,
+                            0,
+                            3,
+                            2
+                        ],
+                        "vertices": [
+                            1,
+                            26,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            27,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            28,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            29,
+                            0.0,
+                            0.0,
+                            1.0
+                        ],
+                        "hull": 4,
+                        "edges": [
+                            4,
+                            2,
+                            0,
+                            2,
+                            0,
+                            6,
+                            4,
+                            6,
+                            0,
+                            4
+                        ],
+                        "width": 128,
+                        "height": 128,
+                        "sequence": {
+                            "count": 1,
+                            "start": 3,
+                            "digits": 4,
+                            "setup": 0
+                        }
+                    }
+                },
+                "cristal_Segment_2": {
+                    "cristal_Segment_2": {
+                        "type": "mesh",
+                        "path": "cristal_texturing_Baked_",
+                        "uvs": [
+                            0.5036324858665466,
+                            0.21236954629421234,
+                            0.5036324858665466,
+                            0.7474947571754456,
+                            0.6177551746368408,
+                            0.5752082467079163,
+                            0.6177551746368408,
+                            0.2879645526409149
+                        ],
+                        "triangles": [
+                            0,
+                            2,
+                            1,
+                            0,
+                            3,
+                            2
+                        ],
+                        "vertices": [
+                            1,
+                            22,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            25,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            29,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            28,
+                            0.0,
+                            0.0,
+                            1.0
+                        ],
+                        "hull": 4,
+                        "edges": [
+                            4,
+                            2,
+                            0,
+                            2,
+                            0,
+                            6,
+                            4,
+                            6,
+                            0,
+                            4
+                        ],
+                        "width": 128,
+                        "height": 128,
+                        "sequence": {
+                            "count": 1,
+                            "start": 3,
+                            "digits": 4,
+                            "setup": 0
+                        }
+                    }
+                },
+                "cristal_Segment_3": {
+                    "cristal_Segment_3": {
+                        "type": "mesh",
+                        "path": "cristal_texturing_Baked_",
+                        "uvs": [
+                            0.9963675141334534,
+                            0.5387576818466187,
+                            0.9963675141334534,
+                            0.0036324539687484503,
+                            0.8822447657585144,
+                            0.17591895163059235,
+                            0.8822448253631592,
+                            0.46316269040107727
+                        ],
+                        "triangles": [
+                            0,
+                            2,
+                            1,
+                            0,
+                            3,
+                            2
+                        ],
+                        "vertices": [
+                            1,
+                            30,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            31,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            27,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            26,
+                            0.0,
+                            0.0,
+                            1.0
+                        ],
+                        "hull": 4,
+                        "edges": [
+                            4,
+                            2,
+                            0,
+                            2,
+                            0,
+                            6,
+                            4,
+                            6,
+                            0,
+                            4
+                        ],
+                        "width": 128,
+                        "height": 128,
+                        "sequence": {
+                            "count": 1,
+                            "start": 3,
+                            "digits": 4,
+                            "setup": 0
+                        }
+                    }
+                },
+                "cristal_Segment_4": {
+                    "cristal_Segment_4": {
+                        "type": "mesh",
+                        "path": "cristal_texturing_Baked_",
+                        "uvs": [
+                            0.5036324858665466,
+                            0.21236954629421234,
+                            0.6177551746368408,
+                            0.2879645526409149,
+                            0.8822447657585144,
+                            0.17591895163059235,
+                            0.9963675141334534,
+                            0.0036324539687484503
+                        ],
+                        "triangles": [
+                            0,
+                            2,
+                            1,
+                            0,
+                            3,
+                            2
+                        ],
+                        "vertices": [
+                            1,
+                            22,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            28,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            27,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            31,
+                            0.0,
+                            0.0,
+                            1.0
+                        ],
+                        "hull": 4,
+                        "edges": [
+                            4,
+                            2,
+                            0,
+                            2,
+                            0,
+                            6,
+                            4,
+                            6,
+                            0,
+                            4
+                        ],
+                        "width": 128,
+                        "height": 128,
+                        "sequence": {
+                            "count": 1,
+                            "start": 3,
+                            "digits": 4,
+                            "setup": 0
+                        }
+                    }
+                },
+                "cristal_Segment_5": {
+                    "cristal_Segment_5": {
+                        "type": "mesh",
+                        "path": "cristal_texturing_Baked_",
+                        "uvs": [
+                            0.9963675141334534,
+                            0.5387576818466187,
+                            0.8822448253631592,
+                            0.46316269040107727,
+                            0.6177551746368408,
+                            0.5752082467079163,
+                            0.5036324858665466,
+                            0.7474947571754456
+                        ],
+                        "triangles": [
+                            0,
+                            2,
+                            1,
+                            0,
+                            3,
+                            2
+                        ],
+                        "vertices": [
+                            1,
+                            30,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            26,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            29,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            25,
+                            0.0,
+                            0.0,
+                            1.0
+                        ],
+                        "hull": 4,
+                        "edges": [
+                            4,
+                            2,
+                            0,
+                            2,
+                            0,
+                            6,
+                            4,
+                            6,
+                            0,
+                            4
+                        ],
+                        "width": 128,
+                        "height": 128,
+                        "sequence": {
+                            "count": 1,
+                            "start": 3,
+                            "digits": 4,
+                            "setup": 0
+                        }
+                    }
+                },
+                "cristal_Segment_6": {
+                    "cristal_Segment_6": {
+                        "type": "mesh",
+                        "path": "cristal_texturing_Baked_",
+                        "uvs": [
+                            0.11775520443916321,
+                            0.2879645526409149,
+                            0.1177552118897438,
+                            0.575208306312561,
+                            0.3822448253631592,
+                            0.46316269040107727,
+                            0.3822447955608368,
+                            0.17591896653175354
+                        ],
+                        "triangles": [
+                            0,
+                            2,
+                            1,
+                            0,
+                            3,
+                            2
+                        ],
+                        "vertices": [
+                            1,
+                            32,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            24,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            23,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            33,
+                            0.0,
+                            0.0,
+                            1.0
+                        ],
+                        "hull": 4,
+                        "edges": [
+                            4,
+                            2,
+                            0,
+                            2,
+                            0,
+                            6,
+                            4,
+                            6,
+                            0,
+                            4
+                        ],
+                        "width": 128,
+                        "height": 128,
+                        "sequence": {
+                            "count": 1,
+                            "start": 3,
+                            "digits": 4,
+                            "setup": 0
+                        }
+                    }
+                },
+                "cristal_Segment_7": {
+                    "cristal_Segment_7": {
+                        "type": "mesh",
+                        "path": "cristal_texturing_Baked_",
+                        "uvs": [
+                            0.003632485633715987,
+                            0.21236956119537354,
+                            0.11775520443916321,
+                            0.2879645526409149,
+                            0.3822447955608368,
+                            0.17591896653175354,
+                            0.49636751413345337,
+                            0.0036324639804661274
+                        ],
+                        "triangles": [
+                            0,
+                            2,
+                            1,
+                            0,
+                            3,
+                            2
+                        ],
+                        "vertices": [
+                            1,
+                            30,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            32,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            33,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            31,
+                            0.0,
+                            0.0,
+                            1.0
+                        ],
+                        "hull": 4,
+                        "edges": [
+                            4,
+                            2,
+                            0,
+                            2,
+                            0,
+                            6,
+                            4,
+                            6,
+                            0,
+                            4
+                        ],
+                        "width": 128,
+                        "height": 128,
+                        "sequence": {
+                            "count": 1,
+                            "start": 3,
+                            "digits": 4,
+                            "setup": 0
+                        }
+                    }
+                },
+                "cristal_Segment_8": {
+                    "cristal_Segment_8": {
+                        "type": "mesh",
+                        "path": "cristal_texturing_Baked_",
+                        "uvs": [
+                            0.49636754393577576,
+                            0.5387576818466187,
+                            0.49636751413345337,
+                            0.0036324639804661274,
+                            0.3822447955608368,
+                            0.17591896653175354,
+                            0.3822448253631592,
+                            0.46316269040107727
+                        ],
+                        "triangles": [
+                            0,
+                            2,
+                            1,
+                            0,
+                            3,
+                            2
+                        ],
+                        "vertices": [
+                            1,
+                            22,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            31,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            33,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            23,
+                            0.0,
+                            0.0,
+                            1.0
+                        ],
+                        "hull": 4,
+                        "edges": [
+                            4,
+                            2,
+                            0,
+                            2,
+                            0,
+                            6,
+                            4,
+                            6,
+                            0,
+                            4
+                        ],
+                        "width": 128,
+                        "height": 128,
+                        "sequence": {
+                            "count": 1,
+                            "start": 3,
+                            "digits": 4,
+                            "setup": 0
+                        }
+                    }
+                },
+                "cristal_Segment_9": {
+                    "cristal_Segment_9": {
+                        "type": "mesh",
+                        "path": "cristal_texturing_Baked_",
+                        "uvs": [
+                            0.003632485633715987,
+                            0.21236956119537354,
+                            0.0036324902903288603,
+                            0.7474947571754456,
+                            0.1177552118897438,
+                            0.575208306312561,
+                            0.11775520443916321,
+                            0.2879645526409149
+                        ],
+                        "triangles": [
+                            0,
+                            2,
+                            1,
+                            0,
+                            3,
+                            2
+                        ],
+                        "vertices": [
+                            1,
+                            30,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            25,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            24,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1,
+                            32,
+                            0.0,
+                            0.0,
+                            1.0
+                        ],
+                        "hull": 4,
+                        "edges": [
+                            4,
+                            2,
+                            0,
+                            2,
+                            0,
+                            6,
+                            4,
+                            6,
+                            0,
+                            4
+                        ],
+                        "width": 128,
+                        "height": 128,
+                        "sequence": {
+                            "count": 1,
+                            "start": 3,
+                            "digits": 4,
+                            "setup": 0
+                        }
+                    }
+                }
+            }
+        }
+    ],
+    "animations": {
+        "animation": {
+            "attachments": {
+                "default": {}
+            }
+        },
+        "preview": {
+            "bones": {
+                "cristal_rotation_Y": {
+                    "rotate": [
+                        {
+                            "curve": [
+                                0.667,
+                                0,
+                                1.333,
+                                -360
+                            ]
+                        },
+                        {
+                            "time": 2,
+                            "value": -360,
+                            "curve": [
+                                2.667,
+                                -360,
+                                3.333,
+                                -360
+                            ]
+                        },
+                        {
+                            "time": 4,
+                            "value": -360,
+                            "curve": [
+                                4.667,
+                                -360,
+                                5.333,
+                                0
+                            ]
+                        },
+                        {
+                            "time": 6
+                        }
+                    ]
+                },
+                "cristal_rotation_Z": {
+                    "rotate": [
+                        {
+                            "time": 2,
+                            "curve": [
+                                2.667,
+                                0,
+                                3.333,
+                                360
+                            ]
+                        },
+                        {
+                            "time": 4,
+                            "value": 360,
+                            "curve": [
+                                4.667,
+                                360,
+                                5.333,
+                                0
+                            ]
+                        },
+                        {
+                            "time": 6
+                        }
+                    ]
+                },
+                "cristal_rotation_X": {
+                    "rotate": [
+                        {
+                            "value": -360,
+                            "curve": [
+                                0.667,
+                                -360,
+                                1.333,
+                                0
+                            ]
+                        },
+                        {
+                            "time": 2,
+                            "curve": "stepped"
+                        },
+                        {
+                            "time": 4,
+                            "curve": [
+                                4.667,
+                                0,
+                                5.333,
+                                -360
+                            ]
+                        },
+                        {
+                            "time": 6,
+                            "value": -360,
+                            "curve": [
+                                6.667,
+                                -360,
+                                7.333,
+                                -360
+                            ]
+                        },
+                        {
+                            "time": 8,
+                            "value": -360
+                        }
+                    ]
+                }
+            }
+        }
+    }
+}

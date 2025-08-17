@@ -1,0 +1,7 @@
+libcst
+fake-bpy-module-4.1
+black
+isort
+ruff
+pytest
+blender-stubs

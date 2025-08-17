@@ -1,0 +1,13 @@
+schema_version = "1.0.0"
+
+id = "Blender_to_Spine2D_Mesh_Exporter"
+version = "0.23.0"
+name = "Blender to Spine2D Mesh Exporter"
+maintainer = "Maxim Sokolenko"
+blender_version_min = "4.4.0"
+type = "add-on"
+tags = ["Object"]
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+tagline = "Blender 3D objects into Spine 2D meshes"
