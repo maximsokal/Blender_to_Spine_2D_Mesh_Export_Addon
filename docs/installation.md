@@ -1,6 +1,14 @@
 # Installation Guide
 
-This addon supports multiple installation methods to accommodate different user workflows and technical requirements. Choose the method that best fits your development environment and technical expertise.
+Before diving into manual steps, note that you can **download a ready-to-use release archive** from GitHub:  
+👉 [Latest Release on GitHub](https://github.com/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon/releases)
+
+Simply download the `.zip` file from the release page and install it directly in Blender (see Method 1, Step 3 below).  
+This is the easiest way for most users.
+
+---
+
+This addon also supports multiple installation methods to accommodate different workflows. Choose the method that best fits your environment.
 
 ## System Requirements
 
@@ -26,19 +34,19 @@ This method is recommended for most users who want a straightforward installatio
 2. **Extract Archive**:
    - Extract the downloaded ZIP file
    - Navigate to the extracted project folder
-   - Locate the `spine2d_mesh_exporter` subdirectory
+   - Locate the `Blender_to_Spine_2D_Mesh_Export_Addon` subdirectory
 
 ### Step 2: Create Addon Archive
 1. **Select Addon Folder**:
-   - Navigate to the `spine2d_mesh_exporter` folder (NOT the root project folder)
+   - Navigate to the `Blender_to_Spine_2D_Mesh_Export_Addon` folder (NOT the root project folder)
    - This folder contains the core addon files: `__init__.py`, `main.py`, `ui.py`, etc.
 
 2. **Create ZIP Archive**:
-   - **Windows**: Right-click on `spine2d_mesh_exporter` folder → **Send to → Compressed folder**
+   - **Windows**: Right-click on `Blender_to_Spine_2D_Mesh_Export_Addon` folder → **Send to → Compressed folder**
 
 3. **Verify Archive Contents**:
    - Open the created ZIP file
-   - Ensure it contains a `spine2d_mesh_exporter` folder with Python files inside
+   - Ensure it contains a `Blender_to_Spine_2D_Mesh_Export_Addon` folder with Python files inside
    - Critical files must include: `__init__.py`, `blender_manifest.toml`, `main.py`, `ui.py`, etc.
 
 ### Step 3: Install in Blender
@@ -73,7 +81,7 @@ This method is recommended for developers, contributors, or users who need optim
    ```bash
    # Option A: Clone with Git
    git clone [repository-url]
-   cd spine2d_mesh_exporter
+   cd Blender_to_Spine_2D_Mesh_Export_Addon
 
    # Option B: Download and extract ZIP as in Method 1
    ```
@@ -81,7 +89,7 @@ This method is recommended for developers, contributors, or users who need optim
 2. **Install Python Dependencies**:
    ```bash
    # Navigate to project root directory
-   cd /path/to/spine2d_mesh_exporter
+   cd /path/to/Blender_to_Spine_2D_Mesh_Export_Addon
 
    # Install required packages
    pip install libcst black isort fake-bpy-module-4.1
@@ -130,10 +138,10 @@ This method is recommended for developers, contributors, or users who need optim
 - **Cause**: Blender version below 4.4.0
 - **Solution**: Upgrade to Blender 4.4.0 or newer
 
-#### Error: "No module named 'spine2d_mesh_exporter'"
+#### Error: "No module named 'Blender_to_Spine_2D_Mesh_Export_Addon'"
 - **Cause**: Incorrect ZIP structure or missing files
 - **Solution**:
-  1. Recreate ZIP ensuring `spine2d_mesh_exporter` folder is the top-level directory
+  1. Recreate ZIP ensuring `Blender_to_Spine_2D_Mesh_Export_Addon` folder is the top-level directory
   2. Verify `__init__.py` and `blender_manifest.toml` are present
 
 #### Error: "Failed to enable add-on"
@@ -178,3 +186,4 @@ If installation issues persist:
 3. **Monitor System Resources**: Ensure adequate RAM and storage for export operations
 
 The addon is now ready for use. Refer to the [Usage Guide](usage.md) for detailed operational instructions.
+

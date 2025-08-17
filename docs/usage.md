@@ -1,9 +1,9 @@
 # Usage Guide
 
-After installation, the addon can be found in **3D View → Sidebar → Spine2D Mesh Exporter**. This comprehensive interface provides all necessary tools for converting 3D mesh objects into Spine2D-compatible skeletal animation data.
+After installation, the addon can be found in **3D View → Sidebar → Blender_to_Spine_2D_Mesh_Export**. This comprehensive interface provides all necessary tools for converting 3D mesh objects into Spine2D-compatible skeletal animation data.
 
 ## Main Interface Overview
-![ui_addon](assets/ui_addon.png)
+![ui_addon](../assets/ui_addon.png)
 The addon interface is organized into collapsible sections for optimal workflow management. Each section contains specific controls and configuration options for different aspects of the export pipeline.
 
 ---
@@ -170,8 +170,8 @@ The addon interface is organized into collapsible sections for optimal workflow 
 ---
 
 ## Addon Preferences
-![ui_preferences](assets/ui_preferences.png)
-Access through **Edit → Preferences → Add-ons → Model to Spine2D Mesh**
+![ui_preferences](../assets/ui_preferences.png)
+Access through **Edit → Preferences → Add-ons → Blender_to_Spine_2D_Mesh_Export**
 
 ### Information & Help Section
 
@@ -270,3 +270,4 @@ Access through **Edit → Preferences → Add-ons → Model to Spine2D Mesh**
 5. Review sequence continuity in Spine2D editor
 
 This interface provides comprehensive control over the 3D-to-2D conversion pipeline while maintaining workflow efficiency through intelligent defaults and performance optimizations.
+
