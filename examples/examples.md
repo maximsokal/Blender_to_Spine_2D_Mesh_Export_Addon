@@ -21,7 +21,7 @@ examples/
 ### Project Overview
 **File**: `01_pyramid_basic/cone_test.blend`
 
-![example_cone](assets/example_cone.png)
+![example_cone](../assets/example_cone.png)
 
 **Complexity**: Beginner
 **Primary Focus**: Fundamental export workflow and basic functionality validation
@@ -115,7 +115,7 @@ examples/
 ### Project Overview
 **File**: `02_crystal_procedural/cristall.blend`
 
-![example_crystal](assets/example_crystal.png)
+![example_crystal](../assets/example_crystal.png)
 
 **Complexity**: Advanced
 **Primary Focus**: Procedural material sequence baking and temporal texture generation
@@ -210,7 +210,7 @@ examples/
 ### Project Overview
 **File**: `03_spine_text_multi/text_spine.blend`
 
-![example_text_spine](assets/example_text_spine.png)
+![example_text_spine](../assets/example_text_spine.png)
 
 **Complexity**: Expert
 **Primary Focus**: High-vertex-count processing and complex multi-object workflow management
@@ -359,4 +359,5 @@ Total: 1680 vertices
 - **Benchmark Performance**: Establish processing time expectations
 
 These examples provide a comprehensive foundation for mastering the Spine2D Mesh Exporter addon, from basic functionality through advanced production workflows.
+
 
