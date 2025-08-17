@@ -1,6 +1,23 @@
 # seam_marker.py
 # pylint: disable=import-error
 """
+Blender to Spine2D Mesh Exporter
+Copyright (c) 2025 Maxim Sokolenko
+
+This file is part of Blender to Spine2D Mesh Exporter.
+
+Blender to Spine2D Mesh Exporter is free software: you can redistribute it
+and/or modify it under the terms of the GNU General Public License as
+published by the Free Software Foundation, either version 3 of the License,
+or (at your option) any later version.
+
+Blender to Spine2D Mesh Exporter is distributed in the hope that it will
+be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
+of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with Blender to Spine2D Mesh Exporter. If not, see <https://www.gnu.org/licenses/>.
 This module is dedicated to a single, specific task within the export pipeline: creating a copy of a mesh and marking its edges as seams based on provided segmentation data.
 
 The key functionalities are:
