@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for considering contributing to **Spine2D Mesh Visualizer**!
+Thank you for considering contributing to **Blender to Spine 2D Mesh Export Addon**!
 
 ## Development setup
 
@@ -19,3 +19,4 @@ Thank you for considering contributing to **Spine2D Mesh Visualizer**!
 - Create a feature branch for your changes.
 - Describe the motivation and summary of your change.
 - Ensure CI passes before requesting review.
+
