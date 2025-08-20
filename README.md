@@ -22,7 +22,7 @@
   </a>
 </p>
 
-[![YouTube](https://img.youtube.com/vi/f_1Zc2qCz44-8/0.jpg)](https://www.youtube.com/watch?v=f_1Zc2qCz44)
+[![Blender to Spine2D Demo Video](https://img.youtube.com/vi/f_1Zc2qCz44/0.jpg)](https://www.youtube.com/watch?v=f_1Zc2qCz44 "Watch the Blender to Spine2D Mesh Exporter demonstration")
 
 A comprehensive Blender addon that converts 3D mesh objects into Spine2D-compatible JSON skeletal animation data. This tool bridges the gap between 3D modeling workflows and 2D skeletal animation pipelines, enabling artists to leverage Blender's powerful modeling capabilities for Spine2D projects.
 
@@ -303,5 +303,6 @@ This addon integrates with Spine’s JSON export pipeline. Please note:
 - The **Spine Runtimes License** must be included when redistributing this addon.
 
 This addon integrates with Esoteric Software's Spine animation system. Spine is a trademark of Esoteric Software LLC.
+
 
 
