@@ -20,7 +20,7 @@
   <a href="https://patreon.com/MaximSokolenko">
     <img src="https://img.shields.io/badge/Support-Patreon-orange.svg" alt="Support on Patreon">
   </a>
-</p>>
+</p>
 
 [![YouTube](https://img.youtube.com/vi/f_1Zc2qCz44-8/0.jpg)](https://www.youtube.com/watch?v=f_1Zc2qCz44)
 
@@ -303,4 +303,5 @@ This addon integrates with Spine’s JSON export pipeline. Please note:
 - The **Spine Runtimes License** must be included when redistributing this addon.
 
 This addon integrates with Esoteric Software's Spine animation system. Spine is a trademark of Esoteric Software LLC.
+
 
