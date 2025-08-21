@@ -135,7 +135,7 @@ The addon implements a sophisticated multi-stage pipeline that transforms 3D mes
 3. **Data Merging**: Combine all segments into unified skeletal structure
 4. **Final Output**: Write production-ready JSON with embedded animations
 
-For detailed technical architecture documentation, see [Architecture Overview](ARCHITECTURE.md).
+For detailed technical architecture documentation, see [Architecture Overview](docs/ARCHITECTURE.md).
 
 ---
 
@@ -272,7 +272,7 @@ Comprehensive example projects showcasing various use cases and workflows are av
 We welcome contributions from the community! Whether you're reporting bugs, suggesting features, or submitting code improvements, your input helps make this addon better.
 
 ### Getting Started
-- Review our [Contributing Guidelines](CONTRIBUTING.md)
+- Review our [Contributing Guidelines](docs/CONTRIBUTING.md)
 - Check existing issues before creating new reports
 - Follow our coding standards and testing requirements
 
@@ -290,7 +290,7 @@ We welcome contributions from the community! Whether you're reporting bugs, sugg
 
 ## Release History
 
-Track addon development progress and version changes in our [Changelog](CHANGELOG.md).
+Track addon development progress and version changes in our [Changelog](docs/CHANGELOG.md).
 
 ---
 
@@ -311,6 +311,7 @@ This addon integrates with Spine’s JSON export pipeline. Please note:
 - The **Spine Runtimes License** must be included when redistributing this addon.
 
 This addon integrates with Esoteric Software's Spine animation system. Spine is a trademark of Esoteric Software LLC.
+
 
 
 
