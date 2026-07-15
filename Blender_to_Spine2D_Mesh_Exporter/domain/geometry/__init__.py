@@ -34,6 +34,17 @@ from .model import (
     Vector2,
     Vector3,
 )
+from .segmentation import (
+    MeshSegment,
+    SegmentationError,
+    SegmentationPlan,
+    SegmentationSettings,
+    SegmentBoundaryEdge,
+    SegmentBoundaryReason,
+    SegmentTopology,
+    materialize_segment_snapshots,
+    segment_mesh,
+)
 from .validator import (
     MeshSnapshotValidator,
     MeshValidationError,
@@ -53,6 +64,7 @@ __all__ = [
     "MeshEdge",
     "MeshFace",
     "MeshLoop",
+    "MeshSegment",
     "MeshSnapshot",
     "MeshSnapshotValidator",
     "MeshValidationError",
@@ -60,6 +72,12 @@ __all__ = [
     "MeshValidationSeverity",
     "MeshVertex",
     "MissingSourceLoopError",
+    "SegmentationError",
+    "SegmentationPlan",
+    "SegmentationSettings",
+    "SegmentBoundaryEdge",
+    "SegmentBoundaryReason",
+    "SegmentTopology",
     "SourceEdgeId",
     "SourceFaceId",
     "SourceLoopId",
@@ -73,5 +91,7 @@ __all__ = [
     "build_mesh_fingerprint",
     "build_uv_correspondence",
     "extract_face_subset",
+    "materialize_segment_snapshots",
+    "segment_mesh",
     "transfer_uv_by_source_loop",
 ]
