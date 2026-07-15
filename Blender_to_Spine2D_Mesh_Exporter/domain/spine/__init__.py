@@ -33,6 +33,14 @@ from .model import (
     SpineDocument,
     TransformConstraint,
 )
+from .parity import (
+    A1ParityError,
+    A1ParityIssue,
+    A1ParityReport,
+    A1ParitySettings,
+    A1ParitySeverity,
+    compare_a1_exports,
+)
 from .serializer import SpineSerializer
 from .validator import SpineValidationError, SpineValidationIssue, SpineValidator
 from .weighted_vertices import (
@@ -43,6 +51,11 @@ from .weighted_vertices import (
 )
 
 __all__ = [
+    "A1ParityError",
+    "A1ParityIssue",
+    "A1ParityReport",
+    "A1ParitySettings",
+    "A1ParitySeverity",
     "Bone",
     "IKConstraint",
     "LegacyAttachmentComponent",
@@ -77,6 +90,7 @@ __all__ = [
     "build_legacy_mesh_document",
     "build_legacy_rig",
     "calculate_uniform_scale",
+    "compare_a1_exports",
     "decode_weighted_vertices",
     "encode_weighted_vertices",
 ]
