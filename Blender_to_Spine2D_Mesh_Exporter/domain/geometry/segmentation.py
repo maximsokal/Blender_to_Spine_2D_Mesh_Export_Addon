@@ -320,7 +320,7 @@ def segment_mesh(
             angle = _normal_angle_degrees(first_face.normal, second_face.normal)
             if angle is None:
                 reasons.add(SegmentBoundaryReason.INVALID_NORMAL)
-            elif angle > resolved_settings.angle_limit_degrees:
+            elif angle >= resolved_settings.angle_limit_degrees:
                 reasons.add(SegmentBoundaryReason.ANGLE)
         if resolved_settings.split_uv_boundaries and resolved_uv_layer is not None:
             if _is_uv_discontinuous(
