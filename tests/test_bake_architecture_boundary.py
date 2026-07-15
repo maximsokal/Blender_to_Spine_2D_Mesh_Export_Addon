@@ -5,6 +5,17 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1] / "Blender_to_Spine2D_Mesh_Exporter"
 
 
+def _attribute_path(node):
+    parts = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        parts.append(current.id)
+    return ".".join(reversed(parts))
+
+
 def _function_for_line(tree, line_number):
     matches = []
     for node in ast.walk(tree):
@@ -42,15 +53,18 @@ def test_object_bake_operator_is_confined_to_one_helper():
     path = ROOT / "blender_adapter" / "bake_executor.py"
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
-    operator_lines = [
-        line_number
-        for line_number, line in enumerate(source.splitlines(), start=1)
-        if ".ops.object.bake" in line
-    ]
-    assert operator_lines
+    operator_calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        path_value = _attribute_path(node.func)
+        if path_value.endswith(".ops.object.bake"):
+            operator_calls.append(node)
+
+    assert operator_calls
     function_names = {
-        _function_for_line(tree, line_number).name
-        for line_number in operator_lines
-        if _function_for_line(tree, line_number) is not None
+        _function_for_line(tree, node.lineno).name
+        for node in operator_calls
+        if _function_for_line(tree, node.lineno) is not None
     }
     assert function_names == {"_call_bake_operator"}
