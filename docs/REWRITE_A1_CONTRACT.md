@@ -35,7 +35,10 @@ new architecture.
 Segmentation is a pure deterministic operation. It returns a `SegmentationPlan`
 containing source-face membership, boundary-edge reasons and topology reports.
 The domain layer never creates Blender objects, writes custom properties or uses
-random clustering.
+random clustering. The current implementation matches the legacy strict threshold
+rule (`angle < angle_limit` joins faces), but full parity with the legacy
+seed-normal traversal and complex-segment decomposition remains a golden-test
+requirement.
 
 ## Implemented foundation
 
@@ -60,8 +63,9 @@ The current foundation contains:
 
 ## Not implemented yet
 
+- full A1 segmentation parity for legacy seed-normal grouping;
+- deterministic complex-segment decomposition replacing random k-means;
 - evaluated modifier lineage propagation;
-- complex-segment decomposition compatible with the legacy hole strategy;
 - UV unwrap adapter and transactional UV write-back;
 - baking transaction;
 - A1 rig builder connected to `SpineDocument`;
