@@ -86,6 +86,24 @@ def test_uv_discontinuity_splits_without_coordinate_matching():
     assert "UV_DISCONTINUITY" in _boundary_reason_names(plan)[2]
 
 
+def test_angle_equal_to_limit_is_a_boundary_for_legacy_compatibility():
+    snapshot = build_square_snapshot()
+    faces = (
+        snapshot.faces[0],
+        replace(snapshot.faces[1], normal=(0.0, 1.0, 0.0)),
+    )
+    plan = segment_mesh(
+        replace(snapshot, faces=faces),
+        SegmentationSettings(
+            angle_limit_degrees=90.0,
+            split_materials=False,
+            split_uv_boundaries=False,
+        ),
+    )
+    assert len(plan.segments) == 2
+    assert "ANGLE" in _boundary_reason_names(plan)[2]
+
+
 def test_segment_snapshots_preserve_source_lineage():
     snapshot = build_square_snapshot()
     edges = tuple(
