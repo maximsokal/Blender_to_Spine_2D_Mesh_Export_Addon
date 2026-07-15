@@ -59,7 +59,7 @@ jobs:
           set -euo pipefail
           "${BLENDER_DIRECTORY}/blender" --version
 
-      - name: Run real Blender integration tests
+      - name: Run real Blender geometry and UV tests
         shell: bash
         run: |
           set -euo pipefail
@@ -71,11 +71,22 @@ jobs:
             --python tests/blender_headless/run_headless_integration.py \
             2>&1 | tee test-results/blender-headless.log
 
-      - name: Upload Blender integration log
+      - name: Run real Blender Cycles bake tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_bake_integration.py \
+            2>&1 | tee test-results/blender-bake.log
+
+      - name: Upload Blender integration logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: blender-4.4-headless-log
-          path: test-results/blender-headless.log
+          name: blender-4.4-headless-logs
+          path: test-results/*.log
           if-no-files-found: warn
           retention-days: 7
