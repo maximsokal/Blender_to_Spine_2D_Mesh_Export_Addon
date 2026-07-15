@@ -1,7 +1,7 @@
 """Reusable topology analysis for immutable face regions.
 
 The legacy implementation calculated ``holes = max(0, 1 - Euler)`` in several
-places.  That is insufficient for disconnected, closed, or non-manifold input.
+places. That is insufficient for disconnected, closed, or non-manifold input.
 This module keeps the calculation in one deterministic implementation and
 reports both Euler characteristic and boundary-component count.
 """
@@ -22,7 +22,7 @@ class RegionTopologyError(ValueError):
 
 
 def build_edge_to_faces(snapshot: MeshSnapshot) -> dict[EdgeId, Tuple[FaceId, ...]]:
-    """Build a stable edge-to-face map from loop connectivity."""
+    """Validate once and build a stable edge-to-face map from loop connectivity."""
 
     MeshSnapshotValidator().validate_or_raise(snapshot)
     loop_map = snapshot.loop_by_id()
@@ -70,7 +70,7 @@ def _boundary_component_count(
     if not adjacency:
         return 0, True
 
-    # A manifold polygonal boundary is a collection of closed cycles.  Every
+    # A manifold polygonal boundary is a collection of closed cycles. Every
     # boundary vertex therefore has degree exactly two inside the boundary graph.
     boundary_manifold = all(len(neighbours) == 2 for neighbours in adjacency.values())
     visited: set[VertexId] = set()
@@ -96,9 +96,18 @@ def analyse_face_region(
     *,
     edge_to_faces: dict[EdgeId, Tuple[FaceId, ...]] | None = None,
 ) -> SegmentTopology:
-    """Calculate topology invariants for a connected or disconnected face subset."""
+    """Calculate topology invariants for a connected or disconnected face subset.
 
-    MeshSnapshotValidator().validate_or_raise(snapshot)
+    Passing a precomputed ``edge_to_faces`` map means the caller has already
+    validated the snapshot. This is used by decomposition, where hundreds of
+    candidate regions may be analysed against one immutable snapshot.
+    """
+
+    if edge_to_faces is None:
+        resolved_edge_to_faces = build_edge_to_faces(snapshot)
+    else:
+        resolved_edge_to_faces = edge_to_faces
+
     ordered_face_ids = tuple(sorted(set(face_ids), key=lambda item: item.index))
     if not ordered_face_ids:
         raise RegionTopologyError("face_ids cannot be empty")
@@ -109,7 +118,6 @@ def analyse_face_region(
         raise RegionTopologyError(f"Unknown face ids: {unknown}")
 
     loop_map = snapshot.loop_by_id()
-    resolved_edge_to_faces = edge_to_faces or build_edge_to_faces(snapshot)
     region_face_set = set(ordered_face_ids)
     loop_ids = {
         loop_id
@@ -120,7 +128,10 @@ def analyse_face_region(
     vertex_ids = {loop_map[loop_id].vertex_id for loop_id in loop_ids}
 
     region_link_count = {
-        edge_id: sum(face_id in region_face_set for face_id in resolved_edge_to_faces.get(edge_id, ()))
+        edge_id: sum(
+            face_id in region_face_set
+            for face_id in resolved_edge_to_faces.get(edge_id, ())
+        )
         for edge_id in edge_ids
     }
     boundary_edge_ids = tuple(
@@ -178,7 +189,9 @@ def build_face_adjacency(
     region = set(ordered_face_ids)
     blocked = set(blocked_edge_ids)
     resolved_edge_to_faces = edge_to_faces or build_edge_to_faces(snapshot)
-    adjacency: dict[FaceId, set[FaceId]] = {face_id: set() for face_id in ordered_face_ids}
+    adjacency: dict[FaceId, set[FaceId]] = {
+        face_id: set() for face_id in ordered_face_ids
+    }
 
     for edge_id, linked_faces in resolved_edge_to_faces.items():
         if edge_id in blocked:
