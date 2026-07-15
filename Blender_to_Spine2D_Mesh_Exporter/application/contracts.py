@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping, Tuple
 
 
@@ -19,6 +19,21 @@ class IssueSeverity(str, Enum):
     INFO = "INFO"
     WARNING = "WARNING"
     ERROR = "ERROR"
+
+
+def _validate_relative_output_directory(value: str, field_name: str) -> None:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be str")
+    normalized = value.replace("\\", "/").strip()
+    posix_path = PurePosixPath(normalized)
+    windows_path = PureWindowsPath(normalized)
+    if (
+        posix_path.is_absolute()
+        or windows_path.is_absolute()
+        or bool(windows_path.drive)
+        or ".." in posix_path.parts
+    ):
+        raise ValueError(f"{field_name} must be a safe relative directory")
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +60,10 @@ class ExportSettings:
             raise ValueError("texture_height must be a positive integer")
         if not isinstance(self.output_directory, Path):
             raise TypeError("output_directory must be pathlib.Path")
+        _validate_relative_output_directory(
+            self.images_relative_path,
+            "images_relative_path",
+        )
         if self.seam_mode not in {"AUTO", "CUSTOM"}:
             raise ValueError("seam_mode must be 'AUTO' or 'CUSTOM'")
         if self.angle_limit_degrees <= 0.0 or self.angle_limit_degrees > 180.0:
@@ -102,7 +121,9 @@ class ExportResult:
     statistics: Mapping[str, int | float | str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.success and any(issue.severity is IssueSeverity.ERROR for issue in self.issues):
+        if self.success and any(
+            issue.severity is IssueSeverity.ERROR for issue in self.issues
+        ):
             raise ValueError("A successful ExportResult cannot contain ERROR issues")
         if not self.success and not any(
             issue.severity is IssueSeverity.ERROR for issue in self.issues
