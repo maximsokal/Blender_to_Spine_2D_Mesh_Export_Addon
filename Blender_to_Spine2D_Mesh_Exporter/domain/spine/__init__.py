@@ -2,12 +2,15 @@
 
 from .golden import LegacyCompatibilityFingerprint, build_legacy_fingerprint
 from .legacy_attachment_builder import (
+    LegacyAttachmentComponent,
     LegacyAttachmentSequence,
     LegacyAttachmentVertex,
     LegacyMeshAttachmentBuildError,
     LegacyMeshAttachmentBuildResult,
     LegacyMeshAttachmentRequest,
+    LegacyMeshDocumentBuildResult,
     build_legacy_mesh_attachment,
+    build_legacy_mesh_document,
 )
 from .legacy_profile import LegacyRigProfile
 from .legacy_rig_builder import (
@@ -42,12 +45,14 @@ from .weighted_vertices import (
 __all__ = [
     "Bone",
     "IKConstraint",
+    "LegacyAttachmentComponent",
     "LegacyAttachmentSequence",
     "LegacyAttachmentVertex",
     "LegacyCompatibilityFingerprint",
     "LegacyMeshAttachmentBuildError",
     "LegacyMeshAttachmentBuildResult",
     "LegacyMeshAttachmentRequest",
+    "LegacyMeshDocumentBuildResult",
     "LegacyRigBuildError",
     "LegacyRigBuildRequest",
     "LegacyRigBuildResult",
@@ -69,6 +74,7 @@ __all__ = [
     "WeightedVertexInfluence",
     "build_legacy_fingerprint",
     "build_legacy_mesh_attachment",
+    "build_legacy_mesh_document",
     "build_legacy_rig",
     "calculate_uniform_scale",
     "decode_weighted_vertices",
