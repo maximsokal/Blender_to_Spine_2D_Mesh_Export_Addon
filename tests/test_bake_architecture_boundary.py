@@ -53,18 +53,17 @@ def test_object_bake_operator_is_confined_to_one_helper():
     path = ROOT / "blender_adapter" / "bake_executor.py"
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
-    operator_calls = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        path_value = _attribute_path(node.func)
-        if path_value.endswith(".ops.object.bake"):
-            operator_calls.append(node)
+    operator_attributes = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and _attribute_path(node).endswith(".ops.object.bake")
+    ]
 
-    assert operator_calls
+    assert operator_attributes
     function_names = {
         _function_for_line(tree, node.lineno).name
-        for node in operator_calls
+        for node in operator_attributes
         if _function_for_line(tree, node.lineno) is not None
     }
     assert function_names == {"_call_bake_operator"}
