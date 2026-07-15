@@ -40,7 +40,10 @@ def _load_bpy() -> Any:
 def _matrix_rows(matrix: tuple[float, ...]) -> tuple[tuple[float, ...], ...]:
     if len(matrix) != 16:
         raise MeshWriteError("world_matrix must contain 16 values")
-    return tuple(tuple(matrix[row * 4 + column] for column in range(4)) for row in range(4))
+    return tuple(
+        tuple(matrix[row * 4 + column] for column in range(4))
+        for row in range(4)
+    )
 
 
 def _set_world_matrix(obj: Any, matrix: tuple[float, ...]) -> None:
@@ -183,7 +186,13 @@ def temporary_mesh_object(
     scene: Any | None = None,
     name_prefix: str = "__Spine2D_UV",
 ) -> Iterator[TemporaryMeshObject]:
-    """Create and clean an isolated Blender Object for one MeshSnapshot."""
+    """Create and clean an isolated Blender Object for one MeshSnapshot.
+
+    Only failures raised while creating or populating temporary Blender datablocks
+    are converted to :class:`MeshWriteError`. Exceptions raised by the caller inside
+    the ``with`` block retain their original type and traceback while cleanup still
+    runs in ``finally``.
+    """
 
     if not isinstance(snapshot, MeshSnapshot):
         raise TypeError("snapshot must be MeshSnapshot")
@@ -201,33 +210,42 @@ def temporary_mesh_object(
     mesh = None
     obj = None
     try:
-        collection = bpy_module.data.collections.new(f"{name_prefix}_{token}_Collection")
-        resolved_scene.collection.children.link(collection)
+        try:
+            collection = bpy_module.data.collections.new(
+                f"{name_prefix}_{token}_Collection"
+            )
+            resolved_scene.collection.children.link(collection)
 
-        mesh = bpy_module.data.meshes.new(f"{name_prefix}_{token}_Mesh")
-        obj = bpy_module.data.objects.new(f"{name_prefix}_{token}", mesh)
-        collection.objects.link(obj)
+            mesh = bpy_module.data.meshes.new(f"{name_prefix}_{token}_Mesh")
+            obj = bpy_module.data.objects.new(f"{name_prefix}_{token}", mesh)
+            collection.objects.link(obj)
 
-        mesh.from_pydata(
-            [vertex.position for vertex in snapshot.vertices],
-            [tuple(vertex_id.index for vertex_id in edge.vertex_ids) for edge in snapshot.edges],
-            _face_vertex_indices(snapshot),
-        )
-        mesh.update(calc_edges=True)
-        _verify_generated_topology(snapshot, mesh)
-        _write_edge_flags(snapshot, mesh)
-        _write_face_properties(snapshot, mesh)
-        _write_uv_layers(snapshot, mesh)
-        _set_world_matrix(obj, snapshot.world_matrix)
+            mesh.from_pydata(
+                [vertex.position for vertex in snapshot.vertices],
+                [
+                    tuple(vertex_id.index for vertex_id in edge.vertex_ids)
+                    for edge in snapshot.edges
+                ],
+                _face_vertex_indices(snapshot),
+            )
+            mesh.update(calc_edges=True)
+            _verify_generated_topology(snapshot, mesh)
+            _write_edge_flags(snapshot, mesh)
+            _write_face_properties(snapshot, mesh)
+            _write_uv_layers(snapshot, mesh)
+            _set_world_matrix(obj, snapshot.world_matrix)
+        except MeshWriteError:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "Failed to materialize snapshot '%s'",
+                snapshot.snapshot_id,
+            )
+            raise MeshWriteError(
+                f"Failed to materialize snapshot '{snapshot.snapshot_id}': {exc}"
+            ) from exc
 
         yield TemporaryMeshObject(object=obj, mesh=mesh, collection=collection)
-    except MeshWriteError:
-        raise
-    except Exception as exc:
-        logger.exception("Failed to materialize snapshot '%s'", snapshot.snapshot_id)
-        raise MeshWriteError(
-            f"Failed to materialize snapshot '{snapshot.snapshot_id}': {exc}"
-        ) from exc
     finally:
         _remove_object_and_mesh(bpy_module, obj, mesh)
         _remove_collection(bpy_module, collection)
