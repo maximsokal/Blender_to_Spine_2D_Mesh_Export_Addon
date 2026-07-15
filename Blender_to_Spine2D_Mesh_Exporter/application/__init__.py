@@ -20,6 +20,14 @@ from .a1_geometry_preparation import (
     A1PreparedRegion,
     prepare_a1_geometry_regions,
 )
+from .a1_texturing_layout import (
+    A1TexturingLayoutError,
+    A1TexturingTopology,
+    A1UvPropagationResult,
+    A1UvReadyRegion,
+    build_a1_texturing_topology,
+    propagate_texturing_uv_to_regions,
+)
 from .a1_z_groups import (
     A1SourceVertexZBinding,
     A1ZGroupAssignmentError,
@@ -27,7 +35,13 @@ from .a1_z_groups import (
     A1ZGroupHeightOverride,
     build_a1_z_group_assignment,
 )
-from .contracts import ExportIssue, ExportRequest, ExportResult, ExportSettings
+from .contracts import (
+    ExportIssue,
+    ExportRequest,
+    ExportResult,
+    ExportSettings,
+    IssueSeverity,
+)
 
 __all__ = [
     "A1AttachmentProjectionError",
@@ -41,6 +55,10 @@ __all__ = [
     "A1GeometryPreparationSettings",
     "A1PreparedRegion",
     "A1SourceVertexZBinding",
+    "A1TexturingLayoutError",
+    "A1TexturingTopology",
+    "A1UvPropagationResult",
+    "A1UvReadyRegion",
     "A1VertexZBinding",
     "A1ZGroupAssignmentError",
     "A1ZGroupAssignmentPlan",
@@ -49,8 +67,11 @@ __all__ = [
     "ExportRequest",
     "ExportResult",
     "ExportSettings",
+    "IssueSeverity",
     "assemble_a1_document",
+    "build_a1_texturing_topology",
     "build_a1_z_group_assignment",
     "prepare_a1_geometry_regions",
     "project_triangulated_disk_attachment",
+    "propagate_texturing_uv_to_regions",
 ]
