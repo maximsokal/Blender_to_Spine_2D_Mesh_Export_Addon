@@ -1,12 +1,39 @@
-"""Immutable results returned by the Blender bake executor."""
+"""Immutable settings and results used by the Blender bake executor."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Tuple
 
 from .model import BakePlan
+
+
+@dataclass(frozen=True, slots=True)
+class BakeExecutionSettings:
+    render_engine: str = "CYCLES"
+    samples: int = 256
+    use_clear: bool = True
+    generated_color: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    color_mode: str = "RGBA"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.render_engine, str) or not self.render_engine.strip():
+            raise ValueError("render_engine must be a non-empty string")
+        if not isinstance(self.samples, int) or self.samples < 1:
+            raise ValueError("samples must be a positive integer")
+        if not isinstance(self.use_clear, bool):
+            raise TypeError("use_clear must be bool")
+        if not isinstance(self.generated_color, tuple) or len(self.generated_color) != 4:
+            raise ValueError("generated_color must contain four values")
+        if not all(
+            isinstance(value, (int, float)) and isfinite(float(value))
+            for value in self.generated_color
+        ):
+            raise ValueError("generated_color must contain finite numeric values")
+        if self.color_mode not in {"BW", "RGB", "RGBA"}:
+            raise ValueError("color_mode must be BW, RGB, or RGBA")
 
 
 @dataclass(frozen=True, slots=True)
