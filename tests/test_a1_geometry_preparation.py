@@ -10,7 +10,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import (
     is_simple_disk,
 )
 
-from test_complex_decomposition import build_quad_ring
+from test_a1_segmentation_decomposition import build_quad_ring
 from test_geometry_domain import build_square_snapshot
 from test_geometry_triangulation import build_polygon_snapshot
 
