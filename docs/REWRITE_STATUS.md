@@ -11,42 +11,99 @@ must not be merged into `main`.
 
 ## Implemented
 
-- immutable application request/result contracts;
-- typed Spine document model;
-- Spine serializer and cross-reference validator;
+### Pure application and geometry pipeline
+
+- immutable application request/result contracts and structured issues;
+- immutable mesh snapshots with separate local IDs and stable source lineage;
+- exact `SourceLoopId` UV transfer without rounded positions or nearest-point
+  matching;
+- legacy seed-normal segmentation with complete, disjoint face coverage;
+- deterministic manifold-disk decomposition without random k-means;
+- Euler, boundary-component and manifold topology analysis;
+- deterministic source-lineage-preserving ear-clipping triangulation;
+- source-vertex Z-group assignment performed once on the original snapshot;
+- pure geometry preparation pipeline:
+  segmentation -> decomposition -> materialization -> triangulation;
+- shared full-object texturing topology that marks segmentation and decomposition
+  cuts as seams;
+- exact propagation of one globally unwrapped UV layer to every triangulated
+  export region;
+- pure A1 document assembly from ordered UV-ready regions.
+
+### Blender adapters
+
+- read-only source-mesh adapter using direct RNA access;
+- evaluated modifier reader using temporary POINT/EDGE/FACE/CORNER lineage
+  attributes and guaranteed cleanup;
+- explicit modifier lineage policies and structured diagnostics;
+- transactional Blender context capture/restore;
+- temporary Mesh/Object materialization using direct data APIs;
+- typed UV operator plans and isolated full-object unwrap transaction;
+- read-only material analysis for image, sequence, procedural, mixed, empty and
+  unsupported material slots;
+- transactional material copies and active bake target nodes;
+- transactional scene render/bake state restoration;
+- texture bake executor with one required `bpy.ops.object.bake` call per planned
+  frame;
+- atomic multi-file staging, commit, backup and rollback for baked textures.
+
+### Spine A1 domain
+
+- typed Spine document model, serializer and cross-reference validator;
 - weighted-vertex encoder/decoder;
 - centralized legacy rig naming profile;
-- structural Spine golden fingerprint;
-- immutable mesh snapshots with local IDs and source lineage;
-- exact `SourceLoopId` UV transfer;
-- geometry fingerprinting;
-- read-only Blender source-mesh adapter;
-- deterministic segmentation plans with explicit boundary reasons;
-- legacy seed-normal angular grouping with disjoint face coverage;
-- deterministic manifold-disk decomposition without random k-means;
-- reusable Euler/boundary/manifold topology analysis;
-- per-segment and per-region immutable snapshots;
-- evaluated modifier lineage policy and structured reports;
-- transactional evaluated-mesh reader using temporary POINT/EDGE/FACE/CORNER
-  attributes and guaranteed cleanup;
-- static dependency tests forbidding `bpy`, `bmesh`, and `random` in geometry domain.
+- exact A1 control hierarchy and constraint builder validated against the legacy
+  `Cone_merged.json` structure;
+- explicit vertex-bone attachment builder with final bone indices known before
+  serialization;
+- in-memory multi-attachment composition with cumulative non-overlapping bone
+  ranges;
+- no intermediate segment JSON merge and no post-serialization weighted-index
+  remap;
+- structural Spine golden fingerprint.
+
+### Architecture guards
+
+- `domain/` and `application/` remain independent from `bpy` and `bmesh`;
+- geometry domain also forbids random-number dependencies;
+- UV and bake operators are confined to dedicated adapter helpers;
+- Blender operators are forbidden inside geometry/material traversal loops;
+- GitHub Actions stores full pytest logs as artifacts for both Python 3.10 and
+  Python 3.11.
 
 ## Modifier policy currently supported
 
 - `STRICT_PRESERVE`: deformation-only stacks where every source element survives
   exactly once;
 - `ALLOW_SOURCE_DUPLICATION`: source vertices/faces/corners may repeat, permitting
-  modifier behaviour such as Mirror or Triangulate when attributes are preserved;
+  modifier behaviour such as Mirror or Triangulate when Blender preserves their
+  lineage;
 - generated edges are allowed and represented with `MeshEdge.source_id = None`;
-- generated vertices, faces, and corners are rejected because exact UV lineage
-  cannot be proven.
+- generated vertices, faces, and corners are rejected because exact source-loop UV
+  correspondence cannot be proven.
 
-## Validation status
+## Correct shared-texture order
 
-- focused pure-Python domain and fake-Blender adapter tests pass;
-- GitHub Actions passes on Python 3.10 and Python 3.11;
-- the real Blender headless suite has not been added yet, so evaluated attribute
-  propagation still requires Blender 4.4 fixture verification before production use.
+The A1 pipeline must not unwrap each segment independently. The required order is:
+
+1. read/evaluate one complete source snapshot;
+2. calculate segmentation and deterministic decomposition;
+3. mark every internal region cut as a seam on one complete texturing snapshot;
+4. unwrap and bake that complete snapshot once;
+5. transfer the resulting UV layer to each triangulated region through
+   `SourceLoopId`;
+6. compose all region attachments in one `SpineDocument`.
+
+This preserves the existing shared baked texture contract while removing object-name
+search, coordinate tolerances and JSON merging.
+
+## Validation boundary
+
+- the pure domain and fake-Blender test matrix targets Python 3.10 and Python 3.11;
+- real modifier attribute propagation, UV operators, Cycles baking, datablock
+  cleanup and context restoration still require Blender 4.4 headless fixtures;
+- the rewrite remains disabled in production until those tests and representative
+  legacy golden `.blend` fixtures pass.
 
 ## Production path
 
@@ -55,10 +112,12 @@ switched to the rewrite and no addon version has been bumped.
 
 ## Next architectural slices
 
-1. UV unwrap transaction and immutable snapshot write-back;
-2. texture/material bake plan and transactional execution;
-3. A1 rig builder that produces `SpineDocument` directly;
-4. single-object orchestration and golden parity fixtures;
-5. in-memory multi-object composition;
-6. Blender headless integration suite with real `.blend` fixtures;
-7. operator migration and legacy removal.
+1. keep the expanded pure/fake test suite green and inspect saved CI artifacts;
+2. add Blender 4.4 headless fixtures for source reading, modifiers, shared unwrap,
+   baking and cleanup failures;
+3. implement the Blender-facing single-object orchestration service using the
+   existing application stages;
+4. compare complete output against representative v0.23 golden exports;
+5. extend the same in-memory model to connected and multi-object export;
+6. migrate operators while preserving public IDs and important Scene properties;
+7. remove legacy orchestration only after parity is proven.
