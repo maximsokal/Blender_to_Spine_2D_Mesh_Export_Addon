@@ -32,6 +32,11 @@ segmentation and topology-preserving transformations. UV correspondence must use
 `SourceLoopId`; rounded coordinates and nearest-point matching are not part of the
 new architecture.
 
+Segmentation is a pure deterministic operation. It returns a `SegmentationPlan`
+containing source-face membership, boundary-edge reasons and topology reports.
+The domain layer never creates Blender objects, writes custom properties or uses
+random clustering.
+
 ## Implemented foundation
 
 The current foundation contains:
@@ -48,12 +53,15 @@ The current foundation contains:
 - exact SourceLoopId-based UV correspondence;
 - deterministic face-subset extraction for segments;
 - geometry fingerprinting for golden fixtures;
-- a read-only Blender source-mesh adapter using direct RNA access.
+- a read-only Blender source-mesh adapter using direct RNA access;
+- deterministic segmentation by seams, sharp edges, materials, face angle, UV
+  discontinuity, mesh boundaries and non-manifold edges;
+- per-segment Euler characteristic, boundary-component and manifold reports.
 
 ## Not implemented yet
 
 - evaluated modifier lineage propagation;
-- deterministic segmentation engine;
+- complex-segment decomposition compatible with the legacy hole strategy;
 - UV unwrap adapter and transactional UV write-back;
 - baking transaction;
 - A1 rig builder connected to `SpineDocument`;
