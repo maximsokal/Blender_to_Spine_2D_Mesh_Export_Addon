@@ -1,6 +1,12 @@
 """Blender API adapters for the rewritten exporter."""
 
-from .bake_executor import BakeExecutionError, execute_bake_plan
+from .a1_single_object_export import export_a1_single_object
+from .bake_executor import (
+    BakeExecutionError,
+    build_bake_execution_result,
+    execute_bake_plan,
+    stage_bake_plan_outputs,
+)
 from .bake_materials import (
     BakeMaterialError,
     PreparedBakeMaterials,
@@ -57,12 +63,15 @@ __all__ = [
     "activate_object_for_operator",
     "analyse_material_slot",
     "analyse_object_materials",
+    "build_bake_execution_result",
     "build_uv_operator_plan",
     "configure_scene_for_bake",
     "execute_bake_plan",
+    "export_a1_single_object",
     "preserve_bake_scene_state",
     "read_evaluated_mesh_snapshot",
     "read_source_mesh_snapshot",
+    "stage_bake_plan_outputs",
     "temporary_bake_materials",
     "temporary_mesh_object",
     "unwrap_snapshot_uv",
