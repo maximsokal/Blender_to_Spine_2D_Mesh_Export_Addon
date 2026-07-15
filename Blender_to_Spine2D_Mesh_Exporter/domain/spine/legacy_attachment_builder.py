@@ -4,6 +4,10 @@ The legacy exporter creates one vertex bone for every exported mesh vertex and
 binds that vertex to the new bone with one full-weight influence at local (0, 0).
 This module preserves that external Spine contract while requiring an explicit
 Z-group index and already-transformed pixel position for every vertex.
+
+Single- and multi-attachment documents share the same component builder. Bone
+indices are assigned against the final in-memory bone order, so no serialized JSON
+merge or weighted-index remap is required.
 """
 
 from __future__ import annotations
@@ -154,6 +158,36 @@ class LegacyMeshAttachmentRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class LegacyAttachmentComponent:
+    request: LegacyMeshAttachmentRequest
+    vertex_bone_start_index: int
+    vertex_bones: Tuple[Bone, ...]
+    attachment: MeshAttachment
+    slot: Slot
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.vertex_bone_start_index, int) or self.vertex_bone_start_index < 0:
+            raise ValueError("vertex_bone_start_index must be a non-negative integer")
+        if len(self.vertex_bones) != len(self.request.vertices):
+            raise ValueError("one vertex bone is required for every attachment vertex")
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyMeshDocumentBuildResult:
+    rig: LegacyRigBuildResult
+    requests: Tuple[LegacyMeshAttachmentRequest, ...]
+    components: Tuple[LegacyAttachmentComponent, ...]
+    skins: Tuple[Skin, ...]
+    document: SpineDocument
+
+    @property
+    def all_vertex_bones(self) -> Tuple[Bone, ...]:
+        return tuple(
+            bone for component in self.components for bone in component.vertex_bones
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class LegacyMeshAttachmentBuildResult:
     rig: LegacyRigBuildResult
     request: LegacyMeshAttachmentRequest
@@ -162,14 +196,11 @@ class LegacyMeshAttachmentBuildResult:
     slot: Slot
     skin: Skin
     document: SpineDocument
+    vertex_bone_start_index: int
 
     @property
     def all_bones(self) -> Tuple[Bone, ...]:
         return self.document.bones
-
-    @property
-    def vertex_bone_start_index(self) -> int:
-        return len(self.rig.bones)
 
 
 class LegacyMeshAttachmentBuildError(ValueError):
@@ -214,10 +245,11 @@ def _build_vertex_bones(
 
 
 def _build_weighted_stream(
-    rig: LegacyRigBuildResult,
     request: LegacyMeshAttachmentRequest,
+    first_vertex_bone_index: int,
 ) -> Tuple[float | int, ...]:
-    first_vertex_bone_index = len(rig.bones)
+    if not isinstance(first_vertex_bone_index, int) or first_vertex_bone_index < 0:
+        raise ValueError("first_vertex_bone_index must be a non-negative integer")
     weighted = tuple(
         WeightedVertex(
             (
@@ -234,22 +266,17 @@ def _build_weighted_stream(
     return encode_weighted_vertices(weighted)
 
 
-def build_legacy_mesh_attachment(
+def _build_component(
     rig: LegacyRigBuildResult,
     request: LegacyMeshAttachmentRequest,
     *,
-    skeleton_metadata: Mapping[str, object] | None = None,
-) -> LegacyMeshAttachmentBuildResult:
-    """Append legacy vertex bones and build one fully validated Spine document."""
-
-    if not isinstance(rig, LegacyRigBuildResult):
-        raise TypeError("rig must be LegacyRigBuildResult")
-    if not isinstance(request, LegacyMeshAttachmentRequest):
-        raise TypeError("request must be LegacyMeshAttachmentRequest")
-    rig.validate()
-
+    first_vertex_bone_index: int,
+) -> LegacyAttachmentComponent:
     vertex_bones = _build_vertex_bones(rig, request)
-    weighted_vertices = _build_weighted_stream(rig, request)
+    weighted_vertices = _build_weighted_stream(
+        request,
+        first_vertex_bone_index,
+    )
     uvs = tuple(
         float(component)
         for vertex in request.vertices
@@ -275,39 +302,128 @@ def build_legacy_mesh_attachment(
         bone=rig.info.base_bone_name,
         attachment=request.attachment_name,
     )
-    skin = Skin(
-        name=request.skin_name,
-        attachments={
-            request.slot_name: {
-                request.attachment_name: attachment,
-            }
-        },
+    return LegacyAttachmentComponent(
+        request=request,
+        vertex_bone_start_index=first_vertex_bone_index,
+        vertex_bones=vertex_bones,
+        attachment=attachment,
+        slot=slot,
     )
 
+
+def _validate_request_set(
+    requests: Tuple[LegacyMeshAttachmentRequest, ...],
+) -> None:
+    if not isinstance(requests, tuple) or not requests:
+        raise ValueError("requests must be a non-empty tuple")
+    if not all(isinstance(item, LegacyMeshAttachmentRequest) for item in requests):
+        raise TypeError("requests must contain LegacyMeshAttachmentRequest values")
+
+    checks = {
+        "slot_name": tuple(request.slot_name for request in requests),
+        "vertex_prefix": tuple(request.vertex_prefix for request in requests),
+    }
+    for field_name, values in checks.items():
+        duplicates = tuple(sorted({value for value in values if values.count(value) > 1}))
+        if duplicates:
+            raise LegacyMeshAttachmentBuildError(
+                f"Duplicate {field_name} values are not allowed: {duplicates}"
+            )
+
+    attachment_paths = tuple(
+        (request.skin_name, request.slot_name, request.attachment_name)
+        for request in requests
+    )
+    duplicate_paths = tuple(
+        sorted({path for path in attachment_paths if attachment_paths.count(path) > 1})
+    )
+    if duplicate_paths:
+        raise LegacyMeshAttachmentBuildError(
+            f"Duplicate skin/slot/attachment paths are not allowed: {duplicate_paths}"
+        )
+
+
+def _build_skins(
+    requests: Tuple[LegacyMeshAttachmentRequest, ...],
+    components: Tuple[LegacyAttachmentComponent, ...],
+) -> Tuple[Skin, ...]:
+    skin_order: list[str] = []
+    attachments_by_skin: dict[str, dict[str, dict[str, MeshAttachment]]] = {}
+    for request, component in zip(requests, components):
+        if request.skin_name not in attachments_by_skin:
+            skin_order.append(request.skin_name)
+            attachments_by_skin[request.skin_name] = {}
+        slot_attachments = attachments_by_skin[request.skin_name].setdefault(
+            request.slot_name,
+            {},
+        )
+        slot_attachments[request.attachment_name] = component.attachment
+    return tuple(
+        Skin(name=skin_name, attachments=attachments_by_skin[skin_name])
+        for skin_name in skin_order
+    )
+
+
+def _default_skeleton(
+    rig: LegacyRigBuildResult,
+    requests: Tuple[LegacyMeshAttachmentRequest, ...],
+) -> dict[str, object]:
+    return {
+        "hash": "hash_value_placeholder",
+        "spine": rig.profile.spine_version,
+        "x": 0,
+        "y": 0,
+        "width": max(float(request.width) for request in requests),
+        "height": max(float(request.height) for request in requests),
+        "images": "",
+        "audio": "./audio",
+    }
+
+
+def build_legacy_mesh_document(
+    rig: LegacyRigBuildResult,
+    requests: Tuple[LegacyMeshAttachmentRequest, ...],
+    *,
+    skeleton_metadata: Mapping[str, object] | None = None,
+) -> LegacyMeshDocumentBuildResult:
+    """Build one validated document containing several ordered mesh attachments."""
+
+    if not isinstance(rig, LegacyRigBuildResult):
+        raise TypeError("rig must be LegacyRigBuildResult")
+    _validate_request_set(requests)
+    rig.validate()
+
+    components: list[LegacyAttachmentComponent] = []
+    next_bone_index = len(rig.bones)
+    for request in requests:
+        component = _build_component(
+            rig,
+            request,
+            first_vertex_bone_index=next_bone_index,
+        )
+        components.append(component)
+        next_bone_index += len(component.vertex_bones)
+    resolved_components = tuple(components)
+    skins = _build_skins(requests, resolved_components)
+
     if skeleton_metadata is None:
-        skeleton = {
-            "hash": "hash_value_placeholder",
-            "spine": rig.profile.spine_version,
-            "x": 0,
-            "y": 0,
-            "width": float(request.width),
-            "height": float(request.height),
-            "images": "",
-            "audio": "./audio",
-        }
+        skeleton = _default_skeleton(rig, requests)
     else:
         if not isinstance(skeleton_metadata, Mapping):
             raise TypeError("skeleton_metadata must be a mapping or None")
         skeleton = dict(skeleton_metadata)
         skeleton.setdefault("spine", rig.profile.spine_version)
-        skeleton.setdefault("width", float(request.width))
-        skeleton.setdefault("height", float(request.height))
+        skeleton.setdefault("width", max(float(request.width) for request in requests))
+        skeleton.setdefault("height", max(float(request.height) for request in requests))
 
+    vertex_bones = tuple(
+        bone for component in resolved_components for bone in component.vertex_bones
+    )
     document = SpineDocument(
         skeleton=skeleton,
         bones=rig.bones + vertex_bones,
-        slots=(slot,),
-        skins=(skin,),
+        slots=tuple(component.slot for component in resolved_components),
+        skins=skins,
         ik=rig.ik,
         transform=rig.transform,
         animations={"animation": {}},
@@ -316,15 +432,42 @@ def build_legacy_mesh_attachment(
         SpineValidator().validate_or_raise(document)
     except Exception as exc:
         raise LegacyMeshAttachmentBuildError(
-            f"Attachment '{request.attachment_name}' failed Spine validation: {exc}"
+            f"Multi-attachment A1 document failed Spine validation: {exc}"
         ) from exc
 
+    return LegacyMeshDocumentBuildResult(
+        rig=rig,
+        requests=requests,
+        components=resolved_components,
+        skins=skins,
+        document=document,
+    )
+
+
+def build_legacy_mesh_attachment(
+    rig: LegacyRigBuildResult,
+    request: LegacyMeshAttachmentRequest,
+    *,
+    skeleton_metadata: Mapping[str, object] | None = None,
+) -> LegacyMeshAttachmentBuildResult:
+    """Build one attachment through the same cumulative in-memory composer."""
+
+    if not isinstance(request, LegacyMeshAttachmentRequest):
+        raise TypeError("request must be LegacyMeshAttachmentRequest")
+    multi = build_legacy_mesh_document(
+        rig,
+        (request,),
+        skeleton_metadata=skeleton_metadata,
+    )
+    component = multi.components[0]
+    skin = multi.skins[0]
     return LegacyMeshAttachmentBuildResult(
         rig=rig,
         request=request,
-        vertex_bones=vertex_bones,
-        attachment=attachment,
-        slot=slot,
+        vertex_bones=component.vertex_bones,
+        attachment=component.attachment,
+        slot=component.slot,
         skin=skin,
-        document=document,
+        document=multi.document,
+        vertex_bone_start_index=component.vertex_bone_start_index,
     )
