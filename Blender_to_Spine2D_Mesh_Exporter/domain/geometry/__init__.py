@@ -75,6 +75,13 @@ from .topology import (
     face_edge_ids,
     is_simple_disk,
 )
+from .triangulation import (
+    TriangulatedFaceInfo,
+    TriangulationError,
+    TriangulationResult,
+    TriangulationSettings,
+    triangulate_snapshot,
+)
 from .validator import (
     MeshSnapshotValidator,
     MeshValidationError,
@@ -128,6 +135,10 @@ __all__ = [
     "SourceLoopId",
     "SourceLoopUV",
     "SourceVertexId",
+    "TriangulatedFaceInfo",
+    "TriangulationError",
+    "TriangulationResult",
+    "TriangulationSettings",
     "UvCorrespondenceMap",
     "UvTransferReport",
     "Vector2",
@@ -149,4 +160,5 @@ __all__ = [
     "segment_mesh",
     "segment_mesh_a1",
     "transfer_uv_by_source_loop",
+    "triangulate_snapshot",
 ]
