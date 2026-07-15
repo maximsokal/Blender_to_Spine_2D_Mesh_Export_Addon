@@ -3,8 +3,8 @@
 Byte-for-byte JSON equality is too strict for exporter migration because volatile
 metadata and harmless floating-point representation may differ. At the same time,
 name/order changes or weighted bone-index corruption must never be hidden. This
-module compares the stable A1 structure, setup data, mesh topology, UV coordinates,
-and decoded weighted-vertex semantics while collecting every mismatch in one report.
+module compares stable A1 structure, setup data, mesh topology, UV coordinates, and
+decoded weighted-vertex semantics while collecting every mismatch in one report.
 """
 
 from __future__ import annotations
@@ -144,6 +144,8 @@ def _compare_value(
     issues: list[A1ParityIssue],
     severity: A1ParitySeverity = A1ParitySeverity.ERROR,
 ) -> None:
+    """Recursively compare JSON-compatible values with explicit numeric tolerance."""
+
     if _path_ignored(path, settings):
         return
 
@@ -182,7 +184,6 @@ def _compare_value(
                 path=child_path,
                 message="Field is missing from rewritten output",
                 expected=expected[key],
-                actual=None,
             )
         for key in sorted(actual_keys - expected_keys, key=str):
             child_path = f"{path}.{key}" if path else str(key)
@@ -194,7 +195,6 @@ def _compare_value(
                 code="UNEXPECTED_FIELD",
                 path=child_path,
                 message="Rewritten output contains an unexpected field",
-                expected=None,
                 actual=actual[key],
             )
         for key in sorted(expected_keys & actual_keys, key=str):
@@ -271,7 +271,7 @@ def _require_mapping(value: Any, path: str) -> Mapping[str, Any]:
     return value
 
 
-def _require_list(value: Any, path: str) -> Sequence[Any]:
+def _require_sequence(value: Any, path: str) -> Sequence[Any]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         raise TypeError(f"{path} must be a sequence")
     return value
@@ -281,7 +281,7 @@ def _attachment_map(
     document: Mapping[str, Any],
 ) -> dict[Tuple[str, str, str], Mapping[str, Any]]:
     result: dict[Tuple[str, str, str], Mapping[str, Any]] = {}
-    skins = _require_list(document.get("skins", ()), "skins")
+    skins = _require_sequence(document.get("skins", ()), "skins")
     for skin_index, skin_value in enumerate(skins):
         skin = _require_mapping(skin_value, f"skins[{skin_index}]")
         skin_name = str(skin.get("name", "default"))
@@ -315,6 +315,15 @@ def _compare_fingerprints(
     settings: A1ParitySettings,
     issues: list[A1ParityIssue],
 ) -> None:
+    """Compare stable A1 categories with one deterministic issue per category.
+
+    Structural issue paths are deliberately aggregate and stable. The complete
+    ordered tuples are attached to the issue, so callers can display or diff them
+    without depending on which element happened to differ first.
+    """
+
+    if not isinstance(settings, A1ParitySettings):
+        raise TypeError("settings must be A1ParitySettings")
     for field_name in (
         "bone_names",
         "bone_parents",
@@ -324,12 +333,19 @@ def _compare_fingerprints(
         "skin_names",
         "attachment_paths",
     ):
-        _compare_value(
-            getattr(expected, field_name),
-            getattr(actual, field_name),
-            path=f"structure.{field_name}",
-            settings=settings,
-            issues=issues,
+        expected_value = getattr(expected, field_name)
+        actual_value = getattr(actual, field_name)
+        path = f"structure.{field_name}"
+        if _path_ignored(path, settings) or expected_value == actual_value:
+            continue
+        _append_issue(
+            issues,
+            severity=A1ParitySeverity.ERROR,
+            code="STRUCTURE_MISMATCH",
+            path=path,
+            message=f"Ordered A1 structural field '{field_name}' differs",
+            expected=expected_value,
+            actual=actual_value,
         )
 
 
@@ -342,11 +358,11 @@ def _compare_ordered_section_extras(
     settings: A1ParitySettings,
     issues: list[A1ParityIssue],
 ) -> None:
-    expected_values = _require_list(
+    expected_values = _require_sequence(
         expected_document.get(section_name, ()),
         section_name,
     )
-    actual_values = _require_list(
+    actual_values = _require_sequence(
         actual_document.get(section_name, ()),
         section_name,
     )
@@ -382,6 +398,56 @@ def _compare_ordered_section_extras(
         )
 
 
+def _compare_weighted_vertex(
+    expected: WeightedVertex,
+    actual: WeightedVertex,
+    *,
+    path: str,
+    settings: A1ParitySettings,
+    issues: list[A1ParityIssue],
+) -> None:
+    if len(expected.influences) != len(actual.influences):
+        _append_issue(
+            issues,
+            severity=A1ParitySeverity.ERROR,
+            code="INFLUENCE_COUNT_MISMATCH",
+            path=path,
+            message=(
+                f"Expected {len(expected.influences)} influences, got "
+                f"{len(actual.influences)}"
+            ),
+            expected=len(expected.influences),
+            actual=len(actual.influences),
+        )
+        return
+
+    for influence_index, (expected_influence, actual_influence) in enumerate(
+        zip(expected.influences, actual.influences)
+    ):
+        influence_path = f"{path}.influences[{influence_index}]"
+        if expected_influence.bone_index != actual_influence.bone_index:
+            _append_issue(
+                issues,
+                severity=A1ParitySeverity.ERROR,
+                code="WEIGHTED_BONE_INDEX_MISMATCH",
+                path=f"{influence_path}.bone_index",
+                message=(
+                    f"Expected bone {expected_influence.bone_index}, got "
+                    f"{actual_influence.bone_index}"
+                ),
+                expected=expected_influence.bone_index,
+                actual=actual_influence.bone_index,
+            )
+        for field_name in ("x", "y", "weight"):
+            _compare_value(
+                getattr(expected_influence, field_name),
+                getattr(actual_influence, field_name),
+                path=f"{influence_path}.{field_name}",
+                settings=settings,
+                issues=issues,
+            )
+
+
 def _compare_weighted_vertices(
     expected_stream: Any,
     actual_stream: Any,
@@ -406,6 +472,7 @@ def _compare_weighted_vertices(
             expected=expected_stream,
         )
         return
+
     try:
         actual_vertices = decode_weighted_vertices(
             actual_stream,
@@ -434,55 +501,6 @@ def _compare_weighted_vertices(
         )
 
 
-def _compare_weighted_vertex(
-    expected: WeightedVertex,
-    actual: WeightedVertex,
-    *,
-    path: str,
-    settings: A1ParitySettings,
-    issues: list[A1ParityIssue],
-) -> None:
-    if len(expected.influences) != len(actual.influences):
-        _append_issue(
-            issues,
-            severity=A1ParitySeverity.ERROR,
-            code="INFLUENCE_COUNT_MISMATCH",
-            path=path,
-            message=(
-                f"Expected {len(expected.influences)} influences, got "
-                f"{len(actual.influences)}"
-            ),
-            expected=len(expected.influences),
-            actual=len(actual.influences),
-        )
-        return
-    for influence_index, (expected_influence, actual_influence) in enumerate(
-        zip(expected.influences, actual.influences)
-    ):
-        influence_path = f"{path}.influences[{influence_index}]"
-        if expected_influence.bone_index != actual_influence.bone_index:
-            _append_issue(
-                issues,
-                severity=A1ParitySeverity.ERROR,
-                code="WEIGHTED_BONE_INDEX_MISMATCH",
-                path=f"{influence_path}.bone_index",
-                message=(
-                    f"Expected bone {expected_influence.bone_index}, got "
-                    f"{actual_influence.bone_index}"
-                ),
-                expected=expected_influence.bone_index,
-                actual=actual_influence.bone_index,
-            )
-        for field_name in ("x", "y", "weight"):
-            _compare_value(
-                getattr(expected_influence, field_name),
-                getattr(actual_influence, field_name),
-                path=f"{influence_path}.{field_name}",
-                settings=settings,
-                issues=issues,
-            )
-
-
 def _compare_mesh_attachment(
     expected: Mapping[str, Any],
     actual: Mapping[str, Any],
@@ -491,8 +509,8 @@ def _compare_mesh_attachment(
     settings: A1ParitySettings,
     issues: list[A1ParityIssue],
 ) -> None:
-    expected_uvs = _require_list(expected.get("uvs", ()), f"{path}.uvs")
-    actual_uvs = _require_list(actual.get("uvs", ()), f"{path}.uvs")
+    expected_uvs = _require_sequence(expected.get("uvs", ()), f"{path}.uvs")
+    actual_uvs = _require_sequence(actual.get("uvs", ()), f"{path}.uvs")
     _compare_value(
         expected_uvs,
         actual_uvs,
@@ -502,6 +520,7 @@ def _compare_mesh_attachment(
     )
     expected_vertex_count = len(expected_uvs) // 2
     actual_vertex_count = len(actual_uvs) // 2
+
     if len(expected_uvs) % 2 != 0:
         _append_issue(
             issues,
@@ -592,12 +611,13 @@ def _compare_attachments(
     actual_attachments = _attachment_map(actual_document)
     expected_keys = set(expected_attachments)
     actual_keys = set(actual_attachments)
+
     for key in sorted(expected_keys - actual_keys):
         _append_issue(
             issues,
             severity=A1ParitySeverity.ERROR,
             code="MISSING_ATTACHMENT",
-            path="/".join(key),
+            path="attachments." + "/".join(key),
             message="Attachment is missing from rewritten output",
             expected=key,
         )
@@ -606,10 +626,11 @@ def _compare_attachments(
             issues,
             severity=A1ParitySeverity.ERROR,
             code="UNEXPECTED_ATTACHMENT",
-            path="/".join(key),
+            path="attachments." + "/".join(key),
             message="Rewritten output contains an unexpected attachment",
             actual=key,
         )
+
     for key in sorted(expected_keys & actual_keys):
         path = "attachments." + "/".join(key)
         expected_attachment = expected_attachments[key]
@@ -634,6 +655,22 @@ def _compare_attachments(
             )
 
 
+def _append_section_error(
+    issues: list[A1ParityIssue],
+    *,
+    section: str,
+    side: str,
+    exc: Exception,
+) -> None:
+    _append_issue(
+        issues,
+        severity=A1ParitySeverity.ERROR,
+        code=f"{side.upper()}_{section.upper()}_INVALID",
+        path=section,
+        message=f"{side.capitalize()} {section} data is invalid: {exc}",
+    )
+
+
 def compare_a1_exports(
     expected: Mapping[str, Any],
     actual: Mapping[str, Any],
@@ -652,6 +689,7 @@ def compare_a1_exports(
     issues: list[A1ParityIssue] = []
     expected_fingerprint: LegacyCompatibilityFingerprint | None = None
     actual_fingerprint: LegacyCompatibilityFingerprint | None = None
+
     try:
         expected_fingerprint = build_legacy_fingerprint(expected)
     except Exception as exc:
@@ -680,51 +718,79 @@ def compare_a1_exports(
             issues=issues,
         )
 
+    try:
+        expected_skeleton = _require_mapping(
+            expected.get("skeleton", {}),
+            "expected.skeleton",
+        )
+    except Exception as exc:
+        _append_section_error(
+            issues,
+            section="skeleton",
+            side="expected",
+            exc=exc,
+        )
+        expected_skeleton = {}
+    try:
+        actual_skeleton = _require_mapping(
+            actual.get("skeleton", {}),
+            "actual.skeleton",
+        )
+    except Exception as exc:
+        _append_section_error(
+            issues,
+            section="skeleton",
+            side="actual",
+            exc=exc,
+        )
+        actual_skeleton = {}
     _compare_value(
-        _require_mapping(expected.get("skeleton", {}), "expected.skeleton"),
-        _require_mapping(actual.get("skeleton", {}), "actual.skeleton"),
+        expected_skeleton,
+        actual_skeleton,
         path="skeleton",
         settings=resolved_settings,
         issues=issues,
     )
-    _compare_ordered_section_extras(
-        expected,
-        actual,
-        "bones",
-        {"name", "parent"},
-        settings=resolved_settings,
-        issues=issues,
-    )
-    _compare_ordered_section_extras(
-        expected,
-        actual,
-        "slots",
-        {"name", "bone"},
-        settings=resolved_settings,
-        issues=issues,
-    )
-    _compare_ordered_section_extras(
-        expected,
-        actual,
-        "ik",
-        {"name", "order", "bones", "target"},
-        settings=resolved_settings,
-        issues=issues,
-    )
-    _compare_ordered_section_extras(
-        expected,
-        actual,
-        "transform",
-        {"name", "order", "bones", "target"},
-        settings=resolved_settings,
-        issues=issues,
-    )
-    _compare_attachments(
-        expected,
-        actual,
-        settings=resolved_settings,
-        issues=issues,
-    )
+
+    for section_name, structural_fields in (
+        ("bones", {"name", "parent"}),
+        ("slots", {"name", "bone"}),
+        ("ik", {"name", "order", "bones", "target"}),
+        ("transform", {"name", "order", "bones", "target"}),
+    ):
+        try:
+            _compare_ordered_section_extras(
+                expected,
+                actual,
+                section_name,
+                structural_fields,
+                settings=resolved_settings,
+                issues=issues,
+            )
+        except Exception as exc:
+            _append_issue(
+                issues,
+                severity=A1ParitySeverity.ERROR,
+                code="ORDERED_SECTION_INVALID",
+                path=section_name,
+                message=f"Unable to compare ordered section: {exc}",
+            )
+
+    try:
+        _compare_attachments(
+            expected,
+            actual,
+            settings=resolved_settings,
+            issues=issues,
+        )
+    except Exception as exc:
+        _append_issue(
+            issues,
+            severity=A1ParitySeverity.ERROR,
+            code="ATTACHMENT_SECTION_INVALID",
+            path="attachments",
+            message=f"Unable to compare attachments: {exc}",
+        )
 
     if resolved_settings.compare_animations:
         _compare_value(
