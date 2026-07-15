@@ -21,6 +21,11 @@ from .a1_geometry_preparation import (
     A1PreparedRegion,
     prepare_a1_geometry_regions,
 )
+from .a1_multi_object import (
+    A1MultiObjectExportSettings,
+    A1MultiObjectMode,
+    A1MultiObjectStage,
+)
 from .a1_single_object import (
     A1MeshBounds,
     A1ResolvedOutputPaths,
@@ -70,6 +75,9 @@ __all__ = [
     "A1GeometryPreparationResult",
     "A1GeometryPreparationSettings",
     "A1MeshBounds",
+    "A1MultiObjectExportSettings",
+    "A1MultiObjectMode",
+    "A1MultiObjectStage",
     "A1PreparedRegion",
     "A1ResolvedOutputPaths",
     "A1SingleObjectExportSettings",
