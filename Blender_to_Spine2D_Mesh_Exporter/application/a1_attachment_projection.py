@@ -1,9 +1,15 @@
-"""Project validated geometry snapshots into explicit A1 attachment inputs.
+"""Project triangulated disk snapshots into explicit A1 attachment inputs.
 
-This application bridge intentionally accepts only triangulated manifold disks
-whose local vertices each have one UV coordinate in the requested layer.  It
-computes a deterministic boundary cycle, places hull vertices first as required by
-Spine mesh attachments, and never matches geometry by rounded positions.
+Blender UV coordinates belong to mesh loops, not vertices. A single geometric
+vertex may therefore require several Spine attachment vertices when UV seams split
+its incident corners. This module creates one deterministic attachment vertex for
+every unique ``(VertexId, UV)`` pair while preserving the original geometric
+position and Z-group binding.
+
+The first attachment vertices form the ordered physical mesh hull required by the
+Spine runtime. When a UV seam reaches the external boundary, both UV variants are
+placed consecutively at the same geometric position so the physical hull order is
+preserved without merging distinct texture coordinates.
 """
 
 from __future__ import annotations
@@ -16,6 +22,7 @@ from typing import Tuple
 from ..domain.geometry import (
     EdgeId,
     FaceId,
+    LoopId,
     MeshSnapshot,
     MeshSnapshotValidator,
     VertexId,
@@ -45,6 +52,27 @@ class A1VertexZBinding:
             raise TypeError("vertex_id must be VertexId")
         if not isinstance(self.z_group_index, int) or self.z_group_index < 0:
             raise ValueError("z_group_index must be a non-negative integer")
+
+
+@dataclass(frozen=True, slots=True)
+class A1AttachmentVertexKey:
+    """Identity of one Spine attachment vertex after UV seam duplication."""
+
+    vertex_id: VertexId
+    uv: Tuple[float, float]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.vertex_id, VertexId):
+            raise TypeError("vertex_id must be VertexId")
+        if (
+            not isinstance(self.uv, tuple)
+            or len(self.uv) != 2
+            or not all(
+                isinstance(value, (int, float)) and isfinite(float(value))
+                for value in self.uv
+            )
+        ):
+            raise ValueError("uv must contain two finite numeric values")
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,17 +129,126 @@ class A1AttachmentProjectionSettings:
 @dataclass(frozen=True, slots=True)
 class A1AttachmentProjectionResult:
     request: LegacyMeshAttachmentRequest
-    hull_vertex_ids: Tuple[VertexId, ...]
-    ordered_vertex_ids: Tuple[VertexId, ...]
-    old_to_attachment_index: Tuple[Tuple[VertexId, int], ...]
+    hull_vertex_keys: Tuple[A1AttachmentVertexKey, ...]
+    ordered_vertex_keys: Tuple[A1AttachmentVertexKey, ...]
+    loop_to_attachment_index: Tuple[Tuple[LoopId, int], ...]
 
-    def attachment_index_for(self, vertex_id: VertexId) -> int:
+    def __post_init__(self) -> None:
+        if not isinstance(self.request, LegacyMeshAttachmentRequest):
+            raise TypeError("request must be LegacyMeshAttachmentRequest")
+        for field_name in ("hull_vertex_keys", "ordered_vertex_keys"):
+            value = getattr(self, field_name)
+            if not isinstance(value, tuple) or not all(
+                isinstance(item, A1AttachmentVertexKey) for item in value
+            ):
+                raise TypeError(
+                    f"{field_name} must be a tuple of A1AttachmentVertexKey values"
+                )
+        if not self.ordered_vertex_keys:
+            raise ValueError("ordered_vertex_keys cannot be empty")
+        if len(self.ordered_vertex_keys) != len(set(self.ordered_vertex_keys)):
+            raise ValueError("ordered_vertex_keys contain duplicate attachment keys")
+        if self.ordered_vertex_keys[: len(self.hull_vertex_keys)] != (
+            self.hull_vertex_keys
+        ):
+            raise ValueError("hull_vertex_keys must be the ordered vertex prefix")
+        if self.request.hull != len(self.hull_vertex_keys):
+            raise ValueError("request.hull does not match hull_vertex_keys")
+        if len(self.request.vertices) != len(self.ordered_vertex_keys):
+            raise ValueError(
+                "request vertex count does not match ordered_vertex_keys"
+            )
+        if not isinstance(self.loop_to_attachment_index, tuple):
+            raise TypeError("loop_to_attachment_index must be tuple")
+        loop_ids: list[LoopId] = []
+        for loop_id, attachment_index in self.loop_to_attachment_index:
+            if not isinstance(loop_id, LoopId):
+                raise TypeError("loop_to_attachment_index keys must be LoopId")
+            if (
+                not isinstance(attachment_index, int)
+                or attachment_index < 0
+                or attachment_index >= len(self.ordered_vertex_keys)
+            ):
+                raise ValueError(
+                    "loop_to_attachment_index contains an invalid attachment index"
+                )
+            loop_ids.append(loop_id)
+        if len(loop_ids) != len(set(loop_ids)):
+            raise ValueError("loop_to_attachment_index contains duplicate LoopId values")
+
+    @property
+    def hull_vertex_ids(self) -> Tuple[VertexId, ...]:
+        """Compatibility view; UV-split boundary vertices may appear more than once."""
+
+        return tuple(key.vertex_id for key in self.hull_vertex_keys)
+
+    @property
+    def ordered_vertex_ids(self) -> Tuple[VertexId, ...]:
+        """Compatibility view; UV-split vertices may appear more than once."""
+
+        return tuple(key.vertex_id for key in self.ordered_vertex_keys)
+
+    @property
+    def old_to_attachment_index(self) -> Tuple[Tuple[VertexId, int], ...]:
+        """Return the legacy one-to-one map only when no UV duplication exists."""
+
+        mapping: list[Tuple[VertexId, int]] = []
+        seen: set[VertexId] = set()
+        for attachment_index, key in enumerate(self.ordered_vertex_keys):
+            if key.vertex_id in seen:
+                raise A1AttachmentProjectionError(
+                    "UV seam duplication makes old_to_attachment_index one-to-many; "
+                    "use attachment_indices_for() or attachment_index_for_loop()"
+                )
+            seen.add(key.vertex_id)
+            mapping.append((key.vertex_id, attachment_index))
+        return tuple(mapping)
+
+    def attachment_indices_for(self, vertex_id: VertexId) -> Tuple[int, ...]:
         if not isinstance(vertex_id, VertexId):
             raise TypeError("vertex_id must be VertexId")
-        mapping = dict(self.old_to_attachment_index)
-        if vertex_id not in mapping:
+        return tuple(
+            attachment_index
+            for attachment_index, key in enumerate(self.ordered_vertex_keys)
+            if key.vertex_id == vertex_id
+        )
+
+    def attachment_index_for(
+        self,
+        vertex_id: VertexId,
+        *,
+        uv: Tuple[float, float] | None = None,
+    ) -> int:
+        if not isinstance(vertex_id, VertexId):
+            raise TypeError("vertex_id must be VertexId")
+        if uv is not None:
+            key = A1AttachmentVertexKey(
+                vertex_id=vertex_id,
+                uv=(float(uv[0]), float(uv[1])),
+            )
+            try:
+                return self.ordered_vertex_keys.index(key)
+            except ValueError as exc:
+                raise KeyError(f"Unknown attachment vertex key {key}") from exc
+
+        matches = self.attachment_indices_for(vertex_id)
+        if not matches:
             raise KeyError(f"Unknown projected vertex {vertex_id.index}")
-        return mapping[vertex_id]
+        if len(matches) != 1:
+            raise A1AttachmentProjectionError(
+                f"Vertex {vertex_id.index} has {len(matches)} UV-specific attachment "
+                "vertices; provide uv or resolve through a LoopId"
+            )
+        return matches[0]
+
+    def attachment_index_for_loop(self, loop_id: LoopId) -> int:
+        if not isinstance(loop_id, LoopId):
+            raise TypeError("loop_id must be LoopId")
+        mapping = dict(self.loop_to_attachment_index)
+        try:
+            return mapping[loop_id]
+        except KeyError as exc:
+            raise KeyError(f"Unknown projected loop {loop_id.index}") from exc
 
 
 def _validate_triangulated_disk(snapshot: MeshSnapshot) -> None:
@@ -188,14 +325,18 @@ def _walk_boundary_cycle(
             raise A1AttachmentProjectionError(
                 f"Boundary vertex {current.index} has invalid adjacency"
             )
-        candidates = tuple(neighbour for neighbour in neighbours if neighbour != previous)
+        candidates = tuple(
+            neighbour for neighbour in neighbours if neighbour != previous
+        )
         if len(candidates) != 1:
             raise A1AttachmentProjectionError(
                 f"Boundary traversal is ambiguous at vertex {current.index}"
             )
         previous, current = current, candidates[0]
         if len(cycle) > len(adjacency):
-            raise A1AttachmentProjectionError("Boundary traversal exceeded vertex count")
+            raise A1AttachmentProjectionError(
+                "Boundary traversal exceeded vertex count"
+            )
     if len(cycle) != len(adjacency):
         missing = sorted(vertex_id.index for vertex_id in set(adjacency) - set(cycle))
         raise A1AttachmentProjectionError(
@@ -215,41 +356,164 @@ def _deterministic_hull_cycle(snapshot: MeshSnapshot) -> Tuple[VertexId, ...]:
     return forward if forward_key <= reverse_key else reverse
 
 
-def _single_uv_by_vertex(
+def _loop_attachment_keys(
     snapshot: MeshSnapshot,
     layer_name: str,
-) -> dict[VertexId, Tuple[float, float]]:
+) -> dict[LoopId, A1AttachmentVertexKey]:
     if layer_name not in snapshot.uv_layer_names:
         raise A1AttachmentProjectionError(
             f"UV layer '{layer_name}' is absent from snapshot"
         )
-    uv_sets: dict[VertexId, set[Tuple[float, float]]] = defaultdict(set)
-    for loop in snapshot.loops:
+
+    result: dict[LoopId, A1AttachmentVertexKey] = {}
+    for loop in sorted(snapshot.loops, key=lambda item: item.id.index):
         coordinate = loop.uv(layer_name)
         if coordinate is None:
             raise A1AttachmentProjectionError(
                 f"Loop {loop.id.index} is missing UV layer '{layer_name}'"
             )
-        uv_sets[loop.vertex_id].add(
-            (float(coordinate[0]), float(coordinate[1]))
+        if loop.id in result:
+            raise A1AttachmentProjectionError(
+                f"Duplicate local LoopId {loop.id.index} in snapshot"
+            )
+        result[loop.id] = A1AttachmentVertexKey(
+            vertex_id=loop.vertex_id,
+            uv=(float(coordinate[0]), float(coordinate[1])),
         )
-    ambiguous = tuple(
-        sorted(
-            (
-                (vertex_id.index, tuple(sorted(values)))
-                for vertex_id, values in uv_sets.items()
-                if len(values) != 1
-            ),
-            key=lambda item: item[0],
-        )
-    )
-    if ambiguous:
+    return result
+
+
+def _face_loop_by_vertex(snapshot: MeshSnapshot) -> dict[Tuple[FaceId, VertexId], LoopId]:
+    loop_map = snapshot.loop_by_id()
+    result: dict[Tuple[FaceId, VertexId], LoopId] = {}
+    for face in sorted(snapshot.faces, key=lambda item: item.id.index):
+        for loop_id in face.loop_ids:
+            vertex_id = loop_map[loop_id].vertex_id
+            key = (face.id, vertex_id)
+            if key in result:
+                raise A1AttachmentProjectionError(
+                    f"Face {face.id.index} references vertex {vertex_id.index} more "
+                    "than once"
+                )
+            result[key] = loop_id
+    return result
+
+
+def _normalized_vertex_pair(
+    first: VertexId,
+    second: VertexId,
+) -> Tuple[VertexId, VertexId]:
+    if first == second:
         raise A1AttachmentProjectionError(
-            "A local mesh vertex has multiple UV coordinates. UV seam duplication "
-            "must be handled by a dedicated projector before A1 attachment build: "
-            + str(ambiguous)
+            f"Degenerate edge references vertex {first.index} twice"
         )
-    return {vertex_id: next(iter(values)) for vertex_id, values in uv_sets.items()}
+    return (first, second) if first.index < second.index else (second, first)
+
+
+def _edge_by_vertex_pair(
+    snapshot: MeshSnapshot,
+) -> dict[Tuple[VertexId, VertexId], EdgeId]:
+    result: dict[Tuple[VertexId, VertexId], EdgeId] = {}
+    for edge in snapshot.edges:
+        pair = _normalized_vertex_pair(*edge.vertex_ids)
+        if pair in result:
+            raise A1AttachmentProjectionError(
+                f"Multiple edges connect vertices {pair[0].index} and {pair[1].index}"
+            )
+        result[pair] = edge.id
+    return result
+
+
+def _boundary_endpoint_key(
+    *,
+    first: VertexId,
+    second: VertexId,
+    endpoint: VertexId,
+    edge_by_pair: dict[Tuple[VertexId, VertexId], EdgeId],
+    edge_to_faces: dict[EdgeId, Tuple[FaceId, ...]],
+    face_loop_by_vertex: dict[Tuple[FaceId, VertexId], LoopId],
+    loop_keys: dict[LoopId, A1AttachmentVertexKey],
+) -> A1AttachmentVertexKey:
+    pair = _normalized_vertex_pair(first, second)
+    edge_id = edge_by_pair.get(pair)
+    if edge_id is None:
+        raise A1AttachmentProjectionError(
+            f"Boundary cycle references missing edge {first.index}-{second.index}"
+        )
+    linked_faces = edge_to_faces.get(edge_id, ())
+    if len(linked_faces) != 1:
+        raise A1AttachmentProjectionError(
+            f"Expected boundary edge {edge_id.index} to have one face, found "
+            f"{len(linked_faces)}"
+        )
+    face_id = linked_faces[0]
+    loop_id = face_loop_by_vertex.get((face_id, endpoint))
+    if loop_id is None:
+        raise A1AttachmentProjectionError(
+            f"Boundary face {face_id.index} has no loop for vertex {endpoint.index}"
+        )
+    return loop_keys[loop_id]
+
+
+def _ordered_hull_attachment_keys(
+    snapshot: MeshSnapshot,
+    geometric_cycle: Tuple[VertexId, ...],
+    loop_keys: dict[LoopId, A1AttachmentVertexKey],
+) -> Tuple[A1AttachmentVertexKey, ...]:
+    edge_by_pair = _edge_by_vertex_pair(snapshot)
+    edge_to_faces = build_edge_to_faces(snapshot)
+    face_loop_by_vertex = _face_loop_by_vertex(snapshot)
+    hull: list[A1AttachmentVertexKey] = []
+
+    for index, vertex_id in enumerate(geometric_cycle):
+        previous_vertex = geometric_cycle[index - 1]
+        next_vertex = geometric_cycle[(index + 1) % len(geometric_cycle)]
+        incoming_key = _boundary_endpoint_key(
+            first=previous_vertex,
+            second=vertex_id,
+            endpoint=vertex_id,
+            edge_by_pair=edge_by_pair,
+            edge_to_faces=edge_to_faces,
+            face_loop_by_vertex=face_loop_by_vertex,
+            loop_keys=loop_keys,
+        )
+        outgoing_key = _boundary_endpoint_key(
+            first=vertex_id,
+            second=next_vertex,
+            endpoint=vertex_id,
+            edge_by_pair=edge_by_pair,
+            edge_to_faces=edge_to_faces,
+            face_loop_by_vertex=face_loop_by_vertex,
+            loop_keys=loop_keys,
+        )
+        hull.append(incoming_key)
+        if outgoing_key != incoming_key:
+            # The UV seam reaches the physical hull. Both keys must remain hull
+            # vertices, consecutively, to keep the runtime's ordered hull polygon.
+            hull.append(outgoing_key)
+
+    resolved = tuple(hull)
+    if len(resolved) != len(set(resolved)):
+        raise A1AttachmentProjectionError(
+            "UV-specific hull contains a repeated attachment vertex key"
+        )
+    return resolved
+
+
+def _ordered_unique_loop_keys(
+    snapshot: MeshSnapshot,
+    loop_keys: dict[LoopId, A1AttachmentVertexKey],
+) -> Tuple[A1AttachmentVertexKey, ...]:
+    ordered: list[A1AttachmentVertexKey] = []
+    seen: set[A1AttachmentVertexKey] = set()
+    for face in sorted(snapshot.faces, key=lambda item: item.id.index):
+        for loop_id in face.loop_ids:
+            key = loop_keys[loop_id]
+            if key in seen:
+                continue
+            seen.add(key)
+            ordered.append(key)
+    return tuple(ordered)
 
 
 def _z_binding_map(
@@ -257,7 +521,9 @@ def _z_binding_map(
     settings: A1AttachmentProjectionSettings,
     rig: LegacyRigBuildResult,
 ) -> dict[VertexId, int]:
-    mapping = {binding.vertex_id: binding.z_group_index for binding in settings.z_bindings}
+    mapping = {
+        binding.vertex_id: binding.z_group_index for binding in settings.z_bindings
+    }
     snapshot_vertex_ids = {vertex.id for vertex in snapshot.vertices}
     missing = snapshot_vertex_ids - set(mapping)
     unknown = set(mapping) - snapshot_vertex_ids
@@ -279,12 +545,40 @@ def _z_binding_map(
     return mapping
 
 
+def _attachment_edges(
+    snapshot: MeshSnapshot,
+    loop_keys: dict[LoopId, A1AttachmentVertexKey],
+    key_to_index: dict[A1AttachmentVertexKey, int],
+) -> Tuple[int, ...]:
+    edges: list[int] = []
+    seen_pairs: set[Tuple[int, int]] = set()
+    for face in sorted(snapshot.faces, key=lambda item: item.id.index):
+        for corner_index, first_loop_id in enumerate(face.loop_ids):
+            second_loop_id = face.loop_ids[(corner_index + 1) % len(face.loop_ids)]
+            first_index = key_to_index[loop_keys[first_loop_id]]
+            second_index = key_to_index[loop_keys[second_loop_id]]
+            if first_index == second_index:
+                raise A1AttachmentProjectionError(
+                    f"Face {face.id.index} produced a degenerate attachment edge"
+                )
+            normalized = (
+                (first_index, second_index)
+                if first_index < second_index
+                else (second_index, first_index)
+            )
+            if normalized in seen_pairs:
+                continue
+            seen_pairs.add(normalized)
+            edges.extend((first_index, second_index))
+    return tuple(edges)
+
+
 def project_triangulated_disk_attachment(
     snapshot: MeshSnapshot,
     rig: LegacyRigBuildResult,
     settings: A1AttachmentProjectionSettings,
 ) -> A1AttachmentProjectionResult:
-    """Create a deterministic legacy attachment request from one disk snapshot."""
+    """Create a deterministic A1 attachment with exact loop-level UV identity."""
 
     if not isinstance(snapshot, MeshSnapshot):
         raise TypeError("snapshot must be MeshSnapshot")
@@ -292,63 +586,62 @@ def project_triangulated_disk_attachment(
         raise TypeError("rig must be LegacyRigBuildResult")
     if not isinstance(settings, A1AttachmentProjectionSettings):
         raise TypeError("settings must be A1AttachmentProjectionSettings")
-    if snapshot.source_object_id != rig.request.prefix and (
-        snapshot.object_name != rig.request.prefix
-    ):
-        # Object IDs may be UUID-like in the future. The check is intentionally a
-        # warning-level omission rather than a hard name equality requirement; all
-        # actual binding integrity is carried by explicit vertex IDs below.
-        pass
 
     _validate_triangulated_disk(snapshot)
     rig.validate()
-    hull_vertex_ids = _deterministic_hull_cycle(snapshot)
-    hull_set = set(hull_vertex_ids)
-    interior_vertex_ids = tuple(
-        sorted(
-            (vertex.id for vertex in snapshot.vertices if vertex.id not in hull_set),
-            key=lambda item: item.index,
+    loop_keys = _loop_attachment_keys(snapshot, settings.uv_layer_name)
+    geometric_hull = _deterministic_hull_cycle(snapshot)
+    hull_keys = _ordered_hull_attachment_keys(snapshot, geometric_hull, loop_keys)
+    hull_set = set(hull_keys)
+    all_keys = _ordered_unique_loop_keys(snapshot, loop_keys)
+    ordered_keys = hull_keys + tuple(key for key in all_keys if key not in hull_set)
+    if set(ordered_keys) != set(all_keys):
+        missing = set(all_keys) - set(ordered_keys)
+        unknown = set(ordered_keys) - set(all_keys)
+        raise A1AttachmentProjectionError(
+            f"Attachment key coverage mismatch; missing={missing}, unknown={unknown}"
         )
-    )
-    ordered_vertex_ids = hull_vertex_ids + interior_vertex_ids
-    old_to_new = {
-        vertex_id: attachment_index
-        for attachment_index, vertex_id in enumerate(ordered_vertex_ids)
+
+    key_to_index = {
+        key: attachment_index for attachment_index, key in enumerate(ordered_keys)
     }
-    uv_by_vertex = _single_uv_by_vertex(snapshot, settings.uv_layer_name)
     z_by_vertex = _z_binding_map(snapshot, settings, rig)
     vertex_map = snapshot.vertex_by_id()
 
     projected_vertices = tuple(
         LegacyAttachmentVertex(
             index=attachment_index,
-            uv=uv_by_vertex[vertex_id],
+            uv=key.uv,
             bone_position_pixels=(
-                (float(vertex_map[vertex_id].position[0]) - float(settings.center_x))
+                (
+                    float(vertex_map[key.vertex_id].position[0])
+                    - float(settings.center_x)
+                )
                 * rig.info.uniform_scale,
                 -(
-                    float(vertex_map[vertex_id].position[1])
+                    float(vertex_map[key.vertex_id].position[1])
                     - float(settings.center_y)
                 )
                 * rig.info.uniform_scale,
             ),
-            z_group_index=z_by_vertex[vertex_id],
+            z_group_index=z_by_vertex[key.vertex_id],
         )
-        for attachment_index, vertex_id in enumerate(ordered_vertex_ids)
+        for attachment_index, key in enumerate(ordered_keys)
     )
 
     face_map = snapshot.face_by_id()
-    loop_map = snapshot.loop_by_id()
     triangles = tuple(
-        old_to_new[loop_map[loop_id].vertex_id]
+        key_to_index[loop_keys[loop_id]]
         for face_id in sorted(face_map, key=lambda item: item.index)
         for loop_id in face_map[face_id].loop_ids
     )
-    edge_map = snapshot.edge_by_id()
-    edges = tuple(
-        old_to_new[vertex_id]
-        for edge_id in sorted(edge_map, key=lambda item: item.index)
-        for vertex_id in edge_map[edge_id].vertex_ids
+    edges = _attachment_edges(snapshot, loop_keys, key_to_index)
+    loop_to_attachment_index = tuple(
+        (loop_id, key_to_index[key])
+        for loop_id, key in sorted(
+            loop_keys.items(),
+            key=lambda item: item[0].index,
+        )
     )
 
     request = LegacyMeshAttachmentRequest(
@@ -360,16 +653,14 @@ def project_triangulated_disk_attachment(
         height=settings.attachment_height,
         vertices=projected_vertices,
         triangles=triangles,
-        hull=len(hull_vertex_ids),
+        hull=len(hull_keys),
         edges=edges,
         sequence=settings.sequence,
         skin_name=settings.skin_name,
     )
     return A1AttachmentProjectionResult(
         request=request,
-        hull_vertex_ids=hull_vertex_ids,
-        ordered_vertex_ids=ordered_vertex_ids,
-        old_to_attachment_index=tuple(
-            (vertex_id, old_to_new[vertex_id]) for vertex_id in ordered_vertex_ids
-        ),
+        hull_vertex_keys=hull_keys,
+        ordered_vertex_keys=ordered_keys,
+        loop_to_attachment_index=loop_to_attachment_index,
     )
