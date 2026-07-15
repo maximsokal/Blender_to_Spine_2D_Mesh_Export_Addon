@@ -79,7 +79,7 @@ def test_existing_source_seams_are_preserved():
     assert topology.snapshot.edges[0].seam
 
 
-def test_global_uvs_transfer_to_every_duplicated_triangulation_loop():
+def test_global_uvs_transfer_to_every_region_loop():
     source = build_square_snapshot()
     geometry = prepare_a1_geometry_regions(source)
     topology = build_a1_texturing_topology(source, geometry)
@@ -98,9 +98,9 @@ def test_global_uvs_transfer_to_every_duplicated_triangulation_loop():
     assert len(region.snapshot.loops) == 6
     assert region.snapshot.active_uv_layer == "SpineBakeUV"
     assert tuple(loop.uv("SpineBakeUV") for loop in region.snapshot.loops) == (
-        (1.0, 1.0),
         (0.0, 0.0),
         (1.0, 0.0),
+        (1.0, 1.0),
         (0.0, 0.0),
         (1.0, 1.0),
         (0.0, 1.0),
@@ -134,7 +134,9 @@ def test_global_uv_propagation_uses_changed_unwrap_layer_not_old_region_uv():
     textured = replace(
         topology.snapshot,
         loops=changed_loops,
-        uv_layer_names=tuple(sorted(set(topology.snapshot.uv_layer_names) | {"GlobalBakeUV"})),
+        uv_layer_names=tuple(
+            sorted(set(topology.snapshot.uv_layer_names) | {"GlobalBakeUV"})
+        ),
         active_uv_layer="GlobalBakeUV",
     )
 
@@ -145,11 +147,14 @@ def test_global_uv_propagation_uses_changed_unwrap_layer_not_old_region_uv():
         target_layer_name="SpineBakeUV",
     )
 
-    region_uvs = tuple(loop.uv("SpineBakeUV") for loop in propagation.regions[0].snapshot.loops)
+    region_uvs = tuple(
+        loop.uv("SpineBakeUV")
+        for loop in propagation.regions[0].snapshot.loops
+    )
     assert region_uvs == (
-        (0.35, 0.45),
         (0.1, 0.2),
         (0.35, 0.2),
+        (0.35, 0.45),
         (0.1, 0.2),
         (0.35, 0.45),
         (0.1, 0.45),
