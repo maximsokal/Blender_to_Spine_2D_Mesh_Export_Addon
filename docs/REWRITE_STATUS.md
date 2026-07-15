@@ -26,8 +26,14 @@ must not be merged into `main`.
   segmentation -> decomposition -> materialization -> triangulation;
 - shared full-object texturing topology that marks segmentation and decomposition
   cuts as seams;
-- exact propagation of one globally unwrapped UV layer to every triangulated
-  export region;
+- exact propagation of one globally unwrapped UV layer to every triangulated export
+  region;
+- loop-level attachment projection with one Spine vertex per unique
+  `(VertexId, UV)` pair;
+- boundary UV seam duplicates remain consecutive hull vertices while internal seam
+  duplicates remain after the physical hull;
+- triangle and edge indices resolve through exact loops rather than rounded
+  coordinates;
 - pure A1 document assembly from ordered UV-ready regions;
 - typed A1 single-object settings with explicit source geometry, modifier, UV,
   material, bake, sequence, rig and output policies;
@@ -72,7 +78,25 @@ must not be merged into `main`.
   ranges;
 - no intermediate segment JSON merge and no post-serialization weighted-index
   remap;
-- structural Spine golden fingerprint.
+- structural Spine golden fingerprint;
+- structured legacy/rewrite parity comparator with stable category paths;
+- setup-transform and UV numeric tolerances;
+- semantic weighted-stream comparison with exact bone-index checks;
+- optional strict comparison for animations and nonessential mesh edges;
+- machine-readable parity reports and deterministic CLI exit codes.
+
+### Golden parity tooling
+
+- `tools/compare_a1_exports.py` compares legacy and rewrite JSON files outside
+  Blender;
+- exit code `0` means compatible, `1` means incompatible, and `2` means invalid
+  input;
+- optional JSON report output contains every error and warning;
+- volatile skeleton metadata is ignored only through explicit policy;
+- `docs/REWRITE_A1_GOLDEN_PARITY.md` defines the real fixture record, procedure,
+  minimum case matrix, and acceptance policy;
+- malformed document sections and weighted streams become report issues instead of
+  hiding later differences through fail-fast exceptions.
 
 ### Architecture guards
 
@@ -103,23 +127,32 @@ The A1 pipeline must not unwrap each segment independently. The required order i
 4. unwrap and bake that complete snapshot once;
 5. transfer the resulting UV layer to each triangulated region through
    `SourceLoopId`;
-6. compose all region attachments in one `SpineDocument`;
-7. stage the JSON and every baked frame in one filesystem transaction;
-8. commit all outputs together or restore every previous file.
+6. split attachment vertices only where loop UV identity requires it;
+7. compose all region attachments in one `SpineDocument`;
+8. stage the JSON and every baked frame in one filesystem transaction;
+9. commit all outputs together or restore every previous file.
 
 This preserves the existing shared baked texture contract while removing object-name
 search, coordinate tolerances and JSON merging.
 
 ## Validation status
 
-- Python 3.10: 343 passed, 4 skipped;
-- Python 3.11: 343 passed, 4 skipped;
+- Python 3.10: 355 passed, 4 skipped;
+- Python 3.11: 355 passed, 4 skipped;
 - Blender 4.4 headless geometry/UV checks cover read-only mesh access, Smooth,
   Mirror, Solidify rejection, successful unwrap and forced Edit Mode failure;
 - Blender 4.4 real Cycles checks cover successful EMIT baking and forced bake
   rollback;
 - complete Blender 4.4 single-object checks cover valid PNG + Spine JSON output and
   joint preservation of existing PNG + JSON after forced Cycles failure;
+- a folded two-face Blender fixture proves that a single export region can receive
+  six loop-specific attachment vertices for four geometric vertices after Smart
+  Project creates a UV seam;
+- a pure center-fan fixture proves that internal UV duplicates remain after the
+  physical hull;
+- the parity gate is executed against a real Blender-generated JSON, accepts only
+  policy-allowed metadata changes, and detects a deliberately corrupted weighted
+  bone index;
 - all temporary Object, Mesh, Collection, Material and Image datablocks are checked
   for leaks in the real Blender suite.
 
@@ -130,9 +163,9 @@ switched to the rewrite and no addon version has been bumped.
 
 ## Remaining production blockers
 
-1. representative real `.blend` golden fixtures and v0.23 output comparison;
-2. UV seam-duplication projection for cases where one local vertex legitimately has
-   multiple attachment UV coordinates;
+1. representative real project `.blend` fixtures with their actual v0.23 JSON and
+   image outputs;
+2. accepted JSON and image parity reports for the documented fixture matrix;
 3. connected and multi-object orchestration using the same in-memory document model;
 4. UI/operator migration while preserving public IDs and important Scene properties;
-5. legacy orchestration removal only after parity is proven.
+5. legacy orchestration removal only after real-project parity is proven.
