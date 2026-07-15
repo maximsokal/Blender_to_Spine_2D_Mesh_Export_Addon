@@ -1,5 +1,16 @@
 """Typed Spine 4.2 document model and validation utilities."""
 
+from .composition import (
+    AnimationNameAssignment,
+    ComponentBoneIndexMap,
+    ConstraintOrderAssignment,
+    ConstraintOrderPolicy,
+    SpineCompositionError,
+    SpineCompositionSettings,
+    SpineDocumentComponent,
+    SpineDocumentCompositionResult,
+    compose_spine_documents,
+)
 from .golden import LegacyCompatibilityFingerprint, build_legacy_fingerprint
 from .legacy_attachment_builder import (
     LegacyAttachmentComponent,
@@ -56,7 +67,11 @@ __all__ = [
     "A1ParityReport",
     "A1ParitySettings",
     "A1ParitySeverity",
+    "AnimationNameAssignment",
     "Bone",
+    "ComponentBoneIndexMap",
+    "ConstraintOrderAssignment",
+    "ConstraintOrderPolicy",
     "IKConstraint",
     "LegacyAttachmentComponent",
     "LegacyAttachmentSequence",
@@ -76,7 +91,11 @@ __all__ = [
     "MeshAttachment",
     "Skin",
     "Slot",
+    "SpineCompositionError",
+    "SpineCompositionSettings",
     "SpineDocument",
+    "SpineDocumentComponent",
+    "SpineDocumentCompositionResult",
     "SpineSerializer",
     "SpineValidationError",
     "SpineValidationIssue",
@@ -91,6 +110,7 @@ __all__ = [
     "build_legacy_rig",
     "calculate_uniform_scale",
     "compare_a1_exports",
+    "compose_spine_documents",
     "decode_weighted_vertices",
     "encode_weighted_vertices",
 ]
