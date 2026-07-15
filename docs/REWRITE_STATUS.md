@@ -22,7 +22,24 @@ must not be merged into `main`.
 - geometry fingerprinting;
 - read-only Blender source-mesh adapter;
 - deterministic segmentation plans with explicit boundary reasons;
-- per-segment topology reports and immutable segment snapshots.
+- legacy seed-normal angular grouping with disjoint face coverage;
+- deterministic manifold-disk decomposition without random k-means;
+- reusable Euler/boundary/manifold topology analysis;
+- per-segment and per-region immutable snapshots;
+- evaluated modifier lineage policy and structured reports;
+- transactional evaluated-mesh reader using temporary POINT/EDGE/FACE/CORNER
+  attributes and guaranteed cleanup;
+- static dependency tests forbidding `bpy`, `bmesh`, and `random` in geometry domain.
+
+## Modifier policy currently supported
+
+- `STRICT_PRESERVE`: deformation-only stacks where every source element survives
+  exactly once;
+- `ALLOW_SOURCE_DUPLICATION`: source vertices/faces/corners may repeat, permitting
+  modifier behaviour such as Mirror or Triangulate when attributes are preserved;
+- generated edges are allowed and represented with `MeshEdge.source_id = None`;
+- generated vertices, faces, and corners are rejected because exact UV lineage
+  cannot be proven.
 
 ## Production path
 
@@ -31,12 +48,10 @@ switched to the rewrite and no addon version has been bumped.
 
 ## Next architectural slices
 
-1. complex-segment decomposition without random k-means;
-2. evaluated modifier lineage propagation;
-3. UV unwrap transaction and snapshot write-back;
-4. texture baking transaction;
-5. A1 rig builder that produces `SpineDocument` directly;
-6. single-object use case and golden parity fixtures;
-7. in-memory multi-object composition;
-8. Blender headless integration suite;
-9. operator migration and legacy removal.
+1. UV unwrap transaction and immutable snapshot write-back;
+2. texture/material bake plan and transactional execution;
+3. A1 rig builder that produces `SpineDocument` directly;
+4. single-object orchestration and golden parity fixtures;
+5. in-memory multi-object composition;
+6. Blender headless integration suite with real `.blend` fixtures;
+7. operator migration and legacy removal.
