@@ -1,14 +1,14 @@
-"""Real Cycles bake transaction checks executed by Blender 4.4.
+"""Real Cycles and complete A1 export checks executed by Blender 4.4.
 
-The fixtures are generated at runtime. The tests cover both a successful tiny EMIT
-bake and a forced operator failure with an existing output file, proving that scene
-state, context, source materials, temporary datablocks, and filesystem outputs are
-restored transactionally.
+All fixtures are created at runtime. The suite verifies the standalone bake executor,
+then the complete single-object service including one atomic commit shared by the
+baked PNG and the final Spine JSON.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -22,10 +22,17 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from Blender_to_Spine2D_Mesh_Exporter.application import (  # noqa: E402
+    A1SingleObjectExportSettings,
+    A1SingleObjectStage,
+    A1SourceGeometryMode,
+    ExportSettings,
+)
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     BakeExecutionError,
     analyse_object_materials,
     execute_bake_plan,
+    export_a1_single_object,
     read_source_mesh_snapshot,
     unwrap_snapshot_uv,
 )
@@ -222,7 +229,9 @@ def _temporary_datablock_names() -> tuple[str, ...]:
         bpy.data.materials,
         bpy.data.images,
     ):
-        names.extend(item.name for item in collection if item.name.startswith(TEMPORARY_PREFIX))
+        names.extend(
+            item.name for item in collection if item.name.startswith(TEMPORARY_PREFIX)
+        )
     return tuple(sorted(names))
 
 
@@ -259,11 +268,32 @@ def _build_fixture(output_directory: Path):
     return source, source_material, sentinel, unwrap_result.snapshot, plan
 
 
+def _build_service_settings(output_directory: Path) -> A1SingleObjectExportSettings:
+    return A1SingleObjectExportSettings(
+        export=ExportSettings(
+            texture_width=32,
+            texture_height=32,
+            output_directory=output_directory,
+            images_relative_path="images",
+            bake_margin=1,
+        ),
+        prefix="EndToEnd",
+        output_stem="EndToEnd",
+        source_geometry_mode=A1SourceGeometryMode.EVALUATED,
+        uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
+        diffuse_mode=BakeMode.EMIT,
+        procedural_mode=BakeMode.EMIT,
+        bake_execution=BakeExecutionSettings(samples=1),
+    )
+
+
 def test_real_cycles_emit_bake_commits_png_and_restores_state() -> None:
     _clear_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-bake-success-") as directory:
         output_directory = Path(directory)
-        source, material, sentinel, target_snapshot, plan = _build_fixture(output_directory)
+        source, material, sentinel, target_snapshot, plan = _build_fixture(
+            output_directory
+        )
         _activate_only(sentinel)
         source.select_set(False)
         context_before = _capture_context()
@@ -283,8 +313,14 @@ def test_real_cycles_emit_bake_commits_png_and_restores_state() -> None:
         _assert(output_path.stat().st_size > 8, "bake output PNG is empty")
         _assert(output_path.read_bytes()[:8] == PNG_SIGNATURE, "bake output is not PNG")
         _assert(_capture_context() == context_before, "successful bake changed context")
-        _assert(_capture_scene_bake_state() == scene_before, "successful bake changed scene")
-        _assert(_material_fingerprint(material) == material_before, "source material mutated")
+        _assert(
+            _capture_scene_bake_state() == scene_before,
+            "successful bake changed scene",
+        )
+        _assert(
+            _material_fingerprint(material) == material_before,
+            "source material mutated",
+        )
         _assert(not _temporary_datablock_names(), "successful bake leaked temporary data")
 
 
@@ -292,7 +328,9 @@ def test_forced_bake_failure_rolls_back_file_and_restores_state() -> None:
     _clear_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-bake-failure-") as directory:
         output_directory = Path(directory)
-        source, material, sentinel, target_snapshot, plan = _build_fixture(output_directory)
+        source, material, sentinel, target_snapshot, plan = _build_fixture(
+            output_directory
+        )
         final_path = plan.representative_task.output_path
         final_path.parent.mkdir(parents=True, exist_ok=True)
         previous_content = b"previous-production-output"
@@ -316,25 +354,150 @@ def test_forced_bake_failure_rolls_back_file_and_restores_state() -> None:
                     BakeExecutionSettings(samples=1),
                 )
             except BakeExecutionError as exc:
-                _assert("forced Cycles failure" in str(exc), "primary bake error was hidden")
+                _assert(
+                    "forced Cycles failure" in str(exc),
+                    "primary bake error was hidden",
+                )
             else:
                 raise AssertionError("forced bake failure did not propagate")
 
-        _assert(final_path.read_bytes() == previous_content, "existing output was corrupted")
         _assert(
-            tuple(sorted(path.name for path in output_directory.iterdir())) == (final_path.name,),
+            final_path.read_bytes() == previous_content,
+            "existing output was corrupted",
+        )
+        _assert(
+            tuple(sorted(path.name for path in output_directory.iterdir()))
+            == (final_path.name,),
             "rollback left staged or backup files",
         )
         _assert(_capture_context() == context_before, "failed bake changed context")
         _assert(_capture_scene_bake_state() == scene_before, "failed bake changed scene")
-        _assert(_material_fingerprint(material) == material_before, "failed bake mutated material")
+        _assert(
+            _material_fingerprint(material) == material_before,
+            "failed bake mutated material",
+        )
         _assert(not _temporary_datablock_names(), "failed bake leaked temporary data")
+
+
+def test_complete_a1_service_commits_valid_png_and_spine_json() -> None:
+    _clear_scene()
+    with tempfile.TemporaryDirectory(prefix="spine2d-service-success-") as directory:
+        output_directory = Path(directory)
+        source = _create_quad("ServiceSource")
+        material = _create_emission_material(source)
+        sentinel = _create_sentinel()
+        _activate_only(sentinel)
+        source.select_set(False)
+        context_before = _capture_context()
+        scene_before = _capture_scene_bake_state()
+        material_before = _material_fingerprint(material)
+
+        result = export_a1_single_object(
+            source,
+            _build_service_settings(output_directory),
+        )
+
+        _assert(result.success, f"single-object service failed: {result.issues}")
+        expected_json = output_directory / "EndToEnd.json"
+        expected_png = output_directory / "images" / "EndToEnd_Baked.png"
+        _assert(
+            result.output_files == (expected_json.resolve(), expected_png.resolve()),
+            f"unexpected service outputs: {result.output_files}",
+        )
+        _assert(expected_png.read_bytes()[:8] == PNG_SIGNATURE, "service PNG invalid")
+        document = json.loads(expected_json.read_text(encoding="utf-8"))
+        bone_names = tuple(item["name"] for item in document["bones"])
+        _assert(bone_names[0] == "root", "A1 root bone missing")
+        _assert("EndToEnd_main" in bone_names, "A1 main bone missing")
+        _assert("EndToEnd_rotate_X" in bone_names, "A1 rotation bone missing")
+        _assert(len(document["slots"]) == 1, "expected one region slot")
+        slot_name = document["slots"][0]["name"]
+        _assert(slot_name == "EndToEnd_Segment_0", "unexpected segment slot name")
+        attachment = document["skins"][0]["attachments"][slot_name][slot_name]
+        _assert(attachment["type"] == "mesh", "attachment is not a mesh")
+        _assert(
+            attachment["path"] == "images/EndToEnd_Baked",
+            "attachment path does not match committed PNG",
+        )
+        _assert(len(attachment["uvs"]) == 8, "quad attachment UV count invalid")
+        _assert(len(attachment["triangles"]) == 6, "quad triangulation invalid")
+        _assert(_capture_context() == context_before, "service changed context")
+        _assert(_capture_scene_bake_state() == scene_before, "service changed scene")
+        _assert(
+            _material_fingerprint(material) == material_before,
+            "service mutated source material",
+        )
+        _assert(not _temporary_datablock_names(), "service leaked temporary data")
+
+
+def test_complete_a1_service_rolls_back_png_and_json_together() -> None:
+    _clear_scene()
+    with tempfile.TemporaryDirectory(prefix="spine2d-service-failure-") as directory:
+        output_directory = Path(directory)
+        source = _create_quad("ServiceSource")
+        material = _create_emission_material(source)
+        sentinel = _create_sentinel()
+        settings = _build_service_settings(output_directory)
+        final_json = output_directory / "EndToEnd.json"
+        final_png = output_directory / "images" / "EndToEnd_Baked.png"
+        final_json.parent.mkdir(parents=True, exist_ok=True)
+        final_png.parent.mkdir(parents=True, exist_ok=True)
+        old_json = b"old-json-output"
+        old_png = b"old-png-output"
+        final_json.write_bytes(old_json)
+        final_png.write_bytes(old_png)
+        _activate_only(sentinel)
+        source.select_set(False)
+        context_before = _capture_context()
+        scene_before = _capture_scene_bake_state()
+        material_before = _material_fingerprint(material)
+
+        with mock.patch.object(
+            bake_module,
+            "_call_bake_operator",
+            side_effect=BakeExecutionError("forced service bake failure"),
+        ):
+            result = export_a1_single_object(source, settings)
+
+        _assert(not result.success, "forced service failure returned success")
+        _assert(len(result.issues) == 1, "failure should contain one primary issue")
+        issue = result.issues[0]
+        _assert(
+            issue.stage == A1SingleObjectStage.STAGE_OUTPUTS.value,
+            f"unexpected failure stage: {issue.stage}",
+        )
+        _assert(
+            issue.code == A1SingleObjectStage.STAGE_OUTPUTS.error_code,
+            f"unexpected failure code: {issue.code}",
+        )
+        _assert(final_json.read_bytes() == old_json, "existing JSON was corrupted")
+        _assert(final_png.read_bytes() == old_png, "existing PNG was corrupted")
+        leftovers = tuple(
+            sorted(
+                str(path.relative_to(output_directory))
+                for path in output_directory.rglob("*")
+                if path.is_file()
+            )
+        )
+        _assert(
+            leftovers == ("EndToEnd.json", "images/EndToEnd_Baked.png"),
+            f"joint rollback left staged or backup files: {leftovers}",
+        )
+        _assert(_capture_context() == context_before, "failed service changed context")
+        _assert(_capture_scene_bake_state() == scene_before, "failed service changed scene")
+        _assert(
+            _material_fingerprint(material) == material_before,
+            "failed service mutated source material",
+        )
+        _assert(not _temporary_datablock_names(), "failed service leaked temporary data")
 
 
 def main() -> None:
     tests = (
         test_real_cycles_emit_bake_commits_png_and_restores_state,
         test_forced_bake_failure_rolls_back_file_and_restores_state,
+        test_complete_a1_service_commits_valid_png_and_spine_json,
+        test_complete_a1_service_rolls_back_png_and_json_together,
     )
     print(f"Blender version: {bpy.app.version_string}")
     for test in tests:
