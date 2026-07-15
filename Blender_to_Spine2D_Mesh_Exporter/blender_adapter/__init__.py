@@ -1,5 +1,12 @@
 """Blender API adapters for the rewritten exporter."""
 
+from .a1_multi_object_export import (
+    A1MultiObjectPreparationError,
+    A1MultiObjectSource,
+    PreparedA1MultiObject,
+    export_a1_multi_object,
+    prepare_a1_multi_object,
+)
 from .a1_object_preparation import (
     A1ObjectPreparationError,
     PreparedA1Object,
@@ -50,6 +57,8 @@ from .uv_unwrap import (
 )
 
 __all__ = [
+    "A1MultiObjectPreparationError",
+    "A1MultiObjectSource",
     "A1ObjectPreparationError",
     "BakeExecutionError",
     "BakeMaterialError",
@@ -63,6 +72,7 @@ __all__ = [
     "MaterialAnalysisError",
     "MeshReadError",
     "MeshWriteError",
+    "PreparedA1MultiObject",
     "PreparedA1Object",
     "PreparedBakeMaterials",
     "StatisticsValue",
@@ -76,7 +86,9 @@ __all__ = [
     "build_uv_operator_plan",
     "configure_scene_for_bake",
     "execute_bake_plan",
+    "export_a1_multi_object",
     "export_a1_single_object",
+    "prepare_a1_multi_object",
     "prepare_a1_object",
     "preserve_bake_scene_state",
     "read_evaluated_mesh_snapshot",
