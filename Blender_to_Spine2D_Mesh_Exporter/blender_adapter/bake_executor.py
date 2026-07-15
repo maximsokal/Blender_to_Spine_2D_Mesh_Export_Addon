@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from ..domain.baking import (
     BakeArtifact,
@@ -14,7 +14,11 @@ from ..domain.baking import (
     TextureFormat,
 )
 from ..domain.geometry import MeshSnapshot, MeshSnapshotValidator
-from ..infrastructure import AtomicOutputReservation, atomic_file_transaction
+from ..infrastructure import (
+    AtomicFileTransaction,
+    AtomicOutputReservation,
+    atomic_file_transaction,
+)
 from .bake_materials import BakeMaterialError, temporary_bake_materials
 from .bake_scene_state import (
     BakeSceneStateError,
@@ -218,122 +222,149 @@ def _bake_frame_task(
         _remove_image(bpy_module, image)
 
 
-def execute_bake_plan(
+def _require_reservations(
+    plan: BakePlan,
+    reservations: Iterable[AtomicOutputReservation],
+) -> tuple[AtomicOutputReservation, ...]:
+    resolved = tuple(reservations)
+    if len(resolved) != len(plan.frame_tasks):
+        raise BakeExecutionError(
+            f"Expected {len(plan.frame_tasks)} bake output reservations, "
+            f"received {len(resolved)}"
+        )
+    for task, reservation in zip(plan.frame_tasks, resolved):
+        if not isinstance(reservation, AtomicOutputReservation):
+            raise TypeError("reservations must contain AtomicOutputReservation values")
+        expected_path = task.output_path.expanduser().resolve(strict=False)
+        if reservation.final_path != expected_path:
+            raise BakeExecutionError(
+                f"Bake task {task.task_index} expected output '{expected_path}', "
+                f"reservation targets '{reservation.final_path}'"
+            )
+    return resolved
+
+
+def _run_bake_to_reservations(
     source_obj: Any,
     target_snapshot: MeshSnapshot,
     plan: BakePlan,
-    execution_settings: BakeExecutionSettings | None = None,
+    execution_settings: BakeExecutionSettings,
+    reservations: tuple[AtomicOutputReservation, ...],
     *,
-    context: Any | None = None,
-    scene: Any | None = None,
-) -> BakeExecutionResult:
-    """Bake all planned frames and atomically commit their output files.
+    context: Any | None,
+    scene: Any | None,
+) -> None:
+    """Render every frame into pre-reserved staged files without committing them."""
 
-    Blender exposes baking only through ``bpy.ops.object.bake``. Sequence baking
-    therefore requires one operator call per frame; the call is isolated in
-    ``_bake_frame_task`` and no geometry/material loops contain operators.
-    """
-
-    resolved_execution_settings = execution_settings or BakeExecutionSettings()
-    if not isinstance(resolved_execution_settings, BakeExecutionSettings):
-        raise TypeError("execution_settings must be BakeExecutionSettings")
     used_material_indices = _validate_execution_input(
         source_obj,
         target_snapshot,
         plan,
     )
-
+    resolved_reservations = _require_reservations(plan, reservations)
     bpy_module = _load_bpy()
     resolved_context = context or bpy_module.context
     resolved_scene = scene or getattr(resolved_context, "scene", None)
     if resolved_scene is None:
         raise BakeExecutionError("A Blender Scene is required for texture baking")
 
-    try:
-        with atomic_file_transaction() as output_transaction:
-            reservations = tuple(
-                output_transaction.reserve(task.output_path)
-                for task in plan.frame_tasks
+    with preserve_bake_scene_state(resolved_scene):
+        configure_scene_for_bake(
+            resolved_scene,
+            plan,
+            execution_settings,
+        )
+        with temporary_mesh_object(
+            target_snapshot,
+            scene=resolved_scene,
+            name_prefix="__Spine2D_BakeTarget",
+        ) as temporary:
+            _activate_uv_layer(
+                temporary.mesh,
+                plan.settings.uv_layer_name,
             )
+            with temporary_bake_materials(
+                source_obj,
+                temporary.object,
+                used_material_indices=used_material_indices,
+            ) as prepared_materials:
+                with activate_object_for_operator(
+                    temporary.object,
+                    context=resolved_context,
+                ):
+                    if plan.settings.selected_to_active:
+                        try:
+                            source_obj.select_set(True)
+                            resolved_context.view_layer.objects.active = temporary.object
+                        except Exception as exc:
+                            raise BakeExecutionError(
+                                "Unable to prepare selected-to-active bake selection"
+                            ) from exc
 
-            with preserve_bake_scene_state(resolved_scene):
-                configure_scene_for_bake(
-                    resolved_scene,
-                    plan,
-                    resolved_execution_settings,
-                )
-                with temporary_mesh_object(
-                    target_snapshot,
-                    scene=resolved_scene,
-                    name_prefix="__Spine2D_BakeTarget",
-                ) as temporary:
-                    _activate_uv_layer(
-                        temporary.mesh,
-                        plan.settings.uv_layer_name,
-                    )
-                    with temporary_bake_materials(
-                        source_obj,
-                        temporary.object,
-                        used_material_indices=used_material_indices,
-                    ) as prepared_materials:
-                        with activate_object_for_operator(
-                            temporary.object,
+                    # Blender exposes baking only as an operator. One call is
+                    # therefore required for each explicit sequence frame.
+                    for task, reservation in zip(
+                        plan.frame_tasks,
+                        resolved_reservations,
+                    ):
+                        logger.info(
+                            "Staging bake '%s' frame task %d/%d (timeline=%s)",
+                            plan.source_object_id,
+                            task.task_index + 1,
+                            len(plan.frame_tasks),
+                            task.timeline_frame,
+                        )
+                        _bake_frame_task(
+                            bpy_module=bpy_module,
                             context=resolved_context,
-                        ):
-                            if plan.settings.selected_to_active:
-                                try:
-                                    source_obj.select_set(True)
-                                    resolved_context.view_layer.objects.active = temporary.object
-                                except Exception as exc:
-                                    raise BakeExecutionError(
-                                        "Unable to prepare selected-to-active bake selection"
-                                    ) from exc
+                            scene=resolved_scene,
+                            plan=plan,
+                            execution_settings=execution_settings,
+                            task=task,
+                            reservation=reservation,
+                            prepared_materials=prepared_materials,
+                        )
 
-                            # The operator-only Blender bake API requires one call
-                            # for every sequence frame. All other preparation is
-                            # outside this loop.
-                            for task, reservation in zip(
-                                plan.frame_tasks,
-                                reservations,
-                            ):
-                                logger.info(
-                                    "Baking '%s' frame task %d/%d (timeline=%s)",
-                                    plan.source_object_id,
-                                    task.task_index + 1,
-                                    len(plan.frame_tasks),
-                                    task.timeline_frame,
-                                )
-                                _bake_frame_task(
-                                    bpy_module=bpy_module,
-                                    context=resolved_context,
-                                    scene=resolved_scene,
-                                    plan=plan,
-                                    execution_settings=resolved_execution_settings,
-                                    task=task,
-                                    reservation=reservation,
-                                    prepared_materials=prepared_materials,
-                                )
 
-            committed_paths = output_transaction.commit()
+def stage_bake_plan_outputs(
+    source_obj: Any,
+    target_snapshot: MeshSnapshot,
+    plan: BakePlan,
+    output_transaction: AtomicFileTransaction,
+    execution_settings: BakeExecutionSettings | None = None,
+    *,
+    context: Any | None = None,
+    scene: Any | None = None,
+) -> tuple[AtomicOutputReservation, ...]:
+    """Bake into a caller-owned atomic transaction without committing outputs.
 
-        artifacts = tuple(
-            BakeArtifact(
-                task_index=task.task_index,
-                timeline_frame=task.timeline_frame,
-                image_name=task.image_name,
-                output_path=committed_path,
-                width=plan.settings.width,
-                height=plan.settings.height,
-            )
-            for task, committed_path in zip(plan.frame_tasks, committed_paths)
+    This is the integration point used by the single-object exporter so texture
+    files and the final Spine JSON become visible in one shared commit. The caller
+    owns commit/rollback; all Blender state and temporary datablocks are still
+    restored before this function returns.
+    """
+
+    if not isinstance(output_transaction, AtomicFileTransaction):
+        raise TypeError("output_transaction must be AtomicFileTransaction")
+    resolved_execution_settings = execution_settings or BakeExecutionSettings()
+    if not isinstance(resolved_execution_settings, BakeExecutionSettings):
+        raise TypeError("execution_settings must be BakeExecutionSettings")
+
+    try:
+        reservations = tuple(
+            output_transaction.reserve(task.output_path)
+            for task in plan.frame_tasks
         )
-        result = BakeExecutionResult(plan=plan, artifacts=artifacts)
-        logger.info(
-            "Committed %d baked texture files for '%s'",
-            len(result.artifacts),
-            plan.source_object_id,
+        _run_bake_to_reservations(
+            source_obj,
+            target_snapshot,
+            plan,
+            resolved_execution_settings,
+            reservations,
+            context=context,
+            scene=scene,
         )
-        return result
+        return reservations
     except BakeExecutionError:
         raise
     except (
@@ -352,4 +383,83 @@ def execute_bake_plan(
         )
         raise BakeExecutionError(
             f"Unexpected texture bake failure for '{plan.source_object_id}': {exc}"
+        ) from exc
+
+
+def build_bake_execution_result(
+    plan: BakePlan,
+    committed_paths: Iterable[Path],
+) -> BakeExecutionResult:
+    """Create the typed result after a transaction has committed bake files."""
+
+    if not isinstance(plan, BakePlan):
+        raise TypeError("plan must be BakePlan")
+    resolved_paths = tuple(
+        path.expanduser().resolve(strict=False) for path in committed_paths
+    )
+    if len(resolved_paths) != len(plan.frame_tasks):
+        raise BakeExecutionError(
+            f"Expected {len(plan.frame_tasks)} committed bake paths, "
+            f"received {len(resolved_paths)}"
+        )
+    artifacts = tuple(
+        BakeArtifact(
+            task_index=task.task_index,
+            timeline_frame=task.timeline_frame,
+            image_name=task.image_name,
+            output_path=committed_path,
+            width=plan.settings.width,
+            height=plan.settings.height,
+        )
+        for task, committed_path in zip(plan.frame_tasks, resolved_paths)
+    )
+    return BakeExecutionResult(plan=plan, artifacts=artifacts)
+
+
+def execute_bake_plan(
+    source_obj: Any,
+    target_snapshot: MeshSnapshot,
+    plan: BakePlan,
+    execution_settings: BakeExecutionSettings | None = None,
+    *,
+    context: Any | None = None,
+    scene: Any | None = None,
+) -> BakeExecutionResult:
+    """Bake and atomically commit only the texture outputs in ``plan``."""
+
+    try:
+        with atomic_file_transaction() as output_transaction:
+            reservations = stage_bake_plan_outputs(
+                source_obj,
+                target_snapshot,
+                plan,
+                output_transaction,
+                execution_settings,
+                context=context,
+                scene=scene,
+            )
+            committed_paths = output_transaction.commit()
+        result = build_bake_execution_result(
+            plan,
+            tuple(
+                path
+                for reservation, path in zip(reservations, committed_paths)
+                if path == reservation.final_path
+            ),
+        )
+        logger.info(
+            "Committed %d baked texture files for '%s'",
+            len(result.artifacts),
+            plan.source_object_id,
+        )
+        return result
+    except BakeExecutionError:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "Unable to commit texture outputs for '%s'",
+            plan.source_object_id,
+        )
+        raise BakeExecutionError(
+            f"Unable to commit texture outputs for '{plan.source_object_id}': {exc}"
         ) from exc
