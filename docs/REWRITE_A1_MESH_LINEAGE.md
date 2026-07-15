@@ -60,6 +60,25 @@ A non-strict transfer may preserve the target loop's existing UV while reporting
 the missing source ID. It never silently treats that fallback as a successful
 match.
 
+## Deterministic segmentation
+
+`segment_mesh()` operates only on `MeshSnapshot` and returns a
+`SegmentationPlan`. It does not create Blender objects or write custom properties.
+
+Boundary reasons are explicit and may include:
+
+- source mesh boundary;
+- non-manifold edge;
+- seam or sharp edge;
+- material change;
+- face-normal angle threshold;
+- UV discontinuity.
+
+Every segment contains source-face lineage and a topology report with its Euler
+characteristic, boundary-edge count, boundary-component count and manifold flag.
+Segment order and face order are deterministic. The current angle boundary uses
+the legacy strict join rule: faces join only when `angle < angle_limit`.
+
 ## Blender adapter
 
 `read_source_mesh_snapshot()` reads the original Mesh datablock through direct
