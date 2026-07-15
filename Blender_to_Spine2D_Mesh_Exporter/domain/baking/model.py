@@ -24,6 +24,13 @@ class BakeMode(str, Enum):
     EMIT = "EMIT"
 
 
+class BakeMaterialPolicy(str, Enum):
+    """Policy used to convert material analysis into a Blender bake mode."""
+
+    LEGACY_ANY_IMAGE = "LEGACY_ANY_IMAGE"
+    CONSERVATIVE_MIXED = "CONSERVATIVE_MIXED"
+
+
 class TextureFormat(str, Enum):
     PNG = "PNG"
     JPEG = "JPEG"
@@ -91,6 +98,10 @@ class MaterialAnalysis:
     def animated(self) -> bool:
         return any(dependency.animated for dependency in self.image_dependencies)
 
+    @property
+    def has_image_dependency(self) -> bool:
+        return bool(self.image_dependencies)
+
 
 @dataclass(frozen=True, slots=True)
 class ObjectMaterialAnalysis:
@@ -131,6 +142,7 @@ class BakeSettings:
     cage_extrusion: float = 0.1
     diffuse_mode: BakeMode = BakeMode.DIFFUSE
     procedural_mode: BakeMode = BakeMode.COMBINED
+    material_policy: BakeMaterialPolicy = BakeMaterialPolicy.LEGACY_ANY_IMAGE
     sequence_start_frame: int = 0
     sequence_frame_count: int = 0
     sequence_frame_digits: int = 4
@@ -161,6 +173,8 @@ class BakeSettings:
         for field_name in ("diffuse_mode", "procedural_mode"):
             if not isinstance(getattr(self, field_name), BakeMode):
                 raise TypeError(f"{field_name} must be BakeMode")
+        if not isinstance(self.material_policy, BakeMaterialPolicy):
+            raise TypeError("material_policy must be BakeMaterialPolicy")
         if not isinstance(self.sequence_start_frame, int) or self.sequence_start_frame < 0:
             raise ValueError("sequence_start_frame must be a non-negative integer")
         if not isinstance(self.sequence_frame_count, int) or self.sequence_frame_count < 0:
@@ -240,6 +254,19 @@ def sanitize_filename_stem(value: str) -> str:
     return sanitized
 
 
+def _slot_requires_procedural_mode(
+    slot: MaterialAnalysis,
+    policy: BakeMaterialPolicy,
+) -> bool:
+    if slot.kind in {MaterialKind.PROCEDURAL, MaterialKind.SOLID_COLOR}:
+        return True
+    if slot.kind is MaterialKind.MIXED:
+        if policy is BakeMaterialPolicy.LEGACY_ANY_IMAGE:
+            return not slot.has_image_dependency
+        return True
+    return False
+
+
 def _select_bake_mode(
     analysis: ObjectMaterialAnalysis,
     settings: BakeSettings,
@@ -255,7 +282,10 @@ def _select_bake_mode(
     usable = tuple(slot for slot in analysis.slots if slot.kind is not MaterialKind.EMPTY)
     if not usable:
         raise BakePlanError("object has no usable materials")
-    if any(slot.kind in {MaterialKind.PROCEDURAL, MaterialKind.MIXED} for slot in usable):
+    if any(
+        _slot_requires_procedural_mode(slot, settings.material_policy)
+        for slot in usable
+    ):
         return settings.procedural_mode
     return settings.diffuse_mode
 
