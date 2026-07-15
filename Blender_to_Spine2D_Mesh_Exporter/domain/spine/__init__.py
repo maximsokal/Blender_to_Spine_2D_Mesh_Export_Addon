@@ -1,6 +1,14 @@
 """Typed Spine 4.2 document model and validation utilities."""
 
 from .golden import LegacyCompatibilityFingerprint, build_legacy_fingerprint
+from .legacy_attachment_builder import (
+    LegacyAttachmentSequence,
+    LegacyAttachmentVertex,
+    LegacyMeshAttachmentBuildError,
+    LegacyMeshAttachmentBuildResult,
+    LegacyMeshAttachmentRequest,
+    build_legacy_mesh_attachment,
+)
 from .legacy_profile import LegacyRigProfile
 from .legacy_rig_builder import (
     LegacyRigBuildError,
@@ -34,7 +42,12 @@ from .weighted_vertices import (
 __all__ = [
     "Bone",
     "IKConstraint",
+    "LegacyAttachmentSequence",
+    "LegacyAttachmentVertex",
     "LegacyCompatibilityFingerprint",
+    "LegacyMeshAttachmentBuildError",
+    "LegacyMeshAttachmentBuildResult",
+    "LegacyMeshAttachmentRequest",
     "LegacyRigBuildError",
     "LegacyRigBuildRequest",
     "LegacyRigBuildResult",
@@ -55,6 +68,7 @@ __all__ = [
     "WeightedVertex",
     "WeightedVertexInfluence",
     "build_legacy_fingerprint",
+    "build_legacy_mesh_attachment",
     "build_legacy_rig",
     "calculate_uniform_scale",
     "decode_weighted_vertices",
