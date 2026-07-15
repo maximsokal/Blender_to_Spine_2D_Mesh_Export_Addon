@@ -2,6 +2,7 @@
 
 from .model import (
     BakeFrameTask,
+    BakeMaterialPolicy,
     BakeMode,
     BakePlan,
     BakePlanError,
@@ -17,6 +18,7 @@ from .model import (
 
 __all__ = [
     "BakeFrameTask",
+    "BakeMaterialPolicy",
     "BakeMode",
     "BakePlan",
     "BakePlanError",
