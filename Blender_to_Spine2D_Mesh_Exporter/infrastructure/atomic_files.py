@@ -58,7 +58,9 @@ class AtomicFileTransaction:
         if normalized in self._final_paths:
             raise ValueError(f"final output is reserved twice: {normalized}")
         normalized.parent.mkdir(parents=True, exist_ok=True)
-        staged_name = f".{normalized.name}.spine2d-stage-{self._token}"
+        staged_name = (
+            f".{normalized.stem}.spine2d-stage-{self._token}{normalized.suffix}"
+        )
         staged_path = normalized.with_name(staged_name)
         if staged_path.exists():
             staged_path.unlink()
@@ -80,7 +82,8 @@ class AtomicFileTransaction:
         )
         if missing:
             raise AtomicFileCommitError(
-                "staged output files are missing: " + ", ".join(str(path) for path in missing)
+                "staged output files are missing: "
+                + ", ".join(str(path) for path in missing)
             )
 
     def _backup_existing_outputs(self) -> None:
@@ -132,8 +135,11 @@ class AtomicFileTransaction:
             self._install_staged_outputs()
             self._remove_backups()
         except Exception as exc:
-            rollback_failures = self._restore_after_failed_commit()
-            self.rollback()
+            rollback_failures = list(self._restore_after_failed_commit())
+            try:
+                self.rollback()
+            except Exception as rollback_exc:
+                rollback_failures.append(str(rollback_exc))
             details = ""
             if rollback_failures:
                 details = "; rollback failures: " + "; ".join(rollback_failures)
@@ -175,8 +181,12 @@ def atomic_file_transaction() -> Iterator[AtomicFileTransaction]:
     transaction = AtomicFileTransaction()
     try:
         yield transaction
-    except Exception:
-        transaction.rollback()
+    except BaseException:
+        try:
+            transaction.rollback()
+        except Exception:
+            # The caller's primary exception must not be hidden by cleanup.
+            pass
         raise
     finally:
         if not transaction.committed and not transaction._closed:
