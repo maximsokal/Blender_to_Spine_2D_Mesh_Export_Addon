@@ -82,6 +82,17 @@ jobs:
             --python tests/blender_headless/run_bake_integration.py \
             2>&1 | tee test-results/blender-bake.log
 
+      - name: Run real Blender UV seam export test
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_uv_seam_export_integration.py \
+            2>&1 | tee test-results/blender-uv-seam.log
+
       - name: Upload Blender integration logs
         if: always()
         uses: actions/upload-artifact@v4
