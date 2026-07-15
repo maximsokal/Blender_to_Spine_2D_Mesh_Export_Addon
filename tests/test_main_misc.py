@@ -1,6 +1,7 @@
-from Blender_to_Spine2D_Mesh_Exporter import main
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 import os
+
+from Blender_to_Spine2D_Mesh_Exporter import main, pipeline_v2
 
 
 class Poly:
@@ -9,32 +10,32 @@ class Poly:
 
 
 class Mesh:
-    def __init__(self, n):
-        self.polygons = [Poly(i) for i in range(n)]
+    def __init__(self, count):
+        self.polygons = [Poly(index) for index in range(count)]
         self.storage = {}
 
-    def __setitem__(self, key, val):
-        self.storage[key] = val
+    def __setitem__(self, key, value):
+        self.storage[key] = value
 
     def __getitem__(self, key):
         return self.storage[key]
 
 
 class Obj:
-    def __init__(self, name, n):
+    def __init__(self, name, count):
         self.name = name
-        self.data = Mesh(n)
+        self.data = Mesh(count)
 
 
 class Image:
-    def __init__(self, w, h):
-        self.size = (w, h)
+    def __init__(self, width, height):
+        self.size = (width, height)
 
 
 class Node:
-    def __init__(self, img=None):
+    def __init__(self, image=None):
         self.type = "TEX_IMAGE"
-        self.image = img
+        self.image = image
 
 
 class NodeTree:
@@ -48,9 +49,9 @@ class Material:
 
 
 class ObjMat(Obj):
-    def __init__(self, name, n, mat):
-        super().__init__(name, n)
-        self.active_material = mat
+    def __init__(self, name, count, material):
+        super().__init__(name, count)
+        self.active_material = material
 
 
 def test_assign_face_ids():
@@ -59,77 +60,68 @@ def test_assign_face_ids():
     assert obj.data["face_id_map"] == {"0": 0, "1": 1, "2": 2}
 
 
-# Duplicate function definition removed
 def test_get_texture_dimensions():
-    img = Image(128, 256)
-    mat = Material([Node(img)])
-    obj = ObjMat("o", 1, mat)
-    w, h = main.get_texture_dimensions(obj, 64, 64)
-    assert (w, h) == (128, 256)
+    image = Image(128, 256)
+    material = Material([Node(image)])
+    obj = ObjMat("o", 1, material)
+    assert main.get_texture_dimensions(obj, 64, 64) == (128, 256)
 
 
 def test_save_uv_as_json_uses_custom_output_dir(tmp_path):
-    """
-    This test checks that save_uv_as_json uses the specified
-    'output_dir' directory to save the final JSON,
-    and not the default directory.
-    """
-    # 1. Setup
+    from contextlib import ExitStack
+
     custom_dir = tmp_path / "custom_json_output"
     custom_dir.mkdir()
 
-    mock_uv_layers = MagicMock()
-    mock_uv_layers.active = MagicMock()
+    source = MagicMock(type="MESH")
+    source.name = "TestCube"
+    source.matrix_world.translation.copy.return_value = (0, 0, 0)
+    source.data.__contains__.return_value = False
 
-    mock_obj = MagicMock()
-    mock_obj.name = "TestCube"
-    mock_obj.type = "MESH"
-    mock_obj.matrix_world.translation.copy.return_value = (0, 0, 0)
-    mock_obj.data.uv_layers = mock_uv_layers
+    working_copy = MagicMock(type="MESH")
+    working_copy.name = "TestCube_copy_for_uv"
+    source.copy.return_value = working_copy
+    source.data.copy.return_value = working_copy.data
 
-    mock_textured_obj = MagicMock()
-    mock_textured_obj.name = "textured_mock"
-    mock_textured_obj.type = "MESH"
-    mock_textured_obj.data.uv_layers = mock_uv_layers
+    textured = MagicMock(type="MESH")
+    textured.name = "TestCube_texturing_copy"
 
-    mock_export_return = {
+    export_result = {
         "bones": [{"name": "root"}],
-        "_uv3d_pairs": [[0, [0.1, 0.1], [0, 0, 0]]],  # Add dummy data
+        "_uv3d_pairs": [[0, [0.1, 0.1], [0, 0, 0]]],
         "textured_uv3d_pairs": [[0, [0.1, 0.1], [0, 0, 0]]],
     }
 
-    with patch(
-        "Blender_to_Spine2D_Mesh_Exporter.main._export_segment",
-        return_value=mock_export_return,
-    ) as mock_export, patch(
-        "Blender_to_Spine2D_Mesh_Exporter.main.merge_spine_json_dicts",
-        return_value={"skeleton": {}},
-    ) as mock_merge, patch(
-        "Blender_to_Spine2D_Mesh_Exporter.main.write_json"
-    ) as mock_write_json, patch(
-        "Blender_to_Spine2D_Mesh_Exporter.main.plane_cut.execute_smart_cut",
-        return_value=[],
-    ), patch(
-        "Blender_to_Spine2D_Mesh_Exporter.main.main_preprocessing",
-        return_value={"z_groups_info": {0.0: {}}},
-    ), patch(
-        "Blender_to_Spine2D_Mesh_Exporter.main.bake_textures_for_object",
-        return_value=True,
-    ), patch(
-        "Blender_to_Spine2D_Mesh_Exporter.main.transfer_baked_uvs_to_segments"
-    ), patch(
-        "Blender_to_Spine2D_Mesh_Exporter.main.mark_seams_on_copy",
-        return_value=(mock_textured_obj, []),
-    ), patch("bpy.context.scene.objects", return_value=[]):
-        # 2. Execution
-        main.save_uv_as_json(mock_obj, 512, 512, output_dir=str(custom_dir))
+    patches = [
+        patch.object(pipeline_v2, "_mesh_object", return_value=source),
+        patch.object(pipeline_v2, "_resolve_output_directory", return_value=str(custom_dir)),
+        patch.object(pipeline_v2, "_ensure_source_uv", return_value="UVMap"),
+        patch.object(pipeline_v2, "_copy_seams"),
+        patch.object(pipeline_v2, "activate_object"),
+        patch.object(pipeline_v2, "_object_ids", return_value=set()),
+        patch.object(pipeline_v2, "_new_segment_objects", return_value=[]),
+        patch.object(pipeline_v2, "apply_segmentation_seams"),
+        patch.object(pipeline_v2, "copy_orig_face_id_layer", return_value=True),
+        patch.object(pipeline_v2, "_prepare_textured_uv", return_value="UVMap_for_texturing"),
+        patch.object(pipeline_v2, "_export_segments", return_value=[export_result]),
+        patch.object(pipeline_v2, "scene_bool", return_value=False),
+        patch.object(pipeline_v2.ExportSession, "cleanup"),
+        patch.object(pipeline_v2.ExportSession, "restore_source_metadata"),
+        patch.object(main, "assign_face_ids"),
+        patch.object(main, "main_preprocessing", return_value={"z_groups_info": {0.0: {}}}),
+        patch.object(main.plane_cut, "execute_smart_cut", return_value=[]),
+        patch.object(main, "mark_seams_on_copy", return_value=(textured, [])),
+        patch.object(main, "bake_textures_for_object", return_value=True),
+        patch.object(main, "transfer_baked_uvs_to_segments"),
+        patch.object(main, "merge_spine_json_dicts", return_value={"skeleton": {}}),
+        patch.object(main, "write_json"),
+    ]
 
-        # 3. Verification
-        mock_write_json.assert_called_once()
+    with ExitStack() as stack:
+        entered = [stack.enter_context(item) for item in patches]
+        write_json = entered[-1]
+        result = main.save_uv_as_json(source, 512, 512, output_dir=str(custom_dir))
 
-        call_args = mock_write_json.call_args
-        final_path = call_args[0][1]
-
-        expected_path = os.path.join(str(custom_dir), f"{mock_obj.name}_merged.json")
-
-        assert final_path == expected_path
+    expected_path = os.path.join(str(custom_dir), "TestCube_merged.json")
+    assert result == expected_path
+    write_json.assert_called_once_with({"skeleton": {}}, expected_path)
