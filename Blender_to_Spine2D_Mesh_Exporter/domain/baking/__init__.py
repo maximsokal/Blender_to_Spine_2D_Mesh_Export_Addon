@@ -1,5 +1,6 @@
 """Blender-independent material analysis and texture baking plans."""
 
+from .execution import BakeArtifact, BakeExecutionResult
 from .model import (
     BakeFrameTask,
     BakeMaterialPolicy,
@@ -17,6 +18,8 @@ from .model import (
 )
 
 __all__ = [
+    "BakeArtifact",
+    "BakeExecutionResult",
     "BakeFrameTask",
     "BakeMaterialPolicy",
     "BakeMode",
