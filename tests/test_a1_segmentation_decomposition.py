@@ -96,14 +96,28 @@ def _build_snapshot(name, positions, face_vertices, face_normals=None):
 
 def _normal_at_degrees(angle):
     value = radians(angle)
-    return (0.0, sin(value), cos(value))
+    # The strip bends around the global Y axis.  This is the actual geometric
+    # polygon normal for a path segment with the same angle in the XZ plane.
+    return (-sin(value), 0.0, cos(value))
 
 
 def build_three_quad_strip():
+    # Build a physically bent strip instead of assigning synthetic normals to a
+    # flat mesh. Each quad is planar, adjacent quads share a full Y-aligned edge,
+    # and their normals are exactly 0, 20 and 40 degrees apart.
+    path_points = [(0.0, 0.0)]
+    x_value = 0.0
+    z_value = 0.0
+    for angle in (0.0, 20.0, 40.0):
+        value = radians(angle)
+        x_value += cos(value)
+        z_value += sin(value)
+        path_points.append((x_value, z_value))
+
     positions = tuple(
-        (float(x), float(y), 0.0)
-        for y in range(2)
-        for x in range(4)
+        (float(x_coordinate), float(y_coordinate), float(z_coordinate))
+        for y_coordinate in range(2)
+        for x_coordinate, z_coordinate in path_points
     )
     faces = (
         (0, 1, 5, 4),
