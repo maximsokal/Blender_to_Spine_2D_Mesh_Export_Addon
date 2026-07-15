@@ -11,6 +11,11 @@ from .evaluated_mesh_reader import (
     LineageAttributeNames,
     read_evaluated_mesh_snapshot,
 )
+from .material_analyzer import (
+    MaterialAnalysisError,
+    analyse_material_slot,
+    analyse_object_materials,
+)
 from .mesh_reader import MeshReadError, read_source_mesh_snapshot
 from .mesh_writer import MeshWriteError, TemporaryMeshObject, temporary_mesh_object
 from .uv_unwrap import (
@@ -26,12 +31,15 @@ __all__ = [
     "EvaluatedMeshReadError",
     "EvaluatedMeshSnapshotResult",
     "LineageAttributeNames",
+    "MaterialAnalysisError",
     "MeshReadError",
     "MeshWriteError",
     "TemporaryMeshObject",
     "UvOperatorPlan",
     "UvUnwrapError",
     "activate_object_for_operator",
+    "analyse_material_slot",
+    "analyse_object_materials",
     "build_uv_operator_plan",
     "read_evaluated_mesh_snapshot",
     "read_source_mesh_snapshot",
