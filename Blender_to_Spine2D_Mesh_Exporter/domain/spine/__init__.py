@@ -23,6 +23,16 @@ from .legacy_attachment_builder import (
     build_legacy_mesh_attachment,
     build_legacy_mesh_document,
 )
+from .legacy_connected_group import (
+    ConnectedConstraintSchedule,
+    ConnectedGroupBuildError,
+    ConnectedGroupBuildResult,
+    ConnectedGroupSettings,
+    ConnectedObjectDocument,
+    ConnectedObjectPlacement,
+    ConnectedZLayer,
+    build_connected_group_document,
+)
 from .legacy_profile import LegacyRigProfile
 from .legacy_rig_builder import (
     LegacyRigBuildError,
@@ -70,6 +80,13 @@ __all__ = [
     "AnimationNameAssignment",
     "Bone",
     "ComponentBoneIndexMap",
+    "ConnectedConstraintSchedule",
+    "ConnectedGroupBuildError",
+    "ConnectedGroupBuildResult",
+    "ConnectedGroupSettings",
+    "ConnectedObjectDocument",
+    "ConnectedObjectPlacement",
+    "ConnectedZLayer",
     "ConstraintOrderAssignment",
     "ConstraintOrderPolicy",
     "IKConstraint",
@@ -104,6 +121,7 @@ __all__ = [
     "UniformScaleMode",
     "WeightedVertex",
     "WeightedVertexInfluence",
+    "build_connected_group_document",
     "build_legacy_fingerprint",
     "build_legacy_mesh_attachment",
     "build_legacy_mesh_document",
