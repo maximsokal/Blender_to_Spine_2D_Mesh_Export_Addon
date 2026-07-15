@@ -19,6 +19,40 @@ Numeric geometry, UV and animation parity is checked by dedicated golden fixture
 Volatile skeleton metadata such as export hash and absolute image paths is excluded
 from the structural compatibility fingerprint.
 
+## Determinism and intentional legacy divergence
+
+A1 preserves externally observable rig and data contracts, not legacy bugs. The
+new pipeline must never reproduce behaviour that can lose or duplicate geometry.
+In particular:
+
+- seed-normal angle grouping is preserved;
+- strict `angle < angle_limit` semantics are preserved;
+- a face may belong to exactly one segment;
+- random k-means decomposition is replaced with deterministic manifold-disk
+  decomposition;
+- every decomposition must prove complete and disjoint face coverage;
+- non-manifold input is rejected until an explicit repair policy exists.
+
+The public legacy `plane_cut.py` contains an unfinished random partition function,
+so byte-for-byte reproduction of that path is not a valid compatibility target.
+Golden fixtures will compare stable geometry, UV, rig, and attachment outcomes.
+
+## Modifier lineage
+
+Modifiers are evaluated only on a temporary Object and Mesh copy. Source lineage is
+encoded through unique temporary INT attributes on POINT, EDGE, FACE, and CORNER
+domains.
+
+Two policies are defined:
+
+- `STRICT_PRESERVE`: every source element survives exactly once;
+- `ALLOW_SOURCE_DUPLICATION`: source vertices, faces, and corners may repeat when
+  Blender propagated their lineage unambiguously.
+
+Generated edges are permitted because edge source identity is optional. Generated
+vertices, faces, or corners are rejected because exact source-loop UV transfer
+cannot be proven for them.
+
 ## Architecture boundary
 
 Everything below `domain/` and `application/` is pure Python and must not import
@@ -32,43 +66,34 @@ segmentation and topology-preserving transformations. UV correspondence must use
 `SourceLoopId`; rounded coordinates and nearest-point matching are not part of the
 new architecture.
 
-Segmentation is a pure deterministic operation. It returns a `SegmentationPlan`
-containing source-face membership, boundary-edge reasons and topology reports.
-The domain layer never creates Blender objects, writes custom properties or uses
-random clustering. The current implementation matches the legacy strict threshold
-rule (`angle < angle_limit` joins faces), but full parity with the legacy
-seed-normal traversal and complex-segment decomposition remains a golden-test
-requirement.
+The geometry domain additionally forbids random-number dependencies. Ordering must
+come from local/source IDs or explicitly documented deterministic scores.
 
 ## Implemented foundation
 
-The current foundation contains:
+The current rewrite branch contains:
 
-- immutable `ExportSettings`, `ExportRequest`, `ExportIssue` and `ExportResult`;
+- immutable `ExportSettings`, `ExportRequest`, `ExportIssue`, and `ExportResult`;
 - typed Spine document entities;
 - weighted vertex stream codec;
-- Spine cross-reference and mesh validator;
+- Spine cross-reference and mesh validators;
 - deterministic Spine serializer;
 - centralized legacy rig naming profile;
-- legacy structural fingerprinting for v0.23/new-engine comparisons;
+- structural legacy fingerprinting;
 - immutable `MeshSnapshot` with local and source IDs;
-- mesh topology and lineage validation;
 - exact SourceLoopId-based UV correspondence;
-- deterministic face-subset extraction for segments;
-- geometry fingerprinting for golden fixtures;
-- a read-only Blender source-mesh adapter using direct RNA access;
-- deterministic segmentation by seams, sharp edges, materials, face angle, UV
-  discontinuity, mesh boundaries and non-manifold edges;
-- per-segment Euler characteristic, boundary-component and manifold reports.
+- deterministic face-subset extraction and geometry fingerprints;
+- read-only source-mesh and transactional evaluated-mesh Blender adapters;
+- deterministic seed-normal segmentation;
+- topology analysis and manifold-disk decomposition;
+- evaluated modifier lineage validation and structured diagnostics.
 
 ## Not implemented yet
 
-- full A1 segmentation parity for legacy seed-normal grouping;
-- deterministic complex-segment decomposition replacing random k-means;
-- evaluated modifier lineage propagation;
 - UV unwrap adapter and transactional UV write-back;
-- baking transaction;
+- material and texture baking transaction;
 - A1 rig builder connected to `SpineDocument`;
+- golden parity against representative real `.blend` fixtures;
 - production operator integration.
 
 The legacy export path remains the active production path until golden and real
