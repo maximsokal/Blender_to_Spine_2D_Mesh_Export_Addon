@@ -22,20 +22,42 @@ from the structural compatibility fingerprint.
 ## Architecture boundary
 
 Everything below `domain/` and `application/` is pure Python and must not import
-`bpy` or `bmesh`. Blender data is converted to immutable snapshots by a future
+`bpy` or `bmesh`. Blender data is converted to immutable snapshots by the
 `blender_adapter` package. The domain produces a validated `SpineDocument`, and
 only `SpineSerializer` converts that model to dictionaries and JSON.
 
-## First foundation slice
+Local mesh identifiers are snapshot-specific. Stable source-lineage identifiers
+point back to the original Blender mesh and are preserved through copying,
+segmentation and topology-preserving transformations. UV correspondence must use
+`SourceLoopId`; rounded coordinates and nearest-point matching are not part of the
+new architecture.
 
-This slice introduces:
+## Implemented foundation
+
+The current foundation contains:
 
 - immutable `ExportSettings`, `ExportRequest`, `ExportIssue` and `ExportResult`;
 - typed Spine document entities;
 - weighted vertex stream codec;
-- cross-reference and mesh validator;
-- deterministic serializer;
+- Spine cross-reference and mesh validator;
+- deterministic Spine serializer;
 - centralized legacy rig naming profile;
-- legacy structural fingerprinting for v0.23/new-engine comparisons.
+- legacy structural fingerprinting for v0.23/new-engine comparisons;
+- immutable `MeshSnapshot` with local and source IDs;
+- mesh topology and lineage validation;
+- exact SourceLoopId-based UV correspondence;
+- deterministic face-subset extraction for segments;
+- geometry fingerprinting for golden fixtures;
+- a read-only Blender source-mesh adapter using direct RNA access.
 
-It does not register Blender classes and does not alter the legacy export path.
+## Not implemented yet
+
+- evaluated modifier lineage propagation;
+- deterministic segmentation engine;
+- UV unwrap adapter and transactional UV write-back;
+- baking transaction;
+- A1 rig builder connected to `SpineDocument`;
+- production operator integration.
+
+The legacy export path remains the active production path until golden and real
+Blender headless tests prove parity.
