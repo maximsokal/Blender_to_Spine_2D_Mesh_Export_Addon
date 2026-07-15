@@ -4,6 +4,7 @@ from .a1_attachment_projection import (
     A1AttachmentProjectionError,
     A1AttachmentProjectionResult,
     A1AttachmentProjectionSettings,
+    A1AttachmentVertexKey,
     A1VertexZBinding,
     project_triangulated_disk_attachment,
 )
@@ -61,6 +62,7 @@ __all__ = [
     "A1AttachmentProjectionError",
     "A1AttachmentProjectionResult",
     "A1AttachmentProjectionSettings",
+    "A1AttachmentVertexKey",
     "A1DocumentAssemblyError",
     "A1DocumentAssemblyResult",
     "A1DocumentAssemblySettings",
