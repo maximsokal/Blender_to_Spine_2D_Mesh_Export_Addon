@@ -69,18 +69,25 @@ def test_output_paths_are_normalized_and_remain_under_export_root(tmp_path):
     assert paths.image_relative_directory == "textures/spine"
 
 
-@pytest.mark.parametrize("value", ("../escape", "safe/../../escape", "/absolute"))
-def test_output_paths_reject_unsafe_image_directories(tmp_path, value):
-    settings = A1SingleObjectExportSettings(
-        export=ExportSettings(
+@pytest.mark.parametrize(
+    "value",
+    (
+        "../escape",
+        "safe/../../escape",
+        "/absolute",
+        "C:/absolute",
+        "C:\\absolute",
+        "//server/share",
+    ),
+)
+def test_export_settings_reject_unsafe_image_directories(tmp_path, value):
+    with pytest.raises(ValueError):
+        ExportSettings(
             texture_width=64,
             texture_height=64,
             output_directory=tmp_path,
             images_relative_path=value,
         )
-    )
-    with pytest.raises(ValueError):
-        resolve_a1_output_paths("Object", settings)
 
 
 def test_world_translation_is_converted_with_legacy_uniform_scale(tmp_path):
