@@ -1,0 +1,77 @@
+"""Immutable mesh snapshots and exact source-lineage correspondence."""
+
+from .correspondence import (
+    ConflictingSourceLoopUVError,
+    CorrespondenceError,
+    MissingSourceLoopError,
+    SourceLoopUV,
+    UvCorrespondenceMap,
+    UvTransferReport,
+    build_uv_correspondence,
+    extract_face_subset,
+    transfer_uv_by_source_loop,
+)
+from .fingerprint import build_mesh_fingerprint
+from .ids import (
+    EdgeId,
+    FaceId,
+    LoopId,
+    SourceEdgeId,
+    SourceFaceId,
+    SourceLoopId,
+    SourceVertexId,
+    VertexId,
+)
+from .model import (
+    IDENTITY_MATRIX_4X4,
+    LoopUV,
+    Matrix4x4,
+    MeshEdge,
+    MeshFace,
+    MeshLoop,
+    MeshSnapshot,
+    MeshVertex,
+    Vector2,
+    Vector3,
+)
+from .validator import (
+    MeshSnapshotValidator,
+    MeshValidationError,
+    MeshValidationIssue,
+    MeshValidationSeverity,
+)
+
+__all__ = [
+    "ConflictingSourceLoopUVError",
+    "CorrespondenceError",
+    "EdgeId",
+    "FaceId",
+    "IDENTITY_MATRIX_4X4",
+    "LoopId",
+    "LoopUV",
+    "Matrix4x4",
+    "MeshEdge",
+    "MeshFace",
+    "MeshLoop",
+    "MeshSnapshot",
+    "MeshSnapshotValidator",
+    "MeshValidationError",
+    "MeshValidationIssue",
+    "MeshValidationSeverity",
+    "MeshVertex",
+    "MissingSourceLoopError",
+    "SourceEdgeId",
+    "SourceFaceId",
+    "SourceLoopId",
+    "SourceLoopUV",
+    "SourceVertexId",
+    "UvCorrespondenceMap",
+    "UvTransferReport",
+    "Vector2",
+    "Vector3",
+    "VertexId",
+    "build_mesh_fingerprint",
+    "build_uv_correspondence",
+    "extract_face_subset",
+    "transfer_uv_by_source_loop",
+]
