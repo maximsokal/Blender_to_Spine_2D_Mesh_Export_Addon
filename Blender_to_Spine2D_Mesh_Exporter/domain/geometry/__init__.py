@@ -1,5 +1,6 @@
 """Immutable mesh snapshots and exact source-lineage correspondence."""
 
+from .a1_segmentation import A1SegmentationError, segment_mesh_a1
 from .correspondence import (
     ConflictingSourceLoopUVError,
     CorrespondenceError,
@@ -10,6 +11,17 @@ from .correspondence import (
     build_uv_correspondence,
     extract_face_subset,
     transfer_uv_by_source_loop,
+)
+from .decomposition import (
+    DecomposedRegion,
+    DecompositionCut,
+    DecompositionError,
+    DecompositionReason,
+    DecompositionSettings,
+    MeshDecompositionPlan,
+    SegmentDecompositionDiagnostic,
+    decompose_complex_segments,
+    materialize_decomposed_snapshots,
 )
 from .fingerprint import build_mesh_fingerprint
 from .ids import (
@@ -45,6 +57,14 @@ from .segmentation import (
     materialize_segment_snapshots,
     segment_mesh,
 )
+from .topology import (
+    RegionTopologyError,
+    analyse_face_region,
+    build_edge_to_faces,
+    build_face_adjacency,
+    face_edge_ids,
+    is_simple_disk,
+)
 from .validator import (
     MeshSnapshotValidator,
     MeshValidationError,
@@ -53,14 +73,21 @@ from .validator import (
 )
 
 __all__ = [
+    "A1SegmentationError",
     "ConflictingSourceLoopUVError",
     "CorrespondenceError",
+    "DecomposedRegion",
+    "DecompositionCut",
+    "DecompositionError",
+    "DecompositionReason",
+    "DecompositionSettings",
     "EdgeId",
     "FaceId",
     "IDENTITY_MATRIX_4X4",
     "LoopId",
     "LoopUV",
     "Matrix4x4",
+    "MeshDecompositionPlan",
     "MeshEdge",
     "MeshFace",
     "MeshLoop",
@@ -72,12 +99,14 @@ __all__ = [
     "MeshValidationSeverity",
     "MeshVertex",
     "MissingSourceLoopError",
+    "RegionTopologyError",
+    "SegmentBoundaryEdge",
+    "SegmentBoundaryReason",
+    "SegmentDecompositionDiagnostic",
+    "SegmentTopology",
     "SegmentationError",
     "SegmentationPlan",
     "SegmentationSettings",
-    "SegmentBoundaryEdge",
-    "SegmentBoundaryReason",
-    "SegmentTopology",
     "SourceEdgeId",
     "SourceFaceId",
     "SourceLoopId",
@@ -88,10 +117,18 @@ __all__ = [
     "Vector2",
     "Vector3",
     "VertexId",
+    "analyse_face_region",
+    "build_edge_to_faces",
+    "build_face_adjacency",
     "build_mesh_fingerprint",
     "build_uv_correspondence",
+    "decompose_complex_segments",
     "extract_face_subset",
+    "face_edge_ids",
+    "is_simple_disk",
+    "materialize_decomposed_snapshots",
     "materialize_segment_snapshots",
     "segment_mesh",
+    "segment_mesh_a1",
     "transfer_uv_by_source_loop",
 ]
