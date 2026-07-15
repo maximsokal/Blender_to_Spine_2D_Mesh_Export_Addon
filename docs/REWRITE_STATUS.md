@@ -41,6 +41,13 @@ must not be merged into `main`.
 - generated vertices, faces, and corners are rejected because exact UV lineage
   cannot be proven.
 
+## Validation status
+
+- focused pure-Python domain and fake-Blender adapter tests pass;
+- GitHub Actions passes on Python 3.10 and Python 3.11;
+- the real Blender headless suite has not been added yet, so evaluated attribute
+  propagation still requires Blender 4.4 fixture verification before production use.
+
 ## Production path
 
 The legacy `main.save_uv_as_json()` path remains active. No UI operator has been
