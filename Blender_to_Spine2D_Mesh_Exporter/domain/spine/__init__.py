@@ -2,6 +2,17 @@
 
 from .golden import LegacyCompatibilityFingerprint, build_legacy_fingerprint
 from .legacy_profile import LegacyRigProfile
+from .legacy_rig_builder import (
+    LegacyRigBuildError,
+    LegacyRigBuildRequest,
+    LegacyRigBuildResult,
+    LegacyRigInfo,
+    LegacyZGroup,
+    LegacyZGroupBuildInfo,
+    UniformScaleMode,
+    build_legacy_rig,
+    calculate_uniform_scale,
+)
 from .model import (
     Bone,
     IKConstraint,
@@ -24,7 +35,13 @@ __all__ = [
     "Bone",
     "IKConstraint",
     "LegacyCompatibilityFingerprint",
+    "LegacyRigBuildError",
+    "LegacyRigBuildRequest",
+    "LegacyRigBuildResult",
+    "LegacyRigInfo",
     "LegacyRigProfile",
+    "LegacyZGroup",
+    "LegacyZGroupBuildInfo",
     "MeshAttachment",
     "Skin",
     "Slot",
@@ -34,9 +51,12 @@ __all__ = [
     "SpineValidationIssue",
     "SpineValidator",
     "TransformConstraint",
+    "UniformScaleMode",
     "WeightedVertex",
     "WeightedVertexInfluence",
     "build_legacy_fingerprint",
+    "build_legacy_rig",
+    "calculate_uniform_scale",
     "decode_weighted_vertices",
     "encode_weighted_vertices",
 ]
