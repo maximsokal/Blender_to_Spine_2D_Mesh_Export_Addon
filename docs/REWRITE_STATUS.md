@@ -1,7 +1,7 @@
 # Rewrite status
 
 The active rewrite branch is `rewrite/a1-domain-foundation`; A1 compatibility targets
-Spine 4.2.43. Deterministic geometry, loop-level UV lineage, transactional and semantic
+Spine 4.2.43. Deterministic geometry, loop-level UV lineage, transactional semantic
 multi-pass baking, typed Spine composition, connected `all_objects`, and both production
 export operators are implemented.
 
@@ -18,123 +18,153 @@ export operators are implemented.
 - standalone, connected, and mixed Connect-flag selections are supported;
 - one checked object remains standalone;
 - final JSON and every static/sequence texture share one atomic transaction;
-- Legacy remains an explicit selectable backend for both operators and is never an
-  automatic fallback;
-- library-level A1 visual options remain opt-in, while the Blender UI explicitly passes
-  its Scene properties;
-- connected shader graphs are analyzed from the active Material Output; unused editor
-  nodes do not change the bake plan;
-- semantic channels and external dependencies are stored in immutable graph snapshots;
-- a Blender-independent strategy registry converts material requirements into one or
-  more typed bake passes;
-- ordinary surface/image/procedural color uses lighting-independent `DIFFUSE` color
-  baking;
+- Legacy remains an explicit selectable backend and is never an automatic fallback;
+- connected shader graphs are analyzed from active Material Output; unused editor nodes do
+  not change the plan;
+- semantic channels and external dependencies are immutable graph snapshots;
+- a Blender-independent strategy registry creates one or more typed bake passes;
+- ordinary opaque surface/image/procedural color uses lighting-independent `DIFFUSE`;
 - pure Emission uses `EMIT`;
-- surface and Emission materials may coexist on one object and are automatically baked
-  through separate passes and composed into one texture;
-- one Principled material may contribute both Base Color and Emission Color through the
-  same automatic multi-pass pipeline;
-- per-polygon material slot indices are restored from the immutable bake snapshot only
-  after every temporary Blender material slot exists;
-- Blender-independent domain and parity tooling imports without a real `bpy` runtime;
+- surface and Emission contributions coexist through separate passes and composition;
+- Alpha and transparency are extracted through copied-material Emission proxies;
+- alpha-bearing surface RGB is evaluated independently as straight color, preventing
+  opacity-premultiplied dark output;
+- per-polygon material indices are restored only after temporary material slots exist;
+- Blender-independent domain/parity tooling imports without real `bpy`;
 - the add-on version is unchanged.
 
-## Semantic bake B1
-
-The B1 pipeline is:
+## Semantic bake B1 and B2
 
 ```text
 active connected shader graph
         -> semantic channels/dependencies
         -> BakeStrategyRegistry
         -> BakePassPlan[]
+        -> reversible copied-material preparation
         -> real Blender pass images
         -> BakeCompositePlan
-        -> one atomic final texture
+        -> one atomic straight-RGBA texture
 ```
 
-Current registered strategies:
+Registered strategies:
 
 - `SurfaceColorBakeStrategy`;
-- `EmissionBakeStrategy`.
+- `EmissionBakeStrategy`;
+- `AlphaBakeStrategy`.
 
-Current composition for mixed surface/emission output adds float RGB contributions,
-uses the maximum pass alpha, and clamps ordinary exported RGB. Single-pass output does
-not pass through the compositor, preserving prior output behavior.
+### Surface and emission
 
-When a caller requests `COMBINED` for a surface pass that will also be composed with an
-`EMIT` pass, the surface pass is normalized to `DIFFUSE`. `COMBINED` already contains
-emission and would otherwise count it twice.
+Opaque surface color uses `DIFFUSE Color`; emission uses `EMIT`. Mixed surface/emission
+adds float RGB contributions and clamps ordinary exported RGB. A surface pass requested
+as `COMBINED` is normalized to `DIFFUSE` when a separate emission pass exists, preventing
+double counting.
 
-Current explicit extension boundaries:
+### Alpha and straight color
 
-- Alpha is detected but still follows the historical surface pass; a dedicated alpha
-  extraction strategy belongs to B2;
-- node groups are marked as dependencies but are not recursively expanded yet;
-- view/camera/world/lighting dependencies are detected, but scene-aware strategies and
-  immutable scene context belong to B3;
-- Volume produces a structured missing camera-projection strategy error and belongs to
-  B4 rather than being silently flattened through UV baking.
+Alpha-bearing materials use independent passes:
 
-See `docs/REWRITE_BAKE_STRATEGIES.md` for the complete extension contract.
+```text
+straight surface color -> temporary Emission proxy -> EMIT
+material opacity       -> grayscale Emission proxy -> EMIT
+material emission      -> native EMIT when present
+```
+
+Final composition uses explicit routing:
+
+```text
+final.rgb   = clamp(sum(color passes))
+final.alpha = alpha_pass.red
+```
+
+Temporary proxy nodes are created only in copied materials and removed in `finally`.
+Original Material Output links are restored between passes. Source materials are never
+mutated.
+
+Current recursive extraction supports:
+
+- Principled Base Color and Alpha;
+- linked Image Color/Alpha and procedural socket graphs;
+- Transparent BSDF/Holdout;
+- Mix Shader in either transparent order;
+- nested Mix Shader;
+- Add Shader opacity/color composition;
+- animated sockets/drivers through per-frame evaluation;
+- opaque slots sharing an object with transparent slots;
+- pure transparent output.
+
+A graph `TIME` dependency now marks material/object analysis as animated in addition to
+image sequence/movie dependencies.
+
+### Executor boundaries
+
+- `bake_executor_core.py`: low-level validation, Blender temporary resources, atomic
+  reservations, and the sole real `bpy.ops.object.bake` call;
+- `semantic_bake_executor.py`: strategy execution, copied-material preparation, and
+  composition;
+- `bake_executor.py`: stable public facade preserving old imports and failure injection.
+
+See `docs/REWRITE_BAKE_STRATEGIES.md` for the full extension contract.
 
 ## Legacy-derived bake compatibility matrix
 
-The real Blender suite reconstructs failure-prone legacy inputs rather than checking
-only that a PNG file exists. Every output is decoded and must contain usable alpha/RGB
-pixels.
+Every output is decoded; a PNG signature alone is not accepted.
 
-Covered scenarios:
+Covered scenarios include:
 
-- one mesh with two standard Principled material slots and distinct baked colors;
-- generated Image Texture and procedural Checker materials;
-- separate surface and Emission slots on one object, with both colors present after
-  decoded-pixel composition;
-- one Principled graph with simultaneous Base Color and Emission Color;
-- three connected objects in one `all_objects` rig, each with multiple materials;
-- exactly one object exporting a three-frame sequence while the others remain static;
-- sequence frames must contain different decoded pixels;
-- sequence metadata is present only on the animated object's attachments;
-- one common JSON plus the exact expected static/sequence PNG set;
-- failure during the second sequence frame restores the previous JSON and every static
-  or sequence texture byte-for-byte, with no staged/backup leftovers;
-- active object, selection, mode, frame, scene bake settings, source node trees, and
-  temporary Blender datablocks are restored.
+- multiple Principled material slots with distinct colors;
+- generated Image Texture and procedural Checker;
+- separate surface and Emission slots;
+- one Principled graph with Base Color and Emission Color;
+- Principled constant Alpha;
+- linked Image Alpha;
+- Transparent/Mix Shader in both orders;
+- nested Mix Shader opacity and straight color;
+- pure Transparent material;
+- animated Alpha sequence with distinct decoded alpha values;
+- three connected objects in one `all_objects` rig with multiple materials;
+- exactly one sequence object while others remain static;
+- exact JSON/static PNG/sequence PNG output sets;
+- failure during sequence or alpha pass restores previous bytes with no staged leftovers;
+- active object, selection, mode, frame, scene settings, source node trees, and temporary
+  Blender datablocks are restored.
 
-The test matrix has found and fixed these production defects:
+The matrix has found and fixed production defects:
 
-1. `COMBINED` baking could return `FINISHED` and write a fully opaque black PNG when the
-   scene had no effective lighting;
-2. Blender clamped every temporary polygon material index to slot `0` because indices
-   were assigned before material slots were created;
-3. Blender RNA node/socket Python wrapper identity was not stable enough for graph
-   traversal; reachable graph matching now uses stable node names and socket links.
+1. `COMBINED` could return `FINISHED` with an opaque black PNG without lighting;
+2. Blender clamped polygon material indices to slot `0` when assigned before slots;
+3. Blender RNA wrapper identity was unstable for graph traversal;
+4. alpha-bearing `DIFFUSE Color` could lose straight RGB;
+5. graph `TIME` dependencies were omitted from object animated analysis.
 
 ## Validation
 
-- Python 3.10: 441 passed, 4 skipped;
-- Python 3.11: 441 passed, 4 skipped;
-- Blender 4.4 geometry, modifiers, UV, Cycles, semantic multi-pass, decoded bake pixels,
-  UV seams, parity, homogeneous multi-object, mixed multi-object, rollback, and
-  registered operator lifecycle tests pass;
-- real multi-pass tests verify separate Surface/Emission slots and one Principled
-  surface-plus-emission graph by decoded output pixels;
-- real single-operator tests verify Rewrite, explicit Legacy, no automatic fallback,
-  legacy JSON/texture naming, control icons, preview animation, and both disabled states;
-- the isolated fixture harness runs Legacy and Rewrite in separate Blender processes,
-  then runs semantic JSON and decoded image comparison from normal Python;
+- Python 3.10: 449 passed, 4 skipped;
+- Python 3.11: 449 passed, 4 skipped;
+- dedicated Blender 4.4 Alpha suite passes static, linked-image, nested, animated sequence,
+  pure-transparent, and alpha-pass rollback fixtures;
+- full Blender 4.4 geometry, modifiers, UV, Cycles, semantic multi-pass, legacy-derived
+  bake matrix, UV seams, parity, multi-object, rollback, operator lifecycle, fixture tools,
+  and isolated Legacy/Rewrite orchestration pass;
 - temporary Blender datablocks and source state are checked for leaks or mutation.
+
+## Explicit remaining boundaries
+
+- node groups are detected but internal group trees are not recursively expanded yet;
+- view/camera/world/lighting dependencies are detected, but B3 scene-aware context and
+  strategies are not implemented;
+- B2 alpha support does not imply correct Glass, Refraction, Transmission, Fresnel, Layer
+  Weight, Light Path, reflection, or lighting-preserving output;
+- Volume returns a structured missing camera-projection strategy error and belongs to B4;
+- HDR output/tone mapping remains a future output policy.
 
 ## Remaining production blockers
 
-1. representative real project `.blend` fixtures with actual v0.23 JSON and image
-   outputs;
+1. representative real project `.blend` fixtures with actual v0.23 JSON/images;
 2. accepted JSON and image parity reports for that fixture matrix;
-3. B2 dedicated alpha/transparency strategies before claiming broad transparent-material
-   support;
-4. B3 scene/camera-aware strategies before claiming reflections, transmission, or
+3. B3 scene/camera-aware strategies before claiming reflection, transmission, or
    lighting-preserving output;
-5. controlled removal of legacy orchestration only after real-project parity is proven;
-6. add-on version bump and release packaging only after the parity gate is accepted.
+4. recursive node-group analysis before claiming arbitrary group-based transparency;
+5. controlled removal of Legacy only after real-project parity;
+6. version bump and release packaging only after the parity gate is accepted.
 
 See `docs/REWRITE_A1_GOLDEN_PARITY.md` for the fixture and parity procedure.
