@@ -8,6 +8,7 @@ from math import isfinite
 from pathlib import Path
 from typing import Tuple
 
+from .context import ObjectBakeContext, SceneBakeContext
 from .graph import (
     MaterialDependencyKind,
     MaterialGraphSnapshot,
@@ -28,6 +29,7 @@ class BakeMode(str, Enum):
     DIFFUSE = "DIFFUSE"
     COMBINED = "COMBINED"
     EMIT = "EMIT"
+    ACTIVE_CAMERA = "ACTIVE_CAMERA"
 
 
 class BakeMaterialPolicy(str, Enum):
@@ -37,9 +39,20 @@ class BakeMaterialPolicy(str, Enum):
     CONSERVATIVE_MIXED = "CONSERVATIVE_MIXED"
 
 
+class BakeEvaluationScope(str, Enum):
+    """Context required to evaluate one material appearance strategy."""
+
+    LOCAL = "LOCAL"
+    SCENE = "SCENE"
+    CAMERA = "CAMERA"
+    AUXILIARY = "AUXILIARY"
+
+
 class BakeStrategyId(str, Enum):
     """Stable identifiers for independently executable bake strategies."""
 
+    CAMERA_COMBINED = "CAMERA_COMBINED"
+    SCENE_COMBINED = "SCENE_COMBINED"
     SURFACE_COLOR = "SURFACE_COLOR"
     EMISSION = "EMISSION"
     ALPHA = "ALPHA"
@@ -50,6 +63,7 @@ class MaterialPreparationMode(str, Enum):
     """How one temporary copied material is prepared for a specific bake pass."""
 
     PRESERVE = "PRESERVE"
+    ZERO_TO_EMISSION = "ZERO_TO_EMISSION"
     EXTRACT_ALPHA_TO_EMISSION = "EXTRACT_ALPHA_TO_EMISSION"
     OPAQUE_ALPHA_TO_EMISSION = "OPAQUE_ALPHA_TO_EMISSION"
 
@@ -302,6 +316,7 @@ class BakePassPlan:
     bake_mode: BakeMode
     material_slot_indices: Tuple[int, ...]
     semantic_channels: Tuple[MaterialSemanticChannel, ...]
+    evaluation_scope: BakeEvaluationScope = BakeEvaluationScope.LOCAL
     material_preparations: Tuple[MaterialSlotPreparation, ...] = ()
 
     def __post_init__(self) -> None:
@@ -311,6 +326,8 @@ class BakePassPlan:
             raise TypeError("strategy_id must be BakeStrategyId")
         if not isinstance(self.bake_mode, BakeMode):
             raise TypeError("bake_mode must be BakeMode")
+        if not isinstance(self.evaluation_scope, BakeEvaluationScope):
+            raise TypeError("evaluation_scope must be BakeEvaluationScope")
         if not isinstance(self.material_slot_indices, tuple) or not self.material_slot_indices:
             raise ValueError("material_slot_indices must be a non-empty tuple")
         if tuple(sorted(set(self.material_slot_indices))) != self.material_slot_indices:
@@ -342,12 +359,15 @@ class BakeCompositePlan:
     clamp_rgb: bool = True
     color_pass_indices: Tuple[int, ...] = ()
     alpha_pass_index: int | None = None
+    unpremultiply_color_by_alpha: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.mode, BakeCompositeMode):
             raise TypeError("mode must be BakeCompositeMode")
         if not isinstance(self.clamp_rgb, bool):
             raise TypeError("clamp_rgb must be bool")
+        if not isinstance(self.unpremultiply_color_by_alpha, bool):
+            raise TypeError("unpremultiply_color_by_alpha must be bool")
         if not isinstance(self.color_pass_indices, tuple):
             raise TypeError("color_pass_indices must be tuple")
         if self.color_pass_indices != tuple(sorted(set(self.color_pass_indices))):
@@ -361,9 +381,15 @@ class BakeCompositePlan:
         if self.mode is BakeCompositeMode.SINGLE:
             if self.alpha_pass_index is not None or self.color_pass_indices:
                 raise ValueError("SINGLE composition cannot declare pass routing")
+            if self.unpremultiply_color_by_alpha:
+                raise ValueError("SINGLE composition cannot request alpha unpremultiplication")
         elif self.mode is BakeCompositeMode.ADD_RGB_MAX_ALPHA:
             if self.alpha_pass_index is not None:
                 raise ValueError("ADD_RGB_MAX_ALPHA cannot declare alpha_pass_index")
+            if self.unpremultiply_color_by_alpha:
+                raise ValueError(
+                    "ADD_RGB_MAX_ALPHA cannot request explicit alpha unpremultiplication"
+                )
         elif self.mode is BakeCompositeMode.ADD_RGB_REPLACE_ALPHA:
             if self.alpha_pass_index is None:
                 raise ValueError("ADD_RGB_REPLACE_ALPHA requires alpha_pass_index")
@@ -379,12 +405,24 @@ class BakePlan:
     representative_task_index: int = 0
     passes: Tuple[BakePassPlan, ...] = ()
     composite: BakeCompositePlan = BakeCompositePlan()
+    object_context: ObjectBakeContext | None = None
+    scene_context: SceneBakeContext | None = None
 
     def __post_init__(self) -> None:
         if self.source_object_id != self.material_analysis.source_object_id:
             raise ValueError("source_object_id and material_analysis disagree")
         if not isinstance(self.bake_mode, BakeMode):
             raise TypeError("bake_mode must be BakeMode")
+        if self.object_context is not None:
+            if not isinstance(self.object_context, ObjectBakeContext):
+                raise TypeError("object_context must be ObjectBakeContext or None")
+            if self.object_context.source_object_id != self.source_object_id:
+                raise ValueError("object_context source_object_id disagrees with BakePlan")
+        if self.scene_context is not None and not isinstance(
+            self.scene_context,
+            SceneBakeContext,
+        ):
+            raise TypeError("scene_context must be SceneBakeContext or None")
         if not self.frame_tasks:
             raise ValueError("frame_tasks cannot be empty")
         actual_indices = tuple(task.task_index for task in self.frame_tasks)
@@ -440,6 +478,12 @@ class BakePlan:
             referenced_pass_indices.add(self.composite.alpha_pass_index)
         if referenced_pass_indices and max(referenced_pass_indices) >= len(self.passes):
             raise ValueError("composite plan references a missing bake pass")
+        if self.scene_aware and self.scene_context is None:
+            raise ValueError("scene-aware BakePlan requires scene_context")
+        if any(
+            item.evaluation_scope is BakeEvaluationScope.CAMERA for item in self.passes
+        ) and (self.scene_context is None or self.scene_context.camera is None):
+            raise ValueError("camera-aware BakePlan requires an active camera snapshot")
 
     @property
     def representative_task(self) -> BakeFrameTask:
@@ -456,6 +500,13 @@ class BakePlan:
     @property
     def requires_composition(self) -> bool:
         return self.composite.mode is not BakeCompositeMode.SINGLE
+
+    @property
+    def scene_aware(self) -> bool:
+        return any(
+            item.evaluation_scope in {BakeEvaluationScope.SCENE, BakeEvaluationScope.CAMERA}
+            for item in self.passes
+        )
 
 
 class BakePlanError(ValueError):
@@ -511,6 +562,9 @@ def _build_frame_tasks(settings: BakeSettings) -> Tuple[BakeFrameTask, ...]:
 def build_bake_plan(
     analysis: ObjectMaterialAnalysis,
     settings: BakeSettings,
+    *,
+    object_context: ObjectBakeContext | None = None,
+    scene_context: SceneBakeContext | None = None,
 ) -> BakePlan:
     """Build a complete plan through the deterministic strategy registry."""
 
@@ -518,10 +572,19 @@ def build_bake_plan(
         raise TypeError("analysis must be ObjectMaterialAnalysis")
     if not isinstance(settings, BakeSettings):
         raise TypeError("settings must be BakeSettings")
+    if object_context is not None and not isinstance(object_context, ObjectBakeContext):
+        raise TypeError("object_context must be ObjectBakeContext or None")
+    if scene_context is not None and not isinstance(scene_context, SceneBakeContext):
+        raise TypeError("scene_context must be SceneBakeContext or None")
 
     from .strategies import resolve_bake_strategy_plan
 
-    passes, composite = resolve_bake_strategy_plan(analysis, settings)
+    passes, composite = resolve_bake_strategy_plan(
+        analysis,
+        settings,
+        object_context=object_context,
+        scene_context=scene_context,
+    )
     tasks = _build_frame_tasks(settings)
     return BakePlan(
         source_object_id=analysis.source_object_id,
@@ -532,4 +595,6 @@ def build_bake_plan(
         representative_task_index=0,
         passes=passes,
         composite=composite,
+        object_context=object_context,
+        scene_context=scene_context,
     )
