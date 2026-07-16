@@ -22,17 +22,52 @@ are implemented.
   automatic fallback;
 - library-level A1 visual options remain opt-in, while the Blender UI explicitly passes
   its Scene properties;
+- A1 surface/image/procedural textures use lighting-independent `DIFFUSE` color baking;
+- pure Emission material sets use `EMIT`; unsupported mixed emission/surface slot sets
+  fail before producing a partially black texture;
+- per-polygon material slot indices are restored from the immutable bake snapshot only
+  after every temporary Blender material slot exists;
+- Blender-independent domain and parity tooling imports without a real `bpy` runtime;
 - the add-on version is unchanged.
+
+## Legacy-derived bake compatibility matrix
+
+The real Blender suite now reconstructs failure-prone legacy inputs rather than checking
+only that a PNG file exists. Every output is decoded and must contain usable alpha/RGB
+pixels.
+
+Covered scenarios:
+
+- one mesh with two standard Principled material slots and distinct baked colors;
+- generated Image Texture and procedural Checker materials;
+- three connected objects in one `all_objects` rig, each with multiple materials;
+- exactly one object exporting a three-frame sequence while the others remain static;
+- sequence frames must contain different decoded pixels;
+- sequence metadata is present only on the animated object's attachments;
+- one common JSON plus the exact expected static/sequence PNG set;
+- failure during the second sequence frame restores the previous JSON and every static
+  or sequence texture byte-for-byte, with no staged/backup leftovers;
+- active object, selection, mode, frame, scene bake settings, source node trees, and
+  temporary Blender datablocks are restored.
+
+This matrix found and fixed two production defects that the previous tests missed:
+
+1. `COMBINED` baking could return `FINISHED` and write a fully opaque black PNG when the
+   scene had no effective lighting;
+2. Blender clamped every temporary polygon material index to slot `0` because indices
+   were assigned before material slots were created.
 
 ## Validation
 
-- Python 3.10: 381 passed, 4 skipped;
-- Python 3.11: 381 passed, 4 skipped;
-- Blender 4.4 geometry, modifiers, UV, Cycles, UV seams, parity, homogeneous
-  multi-object, mixed multi-object, rollback, and registered operator lifecycle tests
-  pass;
+- Python 3.10: 425 passed, 4 skipped;
+- Python 3.11: 425 passed, 4 skipped;
+- Blender 4.4 geometry, modifiers, UV, Cycles, decoded bake pixels, UV seams, parity,
+  homogeneous multi-object, mixed multi-object, rollback, and registered operator
+  lifecycle tests pass;
 - real single-operator tests verify Rewrite, explicit Legacy, no automatic fallback,
   legacy JSON/texture naming, control icons, preview animation, and both disabled states;
+- the isolated fixture harness runs Legacy and Rewrite in separate Blender processes,
+  then runs semantic JSON and decoded image comparison from normal Python;
 - temporary Blender datablocks and source state are checked for leaks or mutation.
 
 ## Remaining production blockers
