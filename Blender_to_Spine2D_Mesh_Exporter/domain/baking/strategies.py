@@ -221,9 +221,6 @@ class SurfaceColorBakeStrategy:
         slots: Tuple[MaterialAnalysis, ...],
         settings: BakeSettings,
     ) -> BakeMode:
-        # DIFFUSE color from a shader with opacity can be attenuated/premultiplied by
-        # Blender. Any alpha-bearing local surface therefore evaluates its straight color
-        # through a temporary Emission proxy.
         if any(MaterialSemanticChannel.ALPHA in slot.semantic_channels for slot in slots):
             return BakeMode.EMIT
         if any(
@@ -387,10 +384,14 @@ class BakeStrategyRegistry:
             slot.slot_index: _slot_evaluation_scope(slot) for slot in usable
         }
         scene_slots = tuple(
-            slot for slot in usable if scope_by_slot[slot.slot_index] is BakeEvaluationScope.SCENE
+            slot
+            for slot in usable
+            if scope_by_slot[slot.slot_index] is BakeEvaluationScope.SCENE
         )
         camera_slots = tuple(
-            slot for slot in usable if scope_by_slot[slot.slot_index] is BakeEvaluationScope.CAMERA
+            slot
+            for slot in usable
+            if scope_by_slot[slot.slot_index] is BakeEvaluationScope.CAMERA
         )
         if (scene_slots or camera_slots) and scene_context is None:
             names = tuple(
@@ -428,6 +429,14 @@ class BakeStrategyRegistry:
             slot_indices = tuple(slot.slot_index for slot in matched)
             if strategy.evaluation_scope is not BakeEvaluationScope.AUXILIARY:
                 primary_covered_slots.update(slot_indices)
+            elif strategy.strategy_id is BakeStrategyId.ALPHA:
+                # Pure Transparent/Holdout has no RGB appearance pass. In that one case
+                # Alpha is both the only evaluable output and the final coverage pass.
+                primary_covered_slots.update(
+                    slot.slot_index
+                    for slot in matched
+                    if not (set(slot.semantic_channels) & _APPEARANCE_CHANNELS)
+                )
             resolved.append(
                 BakePassPlan(
                     pass_index=len(resolved),
