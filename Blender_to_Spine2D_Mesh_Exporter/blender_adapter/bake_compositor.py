@@ -160,6 +160,12 @@ def _compose_with_numpy(
                 dtype=np.float32,
             )
             result[3::4] = alpha_values[0::4]
+            if plan.unpremultiply_color_by_alpha:
+                alpha = result[3::4]
+                valid = alpha > 1e-8
+                for channel in (result[0::4], result[1::4], result[2::4]):
+                    np.divide(channel, alpha, out=channel, where=valid)
+                    channel[~valid] = 0.0
         else:
             raise BakeCompositeError(f"Unsupported composite mode: {plan.mode.value}")
 
@@ -206,7 +212,17 @@ def _compose_with_array(
                 raise BakeCompositeError("Composite alpha pass index is outside buffers")
             values = buffers[plan.alpha_pass_index].pixels
             for offset in range(0, value_count, 4):
-                result[offset + 3] = float(values[offset])
+                alpha = float(values[offset])
+                result[offset + 3] = alpha
+                if plan.unpremultiply_color_by_alpha:
+                    if alpha > 1e-8:
+                        result[offset] /= alpha
+                        result[offset + 1] /= alpha
+                        result[offset + 2] /= alpha
+                    else:
+                        result[offset] = 0.0
+                        result[offset + 1] = 0.0
+                        result[offset + 2] = 0.0
         else:
             raise BakeCompositeError(f"Unsupported composite mode: {plan.mode.value}")
 
