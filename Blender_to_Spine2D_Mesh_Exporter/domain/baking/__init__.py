@@ -1,4 +1,4 @@
-"""Blender-independent material analysis and texture baking plans."""
+"""Blender-independent material analysis and texture planning contracts."""
 
 from .context import (
     CameraBakeSnapshot,
@@ -8,7 +8,6 @@ from .context import (
     SceneBakeContext,
     WorldBakeSnapshot,
 )
-from .execution import BakeArtifact, BakeExecutionResult, BakeExecutionSettings
 from .graph import (
     MaterialDependencyKind,
     MaterialGraphSnapshot,
@@ -38,6 +37,16 @@ from .model import (
     build_bake_plan,
     sanitize_filename_stem,
 )
+from .camera_projection import (
+    CameraProjectionMode,
+    CameraProjectionPlan,
+    TexturePlan,
+    build_camera_projection_plan,
+    build_texture_plan,
+    requires_camera_projection,
+    texture_plan_output_paths,
+)
+from .execution import BakeArtifact, BakeExecutionResult, BakeExecutionSettings
 from .strategies import (
     AlphaBakeStrategy,
     BakeStrategyRegistry,
@@ -68,6 +77,8 @@ __all__ = [
     "BakeStrategyRegistry",
     "CameraBakeSnapshot",
     "CameraCombinedBakeStrategy",
+    "CameraProjectionMode",
+    "CameraProjectionPlan",
     "ColorManagementSnapshot",
     "EmissionBakeStrategy",
     "ImageDependency",
@@ -87,9 +98,14 @@ __all__ = [
     "ShaderNodeSnapshot",
     "SurfaceColorBakeStrategy",
     "TextureFormat",
+    "TexturePlan",
     "WorldBakeSnapshot",
     "build_bake_plan",
+    "build_camera_projection_plan",
     "build_default_bake_strategy_registry",
+    "build_texture_plan",
+    "requires_camera_projection",
     "resolve_bake_strategy_plan",
     "sanitize_filename_stem",
+    "texture_plan_output_paths",
 ]
