@@ -78,8 +78,8 @@ class A1SingleObjectExportSettings:
     bake_execution: BakeExecutionSettings = BakeExecutionSettings()
     rig_scale_mode: UniformScaleMode = UniformScaleMode.AVERAGE
     use_world_location_for_main_bone: bool = True
-    include_control_icons: bool = True
-    include_preview_animation: bool = True
+    include_control_icons: bool = False
+    include_preview_animation: bool = False
     json_indent: int = 2
 
     def __post_init__(self) -> None:
