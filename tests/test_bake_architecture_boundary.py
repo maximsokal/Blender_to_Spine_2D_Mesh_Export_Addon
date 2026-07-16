@@ -43,9 +43,11 @@ def test_bake_helpers_use_no_operator_attributes():
         "bake_material_preparation.py",
         "bake_materials.py",
         "bake_scene_state.py",
+        "camera_projection_executor.py",
         "material_analyzer.py",
         "semantic_bake_executor.py",
         "shader_graph_analyzer.py",
+        "texture_executor.py",
     ):
         path = ROOT / "blender_adapter" / filename
         source = path.read_text(encoding="utf-8")
@@ -95,6 +97,26 @@ def test_object_bake_operator_is_confined_to_core_helper():
     assert function_names == {"_call_bake_operator"}
 
 
+def test_render_operator_is_confined_to_public_failure_injection_hook():
+    path = ROOT / "blender_adapter" / "bake_executor.py"
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    operator_attributes = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and _attribute_path(node).endswith(".ops.render.render")
+    ]
+
+    assert operator_attributes
+    function_names = {
+        _function_for_line(tree, node.lineno).name
+        for node in operator_attributes
+        if _function_for_line(tree, node.lineno) is not None
+    }
+    assert function_names == {"_call_render_operator"}
+
+
 def test_public_executor_is_a_small_facade():
     path = ROOT / "blender_adapter" / "bake_executor.py"
     source = path.read_text(encoding="utf-8")
@@ -104,6 +126,6 @@ def test_public_executor_is_a_small_facade():
         for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    assert function_names == {"_call_bake_operator"}
-    assert "semantic_bake_executor" in source
+    assert function_names == {"_call_bake_operator", "_call_render_operator"}
+    assert "texture_executor" in source
     assert "bake_executor_core" in source
