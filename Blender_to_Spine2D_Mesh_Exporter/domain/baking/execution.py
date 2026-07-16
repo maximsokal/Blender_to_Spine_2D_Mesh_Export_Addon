@@ -1,4 +1,4 @@
-"""Immutable settings and results used by the Blender bake executor."""
+"""Immutable settings and results used by Blender texture executors."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from math import isfinite
 from pathlib import Path
 from typing import Tuple
 
-from .model import BakePlan
+from .camera_projection import TexturePlan
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,25 +64,27 @@ class BakeArtifact:
 
 @dataclass(frozen=True, slots=True)
 class BakeExecutionResult:
-    plan: BakePlan
+    plan: TexturePlan
     artifacts: Tuple[BakeArtifact, ...]
 
     def __post_init__(self) -> None:
+        from .model import BakePlan
+
         if not isinstance(self.plan, BakePlan):
-            raise TypeError("plan must be BakePlan")
+            raise TypeError("plan must be BakePlan or CameraProjectionPlan")
         if not isinstance(self.artifacts, tuple):
             raise TypeError("artifacts must be tuple")
         if len(self.artifacts) != len(self.plan.frame_tasks):
-            raise ValueError("one artifact is required for every bake frame task")
+            raise ValueError("one artifact is required for every texture frame task")
         for task, artifact in zip(self.plan.frame_tasks, self.artifacts):
             if artifact.task_index != task.task_index:
-                raise ValueError("artifact task_index does not match BakePlan")
+                raise ValueError("artifact task_index does not match plan")
             if artifact.timeline_frame != task.timeline_frame:
-                raise ValueError("artifact timeline_frame does not match BakePlan")
+                raise ValueError("artifact timeline_frame does not match plan")
             if artifact.image_name != task.image_name:
-                raise ValueError("artifact image_name does not match BakePlan")
+                raise ValueError("artifact image_name does not match plan")
             if artifact.output_path != task.output_path.resolve(strict=False):
-                raise ValueError("artifact output_path does not match BakePlan")
+                raise ValueError("artifact output_path does not match plan")
 
     @property
     def representative_artifact(self) -> BakeArtifact:
