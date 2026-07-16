@@ -6,7 +6,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
+from math import isfinite
+from pathlib import Path, PurePosixPath
 import sys
 import traceback
 from typing import Any, Mapping, Sequence
@@ -126,7 +127,9 @@ def _context_snapshot() -> dict[str, Any]:
     active = bpy.context.view_layer.objects.active
     return {
         "active_object": None if active is None else active.name_full,
-        "selected_objects": sorted(item.name_full for item in bpy.context.selected_objects),
+        "selected_objects": sorted(
+            item.name_full for item in bpy.context.selected_objects
+        ),
         "mode": bpy.context.mode,
         "frame_current": bpy.context.scene.frame_current,
         "render_engine": bpy.context.scene.render.engine,
@@ -171,6 +174,40 @@ def _require_string_array(payload: Mapping[str, Any], key: str) -> tuple[str, ..
     if len(value) != len(set(value)):
         raise FixtureWorkerError(f"payload.{key} contains duplicates")
     return tuple(value)
+
+
+def _integral_int(
+    value: Any,
+    label: str,
+    *,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise FixtureWorkerError(f"{label} must be an integer")
+    numeric = float(value)
+    if not isfinite(numeric) or not numeric.is_integer():
+        raise FixtureWorkerError(f"{label} must be an integer without rounding")
+    resolved = int(numeric)
+    if resolved < minimum or (maximum is not None and resolved > maximum):
+        suffix = f" and <= {maximum}" if maximum is not None else ""
+        raise FixtureWorkerError(f"{label} must be >= {minimum}{suffix}")
+    return resolved
+
+
+def _assign_exact_int_property(
+    owner: Any,
+    property_name: str,
+    requested: int,
+    label: str,
+) -> None:
+    setattr(owner, property_name, requested)
+    actual = int(getattr(owner, property_name))
+    if actual != requested:
+        raise FixtureWorkerError(
+            f"Blender normalized {label} from {requested} to {actual}; "
+            "the fixture must contain a value accepted exactly by the UI property"
+        )
 
 
 def _resolve_objects(names: Sequence[str]) -> tuple[Any, ...]:
@@ -221,11 +258,35 @@ def _configure_scene(payload: Mapping[str, Any], backend: str) -> None:
     )
     output_directory.mkdir(parents=True, exist_ok=True)
 
-    scene.spine2d_texture_size = int(settings.get("texture_size", 1024))
+    texture_size = _integral_int(
+        settings.get("texture_size", 1024),
+        "settings.texture_size",
+        minimum=64,
+        maximum=4096,
+    )
+    if texture_size % 2:
+        raise FixtureWorkerError("settings.texture_size must be even")
+    angle_limit = _integral_int(
+        settings.get("angle_limit", 30),
+        "settings.angle_limit",
+        minimum=1,
+        maximum=89,
+    )
+    _assign_exact_int_property(
+        scene,
+        "spine2d_texture_size",
+        texture_size,
+        "texture_size",
+    )
+    _assign_exact_int_property(
+        scene,
+        "spine2d_angle_limit",
+        angle_limit,
+        "angle_limit",
+    )
     scene.spine2d_json_path = str(output_directory)
     scene.spine2d_images_path = str(settings.get("images_path", "images"))
     scene.spine2d_seam_maker_mode = str(settings.get("seam_mode", "AUTO"))
-    scene.spine2d_angle_limit = float(settings.get("angle_limit", 30.0))
     scene.spine2d_control_icons = bool(settings.get("control_icons", True))
     scene.spine2d_export_preview_animation = bool(
         settings.get("preview_animation", True)
@@ -242,8 +303,28 @@ def _configure_scene(payload: Mapping[str, Any], backend: str) -> None:
 
     if mode == "single":
         scene.spine2d_single_export_backend = backend
-        scene.spine2d_bake_frame_start = int(sequence.get("start_frame", 0))
-        scene.spine2d_frames_for_render = int(sequence.get("frame_count", 0))
+        start_frame = _integral_int(
+            sequence.get("start_frame", 0),
+            "settings.sequence.start_frame",
+            minimum=0,
+        )
+        frame_count = _integral_int(
+            sequence.get("frame_count", 0),
+            "settings.sequence.frame_count",
+            minimum=0,
+        )
+        _assign_exact_int_property(
+            scene,
+            "spine2d_bake_frame_start",
+            start_frame,
+            "sequence.start_frame",
+        )
+        _assign_exact_int_property(
+            scene,
+            "spine2d_frames_for_render",
+            frame_count,
+            "sequence.frame_count",
+        )
     elif mode == "multi":
         scene.spine2d_multi_export_backend = backend
         for name in selected_names:
@@ -255,11 +336,27 @@ def _configure_scene(payload: Mapping[str, Any], backend: str) -> None:
                 per_object_sequence.get(name, {}),
                 f"per_object_sequence.{name}",
             )
-            obj.spine2d_bake_settings.bake_frame_start = int(
-                raw_sequence.get("start_frame", 0)
+            start_frame = _integral_int(
+                raw_sequence.get("start_frame", 0),
+                f"per_object_sequence.{name}.start_frame",
+                minimum=0,
             )
-            obj.spine2d_bake_settings.frames_for_render = int(
-                raw_sequence.get("frame_count", 0)
+            frame_count = _integral_int(
+                raw_sequence.get("frame_count", 0),
+                f"per_object_sequence.{name}.frame_count",
+                minimum=0,
+            )
+            _assign_exact_int_property(
+                obj.spine2d_bake_settings,
+                "bake_frame_start",
+                start_frame,
+                f"{name}.bake_frame_start",
+            )
+            _assign_exact_int_property(
+                obj.spine2d_bake_settings,
+                "frames_for_render",
+                frame_count,
+                f"{name}.frames_for_render",
             )
     else:
         raise FixtureWorkerError(f"Unsupported fixture mode: {mode}")
@@ -268,9 +365,13 @@ def _configure_scene(payload: Mapping[str, Any], backend: str) -> None:
 def _expected_json_name(payload: Mapping[str, Any]) -> str:
     override = payload.get("expected_json_name")
     if override is not None:
-        if not isinstance(override, str) or not override.endswith(".json"):
+        if not isinstance(override, str):
             raise FixtureWorkerError("expected_json_name must be a .json filename")
-        return override
+        normalized = override.replace("\\", "/")
+        path = PurePosixPath(normalized)
+        if len(path.parts) != 1 or path.suffix.lower() != ".json":
+            raise FixtureWorkerError("expected_json_name must be a safe .json filename")
+        return normalized
     active = sanitize_filename_stem(_require_string(payload, "active_object"))
     mode = _require_string(payload, "mode").lower()
     selected_count = len(_require_string_array(payload, "selected_objects"))
