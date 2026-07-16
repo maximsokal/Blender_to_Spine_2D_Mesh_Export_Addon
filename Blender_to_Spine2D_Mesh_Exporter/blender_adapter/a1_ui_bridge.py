@@ -132,10 +132,14 @@ def _common_object_settings(
         prefix=object_name,
         output_stem=sanitize_filename_stem(object_name),
         json_output_stem=json_output_stem,
-        # The legacy UI exported original object data. Evaluated modifier export remains
-        # available through the typed API but is never enabled silently by UI migration.
         source_geometry_mode=A1SourceGeometryMode.ORIGINAL,
         uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
+        include_control_icons=bool(
+            getattr(scene, "spine2d_control_icons", True)
+        ),
+        include_preview_animation=bool(
+            getattr(scene, "spine2d_export_preview_animation", True)
+        ),
     )
 
 
@@ -176,7 +180,6 @@ def _build_single_object_settings(
         images_relative_path=images_relative_path,
         sequence_start_frame=int(getattr(scene, "spine2d_bake_frame_start", 0)),
         sequence_frame_count=int(getattr(scene, "spine2d_frames_for_render", 0)),
-        # Preserve the legacy public filename while keeping the legacy texture stem.
         json_output_stem=f"{sanitize_filename_stem(object_name)}_merged",
     )
 
@@ -260,8 +263,6 @@ def export_selected_objects_a1(context: Any) -> ExportResult:
         source for source, obj in zip(sources, objects) if not _connect_enabled(obj)
     )
 
-    # One checked object cannot form a connected rig and therefore keeps the historical
-    # behaviour of being exported as standalone.
     if len(connected) < 2:
         connected = ()
         standalone = sources
