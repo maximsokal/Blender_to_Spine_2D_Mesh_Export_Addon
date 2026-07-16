@@ -47,7 +47,9 @@ def _validate_execution_input(
     source_obj: Any,
     target_snapshot: MeshSnapshot,
     plan: BakePlan,
-) -> tuple[int, ...]:
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Validate Blender/domain inputs and return used slots plus per-face bindings."""
+
     if source_obj is None or getattr(source_obj, "type", None) != "MESH":
         raise BakeExecutionError("source_obj must be a Blender MESH object")
     if not isinstance(target_snapshot, MeshSnapshot):
@@ -70,9 +72,10 @@ def _validate_execution_input(
             f"Source object has {len(source_slots)} material slots but BakePlan was "
             f"built from {len(plan.material_analysis.slots)} slots"
         )
-    used_material_indices = tuple(
-        sorted({face.material_index for face in target_snapshot.faces})
+    face_material_indices = tuple(
+        int(face.material_index) for face in target_snapshot.faces
     )
+    used_material_indices = tuple(sorted(set(face_material_indices)))
     if not used_material_indices:
         raise BakeExecutionError("Target snapshot contains no material references")
     if max(used_material_indices) >= len(source_slots):
@@ -80,7 +83,7 @@ def _validate_execution_input(
             f"Target snapshot references material slot {max(used_material_indices)}, "
             f"but source object has only {len(source_slots)} slots"
         )
-    return used_material_indices
+    return used_material_indices, face_material_indices
 
 
 def _activate_uv_layer(mesh: Any, layer_name: str) -> None:
@@ -234,7 +237,9 @@ def _require_reservations(
         )
     for task, reservation in zip(plan.frame_tasks, resolved):
         if not isinstance(reservation, AtomicOutputReservation):
-            raise TypeError("reservations must contain AtomicOutputReservation values")
+            raise TypeError(
+                "reservations must contain AtomicOutputReservation values"
+            )
         expected_path = task.output_path.expanduser().resolve(strict=False)
         if reservation.final_path != expected_path:
             raise BakeExecutionError(
@@ -256,7 +261,7 @@ def _run_bake_to_reservations(
 ) -> None:
     """Render every frame into pre-reserved staged files without committing them."""
 
-    used_material_indices = _validate_execution_input(
+    used_material_indices, face_material_indices = _validate_execution_input(
         source_obj,
         target_snapshot,
         plan,
@@ -287,6 +292,7 @@ def _run_bake_to_reservations(
                 source_obj,
                 temporary.object,
                 used_material_indices=used_material_indices,
+                face_material_indices=face_material_indices,
             ) as prepared_materials:
                 with activate_object_for_operator(
                     temporary.object,
@@ -302,7 +308,7 @@ def _run_bake_to_reservations(
                             ) from exc
 
                     # Blender exposes baking only as an operator. One call is
-                    # therefore required for each explicit sequence frame.
+                    # required for every explicit sequence frame.
                     for task, reservation in zip(
                         plan.frame_tasks,
                         resolved_reservations,
@@ -336,13 +342,7 @@ def stage_bake_plan_outputs(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> tuple[AtomicOutputReservation, ...]:
-    """Bake into a caller-owned atomic transaction without committing outputs.
-
-    This is the integration point used by the single-object exporter so texture
-    files and the final Spine JSON become visible in one shared commit. The caller
-    owns commit/rollback; all Blender state and temporary datablocks are still
-    restored before this function returns.
-    """
+    """Bake into a caller-owned transaction without committing outputs."""
 
     if not isinstance(output_transaction, AtomicFileTransaction):
         raise TypeError("output_transaction must be AtomicFileTransaction")
@@ -390,7 +390,7 @@ def build_bake_execution_result(
     plan: BakePlan,
     committed_paths: Iterable[Path],
 ) -> BakeExecutionResult:
-    """Create the typed result after a transaction has committed bake files."""
+    """Create the typed result after a transaction committed bake files."""
 
     if not isinstance(plan, BakePlan):
         raise TypeError("plan must be BakePlan")
