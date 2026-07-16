@@ -64,9 +64,41 @@ def test_output_paths_are_normalized_and_remain_under_export_root(tmp_path):
     paths = resolve_a1_output_paths("Object", settings)
 
     assert paths.output_stem == "My_Mesh"
+    assert paths.json_output_stem == "My_Mesh"
     assert paths.json_path == tmp_path.resolve() / "My_Mesh.json"
     assert paths.image_directory == tmp_path.resolve() / "textures" / "spine"
     assert paths.image_relative_directory == "textures/spine"
+
+
+def test_json_stem_can_differ_from_texture_and_attachment_stem(tmp_path):
+    settings = build_settings(
+        tmp_path,
+        output_stem="Hero",
+        json_output_stem="Hero:merged",
+    )
+    paths = resolve_a1_output_paths("Object", settings)
+    analysis = ObjectMaterialAnalysis(
+        source_object_id="Object",
+        slots=(
+            MaterialAnalysis(
+                slot_index=0,
+                material_name="Material",
+                kind=MaterialKind.SOLID_COLOR,
+            ),
+        ),
+    )
+    plan = build_bake_plan(
+        analysis,
+        build_a1_bake_settings("Object", settings),
+    )
+
+    assert paths.output_stem == "Hero"
+    assert paths.json_output_stem == "Hero_merged"
+    assert paths.json_path == tmp_path.resolve() / "Hero_merged.json"
+    assert plan.representative_task.output_path == (
+        tmp_path.resolve() / "textures" / "spine" / "Hero_Baked.png"
+    )
+    assert build_a1_attachment_path(plan, paths) == "textures/spine/Hero_Baked"
 
 
 @pytest.mark.parametrize(
