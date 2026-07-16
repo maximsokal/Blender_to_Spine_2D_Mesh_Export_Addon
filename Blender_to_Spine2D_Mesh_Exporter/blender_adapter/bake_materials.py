@@ -8,6 +8,8 @@ import logging
 from typing import Any, Iterable, Iterator, Tuple
 from uuid import uuid4
 
+from ..domain.baking import BakePassPlan
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,12 +22,24 @@ class PreparedBakeMaterials:
     materials: Tuple[Any, ...]
     image_nodes: Tuple[Any, ...]
     placeholder_slot_indices: Tuple[int, ...]
+    used_material_indices: Tuple[int, ...]
 
     def assign_image(self, image: Any) -> None:
         if image is None:
             raise BakeMaterialError("image cannot be None")
         for node in self.image_nodes:
             node.image = image
+
+    @contextmanager
+    def prepare_pass(self, pass_plan: BakePassPlan) -> Iterator[None]:
+        """Apply one pass preparation only to the owned temporary material copies."""
+
+        if not isinstance(pass_plan, BakePassPlan):
+            raise TypeError("pass_plan must be BakePassPlan")
+        from .bake_material_preparation import temporary_prepare_material_pass
+
+        with temporary_prepare_material_pass(self.materials, pass_plan):
+            yield
 
 
 def _load_bpy() -> Any:
@@ -115,13 +129,7 @@ def _apply_face_material_indices(
     *,
     material_slot_count: int,
 ) -> None:
-    """Restore polygon-slot bindings only after Blender material slots exist.
-
-    Blender clamps ``polygon.material_index`` to zero when it is assigned before the
-    mesh has enough material slots. ``temporary_mesh_object`` is intentionally
-    material-agnostic, so the correct binding must be applied here after all copied
-    slots have been appended.
-    """
+    """Restore polygon-slot bindings only after Blender material slots exist."""
 
     if not isinstance(material_slot_count, int) or material_slot_count < 0:
         raise ValueError("material_slot_count must be a non-negative integer")
@@ -234,6 +242,7 @@ def temporary_bake_materials(
             materials=tuple(copied_materials),
             image_nodes=tuple(image_nodes),
             placeholder_slot_indices=tuple(placeholder_indices),
+            used_material_indices=used,
         )
         yield prepared
     finally:
