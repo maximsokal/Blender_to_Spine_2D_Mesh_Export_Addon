@@ -10,6 +10,7 @@ on:
       - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/semantic_bake_executor.py"
       - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/shader_graph_analyzer.py"
       - "tests/blender_headless/run_alpha_bake_integration.py"
+      - "tests/blender_headless/run_alpha_sequence_rollback_integration.py"
   workflow_dispatch:
 
 permissions:
@@ -27,7 +28,7 @@ env:
 jobs:
   blender-alpha-headless:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -68,11 +69,22 @@ jobs:
             --python tests/blender_headless/run_alpha_bake_integration.py \
             2>&1 | tee test-results/blender-alpha-bake.log
 
-      - name: Upload alpha bake log
+      - name: Run alpha sequence nested and rollback tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_alpha_sequence_rollback_integration.py \
+            2>&1 | tee test-results/blender-alpha-extended.log
+
+      - name: Upload alpha bake logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: blender-4.4-alpha-bake-log
-          path: test-results/blender-alpha-bake.log
+          name: blender-4.4-alpha-bake-logs
+          path: test-results/blender-alpha-*.log
           if-no-files-found: warn
           retention-days: 7
