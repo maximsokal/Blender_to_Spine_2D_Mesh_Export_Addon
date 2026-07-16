@@ -267,6 +267,13 @@ def _slot_requires_procedural_mode(
     return False
 
 
+def _slot_uses_emission_surface(slot: MaterialAnalysis) -> bool:
+    """Identify common pure-Emission node trees without guessing mixed shaders."""
+
+    node_types = set(slot.node_types)
+    return "EMISSION" in node_types and "BSDF_PRINCIPLED" not in node_types
+
+
 def _select_bake_mode(
     analysis: ObjectMaterialAnalysis,
     settings: BakeSettings,
@@ -282,6 +289,17 @@ def _select_bake_mode(
     usable = tuple(slot for slot in analysis.slots if slot.kind is not MaterialKind.EMPTY)
     if not usable:
         raise BakePlanError("object has no usable materials")
+
+    emission_flags = tuple(_slot_uses_emission_surface(slot) for slot in usable)
+    if all(emission_flags):
+        return BakeMode.EMIT
+    if any(emission_flags):
+        names = tuple(slot.material_name or f"slot-{slot.slot_index}" for slot in usable)
+        raise BakePlanError(
+            "emission-only and surface materials cannot share one deterministic bake "
+            f"pass yet: {names}"
+        )
+
     if any(
         _slot_requires_procedural_mode(slot, settings.material_policy)
         for slot in usable
