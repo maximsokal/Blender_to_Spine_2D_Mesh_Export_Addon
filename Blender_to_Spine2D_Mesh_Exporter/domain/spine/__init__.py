@@ -45,6 +45,11 @@ from .legacy_rig_builder import (
     build_legacy_rig,
     calculate_uniform_scale,
 )
+from .legacy_visuals import (
+    apply_legacy_visual_options,
+    build_legacy_control_slots_and_attachments,
+    build_legacy_preview_animation,
+)
 from .model import (
     Bone,
     IKConstraint,
@@ -121,10 +126,13 @@ __all__ = [
     "UniformScaleMode",
     "WeightedVertex",
     "WeightedVertexInfluence",
+    "apply_legacy_visual_options",
     "build_connected_group_document",
+    "build_legacy_control_slots_and_attachments",
     "build_legacy_fingerprint",
     "build_legacy_mesh_attachment",
     "build_legacy_mesh_document",
+    "build_legacy_preview_animation",
     "build_legacy_rig",
     "calculate_uniform_scale",
     "compare_a1_exports",
