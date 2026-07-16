@@ -86,6 +86,12 @@ class SurfaceColorBakeStrategy:
         slots: Tuple[MaterialAnalysis, ...],
         settings: BakeSettings,
     ) -> BakeMode:
+        # DIFFUSE color from a shader with opacity can be attenuated/premultiplied by
+        # Blender. Any alpha-bearing surface therefore evaluates its straight color
+        # through a temporary Emission proxy. The adapter applies the same proxy to all
+        # surface slots in that object so one pass never mixes incompatible bake modes.
+        if any(MaterialSemanticChannel.ALPHA in slot.semantic_channels for slot in slots):
+            return BakeMode.EMIT
         if any(
             _slot_requires_procedural_mode(slot, settings.material_policy)
             for slot in slots
@@ -99,6 +105,9 @@ class SurfaceColorBakeStrategy:
         usable_slots: Tuple[MaterialAnalysis, ...],
     ) -> Tuple[MaterialSlotPreparation, ...]:
         del matched_slots, usable_slots
+        # Surface-color Emission proxy preparation is selected by the typed strategy ID
+        # plus its EMIT bake mode. Alpha uses explicit per-slot modes below because it
+        # must distinguish extracted opacity from opaque coverage.
         return ()
 
 
