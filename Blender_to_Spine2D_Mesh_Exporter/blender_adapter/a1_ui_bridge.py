@@ -17,6 +17,7 @@ from ..domain.baking import sanitize_filename_stem
 from ..domain.uv import UvUnwrapSettings
 from .a1_mixed_object_export import export_a1_mixed_object
 from .a1_multi_object_export import A1MultiObjectSource, export_a1_multi_object
+from .a1_single_object_export import export_a1_single_object
 
 
 def _load_bpy() -> Any:
@@ -36,6 +37,17 @@ def _object_name(obj: Any) -> str:
     if not value:
         raise ValueError("Selected mesh object has an empty name")
     return value
+
+
+def _active_mesh(context: Any) -> Any:
+    obj = getattr(context, "active_object", None)
+    if obj is None:
+        raise ValueError("There is no active object")
+    if getattr(obj, "type", None) != "MESH":
+        raise ValueError(f"The active object '{_object_name(obj)}' is not a Mesh")
+    if getattr(obj, "data", None) is None:
+        raise ValueError(f"The active Mesh object '{_object_name(obj)}' has no data")
+    return obj
 
 
 def _ordered_selected_meshes(context: Any) -> Tuple[Any, ...]:
@@ -79,23 +91,30 @@ def _resolve_images_relative_path(scene: Any) -> str:
     return normalized or "images"
 
 
+def _texture_size(scene: Any) -> int:
+    value = int(getattr(scene, "spine2d_texture_size", 1024))
+    if value <= 0:
+        raise ValueError(f"Texture size must be positive, got {value}")
+    return value
+
+
 def _connect_enabled(obj: Any) -> bool:
     settings = getattr(obj, "spine2d_connect_settings", None)
     return bool(settings is not None and getattr(settings, "enabled", False))
 
 
-def _build_object_settings(
+def _common_object_settings(
     obj: Any,
     scene: Any,
     *,
     output_directory: Path,
     texture_size: int,
     images_relative_path: str,
+    sequence_start_frame: int,
+    sequence_frame_count: int,
+    json_output_stem: str | None = None,
 ) -> A1SingleObjectExportSettings:
     object_name = _object_name(obj)
-    bake = getattr(obj, "spine2d_bake_settings", None)
-    frame_count = max(0, int(getattr(bake, "frames_for_render", 0)))
-    start_frame = max(0, int(getattr(bake, "bake_frame_start", 0)))
     seam_mode = str(getattr(scene, "spine2d_seam_maker_mode", "AUTO"))
     angle_limit = float(getattr(scene, "spine2d_angle_limit", 30.0))
     return A1SingleObjectExportSettings(
@@ -107,15 +126,58 @@ def _build_object_settings(
             seam_mode=seam_mode,
             angle_limit_degrees=angle_limit,
             bake_margin=4,
-            sequence_start_frame=start_frame,
-            sequence_frame_count=frame_count,
+            sequence_start_frame=max(0, int(sequence_start_frame)),
+            sequence_frame_count=max(0, int(sequence_frame_count)),
         ),
         prefix=object_name,
         output_stem=sanitize_filename_stem(object_name),
-        # The legacy UI exported object data, not an evaluated modifier result. Modifier
-        # export remains available through the typed API but is not silently enabled.
+        json_output_stem=json_output_stem,
+        # The legacy UI exported original object data. Evaluated modifier export remains
+        # available through the typed API but is never enabled silently by UI migration.
         source_geometry_mode=A1SourceGeometryMode.ORIGINAL,
         uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
+    )
+
+
+def _build_multi_object_settings(
+    obj: Any,
+    scene: Any,
+    *,
+    output_directory: Path,
+    texture_size: int,
+    images_relative_path: str,
+) -> A1SingleObjectExportSettings:
+    bake = getattr(obj, "spine2d_bake_settings", None)
+    return _common_object_settings(
+        obj,
+        scene,
+        output_directory=output_directory,
+        texture_size=texture_size,
+        images_relative_path=images_relative_path,
+        sequence_start_frame=int(getattr(bake, "bake_frame_start", 0)),
+        sequence_frame_count=int(getattr(bake, "frames_for_render", 0)),
+    )
+
+
+def _build_single_object_settings(
+    obj: Any,
+    scene: Any,
+    *,
+    output_directory: Path,
+    texture_size: int,
+    images_relative_path: str,
+) -> A1SingleObjectExportSettings:
+    object_name = _object_name(obj)
+    return _common_object_settings(
+        obj,
+        scene,
+        output_directory=output_directory,
+        texture_size=texture_size,
+        images_relative_path=images_relative_path,
+        sequence_start_frame=int(getattr(scene, "spine2d_bake_frame_start", 0)),
+        sequence_frame_count=int(getattr(scene, "spine2d_frames_for_render", 0)),
+        # Preserve the legacy public filename while keeping the legacy texture stem.
+        json_output_stem=f"{sanitize_filename_stem(object_name)}_merged",
     )
 
 
@@ -135,7 +197,7 @@ def _build_sources(
                 source_object=obj,
                 component_id=f"object_{index}:{object_name}",
                 animation_namespace=f"object_{index}",
-                settings=_build_object_settings(
+                settings=_build_multi_object_settings(
                     obj,
                     scene,
                     output_directory=output_directory,
@@ -147,10 +209,33 @@ def _build_sources(
     return tuple(result)
 
 
-def export_selected_objects_a1(
-    context: Any,
-) -> ExportResult:
-    """Export current selected meshes through standalone, connected, or mixed A1."""
+def export_active_object_a1(context: Any) -> ExportResult:
+    """Export the active Mesh through the complete single-object A1 service."""
+
+    if context is None:
+        raise ValueError("context cannot be None")
+    scene = getattr(context, "scene", None)
+    if scene is None:
+        raise ValueError("context.scene is missing")
+    obj = _active_mesh(context)
+    output_directory = _resolve_output_directory(scene)
+    settings = _build_single_object_settings(
+        obj,
+        scene,
+        output_directory=output_directory,
+        texture_size=_texture_size(scene),
+        images_relative_path=_resolve_images_relative_path(scene),
+    )
+    return export_a1_single_object(
+        obj,
+        settings,
+        context=context,
+        scene=scene,
+    )
+
+
+def export_selected_objects_a1(context: Any) -> ExportResult:
+    """Export selected meshes through standalone, connected, or mixed A1."""
 
     if context is None:
         raise ValueError("context cannot be None")
@@ -159,7 +244,7 @@ def export_selected_objects_a1(
         raise ValueError("context.scene is missing")
     objects = _ordered_selected_meshes(context)
     output_directory = _resolve_output_directory(scene)
-    texture_size = max(2, int(getattr(scene, "spine2d_texture_size", 1024)))
+    texture_size = _texture_size(scene)
     images_relative_path = _resolve_images_relative_path(scene)
     sources = _build_sources(
         objects,
