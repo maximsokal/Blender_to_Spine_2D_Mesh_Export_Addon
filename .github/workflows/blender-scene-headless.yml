@@ -1,0 +1,80 @@
+name: Blender 4.4 Scene Bake
+
+on:
+  pull_request:
+    branches: ["main", "master"]
+    paths:
+      - ".github/workflows/blender-scene-headless.yml"
+      - "Blender_to_Spine2D_Mesh_Exporter/domain/baking/**"
+      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/a1_object_preparation.py"
+      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/bake_*.py"
+      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/scene_*.py"
+      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/semantic_bake_executor.py"
+      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/shader_graph_analyzer.py"
+      - "tests/blender_headless/run_scene_bake_integration.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blender-scene-headless-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BLENDER_VERSION: "4.4.0"
+  BLENDER_ARCHIVE: "blender-4.4.0-linux-x64.tar.xz"
+  BLENDER_DIRECTORY: ".blender/blender-4.4.0"
+
+jobs:
+  blender-scene-headless:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache Blender 4.4
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BLENDER_DIRECTORY }}
+          key: blender-${{ runner.os }}-${{ runner.arch }}-${{ env.BLENDER_VERSION }}
+
+      - name: Download official Blender archive
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .blender/download "${BLENDER_DIRECTORY}"
+          curl --fail --location --retry 5 --retry-delay 3 \
+            "https://download.blender.org/release/Blender4.4/${BLENDER_ARCHIVE}" \
+            --output ".blender/download/${BLENDER_ARCHIVE}"
+          tar \
+            --extract \
+            --file ".blender/download/${BLENDER_ARCHIVE}" \
+            --directory "${BLENDER_DIRECTORY}" \
+            --strip-components=1
+          test -x "${BLENDER_DIRECTORY}/blender"
+
+      - name: Run scene and camera bake tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_scene_bake_integration.py \
+            2>&1 | tee test-results/blender-scene-bake.log
+
+      - name: Upload scene bake log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-4.4-scene-bake-log
+          path: test-results/blender-scene-bake.log
+          if-no-files-found: warn
+          retention-days: 7
