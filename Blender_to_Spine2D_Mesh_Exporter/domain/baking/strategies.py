@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Protocol, Tuple
 
-from .graph import MaterialSemanticChannel
+from .context import ObjectBakeContext, SceneBakeContext
+from .graph import MaterialDependencyKind, MaterialSemanticChannel
 from .model import (
     BakeCompositeMode,
     BakeCompositePlan,
+    BakeEvaluationScope,
     BakeMaterialPolicy,
     BakeMode,
     BakePassPlan,
@@ -23,11 +25,36 @@ from .model import (
 )
 
 
+_CAMERA_DEPENDENCIES = frozenset(
+    {
+        MaterialDependencyKind.CAMERA,
+        MaterialDependencyKind.VIEW,
+        MaterialDependencyKind.REFLECTION,
+        MaterialDependencyKind.TRANSMISSION,
+    }
+)
+_SCENE_DEPENDENCIES = frozenset(
+    {
+        MaterialDependencyKind.WORLD,
+        MaterialDependencyKind.LIGHTING,
+        MaterialDependencyKind.OCCLUSION,
+        MaterialDependencyKind.SCENE_OBJECTS,
+    }
+)
+_APPEARANCE_CHANNELS = frozenset(
+    {
+        MaterialSemanticChannel.SURFACE_COLOR,
+        MaterialSemanticChannel.SURFACE_EMISSION,
+    }
+)
+
+
 class BakeStrategy(Protocol):
     """One independently extensible strategy registered with the resolver."""
 
     strategy_id: BakeStrategyId
     priority: int
+    evaluation_scope: BakeEvaluationScope
 
     def supports(self, slot: MaterialAnalysis) -> bool:
         ...
@@ -66,10 +93,118 @@ def _slot_requires_procedural_mode(
     return False
 
 
+def _slot_evaluation_scope(slot: MaterialAnalysis) -> BakeEvaluationScope:
+    dependencies = set(slot.dependencies)
+    if dependencies & _CAMERA_DEPENDENCIES:
+        return BakeEvaluationScope.CAMERA
+    if dependencies & _SCENE_DEPENDENCIES:
+        return BakeEvaluationScope.SCENE
+    return BakeEvaluationScope.LOCAL
+
+
+def _appearance_channels(
+    slots: Tuple[MaterialAnalysis, ...],
+) -> Tuple[MaterialSemanticChannel, ...]:
+    channels = {
+        channel
+        for slot in slots
+        for channel in slot.semantic_channels
+        if channel in _APPEARANCE_CHANNELS
+    }
+    if not channels:
+        channels.add(MaterialSemanticChannel.SURFACE_COLOR)
+    return tuple(sorted(channels, key=lambda value: value.value))
+
+
+def _mask_unmatched_preparations(
+    matched_slots: Tuple[MaterialAnalysis, ...],
+    usable_slots: Tuple[MaterialAnalysis, ...],
+) -> Tuple[MaterialSlotPreparation, ...]:
+    matched_indices = {slot.slot_index for slot in matched_slots}
+    return tuple(
+        MaterialSlotPreparation(
+            slot_index=slot.slot_index,
+            mode=(
+                MaterialPreparationMode.PRESERVE
+                if slot.slot_index in matched_indices
+                else MaterialPreparationMode.ZERO_TO_EMISSION
+            ),
+        )
+        for slot in usable_slots
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class CameraCombinedBakeStrategy:
+    """Evaluate view/ray/reflection/transmission appearance from the active camera."""
+
+    strategy_id: BakeStrategyId = BakeStrategyId.CAMERA_COMBINED
+    priority: int = 25
+    evaluation_scope: BakeEvaluationScope = BakeEvaluationScope.CAMERA
+
+    def supports(self, slot: MaterialAnalysis) -> bool:
+        return bool(set(slot.semantic_channels) & _APPEARANCE_CHANNELS)
+
+    def semantic_channels(
+        self,
+        slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSemanticChannel, ...]:
+        return _appearance_channels(slots)
+
+    def select_mode(
+        self,
+        slots: Tuple[MaterialAnalysis, ...],
+        settings: BakeSettings,
+    ) -> BakeMode:
+        del slots, settings
+        return BakeMode.ACTIVE_CAMERA
+
+    def material_preparations(
+        self,
+        matched_slots: Tuple[MaterialAnalysis, ...],
+        usable_slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSlotPreparation, ...]:
+        return _mask_unmatched_preparations(matched_slots, usable_slots)
+
+
+@dataclass(frozen=True, slots=True)
+class SceneCombinedBakeStrategy:
+    """Evaluate lighting, World, occlusion and other scene-object appearance."""
+
+    strategy_id: BakeStrategyId = BakeStrategyId.SCENE_COMBINED
+    priority: int = 50
+    evaluation_scope: BakeEvaluationScope = BakeEvaluationScope.SCENE
+
+    def supports(self, slot: MaterialAnalysis) -> bool:
+        return bool(set(slot.semantic_channels) & _APPEARANCE_CHANNELS)
+
+    def semantic_channels(
+        self,
+        slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSemanticChannel, ...]:
+        return _appearance_channels(slots)
+
+    def select_mode(
+        self,
+        slots: Tuple[MaterialAnalysis, ...],
+        settings: BakeSettings,
+    ) -> BakeMode:
+        del slots, settings
+        return BakeMode.COMBINED
+
+    def material_preparations(
+        self,
+        matched_slots: Tuple[MaterialAnalysis, ...],
+        usable_slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSlotPreparation, ...]:
+        return _mask_unmatched_preparations(matched_slots, usable_slots)
+
+
 @dataclass(frozen=True, slots=True)
 class SurfaceColorBakeStrategy:
     strategy_id: BakeStrategyId = BakeStrategyId.SURFACE_COLOR
     priority: int = 100
+    evaluation_scope: BakeEvaluationScope = BakeEvaluationScope.LOCAL
 
     def supports(self, slot: MaterialAnalysis) -> bool:
         return MaterialSemanticChannel.SURFACE_COLOR in slot.semantic_channels
@@ -87,9 +222,8 @@ class SurfaceColorBakeStrategy:
         settings: BakeSettings,
     ) -> BakeMode:
         # DIFFUSE color from a shader with opacity can be attenuated/premultiplied by
-        # Blender. Any alpha-bearing surface therefore evaluates its straight color
-        # through a temporary Emission proxy. The adapter applies the same proxy to all
-        # surface slots in that object so one pass never mixes incompatible bake modes.
+        # Blender. Any alpha-bearing local surface therefore evaluates its straight color
+        # through a temporary Emission proxy.
         if any(MaterialSemanticChannel.ALPHA in slot.semantic_channels for slot in slots):
             return BakeMode.EMIT
         if any(
@@ -104,17 +238,14 @@ class SurfaceColorBakeStrategy:
         matched_slots: Tuple[MaterialAnalysis, ...],
         usable_slots: Tuple[MaterialAnalysis, ...],
     ) -> Tuple[MaterialSlotPreparation, ...]:
-        del matched_slots, usable_slots
-        # Surface-color Emission proxy preparation is selected by the typed strategy ID
-        # plus its EMIT bake mode. Alpha uses explicit per-slot modes below because it
-        # must distinguish extracted opacity from opaque coverage.
-        return ()
+        return _mask_unmatched_preparations(matched_slots, usable_slots)
 
 
 @dataclass(frozen=True, slots=True)
 class EmissionBakeStrategy:
     strategy_id: BakeStrategyId = BakeStrategyId.EMISSION
     priority: int = 200
+    evaluation_scope: BakeEvaluationScope = BakeEvaluationScope.LOCAL
 
     def supports(self, slot: MaterialAnalysis) -> bool:
         return MaterialSemanticChannel.SURFACE_EMISSION in slot.semantic_channels
@@ -139,8 +270,7 @@ class EmissionBakeStrategy:
         matched_slots: Tuple[MaterialAnalysis, ...],
         usable_slots: Tuple[MaterialAnalysis, ...],
     ) -> Tuple[MaterialSlotPreparation, ...]:
-        del matched_slots, usable_slots
-        return ()
+        return _mask_unmatched_preparations(matched_slots, usable_slots)
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +279,7 @@ class AlphaBakeStrategy:
 
     strategy_id: BakeStrategyId = BakeStrategyId.ALPHA
     priority: int = 300
+    evaluation_scope: BakeEvaluationScope = BakeEvaluationScope.AUXILIARY
 
     def supports(self, slot: MaterialAnalysis) -> bool:
         return MaterialSemanticChannel.ALPHA in slot.semantic_channels
@@ -205,11 +336,21 @@ class BakeStrategyRegistry:
         self,
         analysis: ObjectMaterialAnalysis,
         settings: BakeSettings,
+        *,
+        object_context: ObjectBakeContext | None = None,
+        scene_context: SceneBakeContext | None = None,
     ) -> tuple[Tuple[BakePassPlan, ...], BakeCompositePlan]:
         if not isinstance(analysis, ObjectMaterialAnalysis):
             raise TypeError("analysis must be ObjectMaterialAnalysis")
         if not isinstance(settings, BakeSettings):
             raise TypeError("settings must be BakeSettings")
+        if object_context is not None:
+            if not isinstance(object_context, ObjectBakeContext):
+                raise TypeError("object_context must be ObjectBakeContext or None")
+            if object_context.source_object_id != analysis.source_object_id:
+                raise BakePlanError("object context does not match material analysis")
+        if scene_context is not None and not isinstance(scene_context, SceneBakeContext):
+            raise TypeError("scene_context must be SceneBakeContext or None")
         if not analysis.slots:
             raise BakePlanError("object has no material slots")
 
@@ -242,17 +383,51 @@ class BakeStrategyRegistry:
                 f"registered yet: {names}"
             )
 
+        scope_by_slot = {
+            slot.slot_index: _slot_evaluation_scope(slot) for slot in usable
+        }
+        scene_slots = tuple(
+            slot for slot in usable if scope_by_slot[slot.slot_index] is BakeEvaluationScope.SCENE
+        )
+        camera_slots = tuple(
+            slot for slot in usable if scope_by_slot[slot.slot_index] is BakeEvaluationScope.CAMERA
+        )
+        if (scene_slots or camera_slots) and scene_context is None:
+            names = tuple(
+                slot.material_name or f"slot-{slot.slot_index}"
+                for slot in scene_slots + camera_slots
+            )
+            raise BakePlanError(
+                "scene-aware materials require an immutable SceneBakeContext: " + str(names)
+            )
+        if camera_slots and (scene_context is None or scene_context.camera is None):
+            names = tuple(
+                slot.material_name or f"slot-{slot.slot_index}" for slot in camera_slots
+            )
+            raise BakePlanError(
+                "camera-dependent materials require an active scene camera: " + str(names)
+            )
+
         resolved: list[BakePassPlan] = []
-        covered_slots: set[int] = set()
+        primary_covered_slots: set[int] = set()
         ordered_strategies = tuple(
             sorted(self.strategies, key=lambda strategy: strategy.priority)
         )
         for strategy in ordered_strategies:
-            matched = tuple(slot for slot in usable if strategy.supports(slot))
+            if strategy.evaluation_scope is BakeEvaluationScope.AUXILIARY:
+                candidates = usable
+            else:
+                candidates = tuple(
+                    slot
+                    for slot in usable
+                    if scope_by_slot[slot.slot_index] is strategy.evaluation_scope
+                )
+            matched = tuple(slot for slot in candidates if strategy.supports(slot))
             if not matched:
                 continue
             slot_indices = tuple(slot.slot_index for slot in matched)
-            covered_slots.update(slot_indices)
+            if strategy.evaluation_scope is not BakeEvaluationScope.AUXILIARY:
+                primary_covered_slots.update(slot_indices)
             resolved.append(
                 BakePassPlan(
                     pass_index=len(resolved),
@@ -260,6 +435,7 @@ class BakeStrategyRegistry:
                     bake_mode=strategy.select_mode(matched, settings),
                     material_slot_indices=slot_indices,
                     semantic_channels=strategy.semantic_channels(matched),
+                    evaluation_scope=strategy.evaluation_scope,
                     material_preparations=strategy.material_preparations(
                         matched,
                         usable,
@@ -270,11 +446,11 @@ class BakeStrategyRegistry:
         missing = tuple(
             slot.material_name or f"slot-{slot.slot_index}"
             for slot in usable
-            if slot.slot_index not in covered_slots
+            if slot.slot_index not in primary_covered_slots
         )
         if missing:
             raise BakePlanError(
-                "no registered bake strategy can evaluate material slots: "
+                "no registered primary bake strategy can evaluate material slots: "
                 f"{missing}"
             )
         if not resolved:
@@ -306,11 +482,17 @@ class BakeStrategyRegistry:
                 for item in resolved
                 if item.pass_index != alpha_index
             )
+            scene_color = any(
+                resolved[index].evaluation_scope
+                in {BakeEvaluationScope.SCENE, BakeEvaluationScope.CAMERA}
+                for index in color_indices
+            )
             composite = BakeCompositePlan(
                 mode=BakeCompositeMode.ADD_RGB_REPLACE_ALPHA,
                 clamp_rgb=True,
                 color_pass_indices=color_indices,
                 alpha_pass_index=alpha_index,
+                unpremultiply_color_by_alpha=scene_color,
             )
         elif len(resolved) == 1:
             composite = BakeCompositePlan(mode=BakeCompositeMode.SINGLE, clamp_rgb=True)
@@ -326,6 +508,8 @@ class BakeStrategyRegistry:
 def build_default_bake_strategy_registry() -> BakeStrategyRegistry:
     return BakeStrategyRegistry(
         strategies=(
+            CameraCombinedBakeStrategy(),
+            SceneCombinedBakeStrategy(),
             SurfaceColorBakeStrategy(),
             EmissionBakeStrategy(),
             AlphaBakeStrategy(),
@@ -338,8 +522,15 @@ def resolve_bake_strategy_plan(
     settings: BakeSettings,
     *,
     registry: BakeStrategyRegistry | None = None,
+    object_context: ObjectBakeContext | None = None,
+    scene_context: SceneBakeContext | None = None,
 ) -> tuple[Tuple[BakePassPlan, ...], BakeCompositePlan]:
     resolved_registry = registry or build_default_bake_strategy_registry()
     if not isinstance(resolved_registry, BakeStrategyRegistry):
         raise TypeError("registry must be BakeStrategyRegistry or None")
-    return resolved_registry.resolve(analysis, settings)
+    return resolved_registry.resolve(
+        analysis,
+        settings,
+        object_context=object_context,
+        scene_context=scene_context,
+    )
