@@ -47,16 +47,11 @@ from run_bake_integration import (  # noqa: E402
     _temporary_datablock_names,
 )
 
-
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 def _purge_orphan_scene_data() -> None:
-    for collection in (
-        bpy.data.cameras,
-        bpy.data.lights,
-        bpy.data.worlds,
-    ):
+    for collection in (bpy.data.cameras, bpy.data.lights, bpy.data.worlds):
         for datablock in tuple(collection):
             if datablock.users == 0:
                 collection.remove(datablock)
@@ -92,8 +87,7 @@ def _configure_scene() -> None:
 
 
 def _aim_at(obj, target: Vector) -> None:
-    direction = target - obj.location
-    obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+    obj.rotation_euler = (target - obj.location).to_track_quat("-Z", "Y").to_euler()
 
 
 def _create_camera(name: str = "ProjectionCamera"):
@@ -176,12 +170,7 @@ def _create_volume_material(name: str):
 def _create_quad(name: str):
     return _create_mesh_object(
         name,
-        (
-            (-1.5, -1.0, 0.0),
-            (1.5, -1.0, 0.0),
-            (1.5, 1.0, 0.0),
-            (-1.5, 1.0, 0.0),
-        ),
+        ((-1.5, -1.0, 0.0), (1.5, -1.0, 0.0), (1.5, 1.0, 0.0), (-1.5, 1.0, 0.0)),
         ((0, 1, 2, 3),),
     )
 
@@ -190,22 +179,13 @@ def _create_cube(name: str):
     return _create_mesh_object(
         name,
         (
-            (-0.9, -0.9, -0.9),
-            (0.9, -0.9, -0.9),
-            (0.9, 0.9, -0.9),
-            (-0.9, 0.9, -0.9),
-            (-0.9, -0.9, 0.9),
-            (0.9, -0.9, 0.9),
-            (0.9, 0.9, 0.9),
-            (-0.9, 0.9, 0.9),
+            (-0.9, -0.9, -0.9), (0.9, -0.9, -0.9), (0.9, 0.9, -0.9),
+            (-0.9, 0.9, -0.9), (-0.9, -0.9, 0.9), (0.9, -0.9, 0.9),
+            (0.9, 0.9, 0.9), (-0.9, 0.9, 0.9),
         ),
         (
-            (0, 3, 2, 1),
-            (4, 5, 6, 7),
-            (0, 1, 5, 4),
-            (1, 2, 6, 5),
-            (2, 3, 7, 6),
-            (3, 0, 4, 7),
+            (0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
+            (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7),
         ),
     )
 
@@ -236,17 +216,21 @@ def _settings(
     )
 
 
-def _read_pixels(path: Path) -> tuple[float, ...]:
+def _read_image(path: Path) -> tuple[tuple[int, int], tuple[float, ...]]:
     image = bpy.data.images.load(str(path), check_existing=False)
     try:
-        return tuple(float(value) for value in image.pixels[:])
+        size = tuple(int(value) for value in image.size[:2])
+        return size, tuple(float(value) for value in image.pixels[:])
     finally:
         bpy.data.images.remove(image)
 
 
+def _read_pixels(path: Path) -> tuple[float, ...]:
+    return _read_image(path)[1]
+
+
 def _visible_and_transparent_counts(pixels: tuple[float, ...]) -> tuple[int, int]:
-    visible = 0
-    transparent = 0
+    visible = transparent = 0
     for offset in range(0, len(pixels), 4):
         alpha = pixels[offset + 3]
         if alpha > 0.08:
@@ -273,11 +257,7 @@ def _scene_render_fingerprint() -> tuple[object, ...]:
         int(scene.frame_current),
         tuple(
             sorted(
-                (
-                    obj.name,
-                    bool(obj.hide_render),
-                    bool(getattr(obj, "visible_camera", True)),
-                )
+                (obj.name, bool(obj.hide_render), bool(getattr(obj, "visible_camera", True)))
                 for obj in scene.objects
             )
         ),
@@ -299,7 +279,33 @@ def _prepare_scene_with_sentinel() -> object:
     return sentinel
 
 
-def test_production_fresnel_projection_exports_png_and_full_frame_spine_quad() -> None:
+def _projection_attachment(document: dict) -> dict:
+    _assert(len(document["slots"]) == 1, "projection should produce one mesh slot")
+    slot_name = document["slots"][0]["name"]
+    return document["skins"][0]["attachments"][slot_name][slot_name]
+
+
+def _assert_cropped_attachment(attachment: dict, image_size: tuple[int, int]) -> None:
+    hull = int(attachment["hull"])
+    _assert(attachment["type"] == "mesh", "projection attachment is not mesh")
+    _assert(hull >= 3, f"projection hull is degenerate: {hull}")
+    _assert(len(attachment["uvs"]) == hull * 2, "UV count does not match hull")
+    _assert(
+        len(attachment["triangles"]) == (hull - 2) * 3,
+        "triangle count does not match convex fan",
+    )
+    _assert(
+        float(attachment["width"]) == float(image_size[0]),
+        "attachment width does not match cropped image",
+    )
+    _assert(
+        float(attachment["height"]) == float(image_size[1]),
+        "attachment height does not match cropped image",
+    )
+    _assert(all(0.0 <= float(value) <= 1.0 for value in attachment["uvs"]), "UV outside 0..1")
+
+
+def test_production_fresnel_projection_exports_union_crop_and_screen_hull() -> None:
     sentinel = _prepare_scene_with_sentinel()
     with tempfile.TemporaryDirectory(prefix="spine2d-b4-fresnel-") as directory:
         output_directory = Path(directory)
@@ -312,44 +318,29 @@ def test_production_fresnel_projection_exports_png_and_full_frame_spine_quad() -
         context_before = _capture_context()
         render_before = _scene_render_fingerprint()
         material_before = _material_fingerprint(material)
-        prepared = prepare_a1_object(
-            source,
-            _settings(output_directory, "FresnelProjection"),
-        )
-        _assert(
-            isinstance(prepared.bake_plan, CameraProjectionPlan),
-            f"camera graph did not select B4: {type(prepared.bake_plan).__name__}",
-        )
-        _assert(
-            prepared.statistics["texture_pipeline"] == "CAMERA_RENDER_PROJECTION",
-            f"unexpected pipeline stats: {prepared.statistics}",
-        )
+        prepared = prepare_a1_object(source, _settings(output_directory, "FresnelProjection"))
+        _assert(isinstance(prepared.bake_plan, CameraProjectionPlan), "camera graph missed B4")
 
-        result = export_a1_single_object(
-            source,
-            _settings(output_directory, "FresnelProjection"),
-        )
+        result = export_a1_single_object(source, _settings(output_directory, "FresnelProjection"))
         _assert(result.success, f"B4 Fresnel export failed: {result.issues}")
         json_path = output_directory / "FresnelProjection.json"
         png_path = output_directory / "images" / "FresnelProjection_Baked.png"
         _assert(png_path.read_bytes()[:8] == PNG_SIGNATURE, "projection PNG is invalid")
-        visible, transparent = _visible_and_transparent_counts(_read_pixels(png_path))
+        image_size, pixels = _read_image(png_path)
+        _assert(0 < image_size[0] <= 64 and 0 < image_size[1] <= 64, "invalid crop size")
+        _assert(image_size != (64, 64), f"projection was not cropped: {image_size}")
+        visible, transparent = _visible_and_transparent_counts(pixels)
         _assert(visible > 100, f"projection contains too few visible pixels: {visible}")
-        _assert(
-            transparent > 100,
-            f"projection background is not transparent: {transparent}",
-        )
+        _assert(transparent > 0, "crop padding did not preserve transparent border")
 
         document = json.loads(json_path.read_text(encoding="utf-8"))
-        _assert(len(document["slots"]) == 1, "projection should produce one mesh slot")
-        slot_name = document["slots"][0]["name"]
-        attachment = document["skins"][0]["attachments"][slot_name][slot_name]
-        _assert(attachment["type"] == "mesh", "projection attachment is not mesh")
-        _assert(len(attachment["uvs"]) == 8, "full-frame quad must have four UVs")
-        _assert(len(attachment["triangles"]) == 6, "full-frame quad must have two triangles")
-        _assert(attachment["hull"] == 4, "full-frame quad hull must contain four vertices")
-        _assert(attachment["width"] == 64.0, "projection attachment width mismatch")
-        _assert(attachment["height"] == 64.0, "projection attachment height mismatch")
+        attachment = _projection_attachment(document)
+        _assert_cropped_attachment(attachment, image_size)
+        _assert(
+            result.statistics["projection_crop_width"] == image_size[0]
+            and result.statistics["projection_crop_height"] == image_size[1],
+            "projection statistics do not match cropped image",
+        )
         _assert(_capture_context() == context_before, "B4 export changed Blender context")
         _assert(_scene_render_fingerprint() == render_before, "B4 export changed render state")
         _assert(_material_fingerprint(material) == material_before, "B4 mutated material")
@@ -360,47 +351,33 @@ def test_glass_and_volume_are_rendered_by_camera_projection() -> None:
     _prepare_scene_with_sentinel()
     with tempfile.TemporaryDirectory(prefix="spine2d-b4-glass-volume-") as directory:
         output_directory = Path(directory)
-
         glass_obj = _create_cube("GlassSource")
-        glass = _create_glass_material("GlassMaterial")
-        glass_obj.data.materials.append(glass)
-        glass_result = export_a1_single_object(
-            glass_obj,
-            _settings(output_directory, "GlassProjection"),
-        )
+        glass_obj.data.materials.append(_create_glass_material("GlassMaterial"))
+        glass_result = export_a1_single_object(glass_obj, _settings(output_directory, "GlassProjection"))
         _assert(glass_result.success, f"Glass projection failed: {glass_result.issues}")
-        glass_pixels = _read_pixels(
-            output_directory / "images" / "GlassProjection_Baked.png"
-        )
+        glass_size, glass_pixels = _read_image(output_directory / "images" / "GlassProjection_Baked.png")
         glass_visible, glass_transparent = _visible_and_transparent_counts(glass_pixels)
-        _assert(glass_visible > 20, "Glass projection has no visible contribution")
-        _assert(glass_transparent > 20, "Glass projection lost transparent background")
+        _assert(glass_visible > 20 and glass_transparent > 0, "invalid Glass crop")
+        _assert(glass_size != (64, 64), "Glass projection was not cropped")
 
         glass_obj.hide_render = True
         volume_obj = _create_cube("VolumeSource")
-        volume = _create_volume_material("VolumeMaterial")
-        volume_obj.data.materials.append(volume)
-        volume_result = export_a1_single_object(
-            volume_obj,
-            _settings(output_directory, "VolumeProjection"),
-        )
+        volume_obj.data.materials.append(_create_volume_material("VolumeMaterial"))
+        volume_result = export_a1_single_object(volume_obj, _settings(output_directory, "VolumeProjection"))
         _assert(volume_result.success, f"Volume projection failed: {volume_result.issues}")
-        volume_pixels = _read_pixels(
-            output_directory / "images" / "VolumeProjection_Baked.png"
-        )
+        volume_size, volume_pixels = _read_image(output_directory / "images" / "VolumeProjection_Baked.png")
         volume_visible, volume_transparent = _visible_and_transparent_counts(volume_pixels)
-        _assert(volume_visible > 20, "Volume projection has no visible contribution")
-        _assert(volume_transparent > 20, "Volume projection lost transparent background")
+        _assert(volume_visible > 20 and volume_transparent > 0, "invalid Volume crop")
+        _assert(volume_size != (64, 64), "Volume projection was not cropped")
         _assert(not _temporary_datablock_names(), "Glass/Volume tests leaked temporary data")
 
 
-def test_camera_projection_sequence_evaluates_each_frame() -> None:
+def test_camera_projection_sequence_uses_one_union_crop_and_hull() -> None:
     _prepare_scene_with_sentinel()
     with tempfile.TemporaryDirectory(prefix="spine2d-b4-sequence-") as directory:
         output_directory = Path(directory)
         source = _create_quad("ProjectionSequenceSource")
-        material = _create_layer_weight_material("ProjectionSequenceMaterial")
-        source.data.materials.append(material)
+        source.data.materials.append(_create_layer_weight_material("ProjectionSequenceMaterial"))
         source.rotation_euler = (0.0, 0.0, 0.0)
         source.keyframe_insert(data_path="rotation_euler", frame=1)
         source.rotation_euler = (0.0, 1.1, 0.0)
@@ -410,24 +387,20 @@ def test_camera_projection_sequence_evaluates_each_frame() -> None:
 
         result = export_a1_single_object(
             source,
-            _settings(
-                output_directory,
-                "ProjectionSequence",
-                sequence_start=1,
-                sequence_count=2,
-            ),
+            _settings(output_directory, "ProjectionSequence", sequence_start=1, sequence_count=2),
         )
         _assert(result.success, f"B4 sequence failed: {result.issues}")
         first_path = output_directory / "images" / "ProjectionSequence_Baked_0001.png"
         second_path = output_directory / "images" / "ProjectionSequence_Baked_0002.png"
-        first = _read_pixels(first_path)
-        second = _read_pixels(second_path)
+        first_size, first = _read_image(first_path)
+        second_size, second = _read_image(second_path)
+        _assert(first_size == second_size, "sequence frames use different crop dimensions")
+        _assert(first_size != (64, 64), "sequence union was not cropped")
         difference = sum(abs(left - right) for left, right in zip(first, second)) / len(first)
         _assert(difference > 0.005, f"B4 sequence frames are indistinguishable: {difference}")
-        _assert(
-            int(bpy.context.scene.frame_current) == frame_before,
-            "B4 sequence did not restore timeline frame",
-        )
+        document = json.loads((output_directory / "ProjectionSequence.json").read_text("utf-8"))
+        _assert_cropped_attachment(_projection_attachment(document), first_size)
+        _assert(int(bpy.context.scene.frame_current) == frame_before, "timeline frame not restored")
 
 
 def test_forced_render_failure_rolls_back_json_texture_and_visibility() -> None:
@@ -443,8 +416,7 @@ def test_forced_render_failure_rolls_back_json_texture_and_visibility() -> None:
         final_json = output_directory / "ProjectionRollback.json"
         final_png = output_directory / "images" / "ProjectionRollback_Baked.png"
         final_png.parent.mkdir(parents=True, exist_ok=True)
-        old_json = b"previous-json"
-        old_png = b"previous-png"
+        old_json, old_png = b"previous-json", b"previous-png"
         final_json.write_bytes(old_json)
         final_png.write_bytes(old_png)
         context_before = _capture_context()
@@ -484,9 +456,9 @@ def test_forced_render_failure_rolls_back_json_texture_and_visibility() -> None:
 def main() -> None:
     print(f"Blender version: {bpy.app.version_string}")
     tests = (
-        test_production_fresnel_projection_exports_png_and_full_frame_spine_quad,
+        test_production_fresnel_projection_exports_union_crop_and_screen_hull,
         test_glass_and_volume_are_rendered_by_camera_projection,
-        test_camera_projection_sequence_evaluates_each_frame,
+        test_camera_projection_sequence_uses_one_union_crop_and_hull,
         test_forced_render_failure_rolls_back_json_texture_and_visibility,
     )
     for test in tests:
