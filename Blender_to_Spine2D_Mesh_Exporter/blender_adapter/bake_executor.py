@@ -19,6 +19,13 @@ from ..infrastructure import (
     AtomicOutputReservation,
     atomic_file_transaction,
 )
+from .bake_compositor import (
+    BakeCompositeError,
+    BakePixelBuffer,
+    compose_bake_passes,
+    read_bake_image_pixels,
+    write_bake_image_pixels,
+)
 from .bake_materials import BakeMaterialError, temporary_bake_materials
 from .bake_scene_state import (
     BakeSceneStateError,
@@ -83,6 +90,19 @@ def _validate_execution_input(
             f"Target snapshot references material slot {max(used_material_indices)}, "
             f"but source object has only {len(source_slots)} slots"
         )
+
+    planned_slots = {
+        slot_index
+        for pass_plan in plan.passes
+        for slot_index in pass_plan.material_slot_indices
+    }
+    missing_plans = tuple(
+        index for index in used_material_indices if index not in planned_slots
+    )
+    if missing_plans:
+        raise BakeExecutionError(
+            "BakePlan does not cover used material slots: " + str(missing_plans)
+        )
     return used_material_indices, face_material_indices
 
 
@@ -115,8 +135,12 @@ def _create_bake_image(
     plan: BakePlan,
     execution_settings: BakeExecutionSettings,
     image_name: str,
+    *,
+    force_float_buffer: bool = False,
 ) -> Any:
-    float_buffer = plan.settings.texture_format is TextureFormat.OPEN_EXR
+    float_buffer = force_float_buffer or (
+        plan.settings.texture_format is TextureFormat.OPEN_EXR
+    )
     try:
         image = bpy_module.data.images.new(
             name=f"__Spine2D_{image_name}",
@@ -198,6 +222,117 @@ def _save_bake_image(
         )
 
 
+def _bake_one_pass_to_buffer(
+    *,
+    bpy_module: Any,
+    scene: Any,
+    plan: BakePlan,
+    execution_settings: BakeExecutionSettings,
+    task: Any,
+    pass_plan: Any,
+    prepared_materials: Any,
+) -> BakePixelBuffer:
+    image = None
+    try:
+        configure_scene_for_bake(
+            scene,
+            plan,
+            execution_settings,
+            bake_mode=pass_plan.bake_mode,
+        )
+        image = _create_bake_image(
+            bpy_module,
+            plan,
+            execution_settings,
+            f"{task.image_name}__pass_{pass_plan.pass_index}_{pass_plan.strategy_id.value}",
+            force_float_buffer=True,
+        )
+        prepared_materials.assign_image(image)
+        logger.info(
+            "Baking pass %d/%d for '%s': strategy=%s mode=%s slots=%s",
+            pass_plan.pass_index + 1,
+            len(plan.passes),
+            plan.source_object_id,
+            pass_plan.strategy_id.value,
+            pass_plan.bake_mode.value,
+            pass_plan.material_slot_indices,
+        )
+        _call_bake_operator(bpy_module, pass_plan.bake_mode.value)
+        return read_bake_image_pixels(image)
+    finally:
+        _remove_image(bpy_module, image)
+
+
+def _bake_single_pass_frame(
+    *,
+    bpy_module: Any,
+    scene: Any,
+    plan: BakePlan,
+    execution_settings: BakeExecutionSettings,
+    task: Any,
+    reservation: AtomicOutputReservation,
+    prepared_materials: Any,
+) -> None:
+    image = None
+    pass_plan = plan.passes[0]
+    try:
+        configure_scene_for_bake(
+            scene,
+            plan,
+            execution_settings,
+            bake_mode=pass_plan.bake_mode,
+        )
+        image = _create_bake_image(
+            bpy_module,
+            plan,
+            execution_settings,
+            task.image_name,
+        )
+        prepared_materials.assign_image(image)
+        _call_bake_operator(bpy_module, pass_plan.bake_mode.value)
+        _save_bake_image(image, reservation, plan)
+    finally:
+        _remove_image(bpy_module, image)
+
+
+def _bake_multi_pass_frame(
+    *,
+    bpy_module: Any,
+    scene: Any,
+    plan: BakePlan,
+    execution_settings: BakeExecutionSettings,
+    task: Any,
+    reservation: AtomicOutputReservation,
+    prepared_materials: Any,
+) -> None:
+    buffers = tuple(
+        _bake_one_pass_to_buffer(
+            bpy_module=bpy_module,
+            scene=scene,
+            plan=plan,
+            execution_settings=execution_settings,
+            task=task,
+            pass_plan=pass_plan,
+            prepared_materials=prepared_materials,
+        )
+        for pass_plan in plan.passes
+    )
+    composed = compose_bake_passes(buffers, plan.composite)
+    final_image = None
+    try:
+        final_image = _create_bake_image(
+            bpy_module,
+            plan,
+            execution_settings,
+            task.image_name,
+            force_float_buffer=plan.settings.texture_format is TextureFormat.OPEN_EXR,
+        )
+        write_bake_image_pixels(final_image, composed)
+        _save_bake_image(final_image, reservation, plan)
+    finally:
+        _remove_image(bpy_module, final_image)
+
+
 def _bake_frame_task(
     *,
     bpy_module: Any,
@@ -209,20 +344,27 @@ def _bake_frame_task(
     reservation: AtomicOutputReservation,
     prepared_materials: Any,
 ) -> None:
-    image = None
-    try:
-        _set_timeline_frame(scene, context, task.timeline_frame)
-        image = _create_bake_image(
-            bpy_module,
-            plan,
-            execution_settings,
-            task.image_name,
+    _set_timeline_frame(scene, context, task.timeline_frame)
+    if plan.multipass:
+        _bake_multi_pass_frame(
+            bpy_module=bpy_module,
+            scene=scene,
+            plan=plan,
+            execution_settings=execution_settings,
+            task=task,
+            reservation=reservation,
+            prepared_materials=prepared_materials,
         )
-        prepared_materials.assign_image(image)
-        _call_bake_operator(bpy_module, plan.bake_mode.value)
-        _save_bake_image(image, reservation, plan)
-    finally:
-        _remove_image(bpy_module, image)
+        return
+    _bake_single_pass_frame(
+        bpy_module=bpy_module,
+        scene=scene,
+        plan=plan,
+        execution_settings=execution_settings,
+        task=task,
+        reservation=reservation,
+        prepared_materials=prepared_materials,
+    )
 
 
 def _require_reservations(
@@ -274,11 +416,6 @@ def _run_bake_to_reservations(
         raise BakeExecutionError("A Blender Scene is required for texture baking")
 
     with preserve_bake_scene_state(resolved_scene):
-        configure_scene_for_bake(
-            resolved_scene,
-            plan,
-            execution_settings,
-        )
         with temporary_mesh_object(
             target_snapshot,
             scene=resolved_scene,
@@ -307,18 +444,17 @@ def _run_bake_to_reservations(
                                 "Unable to prepare selected-to-active bake selection"
                             ) from exc
 
-                    # Blender exposes baking only as an operator. One call is
-                    # required for every explicit sequence frame.
                     for task, reservation in zip(
                         plan.frame_tasks,
                         resolved_reservations,
                     ):
                         logger.info(
-                            "Staging bake '%s' frame task %d/%d (timeline=%s)",
+                            "Staging bake '%s' frame task %d/%d (timeline=%s passes=%d)",
                             plan.source_object_id,
                             task.task_index + 1,
                             len(plan.frame_tasks),
                             task.timeline_frame,
+                            len(plan.passes),
                         )
                         _bake_frame_task(
                             bpy_module=bpy_module,
@@ -368,6 +504,7 @@ def stage_bake_plan_outputs(
     except BakeExecutionError:
         raise
     except (
+        BakeCompositeError,
         BakeMaterialError,
         BakeSceneStateError,
         BlenderContextError,
