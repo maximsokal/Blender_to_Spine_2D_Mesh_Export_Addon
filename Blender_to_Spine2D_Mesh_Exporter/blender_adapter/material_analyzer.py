@@ -1,8 +1,9 @@
-"""Read Blender material slots into immutable baking-domain analysis.
+"""Read Blender material slots into immutable semantic baking analysis.
 
-The analyzer does not mutate materials, node trees, images, or scene state. It
-records both the legacy "any TEX_IMAGE" signal and the presence of procedural
-nodes so the bake policy can remain explicit.
+Legacy material kinds remain available for compatibility, while every node material
+also receives a graph snapshot rooted at the active Material Output. Strategy
+selection therefore depends on connected shader semantics instead of all nodes that
+happen to exist in the editor.
 """
 
 from __future__ import annotations
@@ -15,6 +16,10 @@ from ..domain.baking import (
     MaterialAnalysis,
     MaterialKind,
     ObjectMaterialAnalysis,
+)
+from .shader_graph_analyzer import (
+    MaterialGraphAnalysisError,
+    analyse_material_graph,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,7 +66,7 @@ def _node_type(node: Any) -> str:
 
 def _is_temporary_bake_node(node: Any) -> bool:
     name = str(getattr(node, "name", "") or "")
-    return name.startswith("TEMP_BAKE_") or name.startswith("TEMP_UV_")
+    return name.startswith(("TEMP_BAKE_", "TEMP_UV_", "__Spine2D_BakeTarget_"))
 
 
 def _image_dependency(node: Any) -> tuple[ImageDependency | None, str | None]:
@@ -113,8 +118,6 @@ def analyse_material_slot(slot_index: int, material: Any | None) -> MaterialAnal
     node_tree = getattr(material, "node_tree", None)
     use_nodes = bool(getattr(material, "use_nodes", node_tree is not None))
     if not use_nodes or node_tree is None:
-        # The legacy baker enables nodes and creates a Principled material using
-        # material.diffuse_color. Preserve that capability as SOLID_COLOR.
         return MaterialAnalysis(
             slot_index=slot_index,
             material_name=material_name,
@@ -131,7 +134,9 @@ def analyse_material_slot(slot_index: int, material: Any | None) -> MaterialAnal
 
     relevant_nodes = tuple(node for node in nodes if not _is_temporary_bake_node(node))
     node_types = tuple(sorted({_node_type(node) for node in relevant_nodes}))
-    procedural = any(_node_type(node) in _PROCEDURAL_NODE_TYPES for node in relevant_nodes)
+    procedural = any(
+        _node_type(node) in _PROCEDURAL_NODE_TYPES for node in relevant_nodes
+    )
 
     dependencies_by_key: dict[tuple[str, str, str | None, int], ImageDependency] = {}
     issues: list[str] = []
@@ -172,6 +177,20 @@ def analyse_material_slot(slot_index: int, material: Any | None) -> MaterialAnal
     else:
         kind = MaterialKind.SOLID_COLOR
 
+    graph = None
+    try:
+        graph = analyse_material_graph(material)
+        issues.extend(graph.issues)
+    except MaterialGraphAnalysisError as exc:
+        # Graph analysis is richer than the legacy kind classifier, but a failure to
+        # produce it must be visible. Do not silently invent semantics.
+        issues.append(f"Shader graph analysis failed: {exc}")
+        logger.warning(
+            "Shader graph analysis failed for material '%s'",
+            material_name,
+            exc_info=True,
+        )
+
     return MaterialAnalysis(
         slot_index=slot_index,
         material_name=material_name,
@@ -179,6 +198,7 @@ def analyse_material_slot(slot_index: int, material: Any | None) -> MaterialAnal
         node_types=node_types,
         image_dependencies=dependencies,
         issues=tuple(issues),
+        graph=graph,
     )
 
 
@@ -213,10 +233,14 @@ def analyse_object_materials(
             slots=analyses,
         )
         logger.debug(
-            "Analyzed %d material slots for '%s': %s",
+            "Analyzed %d material slots for '%s': kinds=%s channels=%s",
             len(result.slots),
             object_name,
             tuple(slot.kind.value for slot in result.slots),
+            tuple(
+                tuple(channel.value for channel in slot.semantic_channels)
+                for slot in result.slots
+            ),
         )
         return result
     except MaterialAnalysisError:
