@@ -109,9 +109,9 @@ def _input_socket(node: Any, name: str) -> Any | None:
     getter = getattr(inputs, "get", None)
     if callable(getter):
         try:
-            value = getter(name)
-            if value is not None:
-                return value
+            socket = getter(name)
+            if socket is not None:
+                return socket
         except Exception:
             logger.debug("Socket lookup by name failed", exc_info=True)
     try:
@@ -123,21 +123,21 @@ def _input_socket(node: Any, name: str) -> Any | None:
     return None
 
 
-def _incoming_by_node(links: tuple[Any, ...]) -> dict[int, tuple[Any, ...]]:
-    grouped: dict[int, list[Any]] = {}
+def _incoming_by_node_name(links: tuple[Any, ...]) -> dict[str, tuple[Any, ...]]:
+    grouped: dict[str, list[Any]] = {}
     for link in links:
         to_node = getattr(link, "to_node", None)
         if to_node is None:
             continue
-        grouped.setdefault(id(to_node), []).append(link)
+        grouped.setdefault(_node_name(to_node), []).append(link)
     return {
         key: tuple(
             sorted(
                 values,
                 key=lambda link: (
-                    _node_name(getattr(link, "from_node", None)),
-                    _socket_name(getattr(link, "from_socket", None)),
-                    _socket_name(getattr(link, "to_socket", None)),
+                    _node_name(getattr(link, "from_node", None)).casefold(),
+                    _socket_name(getattr(link, "from_socket", None)).casefold(),
+                    _socket_name(getattr(link, "to_socket", None)).casefold(),
                 ),
             )
         )
@@ -147,17 +147,20 @@ def _incoming_by_node(links: tuple[Any, ...]) -> dict[int, tuple[Any, ...]]:
 
 def _reachable_from_nodes(
     roots: Iterable[Any],
-    incoming: dict[int, tuple[Any, ...]],
-) -> tuple[set[int], tuple[Any, ...]]:
+    incoming: dict[str, tuple[Any, ...]],
+) -> tuple[set[str], tuple[Any, ...]]:
     pending = list(roots)
-    seen: set[int] = set()
+    seen: set[str] = set()
     used_links: list[Any] = []
     while pending:
         node = pending.pop()
-        if node is None or id(node) in seen:
+        if node is None:
             continue
-        seen.add(id(node))
-        for link in incoming.get(id(node), ()):
+        node_name = _node_name(node)
+        if node_name in seen:
+            continue
+        seen.add(node_name)
+        for link in incoming.get(node_name, ()):
             used_links.append(link)
             pending.append(getattr(link, "from_node", None))
     return seen, tuple(used_links)
@@ -166,10 +169,22 @@ def _reachable_from_nodes(
 def _socket_roots(socket: Any | None, links: tuple[Any, ...]) -> tuple[Any, ...]:
     if socket is None:
         return ()
+    try:
+        socket_links = tuple(getattr(socket, "links", ()))
+    except Exception:
+        socket_links = ()
+    if socket_links:
+        return tuple(
+            getattr(link, "from_node", None)
+            for link in socket_links
+            if getattr(link, "from_node", None) is not None
+        )
+
+    socket_name = _socket_name(socket)
     return tuple(
         getattr(link, "from_node", None)
         for link in links
-        if getattr(link, "to_socket", None) is socket
+        if _socket_name(getattr(link, "to_socket", None)) == socket_name
     )
 
 
@@ -202,8 +217,7 @@ def _principled_emission_enabled(node: Any) -> bool:
         return False
     color = _input_socket(node, "Emission Color") or _input_socket(node, "Emission")
     strength = _input_socket(node, "Emission Strength")
-    linked = bool(color is not None and getattr(color, "is_linked", False))
-    return (linked or _color_nonzero(color)) and _numeric_default(strength, 1.0) > 1e-8
+    return _color_nonzero(color) and _numeric_default(strength, 1.0) > 1e-8
 
 
 def _principled_alpha_enabled(node: Any) -> bool:
@@ -219,50 +233,58 @@ def _semantic_channels(
     output: Any | None,
     nodes: tuple[Any, ...],
     links: tuple[Any, ...],
-    incoming: dict[int, tuple[Any, ...]],
+    incoming: dict[str, tuple[Any, ...]],
 ) -> tuple[MaterialSemanticChannel, ...]:
     if output is None:
         surface_nodes = nodes
         volume_nodes: tuple[Any, ...] = ()
         displacement_nodes: tuple[Any, ...] = ()
     else:
-        surface_roots = _socket_roots(_input_socket(output, "Surface"), links)
-        volume_roots = _socket_roots(_input_socket(output, "Volume"), links)
-        displacement_roots = _socket_roots(_input_socket(output, "Displacement"), links)
-        surface_ids, _ = _reachable_from_nodes(surface_roots, incoming)
-        volume_ids, _ = _reachable_from_nodes(volume_roots, incoming)
-        displacement_ids, _ = _reachable_from_nodes(displacement_roots, incoming)
-        surface_nodes = tuple(node for node in nodes if id(node) in surface_ids)
-        volume_nodes = tuple(node for node in nodes if id(node) in volume_ids)
-        displacement_nodes = tuple(node for node in nodes if id(node) in displacement_ids)
+        surface_names, _ = _reachable_from_nodes(
+            _socket_roots(_input_socket(output, "Surface"), links),
+            incoming,
+        )
+        volume_names, _ = _reachable_from_nodes(
+            _socket_roots(_input_socket(output, "Volume"), links),
+            incoming,
+        )
+        displacement_names, _ = _reachable_from_nodes(
+            _socket_roots(_input_socket(output, "Displacement"), links),
+            incoming,
+        )
+        surface_nodes = tuple(node for node in nodes if _node_name(node) in surface_names)
+        volume_nodes = tuple(node for node in nodes if _node_name(node) in volume_names)
+        displacement_nodes = tuple(
+            node for node in nodes if _node_name(node) in displacement_names
+        )
 
     surface_types = {_node_type(node) for node in surface_nodes}
-    channels: list[MaterialSemanticChannel] = []
-    has_emission = "EMISSION" in surface_types or any(
+    channels: set[MaterialSemanticChannel] = set()
+    if surface_types & _SURFACE_SHADER_TYPES:
+        channels.add(MaterialSemanticChannel.SURFACE_COLOR)
+    if "EMISSION" in surface_types or any(
         _principled_emission_enabled(node) for node in surface_nodes
-    )
-    non_emission_surface = bool(surface_types & _SURFACE_SHADER_TYPES)
-    unknown_surface = bool(surface_nodes) and not surface_types.issubset(
-        {"EMISSION", "OUTPUT_MATERIAL", "MIX_SHADER", "ADD_SHADER", "BSDF_TRANSPARENT"}
-    )
-    if non_emission_surface or unknown_surface:
-        channels.append(MaterialSemanticChannel.SURFACE_COLOR)
-    if has_emission:
-        channels.append(MaterialSemanticChannel.SURFACE_EMISSION)
+    ):
+        channels.add(MaterialSemanticChannel.SURFACE_EMISSION)
     if "BSDF_TRANSPARENT" in surface_types or any(
         _principled_alpha_enabled(node) for node in surface_nodes
     ):
-        channels.append(MaterialSemanticChannel.ALPHA)
+        channels.add(MaterialSemanticChannel.ALPHA)
     if volume_nodes:
-        channels.append(MaterialSemanticChannel.VOLUME)
+        channels.add(MaterialSemanticChannel.VOLUME)
     if displacement_nodes:
-        channels.append(MaterialSemanticChannel.DISPLACEMENT)
+        channels.add(MaterialSemanticChannel.DISPLACEMENT)
 
-    # A connected but unknown surface must not disappear merely because Blender added
-    # a new shader node type that the current classifier has not named yet.
-    if surface_nodes and not channels:
-        channels.append(MaterialSemanticChannel.SURFACE_COLOR)
-    return tuple(sorted(set(channels), key=lambda value: value.value))
+    known_non_surface = {
+        "EMISSION",
+        "OUTPUT_MATERIAL",
+        "MIX_SHADER",
+        "ADD_SHADER",
+        "BSDF_TRANSPARENT",
+    }
+    if surface_nodes and not channels and not surface_types.issubset(known_non_surface):
+        channels.add(MaterialSemanticChannel.SURFACE_COLOR)
+    return tuple(sorted(channels, key=lambda value: value.value))
 
 
 def _dependencies(
@@ -275,9 +297,7 @@ def _dependencies(
     if "TEX_IMAGE" in node_types:
         result.add(MaterialDependencyKind.IMAGE)
     if node_types & _VIEW_NODE_TYPES:
-        result.update(
-            {MaterialDependencyKind.VIEW, MaterialDependencyKind.CAMERA}
-        )
+        result.update({MaterialDependencyKind.VIEW, MaterialDependencyKind.CAMERA})
     if node_types & _OBJECT_NODE_TYPES:
         result.add(MaterialDependencyKind.OBJECT)
     if node_types & _GEOMETRY_NODE_TYPES:
@@ -297,7 +317,6 @@ def _dependencies(
         duration = int(getattr(image, "frame_duration", 1) or 1) if image else 1
         if source in {"SEQUENCE", "MOVIE"} or duration > 1:
             result.add(MaterialDependencyKind.TIME)
-
     if getattr(material, "animation_data", None) is not None or getattr(
         node_tree, "animation_data", None
     ) is not None:
@@ -313,14 +332,13 @@ def analyse_material_graph(material: Any) -> MaterialGraphSnapshot:
     material_name = _material_name(material)
     node_tree = getattr(material, "node_tree", None)
     if node_tree is None:
-        raise MaterialGraphAnalysisError(
-            f"Material '{material_name}' has no node tree"
-        )
+        raise MaterialGraphAnalysisError(f"Material '{material_name}' has no node tree")
 
     nodes = _iter_nodes(node_tree)
     links = _iter_links(node_tree)
     output = _find_active_output(nodes)
     issues: list[str] = []
+    incoming = _incoming_by_node_name(links)
     if output is None:
         issues.append(
             "Active Material Output was not found; semantic analysis used all nodes"
@@ -328,12 +346,11 @@ def analyse_material_graph(material: Any) -> MaterialGraphSnapshot:
         reachable_nodes = nodes
         reachable_links = links
     else:
-        incoming = _incoming_by_node(links)
-        reachable_ids, used_links = _reachable_from_nodes((output,), incoming)
-        reachable_nodes = tuple(node for node in nodes if id(node) in reachable_ids)
-        reachable_links = used_links
+        reachable_names, reachable_links = _reachable_from_nodes((output,), incoming)
+        reachable_nodes = tuple(
+            node for node in nodes if _node_name(node) in reachable_names
+        )
 
-    incoming = _incoming_by_node(links)
     node_snapshots = tuple(
         ShaderNodeSnapshot(
             node_id=_node_name(node),
@@ -364,12 +381,7 @@ def analyse_material_graph(material: Any) -> MaterialGraphSnapshot:
         active_output_node_id=None if output is None else _node_name(output),
         reachable_nodes=node_snapshots,
         reachable_links=link_snapshots,
-        semantic_channels=_semantic_channels(
-            output,
-            reachable_nodes,
-            links,
-            incoming,
-        ),
+        semantic_channels=_semantic_channels(output, reachable_nodes, links, incoming),
         dependencies=_dependencies(material, node_tree, reachable_nodes),
         issues=tuple(issues),
     )
