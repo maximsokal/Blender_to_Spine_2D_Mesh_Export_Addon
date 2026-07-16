@@ -37,7 +37,7 @@ def test_baking_domain_has_no_blender_dependencies():
             assert fragment not in source, f"{path.name} contains forbidden '{fragment}'"
 
 
-def test_bake_helpers_use_no_operators():
+def test_bake_helpers_use_no_operator_attributes():
     for filename in (
         "bake_compositor.py",
         "bake_material_preparation.py",
@@ -49,8 +49,16 @@ def test_bake_helpers_use_no_operators():
     ):
         path = ROOT / "blender_adapter" / filename
         source = path.read_text(encoding="utf-8")
-        assert "bpy.ops" not in source
-        assert ".ops." not in source
+        tree = ast.parse(source, filename=str(path))
+        operator_attributes = [
+            _attribute_path(node)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and ".ops." in f".{_attribute_path(node)}."
+        ]
+        assert not operator_attributes, (
+            f"{filename} contains Blender operator access: {operator_attributes}"
+        )
 
 
 def test_strategy_registry_remains_blender_independent():
