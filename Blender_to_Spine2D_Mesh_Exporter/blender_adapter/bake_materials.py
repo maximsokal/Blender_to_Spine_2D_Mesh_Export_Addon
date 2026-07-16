@@ -58,7 +58,12 @@ def _create_placeholder_material(bpy_module: Any, slot_index: int, token: str) -
     return material
 
 
-def _copy_material(bpy_module: Any, source_material: Any, slot_index: int, token: str) -> Any:
+def _copy_material(
+    bpy_module: Any,
+    source_material: Any,
+    slot_index: int,
+    token: str,
+) -> Any:
     if source_material is None:
         return _create_placeholder_material(bpy_module, slot_index, token)
     try:
@@ -104,6 +109,56 @@ def _create_active_bake_node(material: Any, slot_index: int, token: str) -> Any:
         ) from exc
 
 
+def _apply_face_material_indices(
+    target_mesh: Any,
+    face_material_indices: Iterable[int],
+    *,
+    material_slot_count: int,
+) -> None:
+    """Restore polygon-slot bindings only after Blender material slots exist.
+
+    Blender clamps ``polygon.material_index`` to zero when it is assigned before the
+    mesh has enough material slots. ``temporary_mesh_object`` is intentionally
+    material-agnostic, so the correct binding must be applied here after all copied
+    slots have been appended.
+    """
+
+    if not isinstance(material_slot_count, int) or material_slot_count < 0:
+        raise ValueError("material_slot_count must be a non-negative integer")
+    resolved = tuple(face_material_indices)
+    polygons = tuple(getattr(target_mesh, "polygons", ()))
+    if len(resolved) != len(polygons):
+        raise BakeMaterialError(
+            f"Received {len(resolved)} face material indices for "
+            f"{len(polygons)} target polygons"
+        )
+    for face_index, material_index in enumerate(resolved):
+        if not isinstance(material_index, int) or isinstance(material_index, bool):
+            raise BakeMaterialError(
+                f"face_material_indices[{face_index}] must be an integer"
+            )
+        if material_index < 0 or material_index >= material_slot_count:
+            raise BakeMaterialError(
+                f"Face {face_index} references material slot {material_index}, but "
+                f"only {material_slot_count} slots exist"
+            )
+
+    try:
+        for polygon, material_index in zip(polygons, resolved):
+            polygon.material_index = material_index
+    except Exception as exc:
+        raise BakeMaterialError(
+            "Unable to restore target polygon material indices"
+        ) from exc
+
+    actual = tuple(int(polygon.material_index) for polygon in polygons)
+    if actual != resolved:
+        raise BakeMaterialError(
+            "Blender changed target polygon material indices after assignment: "
+            f"expected={resolved}, actual={actual}"
+        )
+
+
 def _remove_materials(bpy_module: Any, materials: Iterable[Any]) -> None:
     for material in reversed(tuple(materials)):
         try:
@@ -119,8 +174,9 @@ def temporary_bake_materials(
     target_obj: Any,
     *,
     used_material_indices: Iterable[int],
+    face_material_indices: Iterable[int],
 ) -> Iterator[PreparedBakeMaterials]:
-    """Copy all material slots and prepare bake nodes only for used slots."""
+    """Copy source slots, restore polygon bindings, and create active bake nodes."""
 
     if source_obj is None or target_obj is None:
         raise BakeMaterialError("source_obj and target_obj are required")
@@ -166,6 +222,11 @@ def temporary_bake_materials(
                     _create_active_bake_node(copied_material, slot_index, token)
                 )
 
+        _apply_face_material_indices(
+            target_mesh,
+            face_material_indices,
+            material_slot_count=len(copied_materials),
+        )
         if not image_nodes:
             raise BakeMaterialError("No used material slots received active bake nodes")
 
