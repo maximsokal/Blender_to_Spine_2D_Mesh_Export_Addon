@@ -22,12 +22,15 @@ from .model import (
     ImageDependency,
     MaterialAnalysis,
     MaterialKind,
+    MaterialPreparationMode,
+    MaterialSlotPreparation,
     ObjectMaterialAnalysis,
     TextureFormat,
     build_bake_plan,
     sanitize_filename_stem,
 )
 from .strategies import (
+    AlphaBakeStrategy,
     BakeStrategyRegistry,
     EmissionBakeStrategy,
     SurfaceColorBakeStrategy,
@@ -36,6 +39,7 @@ from .strategies import (
 )
 
 __all__ = [
+    "AlphaBakeStrategy",
     "BakeArtifact",
     "BakeCompositeMode",
     "BakeCompositePlan",
@@ -56,7 +60,9 @@ __all__ = [
     "MaterialDependencyKind",
     "MaterialGraphSnapshot",
     "MaterialKind",
+    "MaterialPreparationMode",
     "MaterialSemanticChannel",
+    "MaterialSlotPreparation",
     "ObjectMaterialAnalysis",
     "ShaderLinkSnapshot",
     "ShaderNodeSnapshot",
