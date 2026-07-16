@@ -2,8 +2,8 @@
 
 ## Problem
 
-Blender 4.4 object baking has no camera-ray bake type. A UV `COMBINED` pass therefore
-cannot preserve effects whose value depends on the active camera or on ray type:
+Blender 4.4 object baking has no camera-ray bake type. A UV `COMBINED` pass cannot
+preserve appearance whose value depends on the active camera or ray type:
 
 - Fresnel and Layer Weight;
 - Light Path;
@@ -14,8 +14,8 @@ cannot preserve effects whose value depends on the active camera or on ray type:
 - material displacement whose final appearance must be evaluated by render.
 
 The rewrite does not invent an `ACTIVE_CAMERA` bake mode and does not silently flatten
-these materials through an incorrect UV bake. B4 introduces a second texture execution
-pipeline based on a real still render from the active Blender camera.
+these materials through an incorrect UV bake. B4 uses a real still render from the active
+Blender camera and projects that screen-space result into Spine.
 
 ## Automatic routing
 
@@ -28,7 +28,7 @@ build_texture_plan()
 CameraProjectionPlan
 ```
 
-`build_texture_plan()` is the production planner used by `prepare_a1_object()`.
+`build_texture_plan()` is the production planner used by `prepare_a1_object()`:
 
 ```text
 reachable material graph
@@ -41,17 +41,47 @@ reachable material graph
 ```
 
 The complete object is routed to camera projection when any used material slot requires
-camera projection. Mixing UV-baked and screen-rendered pixels inside one object would mix
-two coordinate spaces and is intentionally not attempted.
+camera evaluation. Mixing UV-baked and screen-rendered pixels inside one object would mix two
+coordinate spaces and is intentionally not attempted.
 
 A camera projection plan requires:
 
 - immutable `ObjectBakeContext`;
 - immutable `SceneBakeContext`;
 - an active camera snapshot;
-- PNG, WEBP, or OPEN_EXR output so transparent background is representable.
+- PNG, WEBP, or OPEN_EXR output so transparency is representable.
 
 JPEG is rejected during planning.
+
+## Recursive Shader Node Groups
+
+`blender_adapter/shader_graph_analyzer.py` recursively enters every **reachable** Shader Node
+Group. It does not scan all nodes inside every group. Traversal follows the actual socket path:
+
+```text
+outer Group output
+    -> active internal Group Output input
+    -> reachable internal links
+    -> internal Group Input output
+    -> matching outer Group input
+```
+
+This distinction prevents an unused Fresnel or Layer Weight connected to an unused group input
+from incorrectly selecting B4.
+
+The recursive analysis provides:
+
+- instance-qualified IDs such as `Outer Instance::Inner Instance::Layer Weight`;
+- explicit `ShaderNodeSnapshot.group_path` values;
+- nested Camera, View, Reflection, Transmission, Image, Volume and Time discovery;
+- nested node-tree animation detection;
+- deterministic socket matching by identifier, then name, then interface position;
+- recursive cycle detection;
+- a maximum group depth of 64;
+- analysis issues instead of infinite recursion or silent dependency invention.
+
+Group datablock identity and group-node instance identity remain separate. Two instances of the
+same node group therefore receive different reachable node IDs.
 
 ## Compatibility contract
 
@@ -65,132 +95,227 @@ JPEG is rejected during planning.
 - atomic output reservations;
 - `BakeExecutionResult`.
 
-Its one synthetic `CAMERA_COMBINED` pass is metadata only. It is never passed to
-`bpy.ops.object.bake`. Runtime dispatch checks the concrete plan type and uses
-`bpy.ops.render.render(write_still=True)`.
+Its synthetic `CAMERA_COMBINED` pass is metadata only. It is never passed to
+`bpy.ops.object.bake`. Runtime dispatch uses `bpy.ops.render.render(write_still=True)` through
+the public failure-injection hook.
 
-## Render execution
+## Render execution layers
 
-`blender_adapter/camera_projection_executor.py` owns the B4 transaction.
+The B4 executor is split by responsibility:
 
-For every static or sequence frame it:
+- `camera_projection_state.py`: validation and reversible Scene/frame/visibility state;
+- `camera_projection_image.py`: staged-image decoding, alpha-mask extraction and crop rewrite;
+- `camera_projection_executor_core.py`: frame orchestration and atomic reservations;
+- `camera_projection_executor.py`: stable public facade;
+- `texture_executor.py`: object-bake/B4 dispatch without operator access.
 
-1. validates source, Scene, World, camera and light identities against the immutable plan;
-2. captures render settings, timeline frame, `hide_render`, and `visible_camera` values;
-3. makes the source object directly visible to the active camera;
-4. disables only direct camera visibility for other renderable objects;
-5. keeps their diffuse, glossy, transmission and shadow participation intact;
-6. enables transparent film while keeping World lighting/reflection contribution;
-7. renders directly to the transaction's staged path;
-8. validates that Blender created a non-empty file;
-9. restores every captured property in `finally`;
-10. commits the JSON and all texture frames together.
-
-The only real render operator access is the failure-injection hook:
+The only real render operator access is:
 
 ```text
 blender_adapter/bake_executor.py::_call_render_operator
 ```
 
-`texture_executor.py` dispatches plans but contains no `bpy.ops` access.
+For every static or sequence frame the executor:
+
+1. validates source, Scene, World, camera and light identities against the immutable plan;
+2. captures render settings, timeline frame, `hide_render`, and `visible_camera` values;
+3. makes the source directly visible to the active camera;
+4. disables only direct camera visibility for other renderable objects;
+5. keeps their diffuse, glossy, transmission and shadow participation intact;
+6. enables transparent film while retaining World lighting and reflection contribution;
+7. renders the full frame to an atomic staged path;
+8. validates and decodes the staged image Blender actually wrote;
+9. extracts a binary alpha mask using threshold `1 / 255`;
+10. after every frame succeeds, derives one sequence-union layout;
+11. rewrites every staged frame with the same crop dimensions;
+12. restores every captured Blender value in `finally`.
+
+Blender 4.4 background mode exposes `Render Result` as a zero-sized image after a completed
+render. The implementation therefore derives alpha from the staged image bytes, not from the
+unreliable headless `Render Result` datablock.
 
 ## Source-only camera layer
 
-Other meshes must remain available to reflection, refraction, occlusion and shadows, but
-they must not be drawn directly into every exported object's texture. B4 therefore changes
-only `visible_camera` for other renderable objects during a projection render.
+Other meshes must remain available to reflection, refraction, occlusion and shadows, but they
+must not be drawn directly into every exported object's texture. B4 changes only
+`visible_camera` for other renderable objects.
 
 It deliberately does **not** set `hide_render=True` on dependencies. This distinction is
-required for Glass and reflective materials.
+required for Glass and reflective materials. All previous `hide_render` and `visible_camera`
+values are restored on success and failure.
 
-The source object's previous `hide_render` and `visible_camera` values are restored on
-success and failure.
+## Stable sequence-union crop
 
-## Spine geometry
-
-`application/a1_camera_projection.py` builds a deterministic full-frame mesh:
+`domain/baking/projection_layout.py` owns the Blender-independent crop model:
 
 ```text
-4 vertices
-5 topology edges including one diagonal
-2 triangles
-4 hull vertices
-UV range 0..1
-attachment size = render width x render height
+ProjectionPixelPoint
+ProjectionCropBounds
+CameraProjectionLayout
+build_sequence_union_layout()
+convex_hull()
 ```
 
-The quad is centered on the legacy main bone. Its local extent is derived from texture
-pixels and the rig's uniform scale so serialized Spine coordinates are exactly:
+All frame masks are unioned before geometry is created:
 
 ```text
-(-width / 2, +height / 2)
-(+width / 2, +height / 2)
-(+width / 2, -height / 2)
-(-width / 2, -height / 2)
+frame 1 alpha mask --+
+frame 2 alpha mask --+--> union alpha mask --> crop + convex hull
+...                  |
+frame N alpha mask --+
 ```
 
-A full-frame quad is the stable first implementation because a static or animated camera
-can move the projected object anywhere in the frame. Per-frame cropping would require a
-second stable geometry/offset contract and could clip later sequence frames.
+The crop is the union alpha bounding box expanded by `BakeSettings.margin_pixels`. For A1 this
+is the existing export `bake_margin`, so no new per-material or B4-only UI switch was added.
+The bounds are clamped to the original render dimensions.
 
-## Production integration
+Every sequence frame receives exactly the same:
 
-`prepare_a1_object()` now calls `build_texture_plan()` after material and scene analysis.
-When B4 is selected it:
+- cropped width and height;
+- full-frame screen offset;
+- UV mapping;
+- convex hull;
+- triangulation;
+- attachment dimensions.
 
-- records `texture_pipeline=CAMERA_RENDER_PROJECTION`;
-- keeps existing texture names and sequence frame names;
-- builds the legacy rig with its main bone at the screen origin;
-- replaces region UV attachments with one full-frame projection quad;
-- keeps control icons and preview animation options compatible;
-- uses the same JSON plus texture atomic transaction as object baking.
+A frame cannot change attachment geometry or move the crop independently. Later frames are
+therefore not clipped by a crop derived from the representative frame alone.
 
-The stable public functions remain:
+An all-transparent static render or sequence is rejected with a structured execution error.
+
+## Screen-space convex hull
+
+The alpha union contributes pixel-boundary points. A deterministic monotonic-chain algorithm
+builds one counter-clockwise convex hull and removes collinear points.
+
+The hull is triangulated as a fan:
 
 ```text
-execute_bake_plan()
-stage_bake_plan_outputs()
+vertex count = H
+triangle count = H - 2
+triangle index count = (H - 2) * 3
 ```
 
-They accept either `BakePlan` or `CameraProjectionPlan` and dispatch internally.
+The hull follows the visible alpha union, while UVs are normalized inside the padded crop. This
+keeps transparent padding around the texture without expanding Spine geometry to a full crop
+rectangle.
+
+Blender image pixels use a bottom-left origin. Spine UV conversion is:
+
+```text
+u = (x - crop_min_x) / crop_width
+v = 1 - (y - crop_min_y) / crop_height
+```
+
+Spine positions preserve full-frame camera placement:
+
+```text
+spine_x = x - full_width  / 2
+spine_y = y - full_height / 2
+```
+
+Cropping therefore reduces texture dimensions without recentering the rendered object.
+
+## Post-render document finalization
+
+A camera layout does not exist during initial object preparation. Production output therefore
+uses this transaction order:
+
+```text
+prepare immutable object/rig/initial document
+        -> reserve JSON
+        -> render every texture frame
+        -> derive sequence-union crop and hull
+        -> rewrite staged textures
+        -> rebuild camera projection attachment
+        -> compose typed Spine documents
+        -> serialize staged JSON
+        -> commit JSON and every texture together
+```
+
+`blender_adapter/a1_projection_finalization.py` rebuilds only the B4 attachment. Source geometry,
+materials, rig planning and texture planning are not repeated.
+
+The same post-render finalization is used by:
+
+- single-object export;
+- standalone multi-object export;
+- connected multi-object export;
+- mixed connected/standalone export.
+
+Multi-object flows re-run the existing typed Spine composition from finalized in-memory
+documents. Serialized JSON is never patched or merged.
+
+The historical reservations-only `stage_bake_plan_outputs()` keeps full-frame B4 output for
+external callers that serialize JSON before staging. Production output services use the
+detailed `stage_texture_plan_outputs()` API and receive the exact `CameraProjectionLayout`.
+This prevents cropped images from being paired with a stale full-frame attachment.
+
+## Atomicity and rollback
+
+JSON is reserved first to preserve public output ordering, but its bytes are written only after
+all projection frames and the final layout succeed.
+
+Failures during any of these stages roll back the entire transaction:
+
+- render;
+- staged-image decode;
+- alpha-union construction;
+- crop rewrite;
+- hull generation;
+- projection attachment rebuild;
+- multi/mixed typed composition;
+- JSON serialization;
+- final commit.
+
+Existing JSON and textures are restored byte-for-byte. Staged and backup files are removed.
+Temporary Blender images and all Scene/context/visibility state are restored in `finally`.
 
 ## Blender 4.4 validation
 
-The dedicated workflow `Blender 4.4 Camera Projection` runs real Cycles renders and decoded
-pixel checks for:
+The dedicated `Blender 4.4 Camera Projection` workflow runs real Cycles renders and decoded
+image checks for:
 
-1. production Layer Weight/Fresnel export;
-2. transparent background plus visible source coverage;
-3. full-frame Spine JSON mesh topology;
-4. Glass render projection;
-5. Principled Volume render projection;
-6. animated camera-dependent sequence frames;
-7. restoration of the original timeline frame;
-8. forced render failure after existing output files are present;
-9. atomic restoration of previous JSON and PNG bytes;
-10. restoration of context, render settings, material graphs, `hide_render`, and
-    `visible_camera`;
-11. absence of staged files and temporary Blender datablocks.
+- production Layer Weight/Fresnel selection and render;
+- transparent background and visible source coverage;
+- static crop smaller than the full render;
+- attachment dimensions matching the decoded cropped PNG;
+- convex hull UV/triangle invariants;
+- Glass projection;
+- Principled Volume projection;
+- camera-dependent sequence frames with one stable union crop;
+- timeline restoration;
+- forced render failure and atomic JSON/PNG rollback;
+- recursive nested Layer Weight groups;
+- recursive nested Volume groups;
+- unused group input precision;
+- standalone multi-object cropped composition;
+- connected multi-object cropped composition;
+- mixed connected/standalone cropped composition;
+- absence of temporary Blender datablocks.
 
-Pure tests additionally cover reflection, Volume, displacement, local-plan preservation,
-missing camera, JPEG rejection, sequence naming, quad topology and execution-result
-compatibility.
+Pure tests cover planner routing, recursive group traversal, group cycles, union masks, padding,
+convex hull construction, UV conversion, all-transparent rejection and architecture boundaries.
 
 ## Current boundaries
 
-### Full-frame output
+### Convex rather than concave geometry
 
-The first B4 version does not crop transparent borders and does not generate a screen-space
-convex hull. This trades texture area for deterministic sequence geometry and stable
-attachment offsets.
+The screen-space attachment is a convex hull. Deep concavities and internal transparent holes
+remain inside the mesh and are represented by texture alpha. This is deliberate: a simple
+convex polygon is deterministic and safe for Spine triangulation.
+
+### Fixed alpha threshold
+
+Layout detection currently uses decoded alpha `>= 1 / 255`. A configurable threshold or
+coverage-weighted antialias policy would be an output policy, not a material strategy switch.
 
 ### Connected multi-object depth
 
-Each B4 texture is a source-only camera layer. Several full-frame layers can be composed for
-standalone objects, but a connected rig cannot reproduce arbitrary per-pixel depth
-intersections using one fixed slot order. Connected multi-object camera projection therefore
-requires a future grouped render or depth-aware layer policy before production parity is
-claimed.
+Each B4 texture remains a source-only camera layer. Connected and mixed documents now carry
+correct cropped textures and attachments, but one fixed Spine slot order still cannot reproduce
+arbitrary per-pixel depth intersections between several layers. Grouped rendering or depth-aware
+composition is required before arbitrary connected B4 visual parity is claimed.
 
 ### Camera movement versus Spine rig movement
 
@@ -199,32 +324,22 @@ converted into Spine bone motion. This is intentional for appearance parity.
 
 ### Render engine scope
 
-The current production execution uses the configured render engine, with real Blender 4.4
-validation on Cycles. Eevee-specific parity and compositor-dependent render pipelines need
-separate fixtures before being claimed.
+Real B4 validation targets Blender 4.4 Cycles. Eevee-specific parity and compositor-dependent
+render pipelines need separate fixtures before being claimed.
 
 ### Color and HDR
 
-PNG/WEBP use Blender's configured color-management transform. OPEN_EXR preserves a higher
-precision render target. Automatic tone mapping, premultiplied-alpha policy variants and HDR
-Spine runtime behavior remain output-policy work, not material strategy switches.
+PNG/WEBP use Blender's configured color-management transform. OPENEXR preserves higher
+precision. Configurable tone mapping, premultiplied-alpha variants and HDR Spine runtime
+behavior remain output-policy work.
 
-### Recursive node groups
+## Next safe increments
 
-B4 can render group-based materials because Blender evaluates the live graph, but planner
-classification still needs recursive node-group analysis to discover camera/volume
-requirements hidden entirely inside a group.
+1. optional concave/contour simplification policy if real fixtures justify it;
+2. grouped multi-object camera rendering;
+3. depth-aware connected composition;
+4. Eevee and custom Compositor fixtures;
+5. representative private `.blend` parity against accepted v0.23 JSON and images.
 
-## Extension direction
-
-The next safe increments are:
-
-1. recursive node-group dependency discovery;
-2. optional stable union crop for complete animation sequences;
-3. screen-space hull generation from a union alpha mask;
-4. grouped multi-object camera layers;
-5. depth-aware connected composition;
-6. representative private `.blend` parity against accepted v0.23 JSON and images.
-
-No increment should add per-material UI mode switches. Planner facts and registered pipeline
-selection remain authoritative.
+No increment should add per-material UI mode switches. Immutable analysis facts and registered
+pipeline selection remain authoritative.
