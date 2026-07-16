@@ -1,7 +1,7 @@
 """Execute semantic bake strategies using the stable low-level bake primitives.
 
-``bake_executor`` remains the owner of Blender context validation, temporary mesh/image
-creation, scene state, atomic reservations, and the only ``bpy.ops.object.bake`` call.
+``bake_executor_core`` owns Blender context validation, temporary mesh/image creation,
+scene state, atomic reservations, and the real ``bpy.ops.object.bake`` implementation.
 This module owns pass-specific material preparation and final RGBA composition.
 """
 
@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from ..domain.baking import (
-    BakeArtifact,
     BakeExecutionResult,
     BakeExecutionSettings,
     BakePlan,
@@ -20,7 +19,7 @@ from ..domain.baking import (
 )
 from ..domain.geometry import MeshSnapshot
 from ..infrastructure import AtomicFileTransaction, atomic_file_transaction
-from . import bake_executor as core
+from . import bake_executor_core as core
 from .bake_compositor import (
     BakeCompositeError,
     BakePixelBuffer,
@@ -41,6 +40,14 @@ from .mesh_writer import MeshWriteError, temporary_mesh_object
 logger = logging.getLogger(__name__)
 
 BakeExecutionError = core.BakeExecutionError
+
+
+def _call_public_bake_operator(bpy_module: Any, bake_type: str) -> None:
+    """Call through the stable facade so existing failure-injection tests still work."""
+
+    from . import bake_executor as public_executor
+
+    public_executor._call_bake_operator(bpy_module, bake_type)
 
 
 def _bake_pass_to_buffer(
@@ -84,7 +91,7 @@ def _bake_pass_to_buffer(
                 pass_plan.bake_mode.value,
                 pass_plan.material_slot_indices,
             )
-            core._call_bake_operator(bpy_module, pass_plan.bake_mode.value)
+            _call_public_bake_operator(bpy_module, pass_plan.bake_mode.value)
             return read_bake_image_pixels(image)
     finally:
         core._remove_image(bpy_module, image)
@@ -117,7 +124,7 @@ def _bake_single_frame(
         )
         with prepared_materials.prepare_pass(pass_plan):
             prepared_materials.assign_image(image)
-            core._call_bake_operator(bpy_module, pass_plan.bake_mode.value)
+            _call_public_bake_operator(bpy_module, pass_plan.bake_mode.value)
             core._save_bake_image(image, reservation, plan)
     finally:
         core._remove_image(bpy_module, image)
