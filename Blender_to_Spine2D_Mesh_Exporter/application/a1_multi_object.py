@@ -14,6 +14,7 @@ from ..domain.spine import UniformScaleMode
 class A1MultiObjectMode(str, Enum):
     STANDALONE = "STANDALONE"
     CONNECTED = "CONNECTED"
+    MIXED = "MIXED"
 
 
 class A1MultiObjectStage(str, Enum):
