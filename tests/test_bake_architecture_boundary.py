@@ -39,14 +39,30 @@ def test_baking_domain_has_no_blender_dependencies():
 
 def test_bake_helpers_use_no_operators():
     for filename in (
+        "bake_compositor.py",
         "bake_materials.py",
         "bake_scene_state.py",
         "material_analyzer.py",
+        "shader_graph_analyzer.py",
     ):
         path = ROOT / "blender_adapter" / filename
         source = path.read_text(encoding="utf-8")
         assert "bpy.ops" not in source
         assert ".ops." not in source
+
+
+def test_strategy_registry_remains_blender_independent():
+    path = ROOT / "domain" / "baking" / "strategies.py"
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    imported_roots = {
+        node.names[0].name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import) and node.names
+    }
+    assert "bpy" not in imported_roots
+    assert "bmesh" not in imported_roots
+    assert "numpy" not in imported_roots
 
 
 def test_object_bake_operator_is_confined_to_one_helper():
