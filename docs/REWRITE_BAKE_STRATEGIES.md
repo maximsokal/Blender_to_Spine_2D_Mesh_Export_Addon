@@ -1,55 +1,48 @@
-# Semantic bake strategy architecture
+# Semantic texture strategy architecture
 
 ## Purpose
 
 The rewrite must not expose one UI switch for every Blender material combination. It
-inspects the connected material graph, identifies semantic outputs and external context,
-selects deterministic strategies, executes one or more real Blender passes, and composes
-one Spine straight-RGBA texture.
+inspects the connected shader graph, identifies semantic outputs and external context,
+then selects one of two texture pipelines:
 
 ```text
-Blender Material + Object + Scene
+Blender Material / Object / Scene
         |
         v
 reachable shader graph analysis
         |
         v
-semantic channels + dependency kinds
+semantic channels + dependencies
         |
         v
 ObjectBakeContext + SceneBakeContext
         |
         v
-BakeStrategyRegistry
+build_texture_plan()
         |
-        v
-BakePassPlan[] + BakeCompositePlan
+        +-- BakePlan ----------------------> object UV bake passes
+        |                                     + RGBA compositor
         |
-        v
-reversible copied-material preparation
-        |
-        v
-transactional Blender execution
-        |
-        v
-validated final texture
+        +-- CameraProjectionPlan ----------> active-camera transparent render
+                                              + full-frame Spine quad
 ```
 
-No strategy is selected by user-facing material checkboxes. The UI may report which
-pipeline was chosen and why, but material, object, and scene analysis own the decision.
+No strategy is selected by user-facing material checkboxes. The UI may report the chosen
+pipeline and reasons, but analysis and planning own the decision.
 
-## Reachable material graph
+## Reachable shader graph
 
 `blender_adapter/shader_graph_analyzer.py` starts at the active
-`ShaderNodeOutputMaterial` and walks only links contributing to that output. Unconnected
-editor nodes do not change the result.
+`ShaderNodeOutputMaterial` and walks only connected links contributing to that output.
+Unused editor nodes do not change the plan.
 
-The Blender-independent `MaterialGraphSnapshot` records:
+`MaterialGraphSnapshot` records:
 
 - reachable nodes and links;
 - active output node;
-- semantic output channels;
-- external dependency kinds;
+- semantic channels;
+- external dependencies;
 - analysis issues.
 
 Semantic channels:
@@ -60,134 +53,76 @@ Semantic channels:
 - `VOLUME`;
 - `DISPLACEMENT`.
 
-Dependency kinds currently include:
+Dependency categories include:
 
-- `IMAGE` and `TIME`;
-- `OBJECT` and `GEOMETRY`;
-- `WORLD` and `LIGHTING`;
-- `OCCLUSION` and `SCENE_OBJECTS`;
-- `VIEW` and `CAMERA`;
-- `REFLECTION` and `TRANSMISSION`;
-- `NODE_GROUP`.
+- Image and Time;
+- Object and Geometry;
+- World and Lighting;
+- Occlusion and scene objects;
+- Camera and View;
+- Reflection and Transmission;
+- Node Group.
 
 Stable node names and socket links are used instead of Python identity of Blender RNA
-wrappers. A `TIME` dependency from a keyframe or driver marks the material as animated,
-just like an image sequence or movie.
-
-## Immutable object and scene inputs
-
-`domain/baking/context.py` defines Blender-independent planning inputs.
-
-### `ObjectBakeContext`
-
-It records:
-
-- source object identity and type;
-- world matrix;
-- collection membership;
-- render, camera-ray, and shadow visibility;
-- object/data animation presence.
-
-### `SceneBakeContext`
-
-It records:
-
-- scene identity and render engine;
-- analysis frame;
-- World identity, node types, color, Background strength, and animation;
-- visible lights with type, energy, color, transform, shadow flag, and animation;
-- active camera identity, projection type, transform, lens/ortho scale, clipping, and
-  animation;
-- visible object identities;
-- shadow-caster identities;
-- view transform, look, exposure, and gamma.
-
-Planning consumes these snapshots directly. Scene-aware execution validates stable
-identities again before temporary Blender datablocks are created. Numeric values that are
-expected to animate are evaluated at each frame rather than compared to the initial
-snapshot.
+wrappers. A `TIME` dependency from keyframes or drivers marks the material/object as
+animated just like an image sequence or movie.
 
 ## Evaluation scopes
 
-Every `BakePassPlan` declares one `BakeEvaluationScope`.
+Every used material slot receives one primary evaluation scope:
 
-### `LOCAL`
+- `LOCAL`: lighting-independent surface color and material Emission;
+- `SCENE`: World, lighting, occlusion and other scene-object appearance;
+- `CAMERA`: active-camera/ray appearance routed to B4;
+- `AUXILIARY`: alpha or another future composition-only channel.
 
-The appearance can be represented from the material/object surface without preserving
-scene lighting or camera rays.
+The presence of a lamp does not automatically make ordinary Principled Base Color
+scene-aware. Selection depends on the reachable graph requirement.
 
-Examples:
+## Object-bake strategy registry
 
-- ordinary Principled Base Color;
-- Image Texture and procedural Base Color;
-- pure material Emission;
-- B2 straight-color and alpha extraction.
+`domain/baking/strategies.py` remains Blender-independent. Every executable object-bake
+strategy declares:
 
-### `SCENE`
+- stable identifier;
+- deterministic priority;
+- evaluation scope;
+- support predicate;
+- semantic channels;
+- Blender bake mode;
+- optional copied-material preparation.
 
-The appearance depends on lights, World, occlusion, or other scene objects, but Blender's
-ordinary Cycles object bake can evaluate it with `COMBINED`.
-
-Examples currently detected and executed:
-
-- Subsurface and Sheen contributions;
-- Toon, Translucent, Hair, and similar lighting-dependent shaders;
-- Ambient Occlusion;
-- World illumination;
-- scene-object occluders and shadow/environment contributors.
-
-### `CAMERA`
-
-The appearance depends on camera/view/ray direction and cannot be represented correctly
-by Blender 4.4 object UV baking.
-
-Examples:
-
-- Fresnel;
-- Layer Weight;
-- Light Path;
-- Glass and Refraction;
-- Principled Transmission;
-- metallic/coat reflection that must preserve camera/environment appearance;
-- reflection/refraction involving other objects.
-
-Real Blender 4.4 validation proved that `bpy.ops.object.bake` exposes no camera-ray bake
-type. Therefore these graphs do **not** fall back to ordinary `COMBINED`; the camera
-projection boundary detector returns an actionable `camera-render projection` error. B4
-must render from the active camera and project that result onto a Spine-compatible
-mesh/texture.
-
-### `AUXILIARY`
-
-A pass supplies a semantic channel used by composition rather than a complete appearance.
-The current example is `AlphaBakeStrategy`.
-
-## Strategy registry
-
-`domain/baking/strategies.py` contains the Blender-independent registry.
-
-Implemented executable strategies:
+Executable strategies:
 
 1. `SceneCombinedBakeStrategy`;
 2. `SurfaceColorBakeStrategy`;
 3. `EmissionBakeStrategy`;
 4. `AlphaBakeStrategy`.
 
-The registry also contains a camera projection boundary detector. It classifies
-camera-dependent appearance and stops planning before a `BakePassPlan` is emitted, because
-there is no valid Blender 4.4 object-bake mode for camera rays.
+A camera boundary detector remains in the registry for callers that explicitly request an
+object-bake plan. Production planning uses `build_texture_plan()` and converts that same
+requirement into `CameraProjectionPlan` instead of returning a dead bake mode.
 
-Every executable pass records:
+## Typed pass plan
 
-- strategy identifier;
+`BakePlan.bake_mode` remains a compatibility alias for the first pass. The source of truth
+is:
+
+```text
+BakePlan.passes: tuple[BakePassPlan, ...]
+BakePlan.composite: BakeCompositePlan
+```
+
+Each pass records:
+
+- strategy ID;
+- verified Blender object-bake mode;
+- material slot coverage;
+- semantic channels;
 - evaluation scope;
-- real Blender bake mode;
-- material-slot coverage;
-- semantic-channel coverage;
 - per-slot copied-material preparation.
 
-`BakeMode` intentionally contains only the object-bake types used and verified in Blender
-4.4:
+Verified Blender 4.4 object-bake modes used by the rewrite:
 
 ```text
 DIFFUSE
@@ -195,213 +130,196 @@ COMBINED
 EMIT
 ```
 
-## B1 surface and emission
+There is no `ACTIVE_CAMERA` object-bake type.
 
-Ordinary opaque surface color uses lighting-independent `DIFFUSE Color`. Pure material
-Emission uses `EMIT`.
+## B1: surface and Emission
 
-When surface and emission are separate contributions:
+Ordinary opaque Principled, Image Texture and procedural Base Color use
+lighting-independent `DIFFUSE Color`. Pure material Emission uses `EMIT`.
 
 ```text
 final.rgb   = clamp(surface.rgb + emission.rgb)
 final.alpha = max(surface.alpha, emission.alpha)
 ```
 
-If a caller requests `COMBINED` for a local surface portion that is also composed with a
-separate emission pass, it is normalized to `DIFFUSE`; `COMBINED` already contains
-emission and would count it twice.
+Single-pass output bypasses the compositor so the architecture alone does not alter legacy
+files.
 
-Single-pass opaque output bypasses the compositor so previous local files do not change
-merely because the architecture supports multiple strategies.
+If a surface contribution requested as `COMBINED` is also composed with a separate Emission
+pass, the registry normalizes it to `DIFFUSE` to avoid counting Emission twice.
 
-## B2 alpha and straight color
+## B2: alpha and straight RGB
 
-A normal `DIFFUSE Color` bake of an alpha-bearing shader can return attenuated or
-premultiplied RGB. B2 evaluates color and opacity independently:
+A native `DIFFUSE Color` bake of an alpha-bearing shader may return attenuated RGB. B2
+evaluates straight color and opacity independently:
 
 ```text
-straight surface color -> temporary Emission proxy -> EMIT
-material opacity       -> grayscale Emission proxy -> EMIT
-material emission      -> native EMIT when present
+straight surface color -> temporary Emission proxy -> EMIT pass
+material opacity       -> grayscale Emission proxy -> EMIT pass
+material emission      -> native EMIT pass when present
 ```
-
-Final composition:
 
 ```text
 final.rgb   = clamp(sum(color contribution passes))
 final.alpha = alpha_pass.red
 ```
 
+`blender_adapter/bake_material_preparation.py` mutates only copied materials. It stores the
+copied output link, creates temporary Math/MixRGB/Emission nodes, runs one pass, removes all
+temporary nodes and restores the copied graph in `finally`.
+
 Opacity extraction supports:
 
-- Principled Alpha, linked Image Alpha, and procedural/value graphs;
+- Principled Alpha, linked Image Alpha and procedural scalar graphs;
 - Transparent BSDF and Holdout as zero opacity;
 - ordinary surface shaders as full opacity;
-- Mix Shader as `(1 - Fac) * opacity(A) + Fac * opacity(B)`;
-- Add Shader as clamped addition;
+- Mix Shader weighted opacity;
+- Add Shader clamped opacity;
 - nested Mix/Add trees;
-- animated socket values and drivers.
+- animated values and drivers.
 
 Straight-color extraction supports:
 
 - Principled Base Color;
-- linked Image/procedural color graphs;
-- common shader `Color` and `Base Color` sockets;
-- Transparent/Holdout as no color contribution;
-- Mix Shader without multiplying straight RGB by final coverage;
-- Add Shader color composition;
-- nested Mix/Add trees.
+- Image/procedural color graphs;
+- Transparent/Holdout branches without premultiplying the visible branch;
+- Mix Shader and Add Shader;
+- nested trees.
 
-Pure Transparent produces black RGB and alpha zero. Opaque slots sharing an object with
-transparent slots contribute alpha one.
+## B3: scene-aware object baking
 
-## B3 scene-aware object baking
+`SceneCombinedBakeStrategy` uses real `COMBINED` object baking for explicit requirements
+such as:
 
-### Strategy selection
+- Subsurface and Sheen;
+- Toon, Translucent and Hair shaders;
+- Ambient Occlusion;
+- World illumination;
+- scene-object occlusion/environment dependencies.
 
-A normal Principled material does not become scene-aware merely because a lamp exists in
-the file. This preserves the historical local-albedo behavior.
+One mesh may mix local and scene-aware slots. Each pass preserves matched copied material
+slots and replaces unmatched slots with black Emission proxies.
 
-`SCENE_COMBINED` is selected only when the reachable material graph explicitly declares a
-scene dependency such as lighting, World, occlusion, or scene objects.
+The temporary bake target occupies the source transform. During scene-aware object baking
+the live source is temporarily excluded from render, then restored in `finally`.
 
-### Per-slot isolation
-
-One mesh may contain local and scene-aware material slots. Each pass receives an explicit
-per-slot preparation plan:
-
-```text
-matched slot     -> PRESERVE
-unmatched slot   -> ZERO_TO_EMISSION
-```
-
-`ZERO_TO_EMISSION` temporarily replaces only the copied material's Surface output with a
-black Emission proxy. This prevents a local material from appearing in the scene pass or a
-scene material from being counted again in the local pass.
-
-### Source-object exclusion
-
-The temporary bake target occupies the source object's transform. During a scene-aware
-pass the live source object is temporarily excluded from render, preventing coincident
-duplicate geometry while leaving the source datablock available to Object Info and other
-references.
-
-`hide_render` is captured and restored in `finally` on success and failure.
-
-### Scene alpha
-
-A `COMBINED` scene pass may return RGB multiplied by coverage. If the material also has a
-separate alpha pass, `BakeCompositePlan.unpremultiply_color_by_alpha` converts the scene
-color back to straight RGB before writing the final texture:
+When scene `COMBINED` and explicit alpha are composed, RGB can be converted to straight
+color:
 
 ```text
-straight.rgb = combined.rgb / alpha, when alpha > epsilon
-straight.rgb = 0,                    when alpha == 0
+straight.rgb = combined.rgb / alpha, alpha > epsilon
+straight.rgb = 0,                    alpha == 0
 final.alpha  = alpha_pass.red
 ```
 
-Both NumPy and deterministic `array('f')` fallback implementations use the same rule.
+NumPy and deterministic `array('f')` fallbacks implement the same operation.
 
-### Animation
+## B4: camera-render projection
 
-World, lights, camera, and source object/data animation are captured as dependencies.
-Sequence frame tasks set the Blender timeline frame before every strategy pass. Real tests
-verify that a keyframed light produces different decoded output frames and that the
-original frame is restored afterward.
+`domain/baking/camera_projection.py` selects B4 for:
 
-### Transaction and cleanup
+- Camera or View dependencies;
+- Reflection or Transmission dependencies;
+- Volume;
+- render-evaluated displacement.
 
-Scene-aware passes remain inside the same caller-owned atomic transaction as JSON, local
-passes, alpha passes, static textures, and sequence frames.
+Affected graph families include Fresnel, Layer Weight, Light Path, Glass, Refraction,
+Principled Transmission, reflective appearance and Principled Volume.
 
-A failure restores:
+`CameraProjectionPlan` is a frozen `BakePlan` subtype. Its synthetic camera pass preserves
+frame/output metadata but is never executed with `bpy.ops.object.bake`.
 
-- previous output bytes;
-- source `hide_render`;
-- active object, selection, and mode;
-- timeline frame;
-- scene render/bake settings;
-- copied material links and temporary nodes;
-- temporary images, materials, meshes, objects, and collections.
+`blender_adapter/camera_projection_executor.py`:
+
+1. validates immutable object/scene identities;
+2. captures render/frame/visibility state;
+3. makes only the source directly camera-visible;
+4. keeps other objects available to reflection, transmission, diffuse and shadow rays;
+5. enables transparent film;
+6. renders each frame to an atomic staged path;
+7. validates the output;
+8. restores all state in `finally`.
+
+`application/a1_camera_projection.py` creates one stable full-frame Spine quad with four
+vertices and two triangles.
+
+See `docs/REWRITE_CAMERA_PROJECTION.md` for the full B4 contract and boundaries.
 
 ## Executor boundaries
 
-- `bake_executor_core.py` owns validation, temporary mesh/image primitives, reservations,
-  and the sole real Blender object-bake operator implementation;
-- `semantic_bake_executor.py` owns strategy execution, scene validation, copied-material
-  preparation, and composition;
-- `scene_bake_analyzer.py` produces immutable object/scene snapshots;
-- `scene_bake_execution.py` owns reversible live-source render exclusion;
-- `scene_material_preparation.py` owns scene-pass material-slot masks;
-- `bake_executor.py` remains the stable public facade.
+- `bake_executor_core.py`: object-bake resource primitives and real object-bake operator;
+- `semantic_bake_executor.py`: B1-B3 execution and composition;
+- `camera_projection_executor.py`: B4 render transaction;
+- `texture_executor.py`: plan dispatch without operator access;
+- `bake_executor.py`: stable public facade and the two failure-injection operator hooks.
 
-## Verified real Blender matrix
+The only real operator access points are:
 
-Decoded-pixel Blender 4.4 tests now cover:
+```text
+bake_executor_core._call_bake_operator()
+bake_executor._call_render_operator()
+```
 
-- ordinary Principled/Image/procedural color;
+## Automatic support matrix
+
+Real Blender decoded-pixel coverage includes:
+
+- opaque Principled, Image Texture and procedural Base Color;
 - pure Emission;
-- separate Surface and Emission material slots;
-- one Principled graph with simultaneous Base Color and Emission;
-- Principled constant Alpha and linked Image Alpha;
-- Transparent/Mix Shader in both orders and nested mixes;
+- mixed surface/Emission slots and shared Principled graphs;
+- constant Alpha and linked Image Alpha;
+- Transparent/Mix Shader in both orders;
+- nested transparency and pure Transparent;
 - animated Alpha;
-- scene `COMBINED` responding to light energy;
-- World-only illumination changes;
-- Ambient Occlusion responding to another render-visible object;
-- mixed local and scene-aware slots without double counting;
-- scene-dependent alpha converted to straight RGBA;
-- keyframed light sequence frames;
-- camera-dependent graph rejection at the projection boundary;
-- rollback after a scene pass begins;
-- source/context/frame/material/datablock restoration.
+- scene light, World and Ambient Occlusion response;
+- mixed local/scene slots;
+- scene straight RGBA;
+- animated lights;
+- Fresnel/Layer Weight production camera projection;
+- Glass camera projection;
+- Principled Volume camera projection;
+- animated camera-dependent projection frames;
+- rollback during local, alpha, scene, sequence and render stages;
+- source state and temporary datablock restoration.
 
-## Explicit remaining boundaries
+## Explicit extension boundaries
 
-### Camera render projection
+### Recursive node groups
 
-Fresnel, Layer Weight, Light Path, Glass, Refraction, Transmission, and reflection that
-must preserve camera appearance require B4. The implementation must:
+`NODE_GROUP` is recorded, but internal group trees are not recursively snapshotted. A future
+increment must enter group node trees with stable group paths, map group sockets, prevent
+recursive cycles and keep datablock identity separate from node instance identity.
 
-1. render a deterministic active-camera view;
-2. define the object/scene visibility set;
-3. retain or derive camera-space depth/coverage;
-4. project the rendered result onto a Spine-compatible mesh or generated camera plane;
-5. preserve sequence timing and atomic output behavior.
+### B4 crop and hull
 
-### Volume
+B4 currently uses a full-frame transparent texture and full-frame quad. Stable union crop
+and screen-space hull generation are future geometry policies.
 
-Volume output cannot be represented by ordinary surface UV object baking. It already
-returns a structured camera-projection planning error and belongs to the same B4 render
-projection pipeline.
+### Connected multi-object B4 depth
 
-### Node groups
+Several source-only full-frame layers cannot reproduce arbitrary per-pixel intersections
+using one fixed slot order. Grouped rendering or depth-aware composition is required before
+connected B4 parity is claimed.
 
-A `NODE_GROUP` dependency is recorded, but internal group trees are not recursively
-snapshotted yet. Recursive support must map group inputs/outputs through a stable group
-path, prevent cycles, and distinguish node instances from shared node-tree datablocks.
+### HDR/output policy
 
-### HDR policy
-
-Ordinary exported textures clamp additive RGB. OpenEXR preservation or configurable tone
-mapping belongs to a later output policy, not to material strategy selection.
+Ordinary additive RGB is clamped. OPEN_EXR, tone mapping and runtime HDR expectations belong
+to output/composition policy, not material strategy UI switches.
 
 ## Extension contract
 
-A new strategy must not add UI material-mode switches or special-case chains to the public
-executor.
+A new strategy or texture pipeline must be implemented without adding special-case UI mode
+switches.
 
 Required sequence:
 
-1. extend immutable graph/object/scene facts only when existing values are insufficient;
-2. classify the required evaluation scope;
-3. register one deterministic strategy or explicit projection boundary;
-4. produce typed pass, material-preparation, and composition plans;
-5. mutate only copied node trees;
-6. add pure resolver/compositor tests;
-7. add real Blender decoded-pixel tests;
-8. verify source state, temporary datablocks, animation, rollback, multi-material objects,
-   and common-rig export.
-
-No strategy may mutate the user's source material or rely on undocumented global selection
-or mode state.
+1. extend graph/object/scene analysis only with immutable facts;
+2. add a semantic channel/dependency only when existing values cannot express the need;
+3. select object bake or camera projection deterministically;
+4. produce immutable typed plans;
+5. mutate only copied materials or reversible scene state;
+6. reuse atomic output transactions;
+7. add pure planner/compositor/geometry tests;
+8. add real Blender decoded-pixel tests;
+9. verify source state, temporary datablocks, rollback, sequence and multi-material behavior;
+10. update parity documentation before claiming production support.
