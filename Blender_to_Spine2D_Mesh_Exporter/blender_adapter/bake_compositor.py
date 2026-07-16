@@ -113,6 +113,21 @@ def _validate_compatible_buffers(
     return first.width, first.height
 
 
+def _resolved_color_indices(
+    buffers: Tuple[BakePixelBuffer, ...],
+    plan: BakeCompositePlan,
+) -> Tuple[int, ...]:
+    if plan.color_pass_indices:
+        indices = plan.color_pass_indices
+    elif plan.mode is BakeCompositeMode.ADD_RGB_MAX_ALPHA:
+        indices = tuple(range(len(buffers)))
+    else:
+        indices = ()
+    if indices and max(indices) >= len(buffers):
+        raise BakeCompositeError("Composite color pass index is outside buffers")
+    return indices
+
+
 def _compose_with_numpy(
     buffers: Tuple[BakePixelBuffer, ...],
     plan: BakeCompositePlan,
@@ -125,12 +140,29 @@ def _compose_with_numpy(
     try:
         width, height = _validate_compatible_buffers(buffers)
         result = np.zeros(width * height * 4, dtype=np.float32)
-        for item in buffers:
-            values = np.asarray(item.pixels, dtype=np.float32)
+        color_indices = _resolved_color_indices(buffers, plan)
+        for index in color_indices:
+            values = np.asarray(buffers[index].pixels, dtype=np.float32)
             result[0::4] += values[0::4]
             result[1::4] += values[1::4]
             result[2::4] += values[2::4]
-            np.maximum(result[3::4], values[3::4], out=result[3::4])
+
+        if plan.mode is BakeCompositeMode.ADD_RGB_MAX_ALPHA:
+            for item in buffers:
+                values = np.asarray(item.pixels, dtype=np.float32)
+                np.maximum(result[3::4], values[3::4], out=result[3::4])
+        elif plan.mode is BakeCompositeMode.ADD_RGB_REPLACE_ALPHA:
+            assert plan.alpha_pass_index is not None
+            if plan.alpha_pass_index >= len(buffers):
+                raise BakeCompositeError("Composite alpha pass index is outside buffers")
+            alpha_values = np.asarray(
+                buffers[plan.alpha_pass_index].pixels,
+                dtype=np.float32,
+            )
+            result[3::4] = alpha_values[0::4]
+        else:
+            raise BakeCompositeError(f"Unsupported composite mode: {plan.mode.value}")
+
         if plan.clamp_rgb:
             np.clip(result[0::4], 0.0, 1.0, out=result[0::4])
             np.clip(result[1::4], 0.0, 1.0, out=result[1::4])
@@ -150,23 +182,42 @@ def _compose_with_array(
     width, height = _validate_compatible_buffers(buffers)
     value_count = width * height * 4
     result = array("f", [0.0]) * value_count
+    color_indices = _resolved_color_indices(buffers, plan)
+
     try:
-        for item in buffers:
-            values = item.pixels
+        for index in color_indices:
+            values = buffers[index].pixels
             for offset in range(0, value_count, 4):
                 result[offset] += float(values[offset])
                 result[offset + 1] += float(values[offset + 1])
                 result[offset + 2] += float(values[offset + 2])
-                result[offset + 3] = max(
-                    result[offset + 3],
-                    float(values[offset + 3]),
-                )
+
+        if plan.mode is BakeCompositeMode.ADD_RGB_MAX_ALPHA:
+            for item in buffers:
+                values = item.pixels
+                for offset in range(0, value_count, 4):
+                    result[offset + 3] = max(
+                        result[offset + 3],
+                        float(values[offset + 3]),
+                    )
+        elif plan.mode is BakeCompositeMode.ADD_RGB_REPLACE_ALPHA:
+            assert plan.alpha_pass_index is not None
+            if plan.alpha_pass_index >= len(buffers):
+                raise BakeCompositeError("Composite alpha pass index is outside buffers")
+            values = buffers[plan.alpha_pass_index].pixels
+            for offset in range(0, value_count, 4):
+                result[offset + 3] = float(values[offset])
+        else:
+            raise BakeCompositeError(f"Unsupported composite mode: {plan.mode.value}")
+
         for offset in range(0, value_count, 4):
             if plan.clamp_rgb:
                 result[offset] = min(1.0, max(0.0, result[offset]))
                 result[offset + 1] = min(1.0, max(0.0, result[offset + 1]))
                 result[offset + 2] = min(1.0, max(0.0, result[offset + 2]))
             result[offset + 3] = min(1.0, max(0.0, result[offset + 3]))
+    except BakeCompositeError:
+        raise
     except Exception as exc:
         raise BakeCompositeError("Fallback bake-pass composition failed") from exc
     return BakePixelBuffer(width=width, height=height, channels=4, pixels=result)
@@ -183,8 +234,6 @@ def compose_bake_passes(
         if len(buffers) != 1:
             raise BakeCompositeError("SINGLE composition requires exactly one buffer")
         return buffers[0]
-    if plan.mode is not BakeCompositeMode.ADD_RGB_MAX_ALPHA:
-        raise BakeCompositeError(f"Unsupported composite mode: {plan.mode.value}")
 
     numpy_result = _compose_with_numpy(buffers, plan)
     return numpy_result if numpy_result is not None else _compose_with_array(buffers, plan)
