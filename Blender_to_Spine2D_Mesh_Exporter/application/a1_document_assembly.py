@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 from typing import Mapping, Tuple
 
@@ -11,6 +11,7 @@ from ..domain.spine import (
     LegacyAttachmentSequence,
     LegacyMeshDocumentBuildResult,
     LegacyRigBuildResult,
+    apply_legacy_visual_options,
     build_legacy_mesh_document,
 )
 from .a1_attachment_projection import (
@@ -37,6 +38,8 @@ class A1DocumentAssemblySettings:
     sequence: LegacyAttachmentSequence | None = None
     skin_name: str = "default"
     segment_index_base: int = 0
+    include_control_icons: bool = True
+    include_preview_animation: bool = True
 
     def __post_init__(self) -> None:
         for field_name in ("prefix", "uv_layer_name", "image_path", "skin_name"):
@@ -60,6 +63,9 @@ class A1DocumentAssemblySettings:
             raise TypeError("sequence must be LegacyAttachmentSequence or None")
         if not isinstance(self.segment_index_base, int) or self.segment_index_base < 0:
             raise ValueError("segment_index_base must be a non-negative integer")
+        for field_name in ("include_control_icons", "include_preview_animation"):
+            if not isinstance(getattr(self, field_name), bool):
+                raise TypeError(f"{field_name} must be bool")
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +143,13 @@ def assemble_a1_document(
             tuple(projection.request for projection in resolved_projections),
             skeleton_metadata=skeleton_metadata,
         )
+        document = apply_legacy_visual_options(
+            document_build.document,
+            prefix=settings.prefix,
+            include_control_icons=settings.include_control_icons,
+            include_preview_animation=settings.include_preview_animation,
+        )
+        document_build = replace(document_build, document=document)
     except Exception as exc:
         raise A1DocumentAssemblyError(
             f"Unable to compose A1 document for '{settings.prefix}': {exc}"
