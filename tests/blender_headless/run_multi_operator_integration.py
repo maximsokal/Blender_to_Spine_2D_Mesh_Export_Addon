@@ -16,10 +16,10 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import Blender_to_Spine2D_Mesh_Exporter as addon  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter import ui  # noqa: E402
 from run_bake_integration import (  # noqa: E402
     PNG_SIGNATURE,
-    _activate_only,
     _assert,
     _clear_scene,
     _create_emission_material,
@@ -131,7 +131,7 @@ def test_rewrite_failure_does_not_fall_back_to_legacy() -> None:
 
 def main() -> None:
     print(f"Blender version: {bpy.app.version_string}")
-    ui.register()
+    addon.register()
     try:
         tests = (
             test_registered_operator_uses_rewrite_backend,
@@ -144,7 +144,7 @@ def main() -> None:
             print(f"[OPERATOR] PASS {test.__name__}")
         print(f"[OPERATOR] PASS {len(tests)} integration tests")
     finally:
-        ui.unregister()
+        addon.unregister()
 
 
 if __name__ == "__main__":
