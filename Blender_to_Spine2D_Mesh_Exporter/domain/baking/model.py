@@ -1,4 +1,4 @@
-"""Typed material analysis and deterministic texture bake planning."""
+"""Typed material analysis and deterministic multi-pass texture bake planning."""
 
 from __future__ import annotations
 
@@ -7,6 +7,12 @@ from enum import Enum
 from math import isfinite
 from pathlib import Path
 from typing import Tuple
+
+from .graph import (
+    MaterialDependencyKind,
+    MaterialGraphSnapshot,
+    MaterialSemanticChannel,
+)
 
 
 class MaterialKind(str, Enum):
@@ -25,10 +31,25 @@ class BakeMode(str, Enum):
 
 
 class BakeMaterialPolicy(str, Enum):
-    """Policy used to convert material analysis into a Blender bake mode."""
+    """Legacy compatibility policy used by the surface-color strategy."""
 
     LEGACY_ANY_IMAGE = "LEGACY_ANY_IMAGE"
     CONSERVATIVE_MIXED = "CONSERVATIVE_MIXED"
+
+
+class BakeStrategyId(str, Enum):
+    """Stable identifiers for independently executable bake strategies."""
+
+    SURFACE_COLOR = "SURFACE_COLOR"
+    EMISSION = "EMISSION"
+    LEGACY_SINGLE_PASS = "LEGACY_SINGLE_PASS"
+
+
+class BakeCompositeMode(str, Enum):
+    """How multiple pass images become one exported RGBA texture."""
+
+    SINGLE = "SINGLE"
+    ADD_RGB_MAX_ALPHA = "ADD_RGB_MAX_ALPHA"
 
 
 class TextureFormat(str, Enum):
@@ -80,6 +101,7 @@ class MaterialAnalysis:
     node_types: Tuple[str, ...] = ()
     image_dependencies: Tuple[ImageDependency, ...] = ()
     issues: Tuple[str, ...] = ()
+    graph: MaterialGraphSnapshot | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.slot_index, int) or self.slot_index < 0:
@@ -93,6 +115,14 @@ class MaterialAnalysis:
         for field_name in ("node_types", "image_dependencies", "issues"):
             if not isinstance(getattr(self, field_name), tuple):
                 raise TypeError(f"{field_name} must be tuple")
+        if self.graph is not None and not isinstance(self.graph, MaterialGraphSnapshot):
+            raise TypeError("graph must be MaterialGraphSnapshot or None")
+        if not all(isinstance(value, str) and value.strip() for value in self.node_types):
+            raise TypeError("node_types must contain non-empty strings")
+        if not all(isinstance(value, ImageDependency) for value in self.image_dependencies):
+            raise TypeError("image_dependencies must contain ImageDependency")
+        if not all(isinstance(value, str) and value.strip() for value in self.issues):
+            raise TypeError("issues must contain non-empty strings")
 
     @property
     def animated(self) -> bool:
@@ -101,6 +131,39 @@ class MaterialAnalysis:
     @property
     def has_image_dependency(self) -> bool:
         return bool(self.image_dependencies)
+
+    @property
+    def semantic_channels(self) -> Tuple[MaterialSemanticChannel, ...]:
+        """Return precise graph channels, with a legacy fallback for synthetic tests."""
+
+        if self.graph is not None:
+            return self.graph.semantic_channels
+        if self.kind in {MaterialKind.EMPTY, MaterialKind.UNSUPPORTED}:
+            return ()
+
+        node_types = set(self.node_types)
+        channels: list[MaterialSemanticChannel] = []
+        pure_emission = "EMISSION" in node_types and "BSDF_PRINCIPLED" not in node_types
+        if not pure_emission:
+            channels.append(MaterialSemanticChannel.SURFACE_COLOR)
+        if "EMISSION" in node_types:
+            channels.append(MaterialSemanticChannel.SURFACE_EMISSION)
+        if "BSDF_TRANSPARENT" in node_types:
+            channels.append(MaterialSemanticChannel.ALPHA)
+        if pure_emission:
+            channels.append(MaterialSemanticChannel.SURFACE_EMISSION)
+        return tuple(dict.fromkeys(channels))
+
+    @property
+    def dependencies(self) -> Tuple[MaterialDependencyKind, ...]:
+        if self.graph is not None:
+            return self.graph.dependencies
+        result: list[MaterialDependencyKind] = []
+        if self.image_dependencies:
+            result.append(MaterialDependencyKind.IMAGE)
+        if self.animated:
+            result.append(MaterialDependencyKind.TIME)
+        return tuple(result)
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +176,8 @@ class ObjectMaterialAnalysis:
             raise ValueError("source_object_id must be a non-empty string")
         if not isinstance(self.slots, tuple):
             raise TypeError("slots must be tuple")
+        if not all(isinstance(slot, MaterialAnalysis) for slot in self.slots):
+            raise TypeError("slots must contain MaterialAnalysis")
         actual_indices = tuple(slot.slot_index for slot in self.slots)
         expected_indices = tuple(range(len(self.slots)))
         if actual_indices != expected_indices:
@@ -204,6 +269,48 @@ class BakeFrameTask:
 
 
 @dataclass(frozen=True, slots=True)
+class BakePassPlan:
+    pass_index: int
+    strategy_id: BakeStrategyId
+    bake_mode: BakeMode
+    material_slot_indices: Tuple[int, ...]
+    semantic_channels: Tuple[MaterialSemanticChannel, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.pass_index, int) or self.pass_index < 0:
+            raise ValueError("pass_index must be a non-negative integer")
+        if not isinstance(self.strategy_id, BakeStrategyId):
+            raise TypeError("strategy_id must be BakeStrategyId")
+        if not isinstance(self.bake_mode, BakeMode):
+            raise TypeError("bake_mode must be BakeMode")
+        if not isinstance(self.material_slot_indices, tuple) or not self.material_slot_indices:
+            raise ValueError("material_slot_indices must be a non-empty tuple")
+        if tuple(sorted(set(self.material_slot_indices))) != self.material_slot_indices:
+            raise ValueError("material_slot_indices must be sorted and unique")
+        if any(not isinstance(index, int) or index < 0 for index in self.material_slot_indices):
+            raise ValueError("material_slot_indices must contain non-negative integers")
+        if not isinstance(self.semantic_channels, tuple) or not self.semantic_channels:
+            raise ValueError("semantic_channels must be a non-empty tuple")
+        if not all(
+            isinstance(channel, MaterialSemanticChannel)
+            for channel in self.semantic_channels
+        ):
+            raise TypeError("semantic_channels must contain MaterialSemanticChannel")
+
+
+@dataclass(frozen=True, slots=True)
+class BakeCompositePlan:
+    mode: BakeCompositeMode = BakeCompositeMode.SINGLE
+    clamp_rgb: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.mode, BakeCompositeMode):
+            raise TypeError("mode must be BakeCompositeMode")
+        if not isinstance(self.clamp_rgb, bool):
+            raise TypeError("clamp_rgb must be bool")
+
+
+@dataclass(frozen=True, slots=True)
 class BakePlan:
     source_object_id: str
     settings: BakeSettings
@@ -211,6 +318,8 @@ class BakePlan:
     bake_mode: BakeMode
     frame_tasks: Tuple[BakeFrameTask, ...]
     representative_task_index: int = 0
+    passes: Tuple[BakePassPlan, ...] = ()
+    composite: BakeCompositePlan = BakeCompositePlan()
 
     def __post_init__(self) -> None:
         if self.source_object_id != self.material_analysis.source_object_id:
@@ -224,6 +333,46 @@ class BakePlan:
             raise ValueError("frame task indices must be ordered and dense from zero")
         if not 0 <= self.representative_task_index < len(self.frame_tasks):
             raise ValueError("representative_task_index is out of range")
+        if not isinstance(self.passes, tuple):
+            raise TypeError("passes must be tuple")
+        if not isinstance(self.composite, BakeCompositePlan):
+            raise TypeError("composite must be BakeCompositePlan")
+
+        if not self.passes:
+            usable_slots = tuple(
+                slot.slot_index
+                for slot in self.material_analysis.slots
+                if slot.kind is not MaterialKind.EMPTY
+            )
+            if not usable_slots:
+                raise ValueError("BakePlan requires at least one usable material slot")
+            object.__setattr__(
+                self,
+                "passes",
+                (
+                    BakePassPlan(
+                        pass_index=0,
+                        strategy_id=BakeStrategyId.LEGACY_SINGLE_PASS,
+                        bake_mode=self.bake_mode,
+                        material_slot_indices=usable_slots,
+                        semantic_channels=(MaterialSemanticChannel.SURFACE_COLOR,),
+                    ),
+                ),
+            )
+        pass_indices = tuple(item.pass_index for item in self.passes)
+        if pass_indices != tuple(range(len(self.passes))):
+            raise ValueError("bake pass indices must be ordered and dense from zero")
+        if self.bake_mode is not self.passes[0].bake_mode:
+            raise ValueError("bake_mode must match the first compatibility bake pass")
+        if len(self.passes) == 1 and self.composite.mode is not BakeCompositeMode.SINGLE:
+            raise ValueError("single-pass plans require SINGLE composition")
+        if len(self.passes) > 1 and self.composite.mode is BakeCompositeMode.SINGLE:
+            raise ValueError("multi-pass plans require an explicit composite mode")
+
+        slot_count = len(self.material_analysis.slots)
+        for item in self.passes:
+            if max(item.material_slot_indices) >= slot_count:
+                raise ValueError("bake pass references a material slot outside analysis")
 
     @property
     def representative_task(self) -> BakeFrameTask:
@@ -233,9 +382,13 @@ class BakePlan:
     def sequence(self) -> bool:
         return any(task.timeline_frame is not None for task in self.frame_tasks)
 
+    @property
+    def multipass(self) -> bool:
+        return len(self.passes) > 1
+
 
 class BakePlanError(ValueError):
-    """Raised when material analysis cannot produce a safe deterministic bake plan."""
+    """Raised when material analysis cannot produce a deterministic bake plan."""
 
 
 def sanitize_filename_stem(value: str) -> str:
@@ -252,60 +405,6 @@ def sanitize_filename_stem(value: str) -> str:
     if not sanitized:
         raise BakePlanError("output filename stem is empty after sanitization")
     return sanitized
-
-
-def _slot_requires_procedural_mode(
-    slot: MaterialAnalysis,
-    policy: BakeMaterialPolicy,
-) -> bool:
-    if slot.kind in {MaterialKind.PROCEDURAL, MaterialKind.SOLID_COLOR}:
-        return True
-    if slot.kind is MaterialKind.MIXED:
-        if policy is BakeMaterialPolicy.LEGACY_ANY_IMAGE:
-            return not slot.has_image_dependency
-        return True
-    return False
-
-
-def _slot_uses_emission_surface(slot: MaterialAnalysis) -> bool:
-    """Identify common pure-Emission node trees without guessing mixed shaders."""
-
-    node_types = set(slot.node_types)
-    return "EMISSION" in node_types and "BSDF_PRINCIPLED" not in node_types
-
-
-def _select_bake_mode(
-    analysis: ObjectMaterialAnalysis,
-    settings: BakeSettings,
-) -> BakeMode:
-    if not analysis.slots:
-        raise BakePlanError("object has no material slots")
-    unsupported = tuple(
-        slot for slot in analysis.slots if slot.kind is MaterialKind.UNSUPPORTED
-    )
-    if unsupported:
-        names = tuple(slot.material_name or f"slot-{slot.slot_index}" for slot in unsupported)
-        raise BakePlanError(f"unsupported materials cannot be baked safely: {names}")
-    usable = tuple(slot for slot in analysis.slots if slot.kind is not MaterialKind.EMPTY)
-    if not usable:
-        raise BakePlanError("object has no usable materials")
-
-    emission_flags = tuple(_slot_uses_emission_surface(slot) for slot in usable)
-    if all(emission_flags):
-        return BakeMode.EMIT
-    if any(emission_flags):
-        names = tuple(slot.material_name or f"slot-{slot.slot_index}" for slot in usable)
-        raise BakePlanError(
-            "emission-only and surface materials cannot share one deterministic bake "
-            f"pass yet: {names}"
-        )
-
-    if any(
-        _slot_requires_procedural_mode(slot, settings.material_policy)
-        for slot in usable
-    ):
-        return settings.procedural_mode
-    return settings.diffuse_mode
 
 
 def _build_frame_tasks(settings: BakeSettings) -> Tuple[BakeFrameTask, ...]:
@@ -342,19 +441,26 @@ def build_bake_plan(
     analysis: ObjectMaterialAnalysis,
     settings: BakeSettings,
 ) -> BakePlan:
-    """Build one complete bake plan without reading Blender scene globals."""
+    """Build a complete plan through the deterministic strategy registry."""
 
     if not isinstance(analysis, ObjectMaterialAnalysis):
         raise TypeError("analysis must be ObjectMaterialAnalysis")
     if not isinstance(settings, BakeSettings):
         raise TypeError("settings must be BakeSettings")
-    bake_mode = _select_bake_mode(analysis, settings)
+
+    # Local import avoids a model/registry import cycle while keeping the public
+    # build function stable for existing callers.
+    from .strategies import resolve_bake_strategy_plan
+
+    passes, composite = resolve_bake_strategy_plan(analysis, settings)
     tasks = _build_frame_tasks(settings)
     return BakePlan(
         source_object_id=analysis.source_object_id,
         settings=settings,
         material_analysis=analysis,
-        bake_mode=bake_mode,
+        bake_mode=passes[0].bake_mode,
         frame_tasks=tasks,
         representative_task_index=0,
+        passes=passes,
+        composite=composite,
     )
