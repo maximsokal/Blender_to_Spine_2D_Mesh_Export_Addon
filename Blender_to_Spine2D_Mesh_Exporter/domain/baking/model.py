@@ -136,7 +136,12 @@ class MaterialAnalysis:
 
     @property
     def animated(self) -> bool:
-        return any(dependency.animated for dependency in self.image_dependencies)
+        if any(dependency.animated for dependency in self.image_dependencies):
+            return True
+        return (
+            self.graph is not None
+            and MaterialDependencyKind.TIME in self.graph.dependencies
+        )
 
     @property
     def has_image_dependency(self) -> bool:
