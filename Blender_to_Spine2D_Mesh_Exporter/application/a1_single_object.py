@@ -72,7 +72,11 @@ class A1SingleObjectExportSettings:
     texture_format: TextureFormat = TextureFormat.PNG
     material_policy: BakeMaterialPolicy = BakeMaterialPolicy.LEGACY_ANY_IMAGE
     diffuse_mode: BakeMode = BakeMode.DIFFUSE
-    procedural_mode: BakeMode = BakeMode.COMBINED
+    # A1 exports albedo-like Spine textures. COMBINED depends on scene lighting and
+    # can return an opaque black image in headless/empty scenes even though Blender
+    # reports FINISHED. DIFFUSE with color-only passes is lighting-independent and
+    # still evaluates Image Texture and procedural Base Color node graphs.
+    procedural_mode: BakeMode = BakeMode.DIFFUSE
     selected_to_active: bool = False
     cage_extrusion: float = 0.1
     bake_execution: BakeExecutionSettings = BakeExecutionSettings()
