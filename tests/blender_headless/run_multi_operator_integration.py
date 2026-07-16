@@ -126,9 +126,16 @@ def test_rewrite_failure_does_not_fall_back_to_legacy() -> None:
             "export_selected_objects_a1",
             side_effect=RuntimeError("forced rewrite operator failure"),
         ), mock.patch.object(ui, "export_selected_objects") as legacy_export:
-            result = bpy.ops.object.spine2d_multi_export()
+            try:
+                result = bpy.ops.object.spine2d_multi_export()
+            except RuntimeError as exc:
+                _assert(
+                    "forced rewrite operator failure" in str(exc),
+                    f"operator hid the primary rewrite error: {exc}",
+                )
+            else:
+                _assert("CANCELLED" in result, f"rewrite failure was hidden: {result}")
 
-        _assert("CANCELLED" in result, f"rewrite failure was hidden: {result}")
         _assert(
             legacy_export.call_count == 0,
             "legacy exporter was invoked as an automatic fallback",
