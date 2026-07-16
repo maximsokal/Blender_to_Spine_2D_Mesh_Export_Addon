@@ -1,19 +1,23 @@
 """Temporarily expose semantic channels on copied Blender materials.
 
-Only material copies owned by ``temporary_bake_materials`` are mutated. Original
-Material Output links are restored and every temporary node is removed in ``finally``.
+Only copies owned by :func:`temporary_bake_materials` are changed. The source node
+graphs are never mutated. Every original Material Output link is restored and every
+temporary node is removed in ``finally`` before the next pass starts.
 """
 
 from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import Enum
 import logging
 from typing import Any, Iterable, Iterator, Tuple
 from uuid import uuid4
 
 from ..domain.baking import (
+    BakeMode,
     BakePassPlan,
+    BakeStrategyId,
     MaterialPreparationMode,
     MaterialSlotPreparation,
 )
@@ -25,10 +29,23 @@ class BakeMaterialPreparationError(RuntimeError):
     """Raised when a semantic channel cannot be exposed on a copied material."""
 
 
+class _ProxyKind(str, Enum):
+    STRAIGHT_SURFACE_COLOR = "STRAIGHT_SURFACE_COLOR"
+    ZERO_COLOR = "ZERO_COLOR"
+    EXTRACT_ALPHA = "EXTRACT_ALPHA"
+    OPAQUE_ALPHA = "OPAQUE_ALPHA"
+
+
 @dataclass(frozen=True, slots=True)
-class _ValueExpression:
+class _ScalarExpression:
     socket: Any | None = None
     constant: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class _ColorExpression:
+    socket: Any | None = None
+    constant: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
 
 
 @dataclass(slots=True)
@@ -118,44 +135,107 @@ def _numeric_default(socket: Any | None, default: float) -> float:
         return float(default)
 
 
-def _value_from_input(socket: Any | None, *, default: float) -> _ValueExpression:
+def _color_default(
+    socket: Any | None,
+    default: Tuple[float, float, float, float],
+) -> Tuple[float, float, float, float]:
+    if socket is None:
+        return default
+    value = getattr(socket, "default_value", default)
+    try:
+        if hasattr(value, "__len__") and not isinstance(value, (str, bytes)):
+            resolved = tuple(float(item) for item in value)
+            if len(resolved) >= 4:
+                return resolved[0], resolved[1], resolved[2], resolved[3]
+            if len(resolved) == 3:
+                return resolved[0], resolved[1], resolved[2], 1.0
+            if len(resolved) == 1:
+                return resolved[0], resolved[0], resolved[0], 1.0
+        scalar = float(value)
+        return scalar, scalar, scalar, 1.0
+    except Exception:
+        return default
+
+
+def _scalar_from_input(socket: Any | None, *, default: float) -> _ScalarExpression:
     source = _linked_source_socket(socket)
     return (
-        _ValueExpression(socket=source)
+        _ScalarExpression(socket=source)
         if source is not None
-        else _ValueExpression(constant=_numeric_default(socket, default))
+        else _ScalarExpression(constant=_numeric_default(socket, default))
     )
 
 
-def _assign_socket_constant(target_socket: Any, value: float) -> None:
-    """Assign one scalar to scalar/vector/color RNA socket defaults generically."""
+def _color_from_input(
+    socket: Any | None,
+    *,
+    default: Tuple[float, float, float, float],
+) -> _ColorExpression:
+    source = _linked_source_socket(socket)
+    return (
+        _ColorExpression(socket=source)
+        if source is not None
+        else _ColorExpression(constant=_color_default(socket, default))
+    )
+
+
+def _assign_socket_constant(target_socket: Any, value: Any) -> None:
+    """Assign a scalar or tuple according to the RNA socket default shape."""
 
     current = getattr(target_socket, "default_value", None)
     try:
-        if hasattr(current, "__len__") and not isinstance(current, (str, bytes)):
+        is_sequence = hasattr(current, "__len__") and not isinstance(current, (str, bytes))
+        if is_sequence:
             length = len(current)
-            if length <= 0:
-                raise ValueError("target socket has an empty sequence default")
-            resolved = [float(value)] * length
-            if length == 4:
+            if isinstance(value, (tuple, list)):
+                source = tuple(float(item) for item in value)
+                if not source:
+                    raise ValueError("constant sequence is empty")
+                resolved = [source[min(index, len(source) - 1)] for index in range(length)]
+            else:
+                resolved = [float(value)] * length
+            if length == 4 and not isinstance(value, (tuple, list)):
                 resolved[3] = 1.0
             target_socket.default_value = tuple(resolved)
         else:
-            target_socket.default_value = float(value)
+            if isinstance(value, (tuple, list)):
+                target_socket.default_value = float(value[0])
+            else:
+                target_socket.default_value = float(value)
     except Exception as exc:
         raise BakeMaterialPreparationError(
-            f"Unable to assign opacity constant to socket '{_socket_name(target_socket)}'"
+            f"Unable to assign constant to socket '{_socket_name(target_socket)}'"
         ) from exc
 
 
-def _connect_value(node_tree: Any, expression: _ValueExpression, target_socket: Any) -> None:
+def _connect_scalar(
+    node_tree: Any,
+    expression: _ScalarExpression,
+    target_socket: Any,
+) -> None:
     if expression.socket is not None:
         try:
             node_tree.links.new(expression.socket, target_socket)
             return
         except Exception as exc:
             raise BakeMaterialPreparationError(
-                "Unable to connect opacity expression to temporary node"
+                "Unable to connect scalar expression to temporary node"
+            ) from exc
+    _assign_socket_constant(target_socket, expression.constant)
+
+
+def _connect_color(
+    node_tree: Any,
+    expression: _ColorExpression,
+    target_socket: Any,
+) -> None:
+    if expression.socket is not None:
+        try:
+            node_tree.links.new(expression.socket, target_socket)
+            return
+        except Exception as exc:
+            raise BakeMaterialPreparationError(
+                "Unable to connect color expression to temporary node"
             ) from exc
     _assign_socket_constant(target_socket, expression.constant)
 
@@ -171,8 +251,8 @@ def _new_math(
 ) -> Any:
     try:
         node = node_tree.nodes.new(type="ShaderNodeMath")
-        node.name = f"__Spine2D_Alpha_{label}_{token}_{len(temporary_nodes)}"
-        node.label = f"Spine2D temporary alpha {label}"
+        node.name = f"__Spine2D_Proxy_{label}_{token}_{len(temporary_nodes)}"
+        node.label = f"Spine2D temporary {label}"
         node.operation = operation
         if hasattr(node, "use_clamp"):
             node.use_clamp = clamp
@@ -180,65 +260,131 @@ def _new_math(
         return node
     except Exception as exc:
         raise BakeMaterialPreparationError(
-            f"Unable to create temporary alpha math node '{operation}'"
+            f"Unable to create temporary Math node '{operation}'"
         ) from exc
 
 
-def _multiply(
+def _new_mix_rgb(
     node_tree: Any,
-    left: _ValueExpression,
-    right: _ValueExpression,
+    temporary_nodes: list[Any],
+    *,
+    blend_type: str,
+    token: str,
+    label: str,
+    clamp: bool = False,
+) -> Any:
+    try:
+        node = node_tree.nodes.new(type="ShaderNodeMixRGB")
+        node.name = f"__Spine2D_Proxy_{label}_{token}_{len(temporary_nodes)}"
+        node.label = f"Spine2D temporary {label}"
+        node.blend_type = blend_type
+        if hasattr(node, "use_clamp"):
+            node.use_clamp = clamp
+        temporary_nodes.append(node)
+        return node
+    except Exception as exc:
+        raise BakeMaterialPreparationError(
+            f"Unable to create temporary MixRGB node '{blend_type}'"
+        ) from exc
+
+
+def _multiply_scalar(
+    node_tree: Any,
+    left: _ScalarExpression,
+    right: _ScalarExpression,
     temporary_nodes: list[Any],
     token: str,
-) -> _ValueExpression:
+) -> _ScalarExpression:
     node = _new_math(
         node_tree,
         temporary_nodes,
         operation="MULTIPLY",
         token=token,
-        label="multiply",
+        label="alpha_multiply",
     )
-    _connect_value(node_tree, left, node.inputs[0])
-    _connect_value(node_tree, right, node.inputs[1])
-    return _ValueExpression(socket=node.outputs[0])
+    _connect_scalar(node_tree, left, node.inputs[0])
+    _connect_scalar(node_tree, right, node.inputs[1])
+    return _ScalarExpression(socket=node.outputs[0])
 
 
 def _one_minus(
     node_tree: Any,
-    value: _ValueExpression,
+    value: _ScalarExpression,
     temporary_nodes: list[Any],
     token: str,
-) -> _ValueExpression:
+) -> _ScalarExpression:
     node = _new_math(
         node_tree,
         temporary_nodes,
         operation="SUBTRACT",
         token=token,
-        label="one_minus",
+        label="alpha_one_minus",
     )
     _assign_socket_constant(node.inputs[0], 1.0)
-    _connect_value(node_tree, value, node.inputs[1])
-    return _ValueExpression(socket=node.outputs[0])
+    _connect_scalar(node_tree, value, node.inputs[1])
+    return _ScalarExpression(socket=node.outputs[0])
 
 
-def _add_clamped(
+def _add_scalar_clamped(
     node_tree: Any,
-    left: _ValueExpression,
-    right: _ValueExpression,
+    left: _ScalarExpression,
+    right: _ScalarExpression,
     temporary_nodes: list[Any],
     token: str,
-) -> _ValueExpression:
+) -> _ScalarExpression:
     node = _new_math(
         node_tree,
         temporary_nodes,
         operation="ADD",
         token=token,
-        label="add",
+        label="alpha_add",
         clamp=True,
     )
-    _connect_value(node_tree, left, node.inputs[0])
-    _connect_value(node_tree, right, node.inputs[1])
-    return _ValueExpression(socket=node.outputs[0])
+    _connect_scalar(node_tree, left, node.inputs[0])
+    _connect_scalar(node_tree, right, node.inputs[1])
+    return _ScalarExpression(socket=node.outputs[0])
+
+
+def _mix_colors(
+    node_tree: Any,
+    color_a: _ColorExpression,
+    color_b: _ColorExpression,
+    factor: _ScalarExpression,
+    temporary_nodes: list[Any],
+    token: str,
+) -> _ColorExpression:
+    node = _new_mix_rgb(
+        node_tree,
+        temporary_nodes,
+        blend_type="MIX",
+        token=token,
+        label="surface_mix",
+    )
+    _connect_scalar(node_tree, factor, node.inputs[0])
+    _connect_color(node_tree, color_a, node.inputs[1])
+    _connect_color(node_tree, color_b, node.inputs[2])
+    return _ColorExpression(socket=node.outputs[0])
+
+
+def _add_colors(
+    node_tree: Any,
+    color_a: _ColorExpression,
+    color_b: _ColorExpression,
+    temporary_nodes: list[Any],
+    token: str,
+) -> _ColorExpression:
+    node = _new_mix_rgb(
+        node_tree,
+        temporary_nodes,
+        blend_type="ADD",
+        token=token,
+        label="surface_add",
+        clamp=True,
+    )
+    _assign_socket_constant(node.inputs[0], 1.0)
+    _connect_color(node_tree, color_a, node.inputs[1])
+    _connect_color(node_tree, color_b, node.inputs[2])
+    return _ColorExpression(socket=node.outputs[0])
 
 
 def _shader_input_node(node: Any, index: int) -> Any | None:
@@ -257,9 +403,9 @@ def _opacity_from_shader(
     temporary_nodes: list[Any],
     token: str,
     visiting: set[str],
-) -> _ValueExpression:
+) -> _ScalarExpression:
     if shader_node is None:
-        return _ValueExpression(constant=0.0)
+        return _ScalarExpression(constant=0.0)
 
     name = _node_name(shader_node)
     if name in visiting:
@@ -270,11 +416,11 @@ def _opacity_from_shader(
     try:
         node_type = _node_type(shader_node)
         if node_type in {"BSDF_TRANSPARENT", "HOLDOUT"}:
-            return _ValueExpression(constant=0.0)
+            return _ScalarExpression(constant=0.0)
         if node_type == "BSDF_PRINCIPLED":
-            return _value_from_input(_input_socket(shader_node, "Alpha"), default=1.0)
+            return _scalar_from_input(_input_socket(shader_node, "Alpha"), default=1.0)
         if node_type == "MIX_SHADER":
-            factor = _value_from_input(
+            factor = _scalar_from_input(
                 _input_socket(shader_node, "Fac", index=0),
                 default=0.5,
             )
@@ -292,21 +438,27 @@ def _opacity_from_shader(
                 token,
                 visiting,
             )
-            return _add_clamped(
+            return _add_scalar_clamped(
                 node_tree,
-                _multiply(
+                _multiply_scalar(
                     node_tree,
                     opacity_a,
                     _one_minus(node_tree, factor, temporary_nodes, token),
                     temporary_nodes,
                     token,
                 ),
-                _multiply(node_tree, opacity_b, factor, temporary_nodes, token),
+                _multiply_scalar(
+                    node_tree,
+                    opacity_b,
+                    factor,
+                    temporary_nodes,
+                    token,
+                ),
                 temporary_nodes,
                 token,
             )
         if node_type == "ADD_SHADER":
-            return _add_clamped(
+            return _add_scalar_clamped(
                 node_tree,
                 _opacity_from_shader(
                     node_tree,
@@ -325,7 +477,107 @@ def _opacity_from_shader(
                 temporary_nodes,
                 token,
             )
-        return _ValueExpression(constant=1.0)
+        return _ScalarExpression(constant=1.0)
+    finally:
+        visiting.remove(name)
+
+
+def _surface_color_from_shader(
+    node_tree: Any,
+    shader_node: Any | None,
+    temporary_nodes: list[Any],
+    token: str,
+    visiting: set[str],
+) -> _ColorExpression | None:
+    """Return straight surface color, deliberately excluding shader opacity/emission."""
+
+    if shader_node is None:
+        return None
+    name = _node_name(shader_node)
+    if name in visiting:
+        raise BakeMaterialPreparationError(
+            f"Shader graph cycle detected while extracting color at '{name}'"
+        )
+    visiting.add(name)
+    try:
+        node_type = _node_type(shader_node)
+        if node_type in {"BSDF_TRANSPARENT", "HOLDOUT", "EMISSION"}:
+            return None
+        if node_type == "BSDF_PRINCIPLED":
+            return _color_from_input(
+                _input_socket(shader_node, "Base Color"),
+                default=(0.8, 0.8, 0.8, 1.0),
+            )
+        if node_type == "MIX_SHADER":
+            factor = _scalar_from_input(
+                _input_socket(shader_node, "Fac", index=0),
+                default=0.5,
+            )
+            color_a = _surface_color_from_shader(
+                node_tree,
+                _shader_input_node(shader_node, 1),
+                temporary_nodes,
+                token,
+                visiting,
+            )
+            color_b = _surface_color_from_shader(
+                node_tree,
+                _shader_input_node(shader_node, 2),
+                temporary_nodes,
+                token,
+                visiting,
+            )
+            # Transparent branches carry no straight color. Selecting the other branch
+            # avoids multiplying RGB by coverage; Alpha is composed independently.
+            if color_a is None:
+                return color_b
+            if color_b is None:
+                return color_a
+            return _mix_colors(
+                node_tree,
+                color_a,
+                color_b,
+                factor,
+                temporary_nodes,
+                token,
+            )
+        if node_type == "ADD_SHADER":
+            color_a = _surface_color_from_shader(
+                node_tree,
+                _shader_input_node(shader_node, 0),
+                temporary_nodes,
+                token,
+                visiting,
+            )
+            color_b = _surface_color_from_shader(
+                node_tree,
+                _shader_input_node(shader_node, 1),
+                temporary_nodes,
+                token,
+                visiting,
+            )
+            if color_a is None:
+                return color_b
+            if color_b is None:
+                return color_a
+            return _add_colors(
+                node_tree,
+                color_a,
+                color_b,
+                temporary_nodes,
+                token,
+            )
+
+        for socket_name in ("Base Color", "Color"):
+            socket = _input_socket(shader_node, socket_name)
+            if socket is not None:
+                return _color_from_input(
+                    socket,
+                    default=(0.8, 0.8, 0.8, 1.0),
+                )
+        raise BakeMaterialPreparationError(
+            f"Surface shader '{name}' ({node_type}) has no supported color channel"
+        )
     finally:
         visiting.remove(name)
 
@@ -346,9 +598,9 @@ def _remove_surface_links(node_tree: Any, surface_socket: Any) -> Tuple[Any, ...
     return sources
 
 
-def _prepare_alpha_material(
+def _prepare_proxy_material(
     material: Any,
-    mode: MaterialPreparationMode,
+    proxy_kind: _ProxyKind,
     *,
     token: str,
 ) -> _PreparedMutation:
@@ -373,26 +625,56 @@ def _prepare_alpha_material(
     temporary_nodes: list[Any] = []
 
     try:
-        if mode is MaterialPreparationMode.OPAQUE_ALPHA_TO_EMISSION:
-            opacity = _ValueExpression(constant=1.0)
-        elif mode is MaterialPreparationMode.EXTRACT_ALPHA_TO_EMISSION:
+        source_node = original_nodes[0] if original_nodes else None
+        emission = node_tree.nodes.new(type="ShaderNodeEmission")
+        emission.name = f"__Spine2D_Proxy_Emission_{token}_{len(temporary_nodes)}"
+        emission.label = f"Spine2D temporary {proxy_kind.value} output"
+        temporary_nodes.append(emission)
+
+        if proxy_kind is _ProxyKind.EXTRACT_ALPHA:
             opacity = _opacity_from_shader(
                 node_tree,
-                original_nodes[0] if original_nodes else None,
+                source_node,
                 temporary_nodes,
                 token,
                 set(),
             )
+            if opacity.socket is not None:
+                try:
+                    node_tree.links.new(opacity.socket, emission.inputs["Color"])
+                except Exception as exc:
+                    raise BakeMaterialPreparationError(
+                        "Unable to connect extracted alpha to Emission Color"
+                    ) from exc
+            else:
+                _assign_socket_constant(emission.inputs["Color"], opacity.constant)
+        elif proxy_kind is _ProxyKind.OPAQUE_ALPHA:
+            _assign_socket_constant(emission.inputs["Color"], 1.0)
+        elif proxy_kind is _ProxyKind.ZERO_COLOR:
+            _assign_socket_constant(
+                emission.inputs["Color"],
+                (0.0, 0.0, 0.0, 1.0),
+            )
+        elif proxy_kind is _ProxyKind.STRAIGHT_SURFACE_COLOR:
+            color = _surface_color_from_shader(
+                node_tree,
+                source_node,
+                temporary_nodes,
+                token,
+                set(),
+            )
+            if color is None:
+                _assign_socket_constant(
+                    emission.inputs["Color"],
+                    (0.0, 0.0, 0.0, 1.0),
+                )
+            else:
+                _connect_color(node_tree, color, emission.inputs["Color"])
         else:
             raise BakeMaterialPreparationError(
-                f"Unsupported material preparation mode: {mode.value}"
+                f"Unsupported proxy kind: {proxy_kind.value}"
             )
 
-        emission = node_tree.nodes.new(type="ShaderNodeEmission")
-        emission.name = f"__Spine2D_Alpha_Emission_{token}_{len(temporary_nodes)}"
-        emission.label = "Spine2D temporary alpha output"
-        temporary_nodes.append(emission)
-        _connect_value(node_tree, opacity, emission.inputs["Color"])
         _assign_socket_constant(emission.inputs["Strength"], 1.0)
         node_tree.links.new(emission.outputs["Emission"], surface_socket)
     except Exception:
@@ -400,7 +682,7 @@ def _prepare_alpha_material(
             try:
                 node_tree.nodes.remove(node)
             except Exception:
-                logger.exception("Failed to remove partially created alpha node")
+                logger.exception("Failed to remove partially created proxy node")
         for source in original_sources:
             try:
                 node_tree.links.new(source, surface_socket)
@@ -455,19 +737,62 @@ def _preparation_map(
     return result
 
 
+def _resolve_proxy_kinds(
+    pass_plan: BakePassPlan,
+    used_material_indices: Tuple[int, ...],
+) -> dict[int, _ProxyKind]:
+    if (
+        pass_plan.strategy_id is BakeStrategyId.SURFACE_COLOR
+        and pass_plan.bake_mode is BakeMode.EMIT
+    ):
+        surface_slots = set(pass_plan.material_slot_indices)
+        return {
+            slot_index: (
+                _ProxyKind.STRAIGHT_SURFACE_COLOR
+                if slot_index in surface_slots
+                else _ProxyKind.ZERO_COLOR
+            )
+            for slot_index in used_material_indices
+        }
+
+    modes = _preparation_map(pass_plan.material_preparations)
+    resolved: dict[int, _ProxyKind] = {}
+    for slot_index, mode in modes.items():
+        if slot_index not in used_material_indices:
+            continue
+        if mode is MaterialPreparationMode.EXTRACT_ALPHA_TO_EMISSION:
+            resolved[slot_index] = _ProxyKind.EXTRACT_ALPHA
+        elif mode is MaterialPreparationMode.OPAQUE_ALPHA_TO_EMISSION:
+            resolved[slot_index] = _ProxyKind.OPAQUE_ALPHA
+        elif mode is MaterialPreparationMode.PRESERVE:
+            continue
+        else:
+            raise BakeMaterialPreparationError(
+                f"Unsupported material preparation mode: {mode.value}"
+            )
+    return resolved
+
+
 @contextmanager
 def temporary_prepare_material_pass(
     materials: Tuple[Any, ...],
     pass_plan: BakePassPlan,
+    *,
+    used_material_indices: Tuple[int, ...],
 ) -> Iterator[None]:
-    """Apply and restore one typed preparation plan on copied materials."""
+    """Apply and restore one typed strategy preparation on copied materials."""
 
     if not isinstance(materials, tuple):
         raise TypeError("materials must be tuple")
     if not isinstance(pass_plan, BakePassPlan):
         raise TypeError("pass_plan must be BakePassPlan")
-    modes = _preparation_map(pass_plan.material_preparations)
-    if not modes or all(mode is MaterialPreparationMode.PRESERVE for mode in modes.values()):
+    if not isinstance(used_material_indices, tuple):
+        raise TypeError("used_material_indices must be tuple")
+    if any(not isinstance(index, int) or index < 0 for index in used_material_indices):
+        raise ValueError("used_material_indices must contain non-negative integers")
+
+    proxy_kinds = _resolve_proxy_kinds(pass_plan, used_material_indices)
+    if not proxy_kinds:
         yield
         return
 
@@ -475,16 +800,18 @@ def temporary_prepare_material_pass(
     mutations: list[_PreparedMutation] = []
     primary_error: BaseException | None = None
     try:
-        for slot_index, mode in sorted(modes.items()):
+        for slot_index, proxy_kind in sorted(proxy_kinds.items()):
             if slot_index >= len(materials):
                 raise BakeMaterialPreparationError(
                     f"Preparation references slot {slot_index}, but only "
                     f"{len(materials)} copied materials exist"
                 )
-            if mode is MaterialPreparationMode.PRESERVE:
-                continue
             mutations.append(
-                _prepare_alpha_material(materials[slot_index], mode, token=token)
+                _prepare_proxy_material(
+                    materials[slot_index],
+                    proxy_kind,
+                    token=token,
+                )
             )
         yield
     except BaseException as exc:
