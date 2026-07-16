@@ -36,7 +36,7 @@ def _select_pair(first, second) -> None:
     bpy.context.view_layer.objects.active = first
 
 
-def _configure_scene(output_directory: Path, backend: str) -> None:
+def _configure_scene(output_directory: Path, backend: str) -> int:
     scene = bpy.context.scene
     scene.spine2d_texture_size = 32
     scene.spine2d_json_path = str(output_directory)
@@ -44,6 +44,9 @@ def _configure_scene(output_directory: Path, backend: str) -> None:
     scene.spine2d_angle_limit = 30
     scene.spine2d_seam_maker_mode = "AUTO"
     scene.spine2d_multi_export_backend = backend
+    # Registered Blender properties may normalize an unsupported enum/minimum value.
+    # The operator must pass the actual Scene value, not the value requested by a test.
+    return int(scene.spine2d_texture_size)
 
 
 def test_registered_operator_uses_rewrite_backend() -> None:
@@ -87,7 +90,7 @@ def test_legacy_backend_is_explicit() -> None:
         _create_emission_material(first)
         _create_emission_material(second)
         _select_pair(first, second)
-        _configure_scene(output_directory, "LEGACY")
+        registered_texture_size = _configure_scene(output_directory, "LEGACY")
         expected = str(output_directory / "legacy-result.json")
 
         with mock.patch.object(
@@ -100,7 +103,10 @@ def test_legacy_backend_is_explicit() -> None:
         _assert("FINISHED" in result, f"legacy operator failed: {result}")
         _assert(legacy_export.call_count == 1, "legacy backend was not invoked once")
         args = legacy_export.call_args.args
-        _assert(args[:2] == (32, 32), f"legacy texture size changed: {args}")
+        _assert(
+            args[:2] == (registered_texture_size, registered_texture_size),
+            f"legacy texture size changed: {args}",
+        )
         _assert(args[2] == str(output_directory), f"legacy output path changed: {args}")
 
 
