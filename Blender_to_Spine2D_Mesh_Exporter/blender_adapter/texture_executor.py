@@ -1,7 +1,9 @@
 """Dispatch immutable texture plans to object baking or camera projection.
 
-This module owns no Blender operator access. The stable ``bake_executor`` facade keeps
-only the two failure-injection hooks for the real object-bake and render operators.
+This module owns no Blender operator access. The detailed API returns render-derived layout
+metadata for orchestration that finalizes JSON after staging. The historical reservations-only
+API keeps B4 full-frame so existing multi-object code cannot commit cropped images beside a
+pre-serialized full-frame document.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from ..domain.baking.projection_layout import CameraProjectionLayout
 from ..infrastructure import AtomicOutputReservation
 from .camera_projection_executor import (
     execute_camera_projection_plan,
+    stage_camera_projection_outputs,
     stage_camera_projection_outputs_detailed,
 )
 from .semantic_bake_executor import (
@@ -54,7 +57,7 @@ def stage_texture_plan_outputs(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> TextureStageResult:
-    """Stage one texture plan and retain render-derived projection metadata."""
+    """Stage one plan and retain the exact B4 crop/hull layout when applicable."""
 
     if isinstance(plan, CameraProjectionPlan):
         staged = stage_camera_projection_outputs_detailed(
@@ -65,10 +68,7 @@ def stage_texture_plan_outputs(
             context=context,
             scene=scene,
         )
-        return TextureStageResult(
-            reservations=staged.reservations,
-            projection_layout=staged.layout,
-        )
+        return TextureStageResult(staged.reservations, staged.layout)
     reservations = stage_object_bake_outputs(
         source_obj,
         target_snapshot,
@@ -78,7 +78,7 @@ def stage_texture_plan_outputs(
         context=context,
         scene=scene,
     )
-    return TextureStageResult(reservations=tuple(reservations))
+    return TextureStageResult(tuple(reservations))
 
 
 def stage_bake_plan_outputs(
@@ -91,9 +91,18 @@ def stage_bake_plan_outputs(
     context: Any | None = None,
     scene: Any | None = None,
 ):
-    """Compatibility wrapper returning only caller-owned reservations."""
+    """Compatibility staging for callers that do not post-finalize projection JSON."""
 
-    return stage_texture_plan_outputs(
+    if isinstance(plan, CameraProjectionPlan):
+        return stage_camera_projection_outputs(
+            source_obj,
+            plan,
+            output_transaction,
+            execution_settings,
+            context=context,
+            scene=scene,
+        )
+    return stage_object_bake_outputs(
         source_obj,
         target_snapshot,
         plan,
@@ -101,7 +110,7 @@ def stage_bake_plan_outputs(
         execution_settings,
         context=context,
         scene=scene,
-    ).reservations
+    )
 
 
 def execute_bake_plan(
