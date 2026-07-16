@@ -42,14 +42,24 @@ class BakeStrategyId(str, Enum):
 
     SURFACE_COLOR = "SURFACE_COLOR"
     EMISSION = "EMISSION"
+    ALPHA = "ALPHA"
     LEGACY_SINGLE_PASS = "LEGACY_SINGLE_PASS"
 
 
+class MaterialPreparationMode(str, Enum):
+    """How one temporary copied material is prepared for a specific bake pass."""
+
+    PRESERVE = "PRESERVE"
+    EXTRACT_ALPHA_TO_EMISSION = "EXTRACT_ALPHA_TO_EMISSION"
+    OPAQUE_ALPHA_TO_EMISSION = "OPAQUE_ALPHA_TO_EMISSION"
+
+
 class BakeCompositeMode(str, Enum):
-    """How multiple pass images become one exported RGBA texture."""
+    """How one or more pass images become one exported RGBA texture."""
 
     SINGLE = "SINGLE"
     ADD_RGB_MAX_ALPHA = "ADD_RGB_MAX_ALPHA"
+    ADD_RGB_REPLACE_ALPHA = "ADD_RGB_REPLACE_ALPHA"
 
 
 class TextureFormat(str, Enum):
@@ -144,7 +154,7 @@ class MaterialAnalysis:
         node_types = set(self.node_types)
         channels: list[MaterialSemanticChannel] = []
         pure_emission = "EMISSION" in node_types and "BSDF_PRINCIPLED" not in node_types
-        if not pure_emission:
+        if not pure_emission and "BSDF_TRANSPARENT" not in node_types:
             channels.append(MaterialSemanticChannel.SURFACE_COLOR)
         if "EMISSION" in node_types:
             channels.append(MaterialSemanticChannel.SURFACE_EMISSION)
@@ -269,12 +279,25 @@ class BakeFrameTask:
 
 
 @dataclass(frozen=True, slots=True)
+class MaterialSlotPreparation:
+    slot_index: int
+    mode: MaterialPreparationMode
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.slot_index, int) or self.slot_index < 0:
+            raise ValueError("slot_index must be a non-negative integer")
+        if not isinstance(self.mode, MaterialPreparationMode):
+            raise TypeError("mode must be MaterialPreparationMode")
+
+
+@dataclass(frozen=True, slots=True)
 class BakePassPlan:
     pass_index: int
     strategy_id: BakeStrategyId
     bake_mode: BakeMode
     material_slot_indices: Tuple[int, ...]
     semantic_channels: Tuple[MaterialSemanticChannel, ...]
+    material_preparations: Tuple[MaterialSlotPreparation, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.pass_index, int) or self.pass_index < 0:
@@ -296,18 +319,49 @@ class BakePassPlan:
             for channel in self.semantic_channels
         ):
             raise TypeError("semantic_channels must contain MaterialSemanticChannel")
+        if not isinstance(self.material_preparations, tuple):
+            raise TypeError("material_preparations must be tuple")
+        if not all(
+            isinstance(item, MaterialSlotPreparation)
+            for item in self.material_preparations
+        ):
+            raise TypeError("material_preparations must contain MaterialSlotPreparation")
+        preparation_indices = tuple(item.slot_index for item in self.material_preparations)
+        if preparation_indices != tuple(sorted(set(preparation_indices))):
+            raise ValueError("material_preparations must be ordered and unique by slot")
 
 
 @dataclass(frozen=True, slots=True)
 class BakeCompositePlan:
     mode: BakeCompositeMode = BakeCompositeMode.SINGLE
     clamp_rgb: bool = True
+    color_pass_indices: Tuple[int, ...] = ()
+    alpha_pass_index: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.mode, BakeCompositeMode):
             raise TypeError("mode must be BakeCompositeMode")
         if not isinstance(self.clamp_rgb, bool):
             raise TypeError("clamp_rgb must be bool")
+        if not isinstance(self.color_pass_indices, tuple):
+            raise TypeError("color_pass_indices must be tuple")
+        if self.color_pass_indices != tuple(sorted(set(self.color_pass_indices))):
+            raise ValueError("color_pass_indices must be sorted and unique")
+        if any(not isinstance(index, int) or index < 0 for index in self.color_pass_indices):
+            raise ValueError("color_pass_indices must contain non-negative integers")
+        if self.alpha_pass_index is not None and (
+            not isinstance(self.alpha_pass_index, int) or self.alpha_pass_index < 0
+        ):
+            raise ValueError("alpha_pass_index must be a non-negative integer or None")
+        if self.mode is BakeCompositeMode.SINGLE:
+            if self.alpha_pass_index is not None or self.color_pass_indices:
+                raise ValueError("SINGLE composition cannot declare pass routing")
+        elif self.mode is BakeCompositeMode.ADD_RGB_MAX_ALPHA:
+            if self.alpha_pass_index is not None:
+                raise ValueError("ADD_RGB_MAX_ALPHA cannot declare alpha_pass_index")
+        elif self.mode is BakeCompositeMode.ADD_RGB_REPLACE_ALPHA:
+            if self.alpha_pass_index is None:
+                raise ValueError("ADD_RGB_REPLACE_ALPHA requires alpha_pass_index")
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,15 +418,23 @@ class BakePlan:
             raise ValueError("bake pass indices must be ordered and dense from zero")
         if self.bake_mode is not self.passes[0].bake_mode:
             raise ValueError("bake_mode must match the first compatibility bake pass")
-        if len(self.passes) == 1 and self.composite.mode is not BakeCompositeMode.SINGLE:
-            raise ValueError("single-pass plans require SINGLE composition")
-        if len(self.passes) > 1 and self.composite.mode is BakeCompositeMode.SINGLE:
-            raise ValueError("multi-pass plans require an explicit composite mode")
+        if self.composite.mode is BakeCompositeMode.SINGLE and len(self.passes) != 1:
+            raise ValueError("SINGLE composition requires exactly one pass")
 
         slot_count = len(self.material_analysis.slots)
         for item in self.passes:
             if max(item.material_slot_indices) >= slot_count:
                 raise ValueError("bake pass references a material slot outside analysis")
+            if item.material_preparations and max(
+                prep.slot_index for prep in item.material_preparations
+            ) >= slot_count:
+                raise ValueError("material preparation references a slot outside analysis")
+
+        referenced_pass_indices = set(self.composite.color_pass_indices)
+        if self.composite.alpha_pass_index is not None:
+            referenced_pass_indices.add(self.composite.alpha_pass_index)
+        if referenced_pass_indices and max(referenced_pass_indices) >= len(self.passes):
+            raise ValueError("composite plan references a missing bake pass")
 
     @property
     def representative_task(self) -> BakeFrameTask:
@@ -385,6 +447,10 @@ class BakePlan:
     @property
     def multipass(self) -> bool:
         return len(self.passes) > 1
+
+    @property
+    def requires_composition(self) -> bool:
+        return self.composite.mode is not BakeCompositeMode.SINGLE
 
 
 class BakePlanError(ValueError):
@@ -448,8 +514,6 @@ def build_bake_plan(
     if not isinstance(settings, BakeSettings):
         raise TypeError("settings must be BakeSettings")
 
-    # Local import avoids a model/registry import cycle while keeping the public
-    # build function stable for existing callers.
     from .strategies import resolve_bake_strategy_plan
 
     passes, composite = resolve_bake_strategy_plan(analysis, settings)
