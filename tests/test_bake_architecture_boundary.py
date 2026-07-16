@@ -40,9 +40,11 @@ def test_baking_domain_has_no_blender_dependencies():
 def test_bake_helpers_use_no_operators():
     for filename in (
         "bake_compositor.py",
+        "bake_material_preparation.py",
         "bake_materials.py",
         "bake_scene_state.py",
         "material_analyzer.py",
+        "semantic_bake_executor.py",
         "shader_graph_analyzer.py",
     ):
         path = ROOT / "blender_adapter" / filename
@@ -65,8 +67,8 @@ def test_strategy_registry_remains_blender_independent():
     assert "numpy" not in imported_roots
 
 
-def test_object_bake_operator_is_confined_to_one_helper():
-    path = ROOT / "blender_adapter" / "bake_executor.py"
+def test_object_bake_operator_is_confined_to_core_helper():
+    path = ROOT / "blender_adapter" / "bake_executor_core.py"
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
     operator_attributes = [
@@ -83,3 +85,17 @@ def test_object_bake_operator_is_confined_to_one_helper():
         if _function_for_line(tree, node.lineno) is not None
     }
     assert function_names == {"_call_bake_operator"}
+
+
+def test_public_executor_is_a_small_facade():
+    path = ROOT / "blender_adapter" / "bake_executor.py"
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    function_names = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert function_names == {"_call_bake_operator"}
+    assert "semantic_bake_executor" in source
+    assert "bake_executor_core" in source
