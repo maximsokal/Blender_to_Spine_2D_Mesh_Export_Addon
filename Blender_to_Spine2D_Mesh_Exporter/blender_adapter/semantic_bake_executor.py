@@ -36,6 +36,14 @@ from .bake_scene_state import (
 )
 from .context_state import BlenderContextError, activate_object_for_operator
 from .mesh_writer import MeshWriteError, temporary_mesh_object
+from .scene_bake_analyzer import (
+    SceneBakeAnalysisError,
+    validate_runtime_scene_context,
+)
+from .scene_bake_execution import (
+    SceneBakeExecutionError,
+    temporarily_exclude_source_from_render,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,11 +91,13 @@ def _bake_pass_to_buffer(
         with prepared_materials.prepare_pass(pass_plan):
             prepared_materials.assign_image(image)
             logger.info(
-                "Baking semantic pass %d/%d for '%s': strategy=%s mode=%s slots=%s",
+                "Baking semantic pass %d/%d for '%s': strategy=%s scope=%s "
+                "mode=%s slots=%s",
                 pass_plan.pass_index + 1,
                 len(plan.passes),
                 plan.source_object_id,
                 pass_plan.strategy_id.value,
+                pass_plan.evaluation_scope.value,
                 pass_plan.bake_mode.value,
                 pass_plan.material_slot_indices,
             )
@@ -229,6 +239,15 @@ def _run_bake_to_reservations(
     if resolved_scene is None:
         raise BakeExecutionError("A Blender Scene is required for texture baking")
 
+    if plan.scene_aware:
+        validate_runtime_scene_context(
+            source_obj,
+            plan.object_context,
+            plan.scene_context,
+            scene=resolved_scene,
+            context=resolved_context,
+        )
+
     with preserve_bake_scene_state(resolved_scene):
         with temporary_mesh_object(
             target_snapshot,
@@ -236,49 +255,55 @@ def _run_bake_to_reservations(
             name_prefix="__Spine2D_BakeTarget",
         ) as temporary:
             core._activate_uv_layer(temporary.mesh, plan.settings.uv_layer_name)
-            with temporary_bake_materials(
+            with temporarily_exclude_source_from_render(
                 source_obj,
-                temporary.object,
-                used_material_indices=used_material_indices,
-                face_material_indices=face_material_indices,
-            ) as prepared_materials:
-                with activate_object_for_operator(
+                enabled=plan.scene_aware and not plan.settings.selected_to_active,
+                context=resolved_context,
+            ):
+                with temporary_bake_materials(
+                    source_obj,
                     temporary.object,
-                    context=resolved_context,
-                ):
-                    if plan.settings.selected_to_active:
-                        try:
-                            source_obj.select_set(True)
-                            resolved_context.view_layer.objects.active = temporary.object
-                        except Exception as exc:
-                            raise BakeExecutionError(
-                                "Unable to prepare selected-to-active bake selection"
-                            ) from exc
-
-                    for task, reservation in zip(
-                        plan.frame_tasks,
-                        resolved_reservations,
+                    used_material_indices=used_material_indices,
+                    face_material_indices=face_material_indices,
+                ) as prepared_materials:
+                    with activate_object_for_operator(
+                        temporary.object,
+                        context=resolved_context,
                     ):
-                        logger.info(
-                            "Staging semantic bake '%s' frame %d/%d "
-                            "(timeline=%s passes=%d composite=%s)",
-                            plan.source_object_id,
-                            task.task_index + 1,
-                            len(plan.frame_tasks),
-                            task.timeline_frame,
-                            len(plan.passes),
-                            plan.composite.mode.value,
-                        )
-                        _bake_frame_task(
-                            bpy_module=bpy_module,
-                            context=resolved_context,
-                            scene=resolved_scene,
-                            plan=plan,
-                            execution_settings=execution_settings,
-                            task=task,
-                            reservation=reservation,
-                            prepared_materials=prepared_materials,
-                        )
+                        if plan.settings.selected_to_active:
+                            try:
+                                source_obj.select_set(True)
+                                resolved_context.view_layer.objects.active = temporary.object
+                            except Exception as exc:
+                                raise BakeExecutionError(
+                                    "Unable to prepare selected-to-active bake selection"
+                                ) from exc
+
+                        for task, reservation in zip(
+                            plan.frame_tasks,
+                            resolved_reservations,
+                        ):
+                            logger.info(
+                                "Staging semantic bake '%s' frame %d/%d "
+                                "(timeline=%s passes=%d composite=%s scene_aware=%s)",
+                                plan.source_object_id,
+                                task.task_index + 1,
+                                len(plan.frame_tasks),
+                                task.timeline_frame,
+                                len(plan.passes),
+                                plan.composite.mode.value,
+                                plan.scene_aware,
+                            )
+                            _bake_frame_task(
+                                bpy_module=bpy_module,
+                                context=resolved_context,
+                                scene=resolved_scene,
+                                plan=plan,
+                                execution_settings=execution_settings,
+                                task=task,
+                                reservation=reservation,
+                                prepared_materials=prepared_materials,
+                            )
 
 
 def stage_bake_plan_outputs(
@@ -323,6 +348,8 @@ def stage_bake_plan_outputs(
         BakeSceneStateError,
         BlenderContextError,
         MeshWriteError,
+        SceneBakeAnalysisError,
+        SceneBakeExecutionError,
     ) as exc:
         raise BakeExecutionError(
             f"Texture bake transaction failed for '{plan.source_object_id}': {exc}"
