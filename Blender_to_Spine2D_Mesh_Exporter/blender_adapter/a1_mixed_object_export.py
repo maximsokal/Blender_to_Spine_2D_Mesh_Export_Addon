@@ -1,0 +1,338 @@
+"""Mixed A1 multi-object export preserving the legacy Connect-flag semantics.
+
+At least two connected objects form one typed ``all_objects`` document. Remaining
+selected objects stay standalone. Both prepared documents are composed in memory and
+the final JSON plus every texture frame are committed by one atomic transaction.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+import logging
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any, Mapping, Tuple
+
+from ..application import (
+    A1MultiObjectExportSettings,
+    A1MultiObjectMode,
+    A1MultiObjectStage,
+    ExportIssue,
+    ExportResult,
+    IssueSeverity,
+)
+from ..domain.spine import (
+    ConstraintOrderPolicy,
+    SpineCompositionSettings,
+    SpineDocumentComponent,
+    SpineSerializer,
+    compose_spine_documents,
+)
+from ..infrastructure import (
+    AtomicFileCommitError,
+    atomic_file_transaction,
+    write_staged_utf8_text,
+)
+from .a1_multi_object_export import (
+    A1MultiObjectPreparationError,
+    A1MultiObjectSource,
+    PreparedA1MultiObject,
+    prepare_a1_multi_object,
+)
+from .a1_object_preparation import StatisticsValue
+from .bake_executor import stage_bake_plan_outputs
+
+logger = logging.getLogger(__name__)
+
+
+def _validate_mixed_sources(
+    connected_sources: Tuple[A1MultiObjectSource, ...],
+    standalone_sources: Tuple[A1MultiObjectSource, ...],
+    settings: A1MultiObjectExportSettings,
+) -> None:
+    if not isinstance(settings, A1MultiObjectExportSettings):
+        raise TypeError("settings must be A1MultiObjectExportSettings")
+    if settings.mode is not A1MultiObjectMode.MIXED:
+        raise ValueError("mixed export requires A1MultiObjectMode.MIXED")
+    if not isinstance(connected_sources, tuple) or len(connected_sources) < 2:
+        raise ValueError("connected_sources must contain at least two objects")
+    if not isinstance(standalone_sources, tuple) or not standalone_sources:
+        raise ValueError("standalone_sources must contain at least one object")
+    all_sources = connected_sources + standalone_sources
+    if not all(isinstance(item, A1MultiObjectSource) for item in all_sources):
+        raise TypeError("all sources must contain A1MultiObjectSource values")
+    component_ids = tuple(item.component_id for item in all_sources)
+    if len(component_ids) != len(set(component_ids)):
+        raise ValueError("component_id values must be unique across mixed groups")
+    connected_ids = {item.component_id for item in connected_sources}
+    if settings.anchor_component_id is not None and (
+        settings.anchor_component_id not in connected_ids
+    ):
+        raise ValueError(
+            "anchor_component_id must identify an object in connected_sources"
+        )
+
+
+def _subgroup_settings(
+    settings: A1MultiObjectExportSettings,
+    *,
+    mode: A1MultiObjectMode,
+    suffix: str,
+    anchor_component_id: str | None,
+) -> A1MultiObjectExportSettings:
+    return replace(
+        settings,
+        mode=mode,
+        output_stem=f"{settings.resolved_output_stem}{suffix}",
+        anchor_component_id=anchor_component_id,
+    )
+
+
+def _validate_final_paths(
+    json_path: Path,
+    connected: PreparedA1MultiObject,
+    standalone: PreparedA1MultiObject,
+) -> Tuple[Path, ...]:
+    resolved_json = json_path.expanduser().resolve(strict=False)
+    owner_by_path: dict[Path, str] = {resolved_json: "final mixed JSON"}
+    result: list[Path] = []
+    for group_name, prepared in (
+        ("connected", connected),
+        ("standalone", standalone),
+    ):
+        for path in prepared.texture_output_paths:
+            resolved = path.expanduser().resolve(strict=False)
+            previous = owner_by_path.get(resolved)
+            if previous is not None:
+                raise ValueError(
+                    f"Mixed output path collision '{resolved}' between {previous} "
+                    f"and {group_name} group"
+                )
+            owner_by_path[resolved] = f"{group_name} texture"
+            result.append(resolved)
+    return tuple(result)
+
+
+def prepare_a1_mixed_object(
+    connected_sources: Tuple[A1MultiObjectSource, ...],
+    standalone_sources: Tuple[A1MultiObjectSource, ...],
+    settings: A1MultiObjectExportSettings,
+    *,
+    context: Any | None = None,
+    scene: Any | None = None,
+) -> PreparedA1MultiObject:
+    """Prepare one connected subgroup plus standalone objects without writing files."""
+
+    _validate_mixed_sources(connected_sources, standalone_sources, settings)
+    anchor = settings.anchor_component_id or connected_sources[0].component_id
+    connected_settings = _subgroup_settings(
+        settings,
+        mode=A1MultiObjectMode.CONNECTED,
+        suffix="__connected",
+        anchor_component_id=anchor,
+    )
+    standalone_settings = _subgroup_settings(
+        settings,
+        mode=A1MultiObjectMode.STANDALONE,
+        suffix="__standalone",
+        anchor_component_id=None,
+    )
+
+    connected = prepare_a1_multi_object(
+        connected_sources,
+        connected_settings,
+        context=context,
+        scene=scene,
+    )
+    standalone = prepare_a1_multi_object(
+        standalone_sources,
+        standalone_settings,
+        context=context,
+        scene=scene,
+    )
+
+    # Both subgroup builders already applied the requested per-object animation
+    # namespaces. The outer composition therefore preserves existing names verbatim.
+    composition = compose_spine_documents(
+        (
+            SpineDocumentComponent(
+                component_id="connected_group",
+                document=connected.document,
+            ),
+            SpineDocumentComponent(
+                component_id="standalone_group",
+                document=standalone.document,
+            ),
+        ),
+        SpineCompositionSettings(
+            shared_bone_names=("root",),
+            constraint_order_policy=ConstraintOrderPolicy.REBASE_CONTIGUOUS,
+            namespace_animations=False,
+            animation_separator=settings.animation_separator,
+        ),
+    )
+    texture_paths = _validate_final_paths(
+        settings.json_path,
+        connected,
+        standalone,
+    )
+    statistics: dict[str, StatisticsValue] = {
+        "object_count": len(connected_sources) + len(standalone_sources),
+        "connected_object_count": len(connected_sources),
+        "standalone_object_count": len(standalone_sources),
+        "mode": A1MultiObjectMode.MIXED.value,
+        "texture_output_count": len(texture_paths),
+        "final_bone_count": len(composition.document.bones),
+        "final_slot_count": len(composition.document.slots),
+        "final_skin_count": len(composition.document.skins),
+        "final_constraint_count": len(composition.document.ik)
+        + len(composition.document.transform),
+    }
+    for prefix, values in (
+        ("connected", connected.statistics),
+        ("standalone", standalone.statistics),
+    ):
+        for key, value in values.items():
+            statistics[f"{prefix}.{key}"] = value
+
+    return PreparedA1MultiObject(
+        settings=settings,
+        sources=connected.sources + standalone.sources,
+        objects=connected.objects + standalone.objects,
+        document=composition.document,
+        composition=composition,
+        texture_output_paths=texture_paths,
+        warnings=connected.warnings + standalone.warnings,
+        statistics=MappingProxyType(statistics),
+    )
+
+
+def _failure_result(
+    *,
+    stage: A1MultiObjectStage,
+    exc: Exception,
+    statistics: Mapping[str, StatisticsValue],
+    warnings: Tuple[ExportIssue, ...],
+    component_id: str | None = None,
+    object_id: str | None = None,
+    object_stage: str | None = None,
+) -> ExportResult:
+    issue_context: dict[str, object] = {"exception_type": type(exc).__name__}
+    if component_id is not None:
+        issue_context["component_id"] = component_id
+    if object_stage is not None:
+        issue_context["object_stage"] = object_stage
+    logger.exception(
+        "A1 mixed multi-object export failed at %s (component=%s, object=%s)",
+        stage.value,
+        component_id,
+        object_id,
+    )
+    return ExportResult(
+        success=False,
+        issues=warnings
+        + (
+            ExportIssue(
+                severity=IssueSeverity.ERROR,
+                stage=stage.value,
+                code=stage.error_code,
+                message=str(exc) or type(exc).__name__,
+                object_id=object_id,
+                technical_details=f"{type(exc).__name__}: {exc}",
+                context=issue_context,
+            ),
+        ),
+        statistics=dict(statistics),
+    )
+
+
+def export_a1_mixed_object(
+    connected_sources: Tuple[A1MultiObjectSource, ...],
+    standalone_sources: Tuple[A1MultiObjectSource, ...],
+    settings: A1MultiObjectExportSettings,
+    *,
+    context: Any | None = None,
+    scene: Any | None = None,
+) -> ExportResult:
+    """Export mixed connected and standalone objects in one atomic transaction."""
+
+    try:
+        prepared = prepare_a1_mixed_object(
+            connected_sources,
+            standalone_sources,
+            settings,
+            context=context,
+            scene=scene,
+        )
+    except A1MultiObjectPreparationError as exc:
+        return _failure_result(
+            stage=exc.stage,
+            exc=exc.cause,
+            statistics=exc.statistics,
+            warnings=exc.warnings,
+            component_id=exc.component_id,
+            object_id=exc.object_id,
+            object_stage=exc.object_stage,
+        )
+    except Exception as exc:
+        return _failure_result(
+            stage=A1MultiObjectStage.COMPOSE_DOCUMENT,
+            exc=exc,
+            statistics={},
+            warnings=(),
+        )
+
+    stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
+    statistics = dict(prepared.statistics)
+    try:
+        json_text = SpineSerializer().to_json(
+            prepared.document,
+            indent=settings.json_indent,
+        )
+        stage = A1MultiObjectStage.STAGE_OUTPUTS
+        with atomic_file_transaction() as transaction:
+            json_reservation = transaction.reserve(prepared.json_path)
+            write_staged_utf8_text(
+                json_reservation.staged_path,
+                json_text,
+                ensure_trailing_newline=True,
+            )
+            bake_reservations = []
+            for item in prepared.objects:
+                bake_reservations.extend(
+                    stage_bake_plan_outputs(
+                        item.source_object,
+                        item.bake_target_snapshot,
+                        item.bake_plan,
+                        transaction,
+                        item.settings.bake_execution,
+                        context=context,
+                        scene=scene,
+                    )
+                )
+            stage = A1MultiObjectStage.COMMIT_OUTPUTS
+            committed_paths = transaction.commit()
+
+        expected_paths = (
+            json_reservation.final_path,
+            *(reservation.final_path for reservation in bake_reservations),
+        )
+        if tuple(committed_paths) != expected_paths:
+            raise AtomicFileCommitError(
+                "Committed output order does not match mixed JSON and texture "
+                "reservations"
+            )
+        statistics["output_file_count"] = len(committed_paths)
+        return ExportResult(
+            success=True,
+            output_files=tuple(committed_paths),
+            issues=prepared.warnings,
+            statistics=statistics,
+        )
+    except Exception as exc:
+        return _failure_result(
+            stage=stage,
+            exc=exc,
+            statistics=statistics,
+            warnings=prepared.warnings,
+        )
