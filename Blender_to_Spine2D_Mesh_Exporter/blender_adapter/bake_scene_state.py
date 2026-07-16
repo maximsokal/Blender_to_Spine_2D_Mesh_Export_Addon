@@ -36,8 +36,6 @@ class BakeSceneState:
             try:
                 values.append(ScenePropertyValue(path, _get_path(scene, path)))
             except (AttributeError, TypeError):
-                # Blender builds may omit optional properties. Only captured
-                # properties are restored; required ones are checked at configure.
                 continue
         try:
             frame_current = int(scene.frame_current)
@@ -111,8 +109,14 @@ def configure_scene_for_bake(
     scene: Any,
     plan: BakePlan,
     execution_settings: BakeExecutionSettings,
+    *,
+    bake_mode: BakeMode | None = None,
 ) -> None:
-    """Apply all render settings required by one immutable BakePlan."""
+    """Apply render settings for one pass of an immutable BakePlan.
+
+    ``bake_mode`` is explicit for multi-pass plans. Omitting it preserves the legacy
+    single-pass contract and uses ``plan.bake_mode``.
+    """
 
     if scene is None:
         raise BakeSceneStateError("scene cannot be None")
@@ -120,6 +124,9 @@ def configure_scene_for_bake(
         raise TypeError("plan must be BakePlan")
     if not isinstance(execution_settings, BakeExecutionSettings):
         raise TypeError("execution_settings must be BakeExecutionSettings")
+    resolved_mode = plan.bake_mode if bake_mode is None else bake_mode
+    if not isinstance(resolved_mode, BakeMode):
+        raise TypeError("bake_mode must be BakeMode or None")
 
     required = (
         "render.engine",
@@ -147,11 +154,11 @@ def configure_scene_for_bake(
     scene.render.bake.use_selected_to_active = plan.settings.selected_to_active
     scene.render.bake.use_cage = plan.settings.selected_to_active
     scene.render.bake.cage_extrusion = plan.settings.cage_extrusion
-    flat_color_pass = plan.bake_mode in {BakeMode.DIFFUSE, BakeMode.EMIT}
+    flat_color_pass = resolved_mode in {BakeMode.DIFFUSE, BakeMode.EMIT}
     scene.render.bake.use_pass_direct = not flat_color_pass
     scene.render.bake.use_pass_indirect = not flat_color_pass
     scene.render.bake.use_pass_color = True
-    scene.cycles.bake_type = plan.bake_mode.value
+    scene.cycles.bake_type = resolved_mode.value
     scene.cycles.samples = execution_settings.samples
 
 
