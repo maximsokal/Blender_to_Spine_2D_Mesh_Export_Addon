@@ -7,6 +7,7 @@ on:
       - ".github/workflows/blender-headless.yml"
       - "Blender_to_Spine2D_Mesh_Exporter/**"
       - "tests/blender_headless/**"
+      - "tools/**"
   workflow_dispatch:
 
 permissions:
@@ -147,6 +148,17 @@ jobs:
             --python-exit-code 1 \
             --python tests/blender_headless/run_single_operator_integration.py \
             2>&1 | tee test-results/blender-single-operator.log
+
+      - name: Smoke fixture worker and pixel comparator
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_fixture_tools_integration.py \
+            2>&1 | tee test-results/blender-fixture-tools.log
 
       - name: Upload Blender integration logs
         if: always()
