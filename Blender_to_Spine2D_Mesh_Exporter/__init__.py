@@ -5,8 +5,8 @@
 
 The package also contains Blender-independent domain/application code and command-line
 parity tools. Importing those modules with normal Python must not eagerly import every
-legacy ``bpy`` module. Blender lifecycle classes are therefore defined only when
-``bpy`` is available; the actual in-Blender registration path remains unchanged.
+legacy ``bpy`` module. Blender lifecycle classes are therefore defined only when a
+real Blender Python API is available; the in-Blender registration path is unchanged.
 """
 
 from __future__ import annotations
@@ -30,8 +30,18 @@ bl_info = {
 logger = logging.getLogger("Blender_to_Spine2D_Mesh_Exporter")
 
 try:
-    import bpy  # type: ignore
+    import bpy as _bpy  # type: ignore
 except ModuleNotFoundError:
+    _bpy = None
+
+# Some normal Python environments contain a placeholder package named ``bpy`` that
+# is not Blender's runtime API. Importing legacy modules against it fails later with
+# misleading AttributeError exceptions. Require the core lifecycle surfaces instead.
+if _bpy is not None and all(
+    hasattr(_bpy, attribute) for attribute in ("types", "props", "utils", "context")
+):
+    bpy = _bpy
+else:
     bpy = None
 
 
@@ -243,8 +253,6 @@ if bpy is not None:
                 logger.exception("Failed to unregister class %s", cls.__name__)
 
 else:
-    # Public placeholders keep domain/application imports predictable without
-    # pretending that Blender lifecycle operations can run in a normal interpreter.
     MODULES: tuple[Any, ...] = ()
     CLASSES_TO_REGISTER: tuple[Any, ...] = ()
 
