@@ -27,6 +27,7 @@ from .bake_compositor import (
 )
 from .bake_executor import (
     BakeExecutionError,
+    CameraProjectionExecutionError,
     build_bake_execution_result,
     execute_bake_plan,
     stage_bake_plan_outputs,
@@ -41,6 +42,12 @@ from .bake_scene_state import (
     BakeSceneStateError,
     configure_scene_for_bake,
     preserve_bake_scene_state,
+)
+from .camera_projection_executor import (
+    configure_scene_for_camera_projection,
+    execute_camera_projection_plan,
+    preserve_camera_projection_state,
+    stage_camera_projection_outputs,
 )
 from .context_state import (
     BlenderContextError,
@@ -90,6 +97,7 @@ __all__ = [
     "BakeSceneStateError",
     "BlenderContextError",
     "BlenderContextState",
+    "CameraProjectionExecutionError",
     "EvaluatedMeshReadError",
     "EvaluatedMeshSnapshotResult",
     "LineageAttributeNames",
@@ -116,7 +124,9 @@ __all__ = [
     "build_uv_operator_plan",
     "compose_bake_passes",
     "configure_scene_for_bake",
+    "configure_scene_for_camera_projection",
     "execute_bake_plan",
+    "execute_camera_projection_plan",
     "export_a1_mixed_object",
     "export_a1_multi_object",
     "export_a1_single_object",
@@ -124,10 +134,12 @@ __all__ = [
     "prepare_a1_multi_object",
     "prepare_a1_object",
     "preserve_bake_scene_state",
+    "preserve_camera_projection_state",
     "read_bake_image_pixels",
     "read_evaluated_mesh_snapshot",
     "read_source_mesh_snapshot",
     "stage_bake_plan_outputs",
+    "stage_camera_projection_outputs",
     "temporary_bake_materials",
     "temporary_mesh_object",
     "unwrap_snapshot_uv",
