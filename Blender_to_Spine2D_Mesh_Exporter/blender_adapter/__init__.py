@@ -60,6 +60,13 @@ from .material_analyzer import (
 )
 from .mesh_reader import MeshReadError, read_source_mesh_snapshot
 from .mesh_writer import MeshWriteError, TemporaryMeshObject, temporary_mesh_object
+from .scene_bake_analyzer import (
+    SceneBakeAnalysisError,
+    analyse_bake_contexts,
+    analyse_object_bake_context,
+    analyse_scene_bake_context,
+    validate_runtime_scene_context,
+)
 from .shader_graph_analyzer import (
     MaterialGraphAnalysisError,
     analyse_material_graph,
@@ -93,14 +100,18 @@ __all__ = [
     "PreparedA1MultiObject",
     "PreparedA1Object",
     "PreparedBakeMaterials",
+    "SceneBakeAnalysisError",
     "StatisticsValue",
     "TemporaryMeshObject",
     "UvOperatorPlan",
     "UvUnwrapError",
     "activate_object_for_operator",
+    "analyse_bake_contexts",
     "analyse_material_graph",
     "analyse_material_slot",
+    "analyse_object_bake_context",
     "analyse_object_materials",
+    "analyse_scene_bake_context",
     "build_bake_execution_result",
     "build_uv_operator_plan",
     "compose_bake_passes",
@@ -120,5 +131,6 @@ __all__ = [
     "temporary_bake_materials",
     "temporary_mesh_object",
     "unwrap_snapshot_uv",
+    "validate_runtime_scene_context",
     "write_bake_image_pixels",
 ]
