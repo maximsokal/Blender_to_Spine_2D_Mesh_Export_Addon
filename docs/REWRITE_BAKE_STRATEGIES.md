@@ -152,9 +152,10 @@ Examples:
 - reflection/refraction involving other objects.
 
 Real Blender 4.4 validation proved that `bpy.ops.object.bake` exposes no camera-ray bake
-type. Therefore these graphs do **not** fall back to ordinary `COMBINED`; planning returns
-an actionable `camera-render projection` error. B4 must render from the active camera and
-project that result onto a Spine-compatible mesh/texture.
+type. Therefore these graphs do **not** fall back to ordinary `COMBINED`; the camera
+projection boundary detector returns an actionable `camera-render projection` error. B4
+must render from the active camera and project that result onto a Spine-compatible
+mesh/texture.
 
 ### `AUXILIARY`
 
@@ -172,8 +173,9 @@ Implemented executable strategies:
 3. `EmissionBakeStrategy`;
 4. `AlphaBakeStrategy`.
 
-The registry also detects camera-dependent material requirements and terminates at the
-camera-render projection boundary instead of inventing an unsupported object-bake mode.
+The registry also contains a camera projection boundary detector. It classifies
+camera-dependent appearance and stops planning before a `BakePassPlan` is emitted, because
+there is no valid Blender 4.4 object-bake mode for camera rays.
 
 Every executable pass records:
 
