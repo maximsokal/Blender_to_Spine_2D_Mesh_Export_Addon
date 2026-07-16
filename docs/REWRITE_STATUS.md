@@ -112,8 +112,8 @@ temporary datablocks are restored on success and failure.
 
 ## Recursive Shader Node Group analysis
 
-`blender_adapter/shader_graph_analyzer.py` now recursively traverses reachable Shader Node
-Groups through their actual interfaces:
+`blender_adapter/shader_graph_analyzer.py` recursively traverses reachable Shader Node Groups
+through their actual interfaces:
 
 ```text
 Group output -> internal Group Output input
@@ -138,16 +138,10 @@ camera-bearing parent input that correctly remains outside the reachable graph.
 
 ## B4: camera-render projection
 
-B4 is selected automatically for:
-
-- Camera or View dependency;
-- Reflection or Transmission dependency;
-- Volume output;
-- render-evaluated displacement.
-
-Covered families include Fresnel, Layer Weight, Light Path, Glass, Refraction, Principled
-Transmission, reflective appearance and Principled Volume, including requirements nested in
-reachable Shader Node Groups.
+B4 is selected automatically for Camera/View, Reflection/Transmission, Volume and
+render-evaluated displacement. Covered families include Fresnel, Layer Weight, Light Path,
+Glass, Refraction, Principled Transmission, reflective appearance and Principled Volume,
+including requirements nested in reachable Shader Node Groups.
 
 `CameraProjectionPlan` is a frozen `BakePlan` subtype. Its synthetic `CAMERA_COMBINED` pass is
 metadata only and is never sent to `bpy.ops.object.bake`.
@@ -176,47 +170,32 @@ file is therefore the source of truth for alpha analysis.
 `domain/baking/projection_layout.py` provides immutable crop/hull contracts and deterministic
 monotonic-chain convex hull generation.
 
-Every frame in a sequence shares:
-
-- crop bounds and texture dimensions;
-- full-frame screen offset;
-- UVs;
-- hull vertices;
-- triangle fan;
-- attachment width and height.
-
-The hull follows the union alpha silhouette while UVs address the padded crop. Vertex positions
-preserve original full-frame camera placement, so cropping does not recenter the rendered
-object.
+Every frame in a sequence shares crop bounds, texture dimensions, full-frame screen offset,
+UVs, hull vertices, triangle fan and attachment dimensions. The hull follows the union alpha
+silhouette while UVs address the padded crop. Vertex positions preserve original full-frame
+camera placement, so cropping does not recenter the object.
 
 For hull size `H`:
 
 ```text
 UV values              = H * 2
-triangles               = H - 2
-triangle index values   = (H - 2) * 3
+triangle index values  = (H - 2) * 3
 ```
 
 An all-transparent render or sequence fails before commit.
 
 ### Post-render typed recomposition
 
-A crop/hull layout is known only after all renders succeed. Production output order is:
+A crop/hull layout is known only after all renders succeed. Production order is:
 
 ```text
 prepare -> reserve JSON -> render/crop textures -> finalize B4 attachments
         -> recompose typed documents -> serialize JSON -> atomic commit
 ```
 
-This is implemented for:
-
-- single-object export;
-- standalone multi-object export;
-- connected multi-object export;
-- mixed connected/standalone export.
-
-Multi/mixed output recomposes existing typed `SpineDocument` values. Serialized JSON is never
-patched or merged. Each attachment width/height is validated against its decoded cropped image.
+This path is implemented for single, standalone multi, connected multi, and mixed exports.
+Multi/mixed output recomposes typed `SpineDocument` values; serialized JSON is never patched or
+merged. Each attachment width/height is validated against its decoded cropped image.
 
 ## Executor boundaries
 
@@ -228,8 +207,7 @@ patched or merged. Each attachment width/height is validated against its decoded
 - `camera_projection_executor_core.py`: B4 render/union/crop orchestration;
 - `camera_projection_executor.py`: stable B4 facade;
 - `texture_executor.py`: plan dispatch and detailed layout result without operator access;
-- `bake_executor.py`: stable public facade containing only object-bake and render
-  failure-injection hooks.
+- `bake_executor.py`: stable public facade containing only object-bake and render hooks.
 
 Architecture tests verify that helper, finalization and output modules contain no direct
 `bpy.ops` access.
@@ -238,22 +216,9 @@ Architecture tests verify that helper, finalization and output modules contain n
 
 Every output image is decoded; a PNG signature alone is not accepted.
 
-B1-B3 coverage includes:
-
-- multiple Principled slots;
-- generated Image Texture and procedural Checker;
-- surface plus Emission in separate/shared materials;
-- constant and linked-image Alpha;
-- Transparent/Mix Shader in both orders;
-- nested transparency and pure Transparent;
-- animated Alpha;
-- light, World and Ambient Occlusion response;
-- mixed local/scene slots;
-- scene straight RGBA;
-- animated lights;
-- local/alpha/scene/sequence rollback;
-- source state and temporary datablock restoration;
-- registered operators and isolated Legacy/Rewrite workflows.
+B1-B3 coverage includes opaque/procedural/image color, Emission, straight Alpha, nested
+transparency, animated Alpha, scene light/World/AO response, mixed local/scene slots, animated
+lights, rollback, state restoration, registered operators and isolated Legacy/Rewrite flows.
 
 Dedicated B4 coverage includes:
 
@@ -274,8 +239,12 @@ Dedicated B4 coverage includes:
 - Python 3.11: **484 passed, 4 skipped**;
 - `Blender 4.4 Alpha Bake`: success;
 - `Blender 4.4 Scene Bake`: success;
-- `Blender 4.4 Camera Projection`: success;
+- `Blender 4.4 Camera Projection`: success, including static/sequence, recursive group and
+  standalone/connected/mixed crop fixtures;
 - full `Blender 4.4 Headless`: success.
+
+Validation was repeated on the documentation-final branch head after code, tests and workflow
+changes were complete.
 
 ## Production defects found by the matrix
 
@@ -290,9 +259,9 @@ Dedicated B4 coverage includes:
 9. zero-argument `super()` is unsafe in a frozen `dataclass(slots=True)` plan subclass;
 10. synthetic projection lineage must preserve source object ID;
 11. scanning all group nodes would make unused inputs leak camera dependencies;
-12. Blender 4.4 headless `Render Result` can remain zero-sized after a successful render;
-13. JSON must be serialized after render-derived crop/hull finalization, not before;
-14. multi/mixed output must recompose typed documents after each component receives its layout.
+12. Blender 4.4 headless `Render Result` can remain zero-sized after success;
+13. JSON must be serialized after render-derived crop/hull finalization;
+14. multi/mixed output must recompose typed documents after component layouts are known.
 
 ## Explicit remaining boundaries
 
@@ -332,8 +301,5 @@ additional premultiplication policies remain output-policy work.
 5. controlled Legacy removal only after private parity acceptance;
 6. version bump and release packaging only after the parity gate is accepted.
 
-See also:
-
-- `docs/REWRITE_CAMERA_PROJECTION.md`;
-- `docs/REWRITE_BAKE_STRATEGIES.md`;
-- `docs/REWRITE_A1_GOLDEN_PARITY.md`.
+See also `docs/REWRITE_CAMERA_PROJECTION.md`, `docs/REWRITE_BAKE_STRATEGIES.md`, and
+`docs/REWRITE_A1_GOLDEN_PARITY.md`.
