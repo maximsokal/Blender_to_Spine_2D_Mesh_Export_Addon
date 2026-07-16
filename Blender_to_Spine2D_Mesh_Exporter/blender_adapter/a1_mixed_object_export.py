@@ -1,8 +1,8 @@
 """Mixed A1 multi-object export preserving the legacy Connect-flag semantics.
 
 At least two connected objects form one typed ``all_objects`` document. Remaining
-selected objects stay standalone. Both prepared documents are composed in memory and
-the final JSON plus every texture frame are committed by one atomic transaction.
+selected objects stay standalone. All documents are composed in memory and the final
+JSON plus every texture frame are committed by one atomic transaction.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from ..domain.spine import (
     ConstraintOrderPolicy,
     SpineCompositionSettings,
     SpineDocumentComponent,
+    SpineDocumentCompositionResult,
     SpineSerializer,
     compose_spine_documents,
 )
@@ -39,7 +40,12 @@ from .a1_multi_object_export import (
     PreparedA1MultiObject,
     prepare_a1_multi_object,
 )
-from .a1_object_preparation import StatisticsValue
+from .a1_object_preparation import (
+    A1ObjectPreparationError,
+    PreparedA1Object,
+    StatisticsValue,
+    prepare_a1_object,
+)
 from .bake_executor import stage_bake_plan_outputs
 
 logger = logging.getLogger(__name__)
@@ -58,6 +64,7 @@ def _validate_mixed_sources(
         raise ValueError("connected_sources must contain at least two objects")
     if not isinstance(standalone_sources, tuple) or not standalone_sources:
         raise ValueError("standalone_sources must contain at least one object")
+
     all_sources = connected_sources + standalone_sources
     if not all(isinstance(item, A1MultiObjectSource) for item in all_sources):
         raise TypeError("all sources must contain A1MultiObjectSource values")
@@ -72,35 +79,128 @@ def _validate_mixed_sources(
             "anchor_component_id must identify an object in connected_sources"
         )
 
+    output_root = settings.output_directory.expanduser().resolve(strict=False)
+    for source in all_sources:
+        source_root = source.settings.export.output_directory.expanduser().resolve(
+            strict=False
+        )
+        if source_root != output_root:
+            raise ValueError(
+                f"Component '{source.component_id}' uses output root '{source_root}', "
+                f"but mixed export uses '{output_root}'"
+            )
 
-def _subgroup_settings(
+
+def _connected_settings(
     settings: A1MultiObjectExportSettings,
-    *,
-    mode: A1MultiObjectMode,
-    suffix: str,
-    anchor_component_id: str | None,
+    anchor_component_id: str,
 ) -> A1MultiObjectExportSettings:
     return replace(
         settings,
-        mode=mode,
-        output_stem=f"{settings.resolved_output_stem}{suffix}",
+        mode=A1MultiObjectMode.CONNECTED,
+        output_stem=f"{settings.resolved_output_stem}__connected",
         anchor_component_id=anchor_component_id,
+    )
+
+
+def _prepare_standalone_objects(
+    sources: Tuple[A1MultiObjectSource, ...],
+    settings: A1MultiObjectExportSettings,
+    *,
+    context: Any | None,
+    scene: Any | None,
+) -> tuple[
+    Tuple[PreparedA1Object, ...],
+    SpineDocumentCompositionResult,
+    Tuple[ExportIssue, ...],
+    Mapping[str, StatisticsValue],
+]:
+    prepared_objects: list[PreparedA1Object] = []
+    warnings: list[ExportIssue] = []
+    statistics: dict[str, StatisticsValue] = {
+        "object_count": len(sources),
+        "mode": A1MultiObjectMode.STANDALONE.value,
+    }
+
+    for source in sources:
+        try:
+            prepared = prepare_a1_object(
+                source.source_object,
+                source.settings,
+                context=context,
+                scene=scene,
+            )
+        except A1ObjectPreparationError as exc:
+            warnings.extend(exc.warnings)
+            raise A1MultiObjectPreparationError(
+                stage=A1MultiObjectStage.PREPARE_OBJECTS,
+                cause=exc.cause,
+                statistics=statistics,
+                warnings=tuple(warnings),
+                component_id=source.component_id,
+                object_id=exc.object_id,
+                object_stage=exc.stage.value,
+            ) from exc
+        prepared_objects.append(prepared)
+        warnings.extend(prepared.warnings)
+        for key, value in prepared.statistics.items():
+            statistics[f"component.{source.component_id}.{key}"] = value
+
+    components = tuple(
+        SpineDocumentComponent(
+            component_id=source.component_id,
+            document=prepared.document,
+            animation_namespace=source.animation_namespace or source.component_id,
+        )
+        for source, prepared in zip(sources, prepared_objects)
+    )
+    composition = compose_spine_documents(
+        components,
+        SpineCompositionSettings(
+            shared_bone_names=("root",),
+            constraint_order_policy=ConstraintOrderPolicy.REBASE_CONTIGUOUS,
+            namespace_animations=settings.namespace_animations,
+            animation_separator=settings.animation_separator,
+        ),
+    )
+    statistics.update(
+        {
+            "final_bone_count": len(composition.document.bones),
+            "final_slot_count": len(composition.document.slots),
+            "final_skin_count": len(composition.document.skins),
+            "final_constraint_count": len(composition.document.ik)
+            + len(composition.document.transform),
+        }
+    )
+    return (
+        tuple(prepared_objects),
+        composition,
+        tuple(warnings),
+        MappingProxyType(statistics),
+    )
+
+
+def _texture_paths(objects: Tuple[PreparedA1Object, ...]) -> Tuple[Path, ...]:
+    return tuple(
+        task.output_path.expanduser().resolve(strict=False)
+        for prepared in objects
+        for task in prepared.bake_plan.frame_tasks
     )
 
 
 def _validate_final_paths(
     json_path: Path,
-    connected: PreparedA1MultiObject,
-    standalone: PreparedA1MultiObject,
+    connected_paths: Tuple[Path, ...],
+    standalone_paths: Tuple[Path, ...],
 ) -> Tuple[Path, ...]:
     resolved_json = json_path.expanduser().resolve(strict=False)
     owner_by_path: dict[Path, str] = {resolved_json: "final mixed JSON"}
     result: list[Path] = []
-    for group_name, prepared in (
-        ("connected", connected),
-        ("standalone", standalone),
+    for group_name, paths in (
+        ("connected", connected_paths),
+        ("standalone", standalone_paths),
     ):
-        for path in prepared.texture_output_paths:
+        for path in paths:
             resolved = path.expanduser().resolve(strict=False)
             previous = owner_by_path.get(resolved)
             if previous is not None:
@@ -121,38 +221,30 @@ def prepare_a1_mixed_object(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> PreparedA1MultiObject:
-    """Prepare one connected subgroup plus standalone objects without writing files."""
+    """Prepare connected and standalone subgroups without writing output files."""
 
     _validate_mixed_sources(connected_sources, standalone_sources, settings)
     anchor = settings.anchor_component_id or connected_sources[0].component_id
-    connected_settings = _subgroup_settings(
-        settings,
-        mode=A1MultiObjectMode.CONNECTED,
-        suffix="__connected",
-        anchor_component_id=anchor,
-    )
-    standalone_settings = _subgroup_settings(
-        settings,
-        mode=A1MultiObjectMode.STANDALONE,
-        suffix="__standalone",
-        anchor_component_id=None,
-    )
-
     connected = prepare_a1_multi_object(
         connected_sources,
-        connected_settings,
+        _connected_settings(settings, anchor),
         context=context,
         scene=scene,
     )
-    standalone = prepare_a1_multi_object(
+    (
+        standalone_objects,
+        standalone_composition,
+        standalone_warnings,
+        standalone_statistics,
+    ) = _prepare_standalone_objects(
         standalone_sources,
-        standalone_settings,
+        settings,
         context=context,
         scene=scene,
     )
 
-    # Both subgroup builders already applied the requested per-object animation
-    # namespaces. The outer composition therefore preserves existing names verbatim.
+    # Both subgroups already applied their per-object animation namespaces. The outer
+    # composition preserves these names and only performs the final bone-index remap.
     composition = compose_spine_documents(
         (
             SpineDocumentComponent(
@@ -161,7 +253,7 @@ def prepare_a1_mixed_object(
             ),
             SpineDocumentComponent(
                 component_id="standalone_group",
-                document=standalone.document,
+                document=standalone_composition.document,
             ),
         ),
         SpineCompositionSettings(
@@ -171,11 +263,14 @@ def prepare_a1_mixed_object(
             animation_separator=settings.animation_separator,
         ),
     )
+    connected_paths = connected.texture_output_paths
+    standalone_paths = _texture_paths(standalone_objects)
     texture_paths = _validate_final_paths(
         settings.json_path,
-        connected,
-        standalone,
+        connected_paths,
+        standalone_paths,
     )
+
     statistics: dict[str, StatisticsValue] = {
         "object_count": len(connected_sources) + len(standalone_sources),
         "connected_object_count": len(connected_sources),
@@ -190,19 +285,19 @@ def prepare_a1_mixed_object(
     }
     for prefix, values in (
         ("connected", connected.statistics),
-        ("standalone", standalone.statistics),
+        ("standalone", standalone_statistics),
     ):
         for key, value in values.items():
             statistics[f"{prefix}.{key}"] = value
 
     return PreparedA1MultiObject(
         settings=settings,
-        sources=connected.sources + standalone.sources,
-        objects=connected.objects + standalone.objects,
+        sources=connected.sources + standalone_sources,
+        objects=connected.objects + standalone_objects,
         document=composition.document,
         composition=composition,
         texture_output_paths=texture_paths,
-        warnings=connected.warnings + standalone.warnings,
+        warnings=connected.warnings + standalone_warnings,
         statistics=MappingProxyType(statistics),
     )
 
