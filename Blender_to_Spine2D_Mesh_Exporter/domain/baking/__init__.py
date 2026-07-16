@@ -1,5 +1,13 @@
 """Blender-independent material analysis and texture baking plans."""
 
+from .context import (
+    CameraBakeSnapshot,
+    ColorManagementSnapshot,
+    LightBakeSnapshot,
+    ObjectBakeContext,
+    SceneBakeContext,
+    WorldBakeSnapshot,
+)
 from .execution import BakeArtifact, BakeExecutionResult, BakeExecutionSettings
 from .graph import (
     MaterialDependencyKind,
@@ -11,6 +19,7 @@ from .graph import (
 from .model import (
     BakeCompositeMode,
     BakeCompositePlan,
+    BakeEvaluationScope,
     BakeFrameTask,
     BakeMaterialPolicy,
     BakeMode,
@@ -32,7 +41,9 @@ from .model import (
 from .strategies import (
     AlphaBakeStrategy,
     BakeStrategyRegistry,
+    CameraCombinedBakeStrategy,
     EmissionBakeStrategy,
+    SceneCombinedBakeStrategy,
     SurfaceColorBakeStrategy,
     build_default_bake_strategy_registry,
     resolve_bake_strategy_plan,
@@ -43,6 +54,7 @@ __all__ = [
     "BakeArtifact",
     "BakeCompositeMode",
     "BakeCompositePlan",
+    "BakeEvaluationScope",
     "BakeExecutionResult",
     "BakeExecutionSettings",
     "BakeFrameTask",
@@ -54,8 +66,12 @@ __all__ = [
     "BakeSettings",
     "BakeStrategyId",
     "BakeStrategyRegistry",
+    "CameraBakeSnapshot",
+    "CameraCombinedBakeStrategy",
+    "ColorManagementSnapshot",
     "EmissionBakeStrategy",
     "ImageDependency",
+    "LightBakeSnapshot",
     "MaterialAnalysis",
     "MaterialDependencyKind",
     "MaterialGraphSnapshot",
@@ -63,11 +79,15 @@ __all__ = [
     "MaterialPreparationMode",
     "MaterialSemanticChannel",
     "MaterialSlotPreparation",
+    "ObjectBakeContext",
     "ObjectMaterialAnalysis",
+    "SceneBakeContext",
+    "SceneCombinedBakeStrategy",
     "ShaderLinkSnapshot",
     "ShaderNodeSnapshot",
     "SurfaceColorBakeStrategy",
     "TextureFormat",
+    "WorldBakeSnapshot",
     "build_bake_plan",
     "build_default_bake_strategy_registry",
     "resolve_bake_strategy_plan",
