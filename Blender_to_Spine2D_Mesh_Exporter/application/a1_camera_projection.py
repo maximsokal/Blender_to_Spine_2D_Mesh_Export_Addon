@@ -1,4 +1,4 @@
-"""Build one full-frame Spine mesh for a camera-rendered B4 texture."""
+"""Build a cropped screen-space Spine mesh for a camera-rendered B4 texture."""
 
 from __future__ import annotations
 
@@ -6,6 +6,10 @@ from dataclasses import replace
 from typing import Mapping
 
 from ..domain.baking import CameraProjectionPlan
+from ..domain.baking.projection_layout import (
+    CameraProjectionLayout,
+    build_full_frame_layout,
+)
 from ..domain.geometry import (
     IDENTITY_MATRIX_4X4,
     EdgeId,
@@ -42,13 +46,56 @@ from .a1_document_assembly import (
 from .a1_z_groups import A1ZGroupAssignmentPlan
 
 
-def build_camera_projection_quad_snapshot(
+def _resolved_layout(
+    plan: CameraProjectionPlan,
+    layout: CameraProjectionLayout | None,
+) -> CameraProjectionLayout:
+    if layout is None:
+        return build_full_frame_layout(
+            plan.settings.width,
+            plan.settings.height,
+            frame_count=len(plan.frame_tasks),
+        )
+    if not isinstance(layout, CameraProjectionLayout):
+        raise TypeError("layout must be CameraProjectionLayout or None")
+    if (
+        layout.full_width != plan.settings.width
+        or layout.full_height != plan.settings.height
+    ):
+        raise A1DocumentAssemblyError(
+            "camera projection layout full dimensions do not match the render plan"
+        )
+    if layout.frame_count != len(plan.frame_tasks):
+        raise A1DocumentAssemblyError(
+            "camera projection layout frame count does not match the render plan"
+        )
+    return layout
+
+
+def _edge_pairs(vertex_count: int) -> tuple[tuple[int, int], ...]:
+    if vertex_count < 3:
+        raise A1DocumentAssemblyError("camera projection hull requires at least 3 vertices")
+    boundary = tuple((index, (index + 1) % vertex_count) for index in range(vertex_count))
+    diagonals = tuple((0, index) for index in range(2, vertex_count - 1))
+    return boundary + diagonals
+
+
+def _normalized_pair(first: int, second: int) -> tuple[int, int]:
+    return (first, second) if first < second else (second, first)
+
+
+def _face_vertices(vertex_count: int) -> tuple[tuple[int, int, int], ...]:
+    return tuple((0, index, index + 1) for index in range(1, vertex_count - 1))
+
+
+def build_camera_projection_mesh_snapshot(
     plan: CameraProjectionPlan,
     rig: LegacyRigBuildResult,
     *,
     uv_layer_name: str,
+    layout: CameraProjectionLayout | None = None,
 ) -> MeshSnapshot:
-    """Create a triangulated full-frame quad in legacy rig coordinate units."""
+    """Create a triangulated convex screen-space hull in legacy rig units."""
 
     if not isinstance(plan, CameraProjectionPlan):
         raise TypeError("plan must be CameraProjectionPlan")
@@ -61,24 +108,18 @@ def build_camera_projection_quad_snapshot(
     if scale <= 0.0:
         raise A1DocumentAssemblyError("camera projection rig scale must be positive")
 
-    half_x = float(plan.settings.width) / (2.0 * scale)
-    half_y = float(plan.settings.height) / (2.0 * scale)
-    # Synthetic topology still belongs to the exported source object.  Snapshot identity
-    # distinguishes it from the source mesh; Source*Id.object_id must remain equal to
-    # MeshSnapshot.source_object_id for the global lineage invariant.
+    resolved_layout = _resolved_layout(plan, layout)
+    points = resolved_layout.hull
     lineage_id = plan.source_object_id
-    positions = (
-        (-half_x, half_y, 0.0),
-        (half_x, half_y, 0.0),
-        (half_x, -half_y, 0.0),
-        (-half_x, -half_y, 0.0),
+    positions = tuple(
+        (
+            resolved_layout.spine_position_pixels(point)[0] / scale,
+            resolved_layout.spine_position_pixels(point)[1] / scale,
+            0.0,
+        )
+        for point in points
     )
-    uvs = (
-        (0.0, 0.0),
-        (1.0, 0.0),
-        (1.0, 1.0),
-        (0.0, 1.0),
-    )
+    uvs = tuple(resolved_layout.spine_uv(point) for point in points)
     vertices = tuple(
         MeshVertex(
             id=VertexId(index),
@@ -88,7 +129,8 @@ def build_camera_projection_quad_snapshot(
         )
         for index, position in enumerate(positions)
     )
-    edge_pairs = ((0, 1), (1, 2), (2, 3), (3, 0), (0, 2))
+
+    edge_pairs = _edge_pairs(len(points))
     edges = tuple(
         MeshEdge(
             id=EdgeId(index),
@@ -97,15 +139,25 @@ def build_camera_projection_quad_snapshot(
         )
         for index, (first, second) in enumerate(edge_pairs)
     )
-    face_vertices = ((0, 1, 2), (0, 2, 3))
-    face_edges = ((0, 1, 4), (4, 2, 3))
-    loops = []
-    faces = []
+    edge_index_by_pair = {
+        _normalized_pair(first, second): index
+        for index, (first, second) in enumerate(edge_pairs)
+    }
+
+    loops: list[MeshLoop] = []
+    faces: list[MeshFace] = []
     loop_index = 0
-    for face_index, (vertex_indices, edge_indices) in enumerate(
-        zip(face_vertices, face_edges)
-    ):
-        face_loop_ids = []
+    for face_index, vertex_indices in enumerate(_face_vertices(len(points))):
+        triangle_pairs = (
+            (vertex_indices[0], vertex_indices[1]),
+            (vertex_indices[1], vertex_indices[2]),
+            (vertex_indices[2], vertex_indices[0]),
+        )
+        edge_indices = tuple(
+            edge_index_by_pair[_normalized_pair(first, second)]
+            for first, second in triangle_pairs
+        )
+        face_loop_ids: list[LoopId] = []
         for corner_index, (vertex_index, edge_index) in enumerate(
             zip(vertex_indices, edge_indices)
         ):
@@ -137,9 +189,9 @@ def build_camera_projection_quad_snapshot(
         )
 
     snapshot = MeshSnapshot(
-        snapshot_id=f"{plan.source_object_id}:camera-projection-quad",
+        snapshot_id=f"{plan.source_object_id}:camera-projection-hull",
         source_object_id=plan.source_object_id,
-        object_name=f"{plan.source_object_id}_CameraProjectionQuad",
+        object_name=f"{plan.source_object_id}_CameraProjectionHull",
         vertices=vertices,
         edges=edges,
         loops=tuple(loops),
@@ -152,15 +204,32 @@ def build_camera_projection_quad_snapshot(
     return snapshot
 
 
+def build_camera_projection_quad_snapshot(
+    plan: CameraProjectionPlan,
+    rig: LegacyRigBuildResult,
+    *,
+    uv_layer_name: str,
+) -> MeshSnapshot:
+    """Compatibility wrapper returning the original full-frame four-vertex mesh."""
+
+    return build_camera_projection_mesh_snapshot(
+        plan,
+        rig,
+        uv_layer_name=uv_layer_name,
+        layout=None,
+    )
+
+
 def assemble_a1_camera_projection_document(
     rig: LegacyRigBuildResult,
     z_groups: A1ZGroupAssignmentPlan,
     plan: CameraProjectionPlan,
     settings: A1DocumentAssemblySettings,
     *,
+    layout: CameraProjectionLayout | None = None,
     skeleton_metadata: Mapping[str, object] | None = None,
 ) -> A1DocumentAssemblyResult:
-    """Compose one full-frame quad attachment for a camera-rendered texture."""
+    """Compose one cropped convex projection attachment for a rendered texture."""
 
     if not isinstance(rig, LegacyRigBuildResult):
         raise TypeError("rig must be LegacyRigBuildResult")
@@ -173,15 +242,25 @@ def assemble_a1_camera_projection_document(
     if settings.prefix.strip() != rig.request.prefix.strip():
         raise A1DocumentAssemblyError("camera projection prefix does not match rig")
 
-    snapshot = build_camera_projection_quad_snapshot(
+    resolved_layout = _resolved_layout(plan, layout)
+    resolved_settings = replace(
+        settings,
+        attachment_width=float(resolved_layout.cropped_width),
+        attachment_height=float(resolved_layout.cropped_height),
+    )
+    snapshot = build_camera_projection_mesh_snapshot(
         plan,
         rig,
-        uv_layer_name=settings.uv_layer_name,
+        uv_layer_name=resolved_settings.uv_layer_name,
+        layout=resolved_layout,
     )
     if not rig.info.z_groups:
         raise A1DocumentAssemblyError("camera projection rig has no Z groups")
     target_z_group = rig.info.z_groups[0].index
-    segment_name = rig.profile.segment_slot(settings.prefix, settings.segment_index_base)
+    segment_name = rig.profile.segment_slot(
+        resolved_settings.prefix,
+        resolved_settings.segment_index_base,
+    )
     projection = project_triangulated_disk_attachment(
         snapshot,
         rig,
@@ -189,10 +268,10 @@ def assemble_a1_camera_projection_document(
             slot_name=segment_name,
             attachment_name=segment_name,
             vertex_prefix=segment_name,
-            image_path=settings.image_path,
-            uv_layer_name=settings.uv_layer_name,
-            attachment_width=settings.attachment_width,
-            attachment_height=settings.attachment_height,
+            image_path=resolved_settings.image_path,
+            uv_layer_name=resolved_settings.uv_layer_name,
+            attachment_width=resolved_settings.attachment_width,
+            attachment_height=resolved_settings.attachment_height,
             center_x=0.0,
             center_y=0.0,
             z_bindings=tuple(
@@ -202,8 +281,8 @@ def assemble_a1_camera_projection_document(
                 )
                 for vertex in snapshot.vertices
             ),
-            sequence=settings.sequence,
-            skin_name=settings.skin_name,
+            sequence=resolved_settings.sequence,
+            skin_name=resolved_settings.skin_name,
         ),
     )
     try:
@@ -214,9 +293,9 @@ def assemble_a1_camera_projection_document(
         )
         document = apply_legacy_visual_options(
             document_build.document,
-            prefix=settings.prefix,
-            include_control_icons=settings.include_control_icons,
-            include_preview_animation=settings.include_preview_animation,
+            prefix=resolved_settings.prefix,
+            include_control_icons=resolved_settings.include_control_icons,
+            include_preview_animation=resolved_settings.include_preview_animation,
         )
         document_build = replace(document_build, document=document)
     except Exception as exc:
@@ -225,7 +304,7 @@ def assemble_a1_camera_projection_document(
         ) from exc
 
     return A1DocumentAssemblyResult(
-        settings=settings,
+        settings=resolved_settings,
         rig=rig,
         z_groups=z_groups,
         projections=(projection,),
@@ -235,5 +314,6 @@ def assemble_a1_camera_projection_document(
 
 __all__ = [
     "assemble_a1_camera_projection_document",
+    "build_camera_projection_mesh_snapshot",
     "build_camera_projection_quad_snapshot",
 ]
