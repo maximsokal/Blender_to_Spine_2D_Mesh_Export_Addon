@@ -47,6 +47,15 @@ from .camera_projection import (
     texture_plan_output_paths,
 )
 from .execution import BakeArtifact, BakeExecutionResult, BakeExecutionSettings
+from .projection_layout import (
+    CameraProjectionLayout,
+    CameraProjectionLayoutError,
+    ProjectionCropBounds,
+    ProjectionPixelPoint,
+    build_full_frame_layout,
+    build_sequence_union_layout,
+    convex_hull,
+)
 from .strategies import (
     AlphaBakeStrategy,
     BakeStrategyRegistry,
@@ -77,6 +86,8 @@ __all__ = [
     "BakeStrategyRegistry",
     "CameraBakeSnapshot",
     "CameraCombinedBakeStrategy",
+    "CameraProjectionLayout",
+    "CameraProjectionLayoutError",
     "CameraProjectionMode",
     "CameraProjectionPlan",
     "ColorManagementSnapshot",
@@ -92,6 +103,8 @@ __all__ = [
     "MaterialSlotPreparation",
     "ObjectBakeContext",
     "ObjectMaterialAnalysis",
+    "ProjectionCropBounds",
+    "ProjectionPixelPoint",
     "SceneBakeContext",
     "SceneCombinedBakeStrategy",
     "ShaderLinkSnapshot",
@@ -103,7 +116,10 @@ __all__ = [
     "build_bake_plan",
     "build_camera_projection_plan",
     "build_default_bake_strategy_registry",
+    "build_full_frame_layout",
+    "build_sequence_union_layout",
     "build_texture_plan",
+    "convex_hull",
     "requires_camera_projection",
     "resolve_bake_strategy_plan",
     "sanitize_filename_stem",
