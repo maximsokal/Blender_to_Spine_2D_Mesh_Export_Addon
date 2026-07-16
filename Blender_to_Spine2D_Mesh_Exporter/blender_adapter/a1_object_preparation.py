@@ -50,6 +50,7 @@ from ..domain.uv import UvUnwrapResult
 from .evaluated_mesh_reader import read_evaluated_mesh_snapshot
 from .material_analyzer import analyse_object_materials
 from .mesh_reader import read_source_mesh_snapshot
+from .scene_bake_analyzer import analyse_bake_contexts
 from .uv_unwrap import unwrap_snapshot_uv
 
 
@@ -353,14 +354,31 @@ def prepare_a1_object(
                 )
 
         stage = A1SingleObjectStage.PLAN_BAKE
+        object_bake_context, scene_bake_context = analyse_bake_contexts(
+            source_obj,
+            scene=scene,
+            context=context,
+        )
         bake_plan = build_bake_plan(
             material_analysis,
             build_a1_bake_settings(object_id, settings),
+            object_context=object_bake_context,
+            scene_context=scene_bake_context,
         )
         statistics.update(
             {
                 "bake_mode": bake_plan.bake_mode.value,
                 "bake_frame_count": len(bake_plan.frame_tasks),
+                "bake_pass_count": len(bake_plan.passes),
+                "bake_scene_aware": int(bake_plan.scene_aware),
+                "bake_strategy_ids": ",".join(
+                    pass_plan.strategy_id.value for pass_plan in bake_plan.passes
+                ),
+                "bake_evaluation_scopes": ",".join(
+                    pass_plan.evaluation_scope.value for pass_plan in bake_plan.passes
+                ),
+                "scene_light_count": len(scene_bake_context.lights),
+                "scene_has_camera": int(scene_bake_context.has_camera),
             }
         )
 
