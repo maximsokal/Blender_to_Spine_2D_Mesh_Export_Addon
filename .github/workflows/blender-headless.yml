@@ -83,6 +83,17 @@ jobs:
             --python tests/blender_headless/run_bake_integration.py \
             2>&1 | tee test-results/blender-bake.log
 
+      - name: Run legacy-derived bake compatibility matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_legacy_bake_matrix_integration.py \
+            2>&1 | tee test-results/blender-legacy-bake-matrix.log
+
       - name: Run real Blender UV seam export test
         shell: bash
         run: |
