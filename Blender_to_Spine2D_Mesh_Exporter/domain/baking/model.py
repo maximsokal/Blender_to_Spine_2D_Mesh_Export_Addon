@@ -26,10 +26,11 @@ class MaterialKind(str, Enum):
 
 
 class BakeMode(str, Enum):
+    """Bake types accepted by Blender 4.4 ``bpy.ops.object.bake``."""
+
     DIFFUSE = "DIFFUSE"
     COMBINED = "COMBINED"
     EMIT = "EMIT"
-    ACTIVE_CAMERA = "ACTIVE_CAMERA"
 
 
 class BakeMaterialPolicy(str, Enum):
