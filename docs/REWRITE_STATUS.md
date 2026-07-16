@@ -20,6 +20,8 @@ are implemented.
 - final JSON and every texture share one atomic transaction;
 - Legacy remains an explicit selectable backend for both operators and is never an
   automatic fallback;
+- library-level A1 visual options remain opt-in, while the Blender UI explicitly passes
+  its Scene properties;
 - the add-on version is unchanged.
 
 ## Validation
