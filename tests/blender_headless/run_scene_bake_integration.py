@@ -1,4 +1,4 @@
-"""Real Blender 4.4 coverage for B3 scene- and camera-aware bake strategies."""
+"""Reusable Blender 4.4 fixtures for supported B3 scene object baking."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
     BakeEvaluationScope,
     BakeExecutionSettings,
     BakeMode,
+    BakePlanError,
     BakeSettings,
     BakeStrategyId,
     build_bake_plan,
@@ -78,6 +79,11 @@ def _create_area_light(name: str = "SceneKey", energy: float = 1200.0):
     return obj
 
 
+def _aim_at(obj, target: Vector) -> None:
+    direction = target - obj.location
+    obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+
+
 def _create_camera(name: str = "SceneCamera"):
     data = bpy.data.cameras.new(name=f"{name}_Data")
     data.type = "PERSP"
@@ -90,11 +96,6 @@ def _create_camera(name: str = "SceneCamera"):
     _aim_at(obj, Vector((0.0, 0.0, 0.0)))
     bpy.context.scene.camera = obj
     return obj
-
-
-def _aim_at(obj, target: Vector) -> None:
-    direction = target - obj.location
-    obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
 
 def _create_subsurface_material(name: str, color):
@@ -235,7 +236,12 @@ def test_scene_combined_responds_to_light_energy() -> None:
         output_directory = Path(directory)
         source = _create_mesh_object(
             "SceneSurface",
-            ((-1.0, -1.0, 0.0), (1.0, -1.0, 0.0), (1.0, 1.0, 0.0), (-1.0, 1.0, 0.0)),
+            (
+                (-1.0, -1.0, 0.0),
+                (1.0, -1.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (-1.0, 1.0, 0.0),
+            ),
             ((0, 1, 2, 3),),
         )
         material = _create_subsurface_material("SceneSubsurface", (0.05, 0.15, 0.9))
@@ -303,62 +309,74 @@ def test_scene_combined_responds_to_light_energy() -> None:
         _assert(not _temporary_datablock_names(), "scene bake leaked temporary datablocks")
 
 
-def test_active_camera_bake_executes_view_dependent_graph() -> None:
+def test_camera_graph_stops_at_projection_boundary() -> None:
     _clear_scene()
     _configure_cycles_scene()
-    with tempfile.TemporaryDirectory(prefix="spine2d-camera-combined-") as directory:
+    with tempfile.TemporaryDirectory(prefix="spine2d-camera-boundary-") as directory:
         output_directory = Path(directory)
         source = _create_mesh_object(
             "CameraSurface",
-            ((-1.0, -1.0, 0.0), (1.0, -1.0, 0.0), (1.0, 1.0, 0.0), (-1.0, 1.0, 0.0)),
+            (
+                (-1.0, -1.0, 0.0),
+                (1.0, -1.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (-1.0, 1.0, 0.0),
+            ),
             ((0, 1, 2, 3),),
         )
         material = _create_layer_weight_emission_material("ViewEmission")
         source.data.materials.append(material)
-        camera = _create_camera()
+        _create_camera()
         sentinel = _create_sentinel()
         sentinel.location.x = 20.0
         _activate_only(sentinel)
         source.select_set(False)
 
-        snapshot, analysis, plan = _prepare_plan(
+        context_before = _capture_context()
+        scene_before = _capture_scene_bake_state()
+        material_before = _material_fingerprint(material)
+        snapshot = read_source_mesh_snapshot(source)
+        analysis = analyse_object_materials(
             source,
-            output_directory,
-            "CameraFacing",
+            source_object_id=snapshot.source_object_id,
         )
-        _assert(
-            tuple(item.strategy_id for item in plan.passes)
-            == (BakeStrategyId.CAMERA_COMBINED,),
-            f"unexpected camera plan: {plan.passes}",
-        )
-        _assert(plan.passes[0].bake_mode is BakeMode.ACTIVE_CAMERA, "camera mode missing")
-        _assert(
-            plan.passes[0].evaluation_scope is BakeEvaluationScope.CAMERA,
-            "camera graph did not receive CAMERA scope",
+        object_context, scene_context = analyse_bake_contexts(
+            source,
+            scene=bpy.context.scene,
+            context=bpy.context,
         )
         dependency_values = {item.value for item in analysis.slots[0].dependencies}
         _assert("VIEW" in dependency_values, "Layer Weight did not report VIEW")
         _assert("CAMERA" in dependency_values, "Layer Weight did not report CAMERA")
 
-        context_before = _capture_context()
-        scene_before = _capture_scene_bake_state()
-        material_before = _material_fingerprint(material)
-        hide_before = bool(source.hide_render)
-        result = execute_bake_plan(
-            source,
-            snapshot,
-            plan,
-            BakeExecutionSettings(samples=1),
-        )
-        luminance = _mean_luminance(_read_pixels(result.representative_artifact.output_path))
+        try:
+            build_bake_plan(
+                analysis,
+                BakeSettings(
+                    width=64,
+                    height=64,
+                    output_directory=output_directory,
+                    output_stem="CameraBoundary",
+                    uv_layer_name="UVMap",
+                    margin_pixels=1,
+                    diffuse_mode=BakeMode.DIFFUSE,
+                    procedural_mode=BakeMode.DIFFUSE,
+                ),
+                object_context=object_context,
+                scene_context=scene_context,
+            )
+        except BakePlanError as exc:
+            _assert(
+                "camera-render projection" in str(exc),
+                f"camera boundary error is not actionable: {exc}",
+            )
+        else:
+            raise AssertionError("camera-dependent graph produced an object-bake plan")
 
-        _assert(luminance > 0.02, f"ACTIVE_CAMERA output is unusable: {luminance}")
-        _assert(bpy.context.scene.camera is camera, "active camera changed")
-        _assert(bool(source.hide_render) == hide_before, "camera bake did not restore source")
-        _assert(_capture_context() == context_before, "camera bake changed context")
-        _assert(_capture_scene_bake_state() == scene_before, "camera bake changed scene settings")
-        _assert(_material_fingerprint(material) == material_before, "camera bake mutated material")
-        _assert(not _temporary_datablock_names(), "camera bake leaked temporary datablocks")
+        _assert(_capture_context() == context_before, "camera planning changed context")
+        _assert(_capture_scene_bake_state() == scene_before, "camera planning changed scene")
+        _assert(_material_fingerprint(material) == material_before, "planning mutated material")
+        _assert(not _temporary_datablock_names(), "camera planning leaked temporary data")
 
 
 def test_mixed_local_and_scene_slots_are_composed_without_double_counting() -> None:
@@ -416,7 +434,7 @@ def main() -> None:
     print(f"Blender version: {bpy.app.version_string}")
     tests = (
         test_scene_combined_responds_to_light_energy,
-        test_active_camera_bake_executes_view_dependent_graph,
+        test_camera_graph_stops_at_projection_boundary,
         test_mixed_local_and_scene_slots_are_composed_without_double_counting,
     )
     for test in tests:
