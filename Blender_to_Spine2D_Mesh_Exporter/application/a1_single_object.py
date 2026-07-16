@@ -62,6 +62,7 @@ class A1SingleObjectExportSettings:
     export: ExportSettings
     prefix: str | None = None
     output_stem: str | None = None
+    json_output_stem: str | None = None
     source_geometry_mode: A1SourceGeometryMode = A1SourceGeometryMode.EVALUATED
     modifier_lineage_policy: ModifierLineagePolicy = (
         ModifierLineagePolicy.STRICT_PRESERVE
@@ -86,7 +87,7 @@ class A1SingleObjectExportSettings:
             raise ValueError("A1 currently supports Spine 4.2.43 only")
         if self.export.rig_profile != "LEGACY_ROTATABLE_MESH":
             raise ValueError("A1 requires rig_profile LEGACY_ROTATABLE_MESH")
-        for field_name in ("prefix", "output_stem"):
+        for field_name in ("prefix", "output_stem", "json_output_stem"):
             value = getattr(self, field_name)
             if value is not None and (
                 not isinstance(value, str) or not value.strip()
@@ -147,6 +148,7 @@ class A1SingleObjectExportSettings:
 @dataclass(frozen=True, slots=True)
 class A1ResolvedOutputPaths:
     output_stem: str
+    json_output_stem: str
     json_path: Path
     image_directory: Path
     image_relative_directory: str
@@ -180,6 +182,9 @@ def resolve_a1_output_paths(
     settings: A1SingleObjectExportSettings,
 ) -> A1ResolvedOutputPaths:
     _, output_stem = resolve_a1_names(object_name, settings)
+    json_output_stem = sanitize_filename_stem(
+        settings.json_output_stem or output_stem
+    )
     output_directory = settings.export.output_directory.expanduser().resolve(
         strict=False
     )
@@ -197,7 +202,8 @@ def resolve_a1_output_paths(
         image_directory = output_directory.joinpath(*relative_path.parts)
     return A1ResolvedOutputPaths(
         output_stem=output_stem,
-        json_path=output_directory / f"{output_stem}.json",
+        json_output_stem=json_output_stem,
+        json_path=output_directory / f"{json_output_stem}.json",
         image_directory=image_directory,
         image_relative_directory=image_relative_directory,
     )
