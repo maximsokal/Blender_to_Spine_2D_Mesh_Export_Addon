@@ -25,6 +25,71 @@ class FixtureMode(str, Enum):
     MULTI = "multi"
 
 
+def _validate_safe_relative_directory(value: str, field_name: str) -> None:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be str")
+    normalized = value.replace("\\", "/").strip()
+    posix = PurePosixPath(normalized)
+    windows = PureWindowsPath(normalized)
+    if (
+        not normalized
+        or posix.is_absolute()
+        or windows.is_absolute()
+        or bool(windows.drive)
+        or ".." in posix.parts
+    ):
+        raise FixtureManifestError(f"{field_name} must be a safe relative directory")
+
+
+def _validate_unique_names(
+    values: Tuple[str, ...],
+    field_name: str,
+    *,
+    allow_empty: bool = False,
+) -> None:
+    if not isinstance(values, tuple):
+        raise TypeError(f"{field_name} must be a tuple")
+    if not values and not allow_empty:
+        raise FixtureManifestError(f"{field_name} cannot be empty")
+    if not all(isinstance(value, str) and value.strip() for value in values):
+        raise FixtureManifestError(f"{field_name} must contain non-empty strings")
+    if len(values) != len(set(values)):
+        raise FixtureManifestError(f"{field_name} cannot contain duplicates")
+
+
+def _validate_safe_json_filename(value: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise FixtureManifestError("expected_json_name must be a non-empty string")
+    normalized = value.replace("\\", "/")
+    path = PurePosixPath(normalized)
+    if (
+        len(path.parts) != 1
+        or path.name != normalized
+        or path.suffix.lower() != ".json"
+    ):
+        raise FixtureManifestError(
+            "expected_json_name must be one safe .json filename without directories"
+        )
+
+
+def _mapping(value: Any, field_name: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise FixtureManifestError(f"{field_name} must be an object")
+    return value
+
+
+def _reject_unknown_keys(
+    data: Mapping[str, Any],
+    allowed: set[str],
+    field_name: str,
+) -> None:
+    unknown = sorted(set(data) - allowed)
+    if unknown:
+        raise FixtureManifestError(
+            f"{field_name} contains unknown fields: " + ", ".join(unknown)
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class FixtureSequenceSettings:
     start_frame: int = 0
@@ -45,7 +110,9 @@ class FixtureExportSettings:
     images_path: str = "images"
     seam_mode: str = "AUTO"
     angle_limit: float = 30.0
-    sequence: FixtureSequenceSettings = FixtureSequenceSettings()
+    sequence: FixtureSequenceSettings = field(
+        default_factory=FixtureSequenceSettings
+    )
     per_object_sequence: Mapping[str, FixtureSequenceSettings] = field(
         default_factory=dict
     )
@@ -118,7 +185,9 @@ class FixtureParitySettings:
                 or not isfinite(float(value))
                 or float(value) < 0.0
             ):
-                raise FixtureManifestError(f"{field_name} must be finite and non-negative")
+                raise FixtureManifestError(
+                    f"{field_name} must be finite and non-negative"
+                )
         if not 0.0 <= float(self.image_max_differing_pixel_ratio) <= 1.0:
             raise FixtureManifestError(
                 "image_max_differing_pixel_ratio must be in [0, 1]"
@@ -142,8 +211,8 @@ class A1FixtureCase:
     active_object: str
     selected_objects: Tuple[str, ...]
     connected_objects: Tuple[str, ...] = ()
-    settings: FixtureExportSettings = FixtureExportSettings()
-    parity: FixtureParitySettings = FixtureParitySettings()
+    settings: FixtureExportSettings = field(default_factory=FixtureExportSettings)
+    parity: FixtureParitySettings = field(default_factory=FixtureParitySettings)
     expected_json_name: str | None = None
 
     def __post_init__(self) -> None:
@@ -165,8 +234,16 @@ class A1FixtureCase:
             raise TypeError("mode must be FixtureMode")
         if not isinstance(self.active_object, str) or not self.active_object.strip():
             raise FixtureManifestError("active_object must be a non-empty string")
+        if not isinstance(self.settings, FixtureExportSettings):
+            raise TypeError("settings must be FixtureExportSettings")
+        if not isinstance(self.parity, FixtureParitySettings):
+            raise TypeError("parity must be FixtureParitySettings")
         _validate_unique_names(self.selected_objects, "selected_objects")
-        _validate_unique_names(self.connected_objects, "connected_objects", allow_empty=True)
+        _validate_unique_names(
+            self.connected_objects,
+            "connected_objects",
+            allow_empty=True,
+        )
         if self.active_object not in self.selected_objects:
             raise FixtureManifestError(
                 "active_object must be included in selected_objects"
@@ -202,10 +279,6 @@ class A1FixtureCase:
                 "per_object_sequence contains unselected objects: "
                 + ", ".join(sorted(unknown_sequences))
             )
-        if not isinstance(self.settings, FixtureExportSettings):
-            raise TypeError("settings must be FixtureExportSettings")
-        if not isinstance(self.parity, FixtureParitySettings):
-            raise TypeError("parity must be FixtureParitySettings")
         if self.expected_json_name is not None:
             _validate_safe_json_filename(self.expected_json_name)
 
@@ -219,7 +292,8 @@ class A1FixtureManifest:
     def __post_init__(self) -> None:
         if self.schema_version != _SCHEMA_VERSION:
             raise FixtureManifestError(
-                f"Unsupported schema_version {self.schema_version}; expected {_SCHEMA_VERSION}"
+                f"Unsupported schema_version {self.schema_version}; "
+                f"expected {_SCHEMA_VERSION}"
             )
         if not isinstance(self.cases, tuple) or not self.cases:
             raise FixtureManifestError("cases must be a non-empty array")
@@ -235,56 +309,6 @@ class A1FixtureManifest:
             raise FixtureManifestError(
                 "blender_executable must be a non-empty string or null"
             )
-
-
-def _validate_safe_relative_directory(value: str, field_name: str) -> None:
-    if not isinstance(value, str):
-        raise TypeError(f"{field_name} must be str")
-    normalized = value.replace("\\", "/").strip()
-    posix = PurePosixPath(normalized)
-    windows = PureWindowsPath(normalized)
-    if (
-        not normalized
-        or posix.is_absolute()
-        or windows.is_absolute()
-        or bool(windows.drive)
-        or ".." in posix.parts
-    ):
-        raise FixtureManifestError(f"{field_name} must be a safe relative directory")
-
-
-def _validate_unique_names(
-    values: Tuple[str, ...],
-    field_name: str,
-    *,
-    allow_empty: bool = False,
-) -> None:
-    if not isinstance(values, tuple):
-        raise TypeError(f"{field_name} must be a tuple")
-    if not values and not allow_empty:
-        raise FixtureManifestError(f"{field_name} cannot be empty")
-    if not all(isinstance(value, str) and value.strip() for value in values):
-        raise FixtureManifestError(
-            f"{field_name} must contain non-empty strings"
-        )
-    if len(values) != len(set(values)):
-        raise FixtureManifestError(f"{field_name} cannot contain duplicates")
-
-
-def _validate_safe_json_filename(value: str) -> None:
-    if not isinstance(value, str) or not value.strip():
-        raise FixtureManifestError("expected_json_name must be a non-empty string")
-    path = PurePosixPath(value.replace("\\", "/"))
-    if len(path.parts) != 1 or path.name != value or path.suffix.lower() != ".json":
-        raise FixtureManifestError(
-            "expected_json_name must be one safe .json filename without directories"
-        )
-
-
-def _mapping(value: Any, field_name: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise FixtureManifestError(f"{field_name} must be an object")
-    return value
 
 
 def _sequence_from_mapping(value: Any, field_name: str) -> FixtureSequenceSettings:
@@ -309,9 +333,15 @@ def _settings_from_mapping(value: Any) -> FixtureExportSettings:
         "preview_animation",
     }
     _reject_unknown_keys(data, allowed, "settings")
-    raw_sequences = _mapping(data.get("per_object_sequence", {}), "per_object_sequence")
+    raw_sequences = _mapping(
+        data.get("per_object_sequence", {}),
+        "per_object_sequence",
+    )
     per_object = {
-        str(name): _sequence_from_mapping(settings, f"per_object_sequence.{name}")
+        str(name): _sequence_from_mapping(
+            settings,
+            f"per_object_sequence.{name}",
+        )
         for name, settings in raw_sequences.items()
     }
     return FixtureExportSettings(
@@ -319,7 +349,10 @@ def _settings_from_mapping(value: Any) -> FixtureExportSettings:
         images_path=data.get("images_path", "images"),
         seam_mode=data.get("seam_mode", "AUTO"),
         angle_limit=data.get("angle_limit", 30.0),
-        sequence=_sequence_from_mapping(data.get("sequence", {}), "settings.sequence"),
+        sequence=_sequence_from_mapping(
+            data.get("sequence", {}),
+            "settings.sequence",
+        ),
         per_object_sequence=per_object,
         control_icons=data.get("control_icons", True),
         preview_animation=data.get("preview_animation", True),
@@ -340,7 +373,10 @@ def _parity_from_mapping(value: Any) -> FixtureParitySettings:
     }
     _reject_unknown_keys(data, allowed, "parity")
     ignore_paths = data.get("ignore_paths", [])
-    if not isinstance(ignore_paths, Sequence) or isinstance(ignore_paths, (str, bytes)):
+    if not isinstance(ignore_paths, Sequence) or isinstance(
+        ignore_paths,
+        (str, bytes),
+    ):
         raise FixtureManifestError("parity.ignore_paths must be an array")
     return FixtureParitySettings(
         absolute_tolerance=data.get("absolute_tolerance", 1e-4),
@@ -350,10 +386,12 @@ def _parity_from_mapping(value: Any) -> FixtureParitySettings:
         ignore_paths=tuple(ignore_paths),
         image_absolute_tolerance=data.get("image_absolute_tolerance", 1e-6),
         image_max_differing_pixel_ratio=data.get(
-            "image_max_differing_pixel_ratio", 0.0
+            "image_max_differing_pixel_ratio",
+            0.0,
         ),
         image_max_mean_absolute_delta=data.get(
-            "image_max_mean_absolute_delta", 0.0
+            "image_max_mean_absolute_delta",
+            0.0,
         ),
     )
 
@@ -372,10 +410,18 @@ def _case_from_mapping(value: Any, base_directory: Path) -> A1FixtureCase:
         "expected_json_name",
     }
     _reject_unknown_keys(data, allowed, "case")
-    required = {"case_id", "blend_file", "mode", "active_object", "selected_objects"}
+    required = {
+        "case_id",
+        "blend_file",
+        "mode",
+        "active_object",
+        "selected_objects",
+    }
     missing = sorted(required - set(data))
     if missing:
-        raise FixtureManifestError("case is missing required fields: " + ", ".join(missing))
+        raise FixtureManifestError(
+            "case is missing required fields: " + ", ".join(missing)
+        )
     blend_file = Path(str(data["blend_file"])).expanduser()
     if not blend_file.is_absolute():
         blend_file = base_directory / blend_file
@@ -406,18 +452,6 @@ def _case_from_mapping(value: Any, base_directory: Path) -> A1FixtureCase:
     )
 
 
-def _reject_unknown_keys(
-    data: Mapping[str, Any],
-    allowed: set[str],
-    field_name: str,
-) -> None:
-    unknown = sorted(set(data) - allowed)
-    if unknown:
-        raise FixtureManifestError(
-            f"{field_name} contains unknown fields: " + ", ".join(unknown)
-        )
-
-
 def load_fixture_manifest(path: Path) -> A1FixtureManifest:
     """Load and validate one manifest relative to its own directory."""
 
@@ -429,13 +463,20 @@ def load_fixture_manifest(path: Path) -> A1FixtureManifest:
     try:
         data = json.loads(resolved.read_text(encoding="utf-8-sig"))
     except OSError as exc:
-        raise FixtureManifestError(f"Unable to read manifest {resolved}: {exc}") from exc
+        raise FixtureManifestError(
+            f"Unable to read manifest {resolved}: {exc}"
+        ) from exc
     except json.JSONDecodeError as exc:
         raise FixtureManifestError(
-            f"Invalid manifest JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}"
+            f"Invalid manifest JSON at line {exc.lineno}, "
+            f"column {exc.colno}: {exc.msg}"
         ) from exc
     root = _mapping(data, "manifest")
-    _reject_unknown_keys(root, {"schema_version", "blender_executable", "cases"}, "manifest")
+    _reject_unknown_keys(
+        root,
+        {"schema_version", "blender_executable", "cases"},
+        "manifest",
+    )
     cases = root.get("cases")
     if not isinstance(cases, Sequence) or isinstance(cases, (str, bytes)):
         raise FixtureManifestError("cases must be an array")
@@ -446,11 +487,17 @@ def load_fixture_manifest(path: Path) -> A1FixtureManifest:
             if root.get("blender_executable") is None
             else str(root["blender_executable"])
         ),
-        cases=tuple(_case_from_mapping(case, resolved.parent) for case in cases),
+        cases=tuple(
+            _case_from_mapping(case, resolved.parent)
+            for case in cases
+        ),
     )
 
 
-def case_to_worker_payload(case: A1FixtureCase, output_directory: Path) -> dict[str, Any]:
+def case_to_worker_payload(
+    case: A1FixtureCase,
+    output_directory: Path,
+) -> dict[str, Any]:
     """Convert a validated case into the JSON payload consumed inside Blender."""
 
     if not isinstance(case, A1FixtureCase):
@@ -464,7 +511,9 @@ def case_to_worker_payload(case: A1FixtureCase, output_directory: Path) -> dict[
         "selected_objects": list(case.selected_objects),
         "connected_objects": list(case.connected_objects),
         "expected_json_name": case.expected_json_name,
-        "output_directory": str(output_directory.expanduser().resolve(strict=False)),
+        "output_directory": str(
+            output_directory.expanduser().resolve(strict=False)
+        ),
         "settings": {
             "texture_size": case.settings.texture_size,
             "images_path": case.settings.images_path,
