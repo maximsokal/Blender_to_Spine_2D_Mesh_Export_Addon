@@ -131,6 +131,30 @@ def test_one_material_with_surface_and_emission_uses_two_passes(tmp_path: Path):
     assert plan.passes[1].material_slot_indices == (0,)
 
 
+def test_combined_surface_is_normalized_before_emission_composition(tmp_path: Path):
+    plan = build_bake_plan(
+        ObjectMaterialAnalysis(
+            "Object",
+            (
+                slot(0, "Body", MaterialSemanticChannel.SURFACE_COLOR),
+                slot(1, "Glow", MaterialSemanticChannel.SURFACE_EMISSION),
+            ),
+        ),
+        BakeSettings(
+            width=64,
+            height=64,
+            output_directory=tmp_path,
+            output_stem="Object",
+            diffuse_mode=BakeMode.DIFFUSE,
+            procedural_mode=BakeMode.COMBINED,
+        ),
+    )
+
+    assert plan.passes[0].strategy_id is BakeStrategyId.SURFACE_COLOR
+    assert plan.passes[0].bake_mode is BakeMode.DIFFUSE
+    assert plan.passes[1].bake_mode is BakeMode.EMIT
+
+
 def test_volume_requires_future_camera_projection_strategy(tmp_path: Path):
     with pytest.raises(BakePlanError, match="camera-projection"):
         build_bake_plan(
