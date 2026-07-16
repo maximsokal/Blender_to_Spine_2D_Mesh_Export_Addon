@@ -1,13 +1,24 @@
 """Blender-independent material analysis and texture baking plans."""
 
 from .execution import BakeArtifact, BakeExecutionResult, BakeExecutionSettings
+from .graph import (
+    MaterialDependencyKind,
+    MaterialGraphSnapshot,
+    MaterialSemanticChannel,
+    ShaderLinkSnapshot,
+    ShaderNodeSnapshot,
+)
 from .model import (
+    BakeCompositeMode,
+    BakeCompositePlan,
     BakeFrameTask,
     BakeMaterialPolicy,
     BakeMode,
+    BakePassPlan,
     BakePlan,
     BakePlanError,
     BakeSettings,
+    BakeStrategyId,
     ImageDependency,
     MaterialAnalysis,
     MaterialKind,
@@ -16,22 +27,43 @@ from .model import (
     build_bake_plan,
     sanitize_filename_stem,
 )
+from .strategies import (
+    BakeStrategyRegistry,
+    EmissionBakeStrategy,
+    SurfaceColorBakeStrategy,
+    build_default_bake_strategy_registry,
+    resolve_bake_strategy_plan,
+)
 
 __all__ = [
     "BakeArtifact",
+    "BakeCompositeMode",
+    "BakeCompositePlan",
     "BakeExecutionResult",
     "BakeExecutionSettings",
     "BakeFrameTask",
     "BakeMaterialPolicy",
     "BakeMode",
+    "BakePassPlan",
     "BakePlan",
     "BakePlanError",
     "BakeSettings",
+    "BakeStrategyId",
+    "BakeStrategyRegistry",
+    "EmissionBakeStrategy",
     "ImageDependency",
     "MaterialAnalysis",
+    "MaterialDependencyKind",
+    "MaterialGraphSnapshot",
     "MaterialKind",
+    "MaterialSemanticChannel",
     "ObjectMaterialAnalysis",
+    "ShaderLinkSnapshot",
+    "ShaderNodeSnapshot",
+    "SurfaceColorBakeStrategy",
     "TextureFormat",
     "build_bake_plan",
+    "build_default_bake_strategy_registry",
+    "resolve_bake_strategy_plan",
     "sanitize_filename_stem",
 ]
