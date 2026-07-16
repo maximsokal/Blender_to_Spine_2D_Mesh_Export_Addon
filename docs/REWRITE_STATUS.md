@@ -55,9 +55,10 @@ active connected shader graph
 - `EmissionBakeStrategy`;
 - `AlphaBakeStrategy`.
 
-Camera-dependent graphs are detected by the registry, but Blender 4.4 exposes no
-camera-ray object-bake type. They return an actionable camera-render projection error
-instead of silently falling back to an incorrect UV `COMBINED` bake.
+The registry also contains a camera-projection boundary detector. Camera-dependent graphs
+are identified, but Blender 4.4 exposes no camera-ray object-bake type. They return an
+actionable camera-render projection error instead of silently falling back to an incorrect
+UV `COMBINED` bake.
 
 `BakeMode` contains only the verified Blender 4.4 object-bake types used by the rewrite:
 
