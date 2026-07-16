@@ -1,9 +1,7 @@
 """Blender API adapters for the rewritten exporter."""
 
-from .a1_mixed_object_export import (
-    export_a1_mixed_object,
-    prepare_a1_mixed_object,
-)
+from .a1_mixed_object_export import prepare_a1_mixed_object
+from .a1_mixed_object_output import export_a1_mixed_object
 from .a1_multi_object_export import (
     A1MultiObjectPreparationError,
     A1MultiObjectSource,
