@@ -13,6 +13,8 @@ from .config import get_texture_size
 
 logger = logging.getLogger(__name__)
 
+SINGLE_BACKEND_PROPERTY = "spine2d_single_export_backend"
+
 
 class OBJECT_OT_SaveUVAsJSON(bpy.types.Operator):
     """Export the active Mesh through Rewrite or the explicit Legacy backend."""
@@ -84,7 +86,7 @@ class OBJECT_OT_SaveUVAsJSON(bpy.types.Operator):
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
         backend = str(
-            getattr(context.scene, "spine2d_single_export_backend", "LEGACY")
+            getattr(context.scene, SINGLE_BACKEND_PROPERTY, "LEGACY")
         ).upper()
         logger.info("[SaveUVAsJSON] Start %s single-object export", backend)
         try:
@@ -98,11 +100,97 @@ class OBJECT_OT_SaveUVAsJSON(bpy.types.Operator):
             return {"CANCELLED"}
 
 
+class OBJECT_PT_Spine2DSingleExportBackend(bpy.types.Panel):
+    """Explicit backend selection for the existing single-object export button."""
+
+    bl_label = "Single Export Engine"
+    bl_idname = "OBJECT_PT_spine2d_single_export_backend"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Blender to Spine2D Mesh Exporter"
+    bl_parent_id = "OBJECT_PT_spine2d_mesh"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context) -> bool:
+        active = context.active_object
+        selected_meshes = tuple(
+            obj for obj in context.selected_objects if obj.type == "MESH"
+        )
+        return bool(
+            active is not None
+            and active.type == "MESH"
+            and len(selected_meshes) <= 1
+        )
+
+    def draw(self, context: bpy.types.Context) -> None:
+        column = self.layout.column(align=True)
+        column.prop(
+            context.scene,
+            SINGLE_BACKEND_PROPERTY,
+            text="Engine",
+        )
+        backend = str(getattr(context.scene, SINGLE_BACKEND_PROPERTY, "REWRITE"))
+        if backend == "LEGACY":
+            column.label(text="Legacy intermediate-JSON pipeline", icon="ERROR")
+        else:
+            column.label(text="Atomic typed A1 pipeline", icon="CHECKMARK")
+
+
+CLASSES = (
+    OBJECT_OT_SaveUVAsJSON,
+    OBJECT_PT_Spine2DSingleExportBackend,
+)
+
+
 def register() -> None:
-    bpy.utils.register_class(OBJECT_OT_SaveUVAsJSON)
-    logger.debug("OBJECT_OT_SaveUVAsJSON registered from single_object_operator.py")
+    setattr(
+        bpy.types.Scene,
+        SINGLE_BACKEND_PROPERTY,
+        bpy.props.EnumProperty(
+            name="Single Export Engine",
+            description=(
+                "Select the rewritten transactional exporter or the explicit "
+                "legacy fallback for the active object"
+            ),
+            items=(
+                (
+                    "REWRITE",
+                    "Rewrite",
+                    "Typed A1 export with atomic JSON and texture commit",
+                ),
+                (
+                    "LEGACY",
+                    "Legacy",
+                    "Previous intermediate-JSON exporter kept for controlled fallback",
+                ),
+            ),
+            default="REWRITE",
+        ),
+    )
+    try:
+        for cls in CLASSES:
+            bpy.utils.register_class(cls)
+    except Exception:
+        if hasattr(bpy.types.Scene, SINGLE_BACKEND_PROPERTY):
+            delattr(bpy.types.Scene, SINGLE_BACKEND_PROPERTY)
+        logger.exception("Failed to register single-object operator UI")
+        raise
+    logger.debug("Single-object Rewrite/Legacy operator registered")
 
 
 def unregister() -> None:
-    bpy.utils.unregister_class(OBJECT_OT_SaveUVAsJSON)
-    logger.debug("OBJECT_OT_SaveUVAsJSON unregistered from single_object_operator.py")
+    errors: list[Exception] = []
+    for cls in reversed(CLASSES):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception as exc:
+            errors.append(exc)
+            logger.exception("Failed to unregister %s", cls.__name__)
+    if hasattr(bpy.types.Scene, SINGLE_BACKEND_PROPERTY):
+        delattr(bpy.types.Scene, SINGLE_BACKEND_PROPERTY)
+    if errors:
+        raise RuntimeError(
+            f"Single-object operator unregistration failed {len(errors)} time(s)"
+        ) from errors[0]
+    logger.debug("Single-object Rewrite/Legacy operator unregistered")
