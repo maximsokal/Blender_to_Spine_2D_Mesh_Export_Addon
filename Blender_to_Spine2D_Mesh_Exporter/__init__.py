@@ -38,12 +38,13 @@ from . import (
     multi_object_export,
 )
 
-# ``main`` remains imported as the explicit legacy implementation but no longer owns
-# registration of ``object.save_uv_as_json``. The new operator keeps that public ID and
-# routes to Rewrite or explicit Legacy.
+# ``main`` remains in MODULES as the legacy implementation and structural reference.
+# Its register/unregister hooks are deliberately skipped because
+# ``single_object_operator`` owns the same public ``object.save_uv_as_json`` ID.
 MODULES = (
     config,
     ui,
+    main,
     single_object_operator,
     plane_cut,
     uv_operations,
@@ -190,6 +191,10 @@ CLASSES_TO_REGISTER = (
 )
 
 
+def _module_owns_runtime_registration(module) -> bool:
+    return module is not main
+
+
 def register() -> None:
     config._setup_default_logging()
     logger.debug("Registering Blender_to_Spine2D_Mesh_Exporter Add-on")
@@ -202,7 +207,7 @@ def register() -> None:
 
     for module in MODULES:
         try:
-            if hasattr(module, "register"):
+            if _module_owns_runtime_registration(module) and hasattr(module, "register"):
                 module.register()
         except Exception:
             logger.exception(f"Failed to register module {module.__name__}")
@@ -219,7 +224,9 @@ def unregister() -> None:
     logger.debug("Unregistering Blender_to_Spine2D_Mesh_Exporter Add-on")
     for module in reversed(MODULES):
         try:
-            if hasattr(module, "unregister"):
+            if _module_owns_runtime_registration(module) and hasattr(
+                module, "unregister"
+            ):
                 module.unregister()
         except Exception:
             logger.exception(f"Failed to unregister module {module.__name__}")
