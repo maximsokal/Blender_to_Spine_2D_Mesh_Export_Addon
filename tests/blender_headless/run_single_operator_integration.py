@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -41,6 +42,8 @@ def _configure_scene(output_directory: Path, backend: str) -> int:
     scene.spine2d_seam_maker_mode = "AUTO"
     scene.spine2d_frames_for_render = 0
     scene.spine2d_bake_frame_start = 0
+    scene.spine2d_control_icons = True
+    scene.spine2d_export_preview_animation = True
     scene.spine2d_single_export_backend = backend
     return int(scene.spine2d_texture_size)
 
@@ -68,10 +71,29 @@ def test_registered_operator_uses_rewrite_backend() -> None:
             texture_path.read_bytes()[:8] == PNG_SIGNATURE,
             "single operator texture is not a valid PNG",
         )
-        document_text = json_path.read_text(encoding="utf-8")
+        document = json.loads(json_path.read_text(encoding="utf-8"))
         _assert(
-            "images/SingleOperator_Baked" in document_text,
+            document["skins"][0]["attachments"]["SingleOperator_Segment_0"]
+            ["SingleOperator_Segment_0"]["path"]
+            == "images/SingleOperator_Baked",
             "attachment path does not preserve the texture stem",
+        )
+        _assert(
+            tuple(slot["name"] for slot in document["slots"][:4])
+            == (
+                "SingleOperator_rotation_X",
+                "SingleOperator_rotation_Z",
+                "SingleOperator_rotation_Y",
+                "SingleOperator_main",
+            ),
+            "Rewrite did not preserve legacy control slot order",
+        )
+        _assert("preview" in document["animations"], "preview animation is missing")
+        _assert(
+            document["animations"]["preview"]["bones"]
+            ["SingleOperator_rotation_X"]["rotate"][-1]
+            == {"time": 8, "value": -360},
+            "preview X timeline changed",
         )
         _assert(_capture_context() == context_before, "single operator changed context")
         _assert(
@@ -83,6 +105,42 @@ def test_registered_operator_uses_rewrite_backend() -> None:
             "single operator mutated the source material",
         )
         _assert(not _temporary_datablock_names(), "single operator leaked temporary data")
+
+
+def test_visual_options_can_be_disabled_through_scene_properties() -> None:
+    _clear_scene()
+    with tempfile.TemporaryDirectory(prefix="spine2d-single-options-") as directory:
+        output_directory = Path(directory)
+        source = _create_quad("SingleOptionsOff")
+        _create_emission_material(source)
+        _activate_only(source)
+        _configure_scene(output_directory, "REWRITE")
+        bpy.context.scene.spine2d_control_icons = False
+        bpy.context.scene.spine2d_export_preview_animation = False
+
+        result = bpy.ops.object.save_uv_as_json()
+
+        _assert("FINISHED" in result, f"option-disabled export failed: {result}")
+        document = json.loads(
+            (output_directory / "SingleOptionsOff_merged.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        _assert(
+            tuple(slot["name"] for slot in document["slots"])
+            == ("SingleOptionsOff_Segment_0",),
+            f"disabled control slots remain: {document['slots']}",
+        )
+        attachment_slots = tuple(document["skins"][0]["attachments"])
+        _assert(
+            attachment_slots == ("SingleOptionsOff_Segment_0",),
+            f"disabled control attachments remain: {attachment_slots}",
+        )
+        _assert(
+            "preview" not in document["animations"],
+            "disabled preview animation remains in JSON",
+        )
+        _assert(not _temporary_datablock_names(), "option test leaked temporary data")
 
 
 def test_legacy_backend_is_explicit_and_preserves_size_sync() -> None:
@@ -178,6 +236,7 @@ def main() -> None:
         tests = (
             test_single_backend_property_and_child_panel_register_cleanly,
             test_registered_operator_uses_rewrite_backend,
+            test_visual_options_can_be_disabled_through_scene_properties,
             test_legacy_backend_is_explicit_and_preserves_size_sync,
             test_rewrite_failure_does_not_fall_back_to_legacy,
         )
