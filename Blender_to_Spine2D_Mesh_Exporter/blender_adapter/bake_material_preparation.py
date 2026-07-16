@@ -1,7 +1,7 @@
-"""Temporarily expose semantic material channels on copied Blender materials.
+"""Temporarily expose semantic channels on copied Blender materials.
 
-Only temporary material copies owned by ``temporary_bake_materials`` are mutated.
-Every link and temporary node is restored/removed in ``finally`` before the next pass.
+Only material copies owned by ``temporary_bake_materials`` are mutated. Original
+Material Output links are restored and every temporary node is removed in ``finally``.
 """
 
 from __future__ import annotations
@@ -33,7 +33,6 @@ class _ValueExpression:
 
 @dataclass(slots=True)
 class _PreparedMutation:
-    material: Any
     node_tree: Any
     output_surface_socket: Any
     original_surface_sources: Tuple[Any, ...]
@@ -59,23 +58,20 @@ def _input_socket(node: Any, name: str, *, index: int | None = None) -> Any | No
     getter = getattr(inputs, "get", None)
     if callable(getter):
         try:
-            socket = getter(name)
-            if socket is not None:
-                return socket
+            result = getter(name)
+            if result is not None:
+                return result
         except Exception:
-            logger.debug("Input lookup by name failed", exc_info=True)
+            logger.debug("Input socket lookup by name failed", exc_info=True)
     if index is not None:
         try:
             return inputs[index]
         except Exception:
             pass
     try:
-        for socket in inputs:
-            if _socket_name(socket) == name:
-                return socket
+        return next(socket for socket in inputs if _socket_name(socket) == name)
     except Exception:
         return None
-    return None
 
 
 def _active_material_output(node_tree: Any) -> Any:
@@ -115,7 +111,7 @@ def _numeric_default(socket: Any | None, default: float) -> float:
         return float(default)
     value = getattr(socket, "default_value", default)
     try:
-        if isinstance(value, (tuple, list)):
+        if hasattr(value, "__len__") and not isinstance(value, (str, bytes)):
             return float(value[0])
         return float(value)
     except Exception:
@@ -124,9 +120,32 @@ def _numeric_default(socket: Any | None, default: float) -> float:
 
 def _value_from_input(socket: Any | None, *, default: float) -> _ValueExpression:
     source = _linked_source_socket(socket)
-    if source is not None:
-        return _ValueExpression(socket=source)
-    return _ValueExpression(constant=_numeric_default(socket, default))
+    return (
+        _ValueExpression(socket=source)
+        if source is not None
+        else _ValueExpression(constant=_numeric_default(socket, default))
+    )
+
+
+def _assign_socket_constant(target_socket: Any, value: float) -> None:
+    """Assign one scalar to scalar/vector/color RNA socket defaults generically."""
+
+    current = getattr(target_socket, "default_value", None)
+    try:
+        if hasattr(current, "__len__") and not isinstance(current, (str, bytes)):
+            length = len(current)
+            if length <= 0:
+                raise ValueError("target socket has an empty sequence default")
+            resolved = [float(value)] * length
+            if length == 4:
+                resolved[3] = 1.0
+            target_socket.default_value = tuple(resolved)
+        else:
+            target_socket.default_value = float(value)
+    except Exception as exc:
+        raise BakeMaterialPreparationError(
+            f"Unable to assign opacity constant to socket '{_socket_name(target_socket)}'"
+        ) from exc
 
 
 def _connect_value(node_tree: Any, expression: _ValueExpression, target_socket: Any) -> None:
@@ -138,22 +157,17 @@ def _connect_value(node_tree: Any, expression: _ValueExpression, target_socket: 
             raise BakeMaterialPreparationError(
                 "Unable to connect opacity expression to temporary node"
             ) from exc
-    try:
-        target_socket.default_value = float(expression.constant)
-    except Exception as exc:
-        raise BakeMaterialPreparationError(
-            "Unable to assign opacity constant to temporary node"
-        ) from exc
+    _assign_socket_constant(target_socket, expression.constant)
 
 
-def _new_math_node(
+def _new_math(
     node_tree: Any,
     temporary_nodes: list[Any],
     *,
     operation: str,
     token: str,
     label: str,
-    use_clamp: bool = False,
+    clamp: bool = False,
 ) -> Any:
     try:
         node = node_tree.nodes.new(type="ShaderNodeMath")
@@ -161,7 +175,7 @@ def _new_math_node(
         node.label = f"Spine2D temporary alpha {label}"
         node.operation = operation
         if hasattr(node, "use_clamp"):
-            node.use_clamp = use_clamp
+            node.use_clamp = clamp
         temporary_nodes.append(node)
         return node
     except Exception as exc:
@@ -177,7 +191,7 @@ def _multiply(
     temporary_nodes: list[Any],
     token: str,
 ) -> _ValueExpression:
-    node = _new_math_node(
+    node = _new_math(
         node_tree,
         temporary_nodes,
         operation="MULTIPLY",
@@ -195,14 +209,14 @@ def _one_minus(
     temporary_nodes: list[Any],
     token: str,
 ) -> _ValueExpression:
-    node = _new_math_node(
+    node = _new_math(
         node_tree,
         temporary_nodes,
         operation="SUBTRACT",
         token=token,
         label="one_minus",
     )
-    node.inputs[0].default_value = 1.0
+    _assign_socket_constant(node.inputs[0], 1.0)
     _connect_value(node_tree, value, node.inputs[1])
     return _ValueExpression(socket=node.outputs[0])
 
@@ -214,13 +228,13 @@ def _add_clamped(
     temporary_nodes: list[Any],
     token: str,
 ) -> _ValueExpression:
-    node = _new_math_node(
+    node = _new_math(
         node_tree,
         temporary_nodes,
         operation="ADD",
         token=token,
         label="add",
-        use_clamp=True,
+        clamp=True,
     )
     _connect_value(node_tree, left, node.inputs[0])
     _connect_value(node_tree, right, node.inputs[1])
@@ -258,10 +272,7 @@ def _opacity_from_shader(
         if node_type in {"BSDF_TRANSPARENT", "HOLDOUT"}:
             return _ValueExpression(constant=0.0)
         if node_type == "BSDF_PRINCIPLED":
-            return _value_from_input(
-                _input_socket(shader_node, "Alpha"),
-                default=1.0,
-            )
+            return _value_from_input(_input_socket(shader_node, "Alpha"), default=1.0)
         if node_type == "MIX_SHADER":
             factor = _value_from_input(
                 _input_socket(shader_node, "Fac", index=0),
@@ -281,50 +292,39 @@ def _opacity_from_shader(
                 token,
                 visiting,
             )
-            weighted_a = _multiply(
-                node_tree,
-                opacity_a,
-                _one_minus(node_tree, factor, temporary_nodes, token),
-                temporary_nodes,
-                token,
-            )
-            weighted_b = _multiply(
-                node_tree,
-                opacity_b,
-                factor,
-                temporary_nodes,
-                token,
-            )
             return _add_clamped(
                 node_tree,
-                weighted_a,
-                weighted_b,
+                _multiply(
+                    node_tree,
+                    opacity_a,
+                    _one_minus(node_tree, factor, temporary_nodes, token),
+                    temporary_nodes,
+                    token,
+                ),
+                _multiply(node_tree, opacity_b, factor, temporary_nodes, token),
                 temporary_nodes,
                 token,
             )
         if node_type == "ADD_SHADER":
-            opacity_a = _opacity_from_shader(
-                node_tree,
-                _shader_input_node(shader_node, 0),
-                temporary_nodes,
-                token,
-                visiting,
-            )
-            opacity_b = _opacity_from_shader(
-                node_tree,
-                _shader_input_node(shader_node, 1),
-                temporary_nodes,
-                token,
-                visiting,
-            )
             return _add_clamped(
                 node_tree,
-                opacity_a,
-                opacity_b,
+                _opacity_from_shader(
+                    node_tree,
+                    _shader_input_node(shader_node, 0),
+                    temporary_nodes,
+                    token,
+                    visiting,
+                ),
+                _opacity_from_shader(
+                    node_tree,
+                    _shader_input_node(shader_node, 1),
+                    temporary_nodes,
+                    token,
+                    visiting,
+                ),
                 temporary_nodes,
                 token,
             )
-
         return _ValueExpression(constant=1.0)
     finally:
         visiting.remove(name)
@@ -355,7 +355,7 @@ def _prepare_alpha_material(
     try:
         material.use_nodes = True
     except Exception as exc:
-        raise BakeMaterialPreparationError("Unable to enable nodes on copied material") from exc
+        raise BakeMaterialPreparationError("Unable to enable copied material nodes") from exc
     node_tree = getattr(material, "node_tree", None)
     if node_tree is None:
         raise BakeMaterialPreparationError("Copied material has no node tree")
@@ -364,7 +364,7 @@ def _prepare_alpha_material(
     surface_socket = _input_socket(output, "Surface")
     if surface_socket is None:
         raise BakeMaterialPreparationError("Material Output has no Surface input")
-    original_source_nodes = tuple(
+    original_nodes = tuple(
         getattr(link, "from_node", None)
         for link in _incoming_links(surface_socket)
         if getattr(link, "from_node", None) is not None
@@ -376,17 +376,16 @@ def _prepare_alpha_material(
         if mode is MaterialPreparationMode.OPAQUE_ALPHA_TO_EMISSION:
             opacity = _ValueExpression(constant=1.0)
         elif mode is MaterialPreparationMode.EXTRACT_ALPHA_TO_EMISSION:
-            source_node = original_source_nodes[0] if original_source_nodes else None
             opacity = _opacity_from_shader(
                 node_tree,
-                source_node,
+                original_nodes[0] if original_nodes else None,
                 temporary_nodes,
                 token,
                 set(),
             )
         else:
             raise BakeMaterialPreparationError(
-                f"Unsupported alpha material preparation mode: {mode.value}"
+                f"Unsupported material preparation mode: {mode.value}"
             )
 
         emission = node_tree.nodes.new(type="ShaderNodeEmission")
@@ -394,7 +393,7 @@ def _prepare_alpha_material(
         emission.label = "Spine2D temporary alpha output"
         temporary_nodes.append(emission)
         _connect_value(node_tree, opacity, emission.inputs["Color"])
-        emission.inputs["Strength"].default_value = 1.0
+        _assign_socket_constant(emission.inputs["Strength"], 1.0)
         node_tree.links.new(emission.outputs["Emission"], surface_socket)
     except Exception:
         for node in reversed(temporary_nodes):
@@ -410,7 +409,6 @@ def _prepare_alpha_material(
         raise
 
     return _PreparedMutation(
-        material=material,
         node_tree=node_tree,
         output_surface_socket=surface_socket,
         original_surface_sources=original_sources,
@@ -431,16 +429,14 @@ def _restore_mutation(mutation: _PreparedMutation) -> None:
             mutation.node_tree.nodes.remove(node)
         except Exception as exc:
             failures.append(f"remove node '{_node_name(node)}': {exc}")
-
-    for source_socket in mutation.original_surface_sources:
+    for source in mutation.original_surface_sources:
         try:
-            mutation.node_tree.links.new(source_socket, mutation.output_surface_socket)
+            mutation.node_tree.links.new(source, mutation.output_surface_socket)
         except Exception as exc:
-            failures.append(f"restore original surface link: {exc}")
-
+            failures.append(f"restore original Surface link: {exc}")
     if failures:
         raise BakeMaterialPreparationError(
-            "Unable to restore temporary copied material: " + "; ".join(failures)
+            "Unable to restore copied material: " + "; ".join(failures)
         )
 
 
@@ -464,13 +460,12 @@ def temporary_prepare_material_pass(
     materials: Tuple[Any, ...],
     pass_plan: BakePassPlan,
 ) -> Iterator[None]:
-    """Apply and restore one typed pass preparation on copied materials."""
+    """Apply and restore one typed preparation plan on copied materials."""
 
     if not isinstance(materials, tuple):
         raise TypeError("materials must be tuple")
     if not isinstance(pass_plan, BakePassPlan):
         raise TypeError("pass_plan must be BakePassPlan")
-
     modes = _preparation_map(pass_plan.material_preparations)
     if not modes or all(mode is MaterialPreparationMode.PRESERVE for mode in modes.values()):
         yield
@@ -483,7 +478,7 @@ def temporary_prepare_material_pass(
         for slot_index, mode in sorted(modes.items()):
             if slot_index >= len(materials):
                 raise BakeMaterialPreparationError(
-                    f"Preparation references material slot {slot_index}, but only "
+                    f"Preparation references slot {slot_index}, but only "
                     f"{len(materials)} copied materials exist"
                 )
             if mode is MaterialPreparationMode.PRESERVE:
@@ -496,14 +491,14 @@ def temporary_prepare_material_pass(
         primary_error = exc
         raise
     finally:
-        restore_failures: list[Exception] = []
+        restore_errors: list[Exception] = []
         for mutation in reversed(mutations):
             try:
                 _restore_mutation(mutation)
             except Exception as exc:
-                restore_failures.append(exc)
+                restore_errors.append(exc)
                 logger.exception("Failed to restore copied material pass preparation")
-        if restore_failures and primary_error is None:
+        if restore_errors and primary_error is None:
             raise BakeMaterialPreparationError(
                 "One or more copied materials could not be restored"
-            ) from restore_failures[0]
+            ) from restore_errors[0]
