@@ -25,6 +25,34 @@ class FixtureMode(str, Enum):
     MULTI = "multi"
 
 
+def _coerce_integral(
+    value: Any,
+    field_name: str,
+    *,
+    minimum: int,
+    maximum: int | None = None,
+    require_even: bool = False,
+) -> int:
+    """Normalize an exact integer without silently rounding Blender UI values."""
+
+    if isinstance(value, bool):
+        raise FixtureManifestError(f"{field_name} must be an integer")
+    if isinstance(value, int):
+        resolved = value
+    elif isinstance(value, float) and isfinite(value) and value.is_integer():
+        resolved = int(value)
+    else:
+        raise FixtureManifestError(f"{field_name} must be an integer")
+
+    if resolved < minimum:
+        raise FixtureManifestError(f"{field_name} must be at least {minimum}")
+    if maximum is not None and resolved > maximum:
+        raise FixtureManifestError(f"{field_name} must be at most {maximum}")
+    if require_even and resolved % 2:
+        raise FixtureManifestError(f"{field_name} must be even")
+    return resolved
+
+
 def _validate_safe_relative_directory(value: str, field_name: str) -> None:
     if not isinstance(value, str):
         raise TypeError(f"{field_name} must be str")
@@ -96,12 +124,24 @@ class FixtureSequenceSettings:
     frame_count: int = 0
 
     def __post_init__(self) -> None:
-        for field_name in ("start_frame", "frame_count"):
-            value = getattr(self, field_name)
-            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-                raise FixtureManifestError(
-                    f"{field_name} must be a non-negative integer"
-                )
+        object.__setattr__(
+            self,
+            "start_frame",
+            _coerce_integral(
+                self.start_frame,
+                "start_frame",
+                minimum=0,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "frame_count",
+            _coerce_integral(
+                self.frame_count,
+                "frame_count",
+                minimum=0,
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +149,7 @@ class FixtureExportSettings:
     texture_size: int = 1024
     images_path: str = "images"
     seam_mode: str = "AUTO"
-    angle_limit: float = 30.0
+    angle_limit: int = 30
     sequence: FixtureSequenceSettings = field(
         default_factory=FixtureSequenceSettings
     )
@@ -120,26 +160,36 @@ class FixtureExportSettings:
     preview_animation: bool = True
 
     def __post_init__(self) -> None:
-        if (
-            not isinstance(self.texture_size, int)
-            or isinstance(self.texture_size, bool)
-            or self.texture_size <= 0
-        ):
-            raise FixtureManifestError("texture_size must be a positive integer")
+        object.__setattr__(
+            self,
+            "texture_size",
+            _coerce_integral(
+                self.texture_size,
+                "texture_size",
+                minimum=64,
+                maximum=4096,
+                require_even=True,
+            ),
+        )
         _validate_safe_relative_directory(self.images_path, "images_path")
         if self.seam_mode not in {"AUTO", "CUSTOM"}:
             raise FixtureManifestError("seam_mode must be AUTO or CUSTOM")
-        if (
-            isinstance(self.angle_limit, bool)
-            or not isinstance(self.angle_limit, (int, float))
-            or not isfinite(float(self.angle_limit))
-            or not 0.0 < float(self.angle_limit) <= 180.0
-        ):
-            raise FixtureManifestError("angle_limit must be finite and in (0, 180]")
+        object.__setattr__(
+            self,
+            "angle_limit",
+            _coerce_integral(
+                self.angle_limit,
+                "angle_limit",
+                minimum=1,
+                maximum=89,
+            ),
+        )
         if not isinstance(self.sequence, FixtureSequenceSettings):
             raise TypeError("sequence must be FixtureSequenceSettings")
         if not isinstance(self.per_object_sequence, Mapping):
             raise TypeError("per_object_sequence must be a mapping")
+
+        normalized_sequences: dict[str, FixtureSequenceSettings] = {}
         for object_name, settings in self.per_object_sequence.items():
             if not isinstance(object_name, str) or not object_name.strip():
                 raise FixtureManifestError(
@@ -149,13 +199,15 @@ class FixtureExportSettings:
                 raise TypeError(
                     "per_object_sequence values must be FixtureSequenceSettings"
                 )
+            normalized_sequences[object_name] = settings
+
         for field_name in ("control_icons", "preview_animation"):
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be bool")
         object.__setattr__(
             self,
             "per_object_sequence",
-            MappingProxyType(dict(self.per_object_sequence)),
+            MappingProxyType(normalized_sequences),
         )
 
 
@@ -238,6 +290,7 @@ class A1FixtureCase:
             raise TypeError("settings must be FixtureExportSettings")
         if not isinstance(self.parity, FixtureParitySettings):
             raise TypeError("parity must be FixtureParitySettings")
+
         _validate_unique_names(self.selected_objects, "selected_objects")
         _validate_unique_names(
             self.connected_objects,
@@ -254,6 +307,7 @@ class A1FixtureCase:
                 "connected_objects contain names outside selected_objects: "
                 + ", ".join(sorted(unknown_connected))
             )
+
         if self.mode is FixtureMode.SINGLE:
             if len(self.selected_objects) != 1:
                 raise FixtureManifestError(
@@ -267,10 +321,19 @@ class A1FixtureCase:
                 raise FixtureManifestError(
                     "single fixture must use settings.sequence, not per_object_sequence"
                 )
-        elif len(self.selected_objects) < 2:
-            raise FixtureManifestError(
-                "multi fixture must contain at least two selected objects"
-            )
+        else:
+            if len(self.selected_objects) < 2:
+                raise FixtureManifestError(
+                    "multi fixture must contain at least two selected objects"
+                )
+            if (
+                self.settings.sequence.start_frame != 0
+                or self.settings.sequence.frame_count != 0
+            ):
+                raise FixtureManifestError(
+                    "multi fixture must use per_object_sequence, not settings.sequence"
+                )
+
         unknown_sequences = set(self.settings.per_object_sequence) - set(
             self.selected_objects
         )
@@ -348,7 +411,7 @@ def _settings_from_mapping(value: Any) -> FixtureExportSettings:
         texture_size=data.get("texture_size", 1024),
         images_path=data.get("images_path", "images"),
         seam_mode=data.get("seam_mode", "AUTO"),
-        angle_limit=data.get("angle_limit", 30.0),
+        angle_limit=data.get("angle_limit", 30),
         sequence=_sequence_from_mapping(
             data.get("sequence", {}),
             "settings.sequence",
@@ -422,6 +485,7 @@ def _case_from_mapping(value: Any, base_directory: Path) -> A1FixtureCase:
         raise FixtureManifestError(
             "case is missing required fields: " + ", ".join(missing)
         )
+
     blend_file = Path(str(data["blend_file"])).expanduser()
     if not blend_file.is_absolute():
         blend_file = base_directory / blend_file
@@ -435,6 +499,7 @@ def _case_from_mapping(value: Any, base_directory: Path) -> A1FixtureCase:
         mode = FixtureMode(str(data["mode"]).lower())
     except ValueError as exc:
         raise FixtureManifestError("mode must be 'single' or 'multi'") from exc
+
     return A1FixtureCase(
         case_id=str(data["case_id"]),
         blend_file=blend_file.resolve(strict=False),
@@ -471,6 +536,7 @@ def load_fixture_manifest(path: Path) -> A1FixtureManifest:
             f"Invalid manifest JSON at line {exc.lineno}, "
             f"column {exc.colno}: {exc.msg}"
         ) from exc
+
     root = _mapping(data, "manifest")
     _reject_unknown_keys(
         root,
