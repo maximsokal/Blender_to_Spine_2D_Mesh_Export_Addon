@@ -113,7 +113,10 @@ class CameraProjectionPlan(BakePlan):
     isolate_source_to_camera: bool = True
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        # ``dataclass(slots=True)`` returns a replacement class object.  Zero-argument
+        # ``super()`` may therefore capture the pre-replacement class in CPython; calling
+        # the concrete base validator is deterministic for this frozen slots subclass.
+        BakePlan.__post_init__(self)
         if not isinstance(self.projection_mode, CameraProjectionMode):
             raise TypeError("projection_mode must be CameraProjectionMode")
         for field_name in ("transparent_background", "isolate_source_to_camera"):
