@@ -239,7 +239,7 @@ def test_camera_dependency_requires_active_camera(tmp_path: Path):
         )
 
 
-def test_camera_dependency_selects_active_camera_strategy(tmp_path: Path):
+def test_camera_dependency_requires_render_projection_even_with_camera(tmp_path: Path):
     analysis = ObjectMaterialAnalysis(
         "Object",
         (
@@ -251,18 +251,14 @@ def test_camera_dependency_selects_active_camera_strategy(tmp_path: Path):
             ),
         ),
     )
-    plan = build_bake_plan(
-        analysis,
-        _settings(tmp_path),
-        object_context=_object_context(),
-        scene_context=_scene_context(),
-    )
 
-    assert tuple(item.strategy_id for item in plan.passes) == (
-        BakeStrategyId.CAMERA_COMBINED,
-    )
-    assert plan.passes[0].bake_mode is BakeMode.ACTIVE_CAMERA
-    assert plan.passes[0].evaluation_scope is BakeEvaluationScope.CAMERA
+    with pytest.raises(BakePlanError, match="camera-render projection"):
+        build_bake_plan(
+            analysis,
+            _settings(tmp_path),
+            object_context=_object_context(),
+            scene_context=_scene_context(),
+        )
 
 
 def test_mixed_scene_and_local_slots_receive_explicit_masks(tmp_path: Path):
