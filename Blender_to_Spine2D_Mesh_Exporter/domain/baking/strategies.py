@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol, Tuple
 
 from .graph import MaterialSemanticChannel
@@ -208,6 +208,19 @@ class BakeStrategyRegistry:
             )
         if not resolved:
             raise BakePlanError("strategy registry produced no bake passes")
+
+        if len(resolved) > 1:
+            # COMBINED already contains emission, so composing it with a separate EMIT
+            # pass would count the same energy twice. A semantic SURFACE_COLOR pass is
+            # therefore normalized to DIFFUSE Color whenever another strategy also
+            # contributes to the final image. Single-pass legacy behavior is unchanged.
+            resolved = [
+                replace(item, bake_mode=BakeMode.DIFFUSE)
+                if item.strategy_id is BakeStrategyId.SURFACE_COLOR
+                and item.bake_mode is BakeMode.COMBINED
+                else item
+                for item in resolved
+            ]
 
         composite_mode = (
             BakeCompositeMode.SINGLE
