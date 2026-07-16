@@ -1,8 +1,9 @@
 """Atomic output wrapper for one prepared A1 Blender object.
 
-All geometry, UV, material, rig, and document construction lives in
-``prepare_a1_object``. This module owns only serialization, bake staging, the shared
-JSON/texture transaction, and conversion of exceptions to ``ExportResult``.
+All geometry, UV, material, rig, and initial document construction lives in
+``prepare_a1_object``. Camera projection textures additionally produce a render-derived
+crop/hull layout; this module finalizes that attachment before serializing JSON, while all
+files still share one caller-owned atomic transaction.
 """
 
 from __future__ import annotations
@@ -28,7 +29,8 @@ from .a1_object_preparation import (
     StatisticsValue,
     prepare_a1_object,
 )
-from .bake_executor import stage_bake_plan_outputs
+from .a1_projection_finalization import finalize_prepared_camera_projection
+from .texture_executor import stage_texture_plan_outputs
 
 logger = logging.getLogger(__name__)
 
@@ -79,12 +81,12 @@ def export_a1_single_object(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> ExportResult:
-    """Prepare, bake, serialize, and atomically commit one A1 object export.
+    """Prepare, stage textures, finalize JSON, and atomically commit one export.
 
-    Source Object, Mesh, materials, selection, active object, mode, frame, and
-    render settings are restored by the preparation and bake adapters on success and
-    failure. The JSON and every planned texture frame become visible together or all
-    previous files are restored.
+    Source Object, Mesh, materials, selection, active object, mode, frame, render settings,
+    and temporary image datablocks are restored on success and failure. JSON is reserved
+    before textures to preserve the public output order, but its bytes are written only after
+    a camera render has produced the final sequence-union crop and screen-space hull.
     """
 
     try:
@@ -110,25 +112,14 @@ def export_a1_single_object(
             statistics={},
         )
 
-    stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
+    stage = A1SingleObjectStage.STAGE_OUTPUTS
     statistics = dict(prepared.statistics)
     try:
-        json_text = SpineSerializer().to_json(
-            prepared.document,
-            indent=settings.json_indent,
-        )
-
-        stage = A1SingleObjectStage.STAGE_OUTPUTS
         with atomic_file_transaction() as output_transaction:
             json_reservation = output_transaction.reserve(
                 prepared.output_paths.json_path
             )
-            write_staged_utf8_text(
-                json_reservation.staged_path,
-                json_text,
-                ensure_trailing_newline=True,
-            )
-            bake_reservations = stage_bake_plan_outputs(
+            texture_stage = stage_texture_plan_outputs(
                 prepared.source_object,
                 prepared.bake_target_snapshot,
                 prepared.bake_plan,
@@ -138,27 +129,43 @@ def export_a1_single_object(
                 scene=scene,
             )
 
+            stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
+            finalized = finalize_prepared_camera_projection(
+                prepared,
+                texture_stage.projection_layout,
+            )
+            statistics = dict(finalized.statistics)
+            json_text = SpineSerializer().to_json(
+                finalized.document,
+                indent=settings.json_indent,
+            )
+            write_staged_utf8_text(
+                json_reservation.staged_path,
+                json_text,
+                ensure_trailing_newline=True,
+            )
+
             stage = A1SingleObjectStage.COMMIT_OUTPUTS
             committed_paths = output_transaction.commit()
 
         expected_paths = (
             json_reservation.final_path,
-            *(reservation.final_path for reservation in bake_reservations),
+            *(reservation.final_path for reservation in texture_stage.reservations),
         )
         if tuple(committed_paths) != expected_paths:
             raise AtomicFileCommitError(
-                "Committed output order does not match reserved JSON and bake files"
+                "Committed output order does not match reserved JSON and texture files"
             )
         statistics["output_file_count"] = len(committed_paths)
         logger.info(
             "A1 single-object export completed for '%s': %s",
-            prepared.object_id,
+            finalized.object_id,
             tuple(str(path) for path in committed_paths),
         )
         return ExportResult(
             success=True,
             output_files=tuple(committed_paths),
-            issues=prepared.warnings,
+            issues=finalized.warnings,
             statistics=statistics,
         )
     except Exception as exc:
