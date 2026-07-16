@@ -11,7 +11,11 @@ on:
       - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/camera_projection_executor.py"
       - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/texture_executor.py"
       - "Blender_to_Spine2D_Mesh_Exporter/domain/baking/camera_projection.py"
+      - "tests/test_camera_projection_planning.py"
       - "tests/blender_headless/run_camera_projection_integration.py"
+      - "docs/REWRITE_CAMERA_PROJECTION.md"
+      - "docs/REWRITE_BAKE_STRATEGIES.md"
+      - "docs/REWRITE_STATUS.md"
   workflow_dispatch:
 
 permissions:
