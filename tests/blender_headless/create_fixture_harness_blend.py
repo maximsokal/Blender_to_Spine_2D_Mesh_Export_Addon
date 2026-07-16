@@ -1,4 +1,4 @@
-"""Create a deterministic Mesh fixture used by the isolated parity harness smoke test."""
+"""Create a deterministic Mesh fixture for the isolated parity harness smoke test."""
 
 from __future__ import annotations
 
@@ -9,11 +9,13 @@ import sys
 import bpy
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-if str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPOSITORY_ROOT))
+SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+REPOSITORY_ROOT = SCRIPT_DIRECTORY.parents[1]
+for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
-from tests.blender_headless.run_bake_integration import (  # noqa: E402
+from run_bake_integration import (  # noqa: E402
     _activate_only,
     _clear_scene,
     _create_emission_material,
