@@ -28,6 +28,15 @@ def _function_for_line(tree, line_number):
     return max(matches, key=lambda node: node.lineno)
 
 
+def _function_names(path: Path):
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
 def test_baking_domain_has_no_blender_dependencies():
     package_root = ROOT / "domain" / "baking"
     forbidden = ("import bpy", "from bpy", "import bmesh", "from bmesh")
@@ -39,11 +48,18 @@ def test_baking_domain_has_no_blender_dependencies():
 
 def test_bake_helpers_use_no_operator_attributes():
     for filename in (
+        "a1_mixed_object_output.py",
+        "a1_multi_object_output.py",
+        "a1_projection_finalization.py",
+        "a1_single_object_export.py",
         "bake_compositor.py",
         "bake_material_preparation.py",
         "bake_materials.py",
         "bake_scene_state.py",
         "camera_projection_executor.py",
+        "camera_projection_executor_core.py",
+        "camera_projection_image.py",
+        "camera_projection_state.py",
         "material_analyzer.py",
         "semantic_bake_executor.py",
         "shader_graph_analyzer.py",
@@ -63,18 +79,19 @@ def test_bake_helpers_use_no_operator_attributes():
         )
 
 
-def test_strategy_registry_remains_blender_independent():
-    path = ROOT / "domain" / "baking" / "strategies.py"
-    source = path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(path))
-    imported_roots = {
-        node.names[0].name.split(".")[0]
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import) and node.names
-    }
-    assert "bpy" not in imported_roots
-    assert "bmesh" not in imported_roots
-    assert "numpy" not in imported_roots
+def test_strategy_and_projection_domains_remain_blender_independent():
+    for filename in ("strategies.py", "camera_projection.py", "projection_layout.py"):
+        path = ROOT / "domain" / "baking" / filename
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        imported_roots = {
+            node.names[0].name.split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import) and node.names
+        }
+        assert "bpy" not in imported_roots
+        assert "bmesh" not in imported_roots
+        assert "numpy" not in imported_roots
 
 
 def test_object_bake_operator_is_confined_to_core_helper():
@@ -120,12 +137,14 @@ def test_render_operator_is_confined_to_public_failure_injection_hook():
 def test_public_executor_is_a_small_facade():
     path = ROOT / "blender_adapter" / "bake_executor.py"
     source = path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(path))
-    function_names = {
-        node.name
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
-    assert function_names == {"_call_bake_operator", "_call_render_operator"}
+    assert _function_names(path) == {"_call_bake_operator", "_call_render_operator"}
     assert "texture_executor" in source
     assert "bake_executor_core" in source
+
+
+def test_camera_projection_executor_is_a_small_facade():
+    path = ROOT / "blender_adapter" / "camera_projection_executor.py"
+    source = path.read_text(encoding="utf-8")
+    assert _function_names(path) == set()
+    assert "camera_projection_executor_core" in source
+    assert "camera_projection_state" in source
