@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Mapping, Tuple
+from typing import Mapping
 
 from ..domain.baking import CameraProjectionPlan
 from ..domain.geometry import (
@@ -30,7 +30,6 @@ from ..domain.spine import (
     build_legacy_mesh_document,
 )
 from .a1_attachment_projection import (
-    A1AttachmentProjectionResult,
     A1AttachmentProjectionSettings,
     A1VertexZBinding,
     project_triangulated_disk_attachment,
@@ -64,7 +63,10 @@ def build_camera_projection_quad_snapshot(
 
     half_x = float(plan.settings.width) / (2.0 * scale)
     half_y = float(plan.settings.height) / (2.0 * scale)
-    lineage_id = f"{plan.source_object_id}:camera-projection"
+    # Synthetic topology still belongs to the exported source object.  Snapshot identity
+    # distinguishes it from the source mesh; Source*Id.object_id must remain equal to
+    # MeshSnapshot.source_object_id for the global lineage invariant.
+    lineage_id = plan.source_object_id
     positions = (
         (-half_x, half_y, 0.0),
         (half_x, half_y, 0.0),
