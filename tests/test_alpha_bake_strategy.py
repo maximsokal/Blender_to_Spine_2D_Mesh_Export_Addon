@@ -67,7 +67,7 @@ def _buffer(values) -> BakePixelBuffer:
     )
 
 
-def test_surface_alpha_adds_explicit_alpha_pass_and_replace_compositor(tmp_path: Path):
+def test_surface_alpha_adds_straight_color_and_alpha_passes(tmp_path: Path):
     plan = build_bake_plan(
         ObjectMaterialAnalysis(
             "Object",
@@ -87,6 +87,7 @@ def test_surface_alpha_adds_explicit_alpha_pass_and_replace_compositor(tmp_path:
         BakeStrategyId.SURFACE_COLOR,
         BakeStrategyId.ALPHA,
     )
+    assert plan.passes[0].bake_mode is BakeMode.EMIT
     assert plan.composite.mode is BakeCompositeMode.ADD_RGB_REPLACE_ALPHA
     assert plan.composite.color_pass_indices == (0,)
     assert plan.composite.alpha_pass_index == 1
@@ -115,6 +116,7 @@ def test_alpha_pass_marks_non_alpha_slots_opaque(tmp_path: Path):
         _settings(tmp_path),
     )
 
+    assert plan.passes[0].bake_mode is BakeMode.EMIT
     alpha_pass = plan.passes[-1]
     assert tuple(
         (item.slot_index, item.mode) for item in alpha_pass.material_preparations
@@ -143,7 +145,7 @@ def test_pure_transparent_material_uses_one_alpha_pass_but_still_composes(tmp_pa
     assert plan.composite.alpha_pass_index == 0
 
 
-def test_surface_combined_is_not_changed_when_only_alpha_is_separate(tmp_path: Path):
+def test_alpha_surface_uses_emission_proxy_even_when_combined_was_requested(tmp_path: Path):
     plan = build_bake_plan(
         ObjectMaterialAnalysis(
             "Object",
@@ -159,7 +161,7 @@ def test_surface_combined_is_not_changed_when_only_alpha_is_separate(tmp_path: P
         _settings(tmp_path, procedural_mode=BakeMode.COMBINED),
     )
 
-    assert plan.passes[0].bake_mode is BakeMode.COMBINED
+    assert plan.passes[0].bake_mode is BakeMode.EMIT
     assert plan.passes[1].bake_mode is BakeMode.EMIT
 
 
