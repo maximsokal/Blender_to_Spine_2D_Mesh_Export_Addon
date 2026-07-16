@@ -160,11 +160,103 @@ jobs:
             --python tests/blender_headless/run_fixture_tools_integration.py \
             2>&1 | tee test-results/blender-fixture-tools.log
 
+      - name: Run isolated fixture parity orchestrator
+        shell: bash
+        run: |
+          set -euo pipefail
+          FIXTURE_ROOT="${PWD}/test-results/a1-harness"
+          SOURCE_BLEND="${FIXTURE_ROOT}/source.blend"
+          MANIFEST="${FIXTURE_ROOT}/manifest.json"
+          OUTPUT_ROOT="${FIXTURE_ROOT}/output"
+          mkdir -p "${FIXTURE_ROOT}"
+
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/create_fixture_harness_blend.py \
+            -- \
+            --output "${SOURCE_BLEND}" \
+            2>&1 | tee test-results/blender-fixture-create.log
+
+          cat > "${MANIFEST}" <<JSON
+          {
+            "schema_version": 1,
+            "cases": [
+              {
+                "case_id": "ci-isolated-single",
+                "blend_file": "${SOURCE_BLEND}",
+                "mode": "single",
+                "active_object": "HarnessHero",
+                "selected_objects": ["HarnessHero"],
+                "connected_objects": [],
+                "settings": {
+                  "texture_size": 64,
+                  "images_path": "images",
+                  "seam_mode": "AUTO",
+                  "angle_limit": 30,
+                  "sequence": {"start_frame": 0, "frame_count": 0},
+                  "per_object_sequence": {},
+                  "control_icons": true,
+                  "preview_animation": true
+                },
+                "parity": {
+                  "absolute_tolerance": 0.0001,
+                  "relative_tolerance": 0.000001,
+                  "compare_animations": true,
+                  "strict_edges": false,
+                  "ignore_paths": [],
+                  "image_absolute_tolerance": 0.000001,
+                  "image_max_differing_pixel_ratio": 0.0,
+                  "image_max_mean_absolute_delta": 0.0
+                }
+              }
+            ]
+          }
+          JSON
+
+          set +e
+          python tools/run_a1_fixture_parity.py \
+            "${MANIFEST}" \
+            --blender "${PWD}/${BLENDER_DIRECTORY}/blender" \
+            --output-root "${OUTPUT_ROOT}" \
+            --overwrite \
+            2>&1 | tee test-results/a1-fixture-orchestrator.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "${STATUS}" -eq 2 ]; then
+            echo "Fixture orchestrator reported an invalid tool/input error"
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("test-results/a1-harness/output")
+          summary = json.loads((root / "parity-summary.json").read_text())
+          case_root = root / "ci-isolated-single"
+          legacy = json.loads((case_root / "legacy/worker-report.json").read_text())
+          rewrite = json.loads((case_root / "rewrite/worker-report.json").read_text())
+          combined = json.loads((case_root / "parity-report.json").read_text())
+
+          assert summary["case_count"] == 1, summary
+          assert legacy["success"], legacy
+          assert rewrite["success"], rewrite
+          assert legacy["backend"] == "LEGACY", legacy
+          assert rewrite["backend"] == "REWRITE", rewrite
+          assert combined["export_success"], combined
+          assert (case_root / "json-parity-report.json").is_file()
+          assert (case_root / "image-parity-report.json").is_file()
+          PY
+
       - name: Upload Blender integration logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: blender-4.4-headless-logs
-          path: test-results/*.log
+          path: |
+            test-results/*.log
+            test-results/a1-harness/**
           if-no-files-found: warn
           retention-days: 7
