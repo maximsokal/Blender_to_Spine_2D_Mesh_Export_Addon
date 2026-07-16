@@ -50,8 +50,6 @@ _APPEARANCE_CHANNELS = frozenset(
 
 
 class BakeStrategy(Protocol):
-    """One independently extensible strategy registered with the resolver."""
-
     strategy_id: BakeStrategyId
     priority: int
     evaluation_scope: BakeEvaluationScope
@@ -136,7 +134,7 @@ def _mask_unmatched_preparations(
 
 @dataclass(frozen=True, slots=True)
 class CameraCombinedBakeStrategy:
-    """Evaluate view/ray/reflection/transmission appearance from the active camera."""
+    """Detect camera-ray appearance and route it to the projection boundary."""
 
     strategy_id: BakeStrategyId = BakeStrategyId.CAMERA_COMBINED
     priority: int = 25
@@ -156,8 +154,12 @@ class CameraCombinedBakeStrategy:
         slots: Tuple[MaterialAnalysis, ...],
         settings: BakeSettings,
     ) -> BakeMode:
-        del slots, settings
-        return BakeMode.ACTIVE_CAMERA
+        del settings
+        names = tuple(slot.material_name or f"slot-{slot.slot_index}" for slot in slots)
+        raise BakePlanError(
+            "camera-dependent appearance requires camera-render projection; Blender "
+            "4.4 object baking exposes no camera-ray bake type: " + str(names)
+        )
 
     def material_preparations(
         self,
@@ -169,8 +171,6 @@ class CameraCombinedBakeStrategy:
 
 @dataclass(frozen=True, slots=True)
 class SceneCombinedBakeStrategy:
-    """Evaluate lighting, World, occlusion and other scene-object appearance."""
-
     strategy_id: BakeStrategyId = BakeStrategyId.SCENE_COMBINED
     priority: int = 50
     evaluation_scope: BakeEvaluationScope = BakeEvaluationScope.SCENE
@@ -272,8 +272,6 @@ class EmissionBakeStrategy:
 
 @dataclass(frozen=True, slots=True)
 class AlphaBakeStrategy:
-    """Expose computed material opacity as a grayscale EMIT pass."""
-
     strategy_id: BakeStrategyId = BakeStrategyId.ALPHA
     priority: int = 300
     evaluation_scope: BakeEvaluationScope = BakeEvaluationScope.AUXILIARY
@@ -430,8 +428,6 @@ class BakeStrategyRegistry:
             if strategy.evaluation_scope is not BakeEvaluationScope.AUXILIARY:
                 primary_covered_slots.update(slot_indices)
             elif strategy.strategy_id is BakeStrategyId.ALPHA:
-                # Pure Transparent/Holdout has no RGB appearance pass. In that one case
-                # Alpha is both the only evaluable output and the final coverage pass.
                 primary_covered_slots.update(
                     slot.slot_index
                     for slot in matched
