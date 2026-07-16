@@ -181,6 +181,11 @@ def analyse_material_slot(slot_index: int, material: Any | None) -> MaterialAnal
     try:
         graph = analyse_material_graph(material)
         issues.extend(graph.issues)
+        if graph.active_output_node_id is None and not graph.semantic_channels:
+            # Preserve the historical no-output behavior. The recursive snapshot remains
+            # useful as a diagnostic, but an empty graph channel set must not suppress the
+            # legacy node-type fallback used by synthetic files and damaged materials.
+            graph = None
     except MaterialGraphAnalysisError as exc:
         # Graph analysis is richer than the legacy kind classifier, but a failure to
         # produce it must be visible. Do not silently invent semantics.
