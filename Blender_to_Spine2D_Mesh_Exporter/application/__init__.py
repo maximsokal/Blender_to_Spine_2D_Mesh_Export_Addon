@@ -10,6 +10,7 @@ from .a1_attachment_projection import (
 )
 from .a1_camera_projection import (
     assemble_a1_camera_projection_document,
+    build_camera_projection_mesh_snapshot,
     build_camera_projection_quad_snapshot,
 )
 from .a1_document_assembly import (
@@ -108,6 +109,7 @@ __all__ = [
     "build_a1_bake_settings",
     "build_a1_texturing_topology",
     "build_a1_z_group_assignment",
+    "build_camera_projection_mesh_snapshot",
     "build_camera_projection_quad_snapshot",
     "calculate_a1_main_position_pixels",
     "calculate_a1_mesh_bounds",
