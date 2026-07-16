@@ -183,7 +183,9 @@ def test_bake_and_attachment_paths_share_one_deterministic_stem(tmp_path):
         build_a1_bake_settings("Object", settings),
     )
 
-    assert plan.bake_mode is BakeMode.COMBINED
+    # A1 textures are albedo-like and must not depend on scene lights. Real Blender
+    # integration proves that COMBINED produced an opaque black image here.
+    assert plan.bake_mode is BakeMode.DIFFUSE
     assert plan.representative_task.output_path == (
         tmp_path.resolve() / "textures" / "spine" / "Hero_Baked.png"
     )
