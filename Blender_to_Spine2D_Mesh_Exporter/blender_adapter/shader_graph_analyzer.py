@@ -20,13 +20,22 @@ class MaterialGraphAnalysisError(RuntimeError):
     """Raised when a Blender node tree cannot be inspected deterministically."""
 
 
-_TEMPORARY_PREFIXES = ("TEMP_BAKE_", "TEMP_UV_", "__Spine2D_BakeTarget_")
+_TEMPORARY_PREFIXES = ("TEMP_BAKE_", "TEMP_UV_", "__Spine2D_BakeTarget_", "__Spine2D_Proxy_")
 _VIEW_NODE_TYPES = frozenset({"FRESNEL", "LAYER_WEIGHT", "LIGHT_PATH"})
 _OBJECT_NODE_TYPES = frozenset({"OBJECT_INFO", "TEX_COORD"})
 _GEOMETRY_NODE_TYPES = frozenset(
-    {"NEW_GEOMETRY", "NORMAL", "NORMAL_MAP", "BUMP", "TANGENT"}
+    {"NEW_GEOMETRY", "NORMAL", "NORMAL_MAP", "BUMP", "TANGENT", "BEVEL"}
 )
-_LIGHTING_NODE_TYPES = frozenset({"AMBIENT_OCCLUSION", "BEVEL"})
+_CAMERA_SHADER_TYPES = frozenset({"BSDF_GLASS", "BSDF_REFRACTION", "BSDF_GLOSSY"})
+_SCENE_LIGHTING_SHADER_TYPES = frozenset(
+    {
+        "BSDF_TRANSLUCENT",
+        "BSDF_TOON",
+        "SUBSURFACE_SCATTERING",
+        "BSDF_HAIR",
+        "BSDF_HAIR_PRINCIPLED",
+    }
+)
 _SURFACE_SHADER_TYPES = frozenset(
     {
         "BSDF_PRINCIPLED",
@@ -37,6 +46,8 @@ _SURFACE_SHADER_TYPES = frozenset(
         "BSDF_TRANSLUCENT",
         "BSDF_TOON",
         "SUBSURFACE_SCATTERING",
+        "BSDF_HAIR",
+        "BSDF_HAIR_PRINCIPLED",
         "HOLDOUT",
     }
 )
@@ -66,7 +77,7 @@ def _node_name(node: Any) -> str:
 
 
 def _is_temporary_node(node: Any) -> bool:
-    return _node_name(node).startswith(_TEMPORARY_PREFIXES)
+    return node is not None and _node_name(node).startswith(_TEMPORARY_PREFIXES)
 
 
 def _socket_name(socket: Any) -> str:
@@ -120,6 +131,14 @@ def _input_socket(node: Any, name: str) -> Any | None:
                 return socket
     except Exception:
         return None
+    return None
+
+
+def _first_input_socket(node: Any, names: tuple[str, ...]) -> Any | None:
+    for name in names:
+        socket = _input_socket(node, name)
+        if socket is not None:
+            return socket
     return None
 
 
@@ -193,11 +212,19 @@ def _numeric_default(socket: Any | None, default: float) -> float:
         return default
     value = getattr(socket, "default_value", default)
     try:
-        if isinstance(value, (tuple, list)):
+        if hasattr(value, "__len__") and not isinstance(value, (str, bytes)):
             return float(value[0])
         return float(value)
     except Exception:
         return default
+
+
+def _socket_enabled(socket: Any | None, *, default: float = 0.0) -> bool:
+    if socket is None:
+        return False
+    if bool(getattr(socket, "is_linked", False)):
+        return True
+    return abs(_numeric_default(socket, default)) > 1e-8
 
 
 def _color_nonzero(socket: Any | None) -> bool:
@@ -215,7 +242,7 @@ def _color_nonzero(socket: Any | None) -> bool:
 def _principled_emission_enabled(node: Any) -> bool:
     if _node_type(node) != "BSDF_PRINCIPLED":
         return False
-    color = _input_socket(node, "Emission Color") or _input_socket(node, "Emission")
+    color = _first_input_socket(node, ("Emission Color", "Emission"))
     strength = _input_socket(node, "Emission Strength")
     return _color_nonzero(color) and _numeric_default(strength, 1.0) > 1e-8
 
@@ -227,6 +254,43 @@ def _principled_alpha_enabled(node: Any) -> bool:
     if alpha is None:
         return False
     return bool(getattr(alpha, "is_linked", False)) or _numeric_default(alpha, 1.0) < 0.999999
+
+
+def _principled_dependencies(node: Any) -> set[MaterialDependencyKind]:
+    result: set[MaterialDependencyKind] = set()
+    if _node_type(node) != "BSDF_PRINCIPLED":
+        return result
+
+    transmission = _first_input_socket(node, ("Transmission Weight", "Transmission"))
+    metallic = _input_socket(node, "Metallic")
+    coat = _first_input_socket(node, ("Coat Weight", "Clearcoat"))
+    subsurface = _first_input_socket(node, ("Subsurface Weight", "Subsurface"))
+    sheen = _first_input_socket(node, ("Sheen Weight", "Sheen"))
+
+    if _socket_enabled(transmission):
+        result.update(
+            {
+                MaterialDependencyKind.CAMERA,
+                MaterialDependencyKind.VIEW,
+                MaterialDependencyKind.WORLD,
+                MaterialDependencyKind.SCENE_OBJECTS,
+                MaterialDependencyKind.REFLECTION,
+                MaterialDependencyKind.TRANSMISSION,
+            }
+        )
+    if _socket_enabled(metallic) or _socket_enabled(coat):
+        result.update(
+            {
+                MaterialDependencyKind.CAMERA,
+                MaterialDependencyKind.VIEW,
+                MaterialDependencyKind.WORLD,
+                MaterialDependencyKind.SCENE_OBJECTS,
+                MaterialDependencyKind.REFLECTION,
+            }
+        )
+    if _socket_enabled(subsurface) or _socket_enabled(sheen):
+        result.add(MaterialDependencyKind.LIGHTING)
+    return result
 
 
 def _semantic_channels(
@@ -294,22 +358,46 @@ def _dependencies(
 ) -> tuple[MaterialDependencyKind, ...]:
     result: set[MaterialDependencyKind] = set()
     node_types = {_node_type(node) for node in reachable_nodes}
-    if "TEX_IMAGE" in node_types:
+    if "TEX_IMAGE" in node_types or "TEX_ENVIRONMENT" in node_types:
         result.add(MaterialDependencyKind.IMAGE)
     if node_types & _VIEW_NODE_TYPES:
         result.update({MaterialDependencyKind.VIEW, MaterialDependencyKind.CAMERA})
+    if "FRESNEL" in node_types or "LAYER_WEIGHT" in node_types:
+        result.add(MaterialDependencyKind.REFLECTION)
+    if "LIGHT_PATH" in node_types:
+        result.add(MaterialDependencyKind.LIGHTING)
     if node_types & _OBJECT_NODE_TYPES:
         result.add(MaterialDependencyKind.OBJECT)
     if node_types & _GEOMETRY_NODE_TYPES:
         result.add(MaterialDependencyKind.GEOMETRY)
-    if node_types & _LIGHTING_NODE_TYPES:
+    if "AMBIENT_OCCLUSION" in node_types:
+        result.update(
+            {
+                MaterialDependencyKind.OCCLUSION,
+                MaterialDependencyKind.SCENE_OBJECTS,
+            }
+        )
+    if node_types & _SCENE_LIGHTING_SHADER_TYPES:
         result.add(MaterialDependencyKind.LIGHTING)
+    if node_types & _CAMERA_SHADER_TYPES:
+        result.update(
+            {
+                MaterialDependencyKind.CAMERA,
+                MaterialDependencyKind.VIEW,
+                MaterialDependencyKind.WORLD,
+                MaterialDependencyKind.SCENE_OBJECTS,
+                MaterialDependencyKind.REFLECTION,
+            }
+        )
+    if "BSDF_GLASS" in node_types or "BSDF_REFRACTION" in node_types:
+        result.add(MaterialDependencyKind.TRANSMISSION)
     if "TEX_ENVIRONMENT" in node_types:
-        result.add(MaterialDependencyKind.WORLD)
+        result.update({MaterialDependencyKind.VIEW, MaterialDependencyKind.CAMERA})
     if "GROUP" in node_types:
         result.add(MaterialDependencyKind.NODE_GROUP)
 
     for node in reachable_nodes:
+        result.update(_principled_dependencies(node))
         if _node_type(node) != "TEX_IMAGE":
             continue
         image = getattr(node, "image", None)
