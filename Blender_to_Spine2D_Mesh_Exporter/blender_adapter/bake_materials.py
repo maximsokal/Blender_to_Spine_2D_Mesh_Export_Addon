@@ -32,13 +32,17 @@ class PreparedBakeMaterials:
 
     @contextmanager
     def prepare_pass(self, pass_plan: BakePassPlan) -> Iterator[None]:
-        """Apply one pass preparation only to the owned temporary material copies."""
+        """Apply one pass preparation only to owned temporary material copies."""
 
         if not isinstance(pass_plan, BakePassPlan):
             raise TypeError("pass_plan must be BakePassPlan")
         from .bake_material_preparation import temporary_prepare_material_pass
 
-        with temporary_prepare_material_pass(self.materials, pass_plan):
+        with temporary_prepare_material_pass(
+            self.materials,
+            pass_plan,
+            used_material_indices=self.used_material_indices,
+        ):
             yield
 
 
