@@ -2,7 +2,8 @@
 
 The active rewrite branch is `rewrite/a1-domain-foundation`; A1 compatibility targets
 Spine 4.2.43. Deterministic geometry, loop-level UV lineage, semantic local/alpha/scene
-baking, camera-render projection, typed Spine composition, connected `all_objects`, and both
+baking, recursive Shader Node Group analysis, camera-render projection, stable sequence-union
+crop, screen-space convex hulls, typed Spine composition, connected `all_objects`, and both
 production operators are implemented.
 
 ## Production operators
@@ -13,7 +14,7 @@ production operators are implemented.
 - the add-on version is unchanged;
 - no release package has been produced from the rewrite branch.
 
-Single-object output preserves existing naming:
+Output naming remains compatible:
 
 ```text
 <object>_merged.json
@@ -21,33 +22,34 @@ Single-object output preserves existing naming:
 <object>_Baked_0000.png ...
 ```
 
-Standalone, connected, and mixed Connect-flag selection flows remain available for the
-existing UV-bake pipeline. JSON and every static/sequence texture share one atomic
-transaction.
+Single, standalone multi, connected multi, and mixed Connect-flag flows use one atomic JSON
+plus texture transaction.
 
 ## Automatic texture pipeline
 
 ```text
 active connected shader graph
+        -> recursive reachable group expansion
         -> semantic channels/dependencies
         -> ObjectBakeContext + SceneBakeContext
-        -> evaluation scope per material slot
         -> build_texture_plan()
         |
         +-- LOCAL / SCENE / AUXILIARY
         |       -> BakePlan
-        |       -> DIFFUSE / EMIT / COMBINED object bake passes
+        |       -> DIFFUSE / EMIT / COMBINED object-bake passes
         |       -> straight-RGBA composition
         |
         +-- CAMERA / VOLUME / render displacement
                 -> CameraProjectionPlan
-                -> active-camera transparent render
-                -> full-frame Spine quad
+                -> active-camera transparent renders
+                -> sequence alpha union
+                -> one stable crop + convex hull
+                -> post-render typed document finalization
 ```
 
 Planner selection is automatic. Per-material mode switches were not added to the UI.
 
-## B1: local surface and emission
+## B1: local surface and Emission
 
 Implemented:
 
@@ -57,8 +59,8 @@ Implemented:
 - separate surface and Emission slots on one mesh;
 - one Principled material containing Base Color and Emission;
 - float-buffer composition;
-- normalization of a surface `COMBINED` request to `DIFFUSE` when a separate Emission pass
-  would otherwise be counted twice.
+- normalization of a surface `COMBINED` request to `DIFFUSE` when separate Emission would
+  otherwise be counted twice.
 
 ```text
 final.rgb   = clamp(surface.rgb + emission.rgb)
@@ -80,16 +82,9 @@ final.rgb   = clamp(sum(color passes))
 final.alpha = alpha_pass.red
 ```
 
-Recursive copied-material extraction supports:
-
-- Principled Base Color and Alpha;
-- linked Image Color/Alpha and procedural socket graphs;
-- Transparent BSDF and Holdout;
-- Mix Shader in both transparent orders;
-- nested Mix and Add Shader trees;
-- animated socket values and drivers;
-- opaque plus transparent slots;
-- pure transparent output.
+Recursive copied-material extraction supports Principled Base Color/Alpha, linked image and
+procedural sockets, Transparent, Holdout, nested Mix/Add Shader trees, animated values,
+drivers, opaque plus transparent slots, and pure Transparent output.
 
 Temporary proxy nodes exist only on copied materials and are removed in `finally`. Source
 material node trees are not mutated.
@@ -100,147 +95,183 @@ Evaluation scopes:
 
 - `LOCAL`: albedo, Image/procedural surface color and material Emission;
 - `SCENE`: World, lighting, occlusion and other scene-object dependencies;
-- `AUXILIARY`: explicit alpha and future composition-only channels;
+- `AUXILIARY`: explicit alpha and composition-only channels;
 - `CAMERA`: routed to B4 instead of object baking.
 
-`ObjectBakeContext` records source identity, transform, collections, visibility and
-animation. `SceneBakeContext` records:
+`ObjectBakeContext` records source identity, transform, collections, visibility and animation.
+`SceneBakeContext` records Scene/render engine, World, lights, active camera, visible objects,
+shadow casters, color management and analysis frame.
 
-- Scene and render engine;
-- World identity/nodes/background strength;
-- lights, energy, color, transform, shadows and animation;
-- active camera identity and projection values;
-- visible objects and shadow casters;
-- color-management settings;
-- analysis frame.
+`SceneCombinedBakeStrategy` selects real `COMBINED` for explicit scene-dependent appearance
+such as Subsurface, Sheen, Toon, Translucent, Hair and Ambient Occlusion. Ordinary Principled
+Base Color remains local merely because a file contains lights.
 
-`SceneCombinedBakeStrategy` automatically selects `COMBINED` for explicit scene-dependent
-appearance such as Subsurface, Sheen, Toon, Translucent, Hair and Ambient Occlusion.
-Ordinary Principled Base Color remains local even when a file happens to contain lights.
+One mesh may contain local and scene-aware slots. Unmatched copied slots become black Emission
+proxies during each pass to prevent double counting. Source/context/frame/render state and all
+temporary datablocks are restored on success and failure.
 
-One mesh may contain local and scene-aware slots. During each pass, unmatched copied
-material slots are replaced by black Emission proxies to prevent double counting.
+## Recursive Shader Node Group analysis
 
-The live source is temporarily excluded while a same-position bake target is evaluated.
-Original visibility, context, frame, scene settings and temporary datablocks are restored on
-success and failure.
+`blender_adapter/shader_graph_analyzer.py` now recursively traverses reachable Shader Node
+Groups through their actual interfaces:
+
+```text
+Group output -> internal Group Output input
+Group Input output -> matching outer Group input
+```
+
+Implemented guarantees:
+
+- only sockets contributing to the active Material Output are expanded;
+- unused group inputs do not leak Camera/View dependencies;
+- stable instance-qualified nested node IDs;
+- explicit `group_path` snapshots;
+- nested Image, Time, Camera, View, Reflection, Transmission and Volume discovery;
+- nested node-tree animation detection;
+- socket matching by identifier/name/index across Blender API variants;
+- recursive-cycle detection;
+- maximum traversal depth 64;
+- no mutation of node groups.
+
+Real Blender fixtures cover nested Layer Weight, nested Principled Volume, and an unused
+camera-bearing parent input that correctly remains outside the reachable graph.
 
 ## B4: camera-render projection
 
-Implemented files:
-
-```text
-domain/baking/camera_projection.py
-application/a1_camera_projection.py
-blender_adapter/camera_projection_executor.py
-blender_adapter/texture_executor.py
-tests/blender_headless/run_camera_projection_integration.py
-.github/workflows/blender-camera-projection.yml
-```
-
-B4 is selected automatically when a used material requires:
+B4 is selected automatically for:
 
 - Camera or View dependency;
 - Reflection or Transmission dependency;
 - Volume output;
 - render-evaluated displacement.
 
-Covered graph families include:
+Covered families include Fresnel, Layer Weight, Light Path, Glass, Refraction, Principled
+Transmission, reflective appearance and Principled Volume, including requirements nested in
+reachable Shader Node Groups.
 
-- Fresnel and Layer Weight;
-- Light Path;
-- Glass and Refraction;
-- Principled Transmission;
-- camera-preserving reflection;
-- Principled Volume.
+`CameraProjectionPlan` is a frozen `BakePlan` subtype. Its synthetic `CAMERA_COMBINED` pass is
+metadata only and is never sent to `bpy.ops.object.bake`.
 
-`CameraProjectionPlan` is a frozen `BakePlan` subtype so existing frame, naming, attachment
-path, sequence and transaction consumers remain compatible. Its synthetic
-`CAMERA_COMBINED` pass is metadata only and is never sent to `bpy.ops.object.bake`.
+### Render and sequence-union layout
 
-Runtime behavior:
+For every static or sequence frame B4:
 
-1. validate source, Scene, World, active camera and light identities;
-2. capture render settings, timeline frame, `hide_render` and `visible_camera`;
-3. show the exported source to direct camera rays;
-4. hide other renderable objects only from direct camera rays;
-5. keep their reflection, refraction, diffuse and shadow participation;
-6. render with transparent film to a staged transaction path;
-7. validate the staged image;
-8. restore every captured value in `finally`;
-9. commit JSON plus all frames together.
+1. validates immutable object/Scene/World/camera/light identities;
+2. captures render, frame, `hide_render` and `visible_camera` state;
+3. keeps only the source directly camera-visible while retaining other objects for reflection,
+   transmission, diffuse, occlusion and shadow rays;
+4. renders a transparent full frame to the transaction's staged path;
+5. decodes the actual staged image and extracts alpha using threshold `1 / 255`;
+6. unions every frame mask;
+7. expands the union bounds by existing `bake_margin`;
+8. builds one counter-clockwise convex screen-space hull;
+9. rewrites every staged frame using the same crop dimensions;
+10. restores all Blender state in `finally`.
 
-The Spine document receives one deterministic full-frame mesh:
+Blender 4.4 headless exposes a zero-sized `Render Result` after completed renders. The staged
+file is therefore the source of truth for alpha analysis.
+
+### Stable cropped Spine attachment
+
+`domain/baking/projection_layout.py` provides immutable crop/hull contracts and deterministic
+monotonic-chain convex hull generation.
+
+Every frame in a sequence shares:
+
+- crop bounds and texture dimensions;
+- full-frame screen offset;
+- UVs;
+- hull vertices;
+- triangle fan;
+- attachment width and height.
+
+The hull follows the union alpha silhouette while UVs address the padded crop. Vertex positions
+preserve original full-frame camera placement, so cropping does not recenter the rendered
+object.
+
+For hull size `H`:
 
 ```text
-4 vertices
-5 topology edges
-2 triangles
-4 hull vertices
-UV 0..1
-attachment width/height = rendered image width/height
+UV values              = H * 2
+triangles               = H - 2
+triangle index values   = (H - 2) * 3
 ```
 
-The full-frame geometry is stable across camera/object animation and avoids clipping later
-sequence frames.
+An all-transparent render or sequence fails before commit.
 
-See `docs/REWRITE_CAMERA_PROJECTION.md` for the complete B4 contract.
+### Post-render typed recomposition
+
+A crop/hull layout is known only after all renders succeed. Production output order is:
+
+```text
+prepare -> reserve JSON -> render/crop textures -> finalize B4 attachments
+        -> recompose typed documents -> serialize JSON -> atomic commit
+```
+
+This is implemented for:
+
+- single-object export;
+- standalone multi-object export;
+- connected multi-object export;
+- mixed connected/standalone export.
+
+Multi/mixed output recomposes existing typed `SpineDocument` values. Serialized JSON is never
+patched or merged. Each attachment width/height is validated against its decoded cropped image.
 
 ## Executor boundaries
 
-- `bake_executor_core.py`: object-bake validation, temporary resources and the sole real
+- `bake_executor_core.py`: object-bake validation/resources and sole real
   `bpy.ops.object.bake` implementation;
-- `semantic_bake_executor.py`: B1-B3 passes, material preparation and composition;
-- `camera_projection_executor.py`: B4 render transaction and reversible visibility state;
-- `texture_executor.py`: plan-type dispatch with no operator access;
+- `semantic_bake_executor.py`: B1-B3 passes, material preparation and RGBA composition;
+- `camera_projection_state.py`: reversible Scene/frame/visibility state;
+- `camera_projection_image.py`: staged-image decode, alpha mask and crop rewrite;
+- `camera_projection_executor_core.py`: B4 render/union/crop orchestration;
+- `camera_projection_executor.py`: stable B4 facade;
+- `texture_executor.py`: plan dispatch and detailed layout result without operator access;
 - `bake_executor.py`: stable public facade containing only object-bake and render
   failure-injection hooks.
 
-Architecture tests verify that helper modules contain no direct `bpy.ops` access.
+Architecture tests verify that helper, finalization and output modules contain no direct
+`bpy.ops` access.
 
 ## Real Blender compatibility matrix
 
 Every output image is decoded; a PNG signature alone is not accepted.
 
-Existing B1-B3 coverage includes:
+B1-B3 coverage includes:
 
-- multiple Principled slots with distinct colors;
+- multiple Principled slots;
 - generated Image Texture and procedural Checker;
-- surface plus Emission in separate and shared materials;
+- surface plus Emission in separate/shared materials;
 - constant and linked-image Alpha;
 - Transparent/Mix Shader in both orders;
 - nested transparency and pure Transparent;
 - animated Alpha;
-- scene `COMBINED` responding to light energy;
-- World illumination changes;
-- Ambient Occlusion responding to another object;
-- mixed local and scene-aware slots;
-- scene-dependent straight RGBA;
+- light, World and Ambient Occlusion response;
+- mixed local/scene slots;
+- scene straight RGBA;
 - animated lights;
-- sequence/alpha/scene rollback;
+- local/alpha/scene/sequence rollback;
 - source state and temporary datablock restoration;
-- connected multi-object JSON and texture transactions;
-- registered operator and isolated Legacy/Rewrite workflows.
+- registered operators and isolated Legacy/Rewrite workflows.
 
 Dedicated B4 coverage includes:
 
-- production Layer Weight/Fresnel planning and export;
-- transparent background plus visible source pixels;
-- one full-frame Spine quad with 8 UV values, 6 triangle indices and hull 4;
-- Glass render projection;
-- Principled Volume render projection;
-- animated camera-dependent sequence frames;
-- restoration of the original timeline frame;
-- forced render failure after previous JSON/PNG bytes exist;
-- atomic rollback of JSON and texture;
-- restoration of render settings, context, material graphs, `hide_render`, and
-  `visible_camera`;
+- Fresnel/Layer Weight planning, render, crop and convex hull;
+- Glass and Principled Volume;
+- animated camera-dependent frames with one sequence-union crop;
+- attachment dimensions equal to decoded cropped images;
+- nested Layer Weight and nested Volume groups;
+- unused group input reachability precision;
+- standalone, connected and mixed multi-object cropped recomposition;
+- forced render failure and atomic JSON/texture rollback;
+- render/context/material/visibility restoration;
 - absence of staged files and temporary Blender datablocks.
 
 ## Validation
 
-- Python 3.10: **471 passed, 4 skipped**;
-- Python 3.11: **471 passed, 4 skipped**;
+- Python 3.10: **484 passed, 4 skipped**;
+- Python 3.11: **484 passed, 4 skipped**;
 - `Blender 4.4 Alpha Bake`: success;
 - `Blender 4.4 Scene Bake`: success;
 - `Blender 4.4 Camera Projection`: success;
@@ -248,54 +279,56 @@ Dedicated B4 coverage includes:
 
 ## Production defects found by the matrix
 
-1. `COMBINED` could report success while writing an opaque black texture without useful
-   lighting;
-2. polygon material indices were clamped when assigned before temporary material slots;
+1. `COMBINED` could report success while producing opaque black output without useful lighting;
+2. polygon material indices were clamped before temporary slots existed;
 3. Blender RNA wrapper identity was unstable for graph traversal;
 4. alpha-bearing `DIFFUSE Color` could lose straight RGB;
 5. graph `TIME` dependencies were omitted from animated analysis;
 6. scene baking could duplicate source and temporary geometry;
 7. mixed local and scene slots required explicit black masks;
 8. Blender 4.4 object baking has no camera-ray bake type;
-9. zero-argument `super()` is unsafe in this frozen `dataclass(slots=True)` plan subclass;
-10. synthetic projection lineage must preserve the source object ID.
+9. zero-argument `super()` is unsafe in a frozen `dataclass(slots=True)` plan subclass;
+10. synthetic projection lineage must preserve source object ID;
+11. scanning all group nodes would make unused inputs leak camera dependencies;
+12. Blender 4.4 headless `Render Result` can remain zero-sized after a successful render;
+13. JSON must be serialized after render-derived crop/hull finalization, not before;
+14. multi/mixed output must recompose typed documents after each component receives its layout.
 
 ## Explicit remaining boundaries
 
-### Full-frame B4 output
+### Convex rather than concave hull
 
-Transparent borders are not cropped and a screen-space alpha hull is not generated yet.
-This is intentional for stable animation geometry.
+The attachment uses a convex hull. Deep concavities and internal transparent holes remain
+inside the mesh and are represented by texture alpha.
+
+### Fixed alpha threshold
+
+Layout detection uses decoded alpha `>= 1 / 255`. A configurable threshold or
+coverage-weighted antialias policy remains output-policy work.
 
 ### Connected multi-object B4 depth
 
-Each B4 texture is a source-only camera layer. A fixed Spine slot order cannot reproduce
-arbitrary per-pixel depth intersections among several full-frame projection layers.
-Connected multi-object B4 production parity is therefore not claimed until grouped rendering
-or a depth-aware composition policy is implemented.
-
-### Recursive node groups
-
-Blender can render group-based appearance, but planner classification does not yet recurse
-into group node trees. Camera/Volume requirements hidden entirely in a group may therefore
-not automatically select B4.
+Connected and mixed outputs now contain correct cropped layers and attachments. A fixed Spine
+slot order still cannot reproduce arbitrary per-pixel depth intersections among independently
+rendered source-only camera layers. Grouped rendering or depth-aware composition is required
+before arbitrary connected B4 visual parity is claimed.
 
 ### Eevee and compositor pipelines
 
-Real B4 validation currently targets Blender 4.4 Cycles. Eevee-specific parity and custom
-Compositor output graphs require dedicated fixtures.
+Real B4 validation targets Blender 4.4 Cycles. Eevee-specific parity and custom Compositor
+output graphs require dedicated fixtures.
 
 ### HDR/output policy
 
-OpenEXR can retain higher precision. Configurable tone mapping, HDR runtime expectations and
+OPENEXR can retain higher precision. Configurable tone mapping, HDR runtime expectations and
 additional premultiplication policies remain output-policy work.
 
 ## Remaining release blockers
 
 1. representative private production `.blend` fixtures with accepted v0.23 JSON/images;
 2. accepted JSON and decoded-image parity reports;
-3. recursive node-group dependency discovery;
-4. a deliberate connected multi-object B4 depth policy;
+3. a deliberate connected multi-object B4 depth policy where real fixtures require it;
+4. Eevee/Compositor support only if production files depend on them;
 5. controlled Legacy removal only after private parity acceptance;
 6. version bump and release packaging only after the parity gate is accepted.
 
