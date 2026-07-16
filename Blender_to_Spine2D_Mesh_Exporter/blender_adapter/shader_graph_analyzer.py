@@ -1,9 +1,16 @@
-"""Read active Blender material outputs into immutable semantic graph snapshots."""
+"""Read active Blender material outputs into immutable semantic graph snapshots.
+
+The analyzer expands reachable Shader Node Groups recursively. Traversal follows the
+actual socket path through Group Output and Group Input nodes, so unused group inputs do
+not leak dependencies into the material plan. Every nested node receives a deterministic
+instance-qualified node ID and an explicit ``group_path`` in the immutable snapshot.
+"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
-from typing import Any, Iterable
+from typing import Any
 
 from ..domain.baking.graph import (
     MaterialDependencyKind,
@@ -20,7 +27,12 @@ class MaterialGraphAnalysisError(RuntimeError):
     """Raised when a Blender node tree cannot be inspected deterministically."""
 
 
-_TEMPORARY_PREFIXES = ("TEMP_BAKE_", "TEMP_UV_", "__Spine2D_BakeTarget_", "__Spine2D_Proxy_")
+_TEMPORARY_PREFIXES = (
+    "TEMP_BAKE_",
+    "TEMP_UV_",
+    "__Spine2D_BakeTarget_",
+    "__Spine2D_Proxy_",
+)
 _VIEW_NODE_TYPES = frozenset({"FRESNEL", "LAYER_WEIGHT", "LIGHT_PATH"})
 _OBJECT_NODE_TYPES = frozenset({"OBJECT_INFO", "TEX_COORD"})
 _GEOMETRY_NODE_TYPES = frozenset(
@@ -51,6 +63,10 @@ _SURFACE_SHADER_TYPES = frozenset(
         "HOLDOUT",
     }
 )
+_GROUP_NODE_TYPES = frozenset({"GROUP"})
+_GROUP_INPUT_TYPES = frozenset({"GROUP_INPUT"})
+_GROUP_OUTPUT_TYPES = frozenset({"GROUP_OUTPUT"})
+_MAX_GROUP_DEPTH = 64
 
 
 def _material_name(material: Any) -> str:
@@ -76,6 +92,15 @@ def _node_name(node: Any) -> str:
     return f"{_node_type(node)}_{id(node)}"
 
 
+def _tree_name(node_tree: Any) -> str:
+    value = str(
+        getattr(node_tree, "name_full", None)
+        or getattr(node_tree, "name", None)
+        or ""
+    ).strip()
+    return value or f"NodeTree_{id(node_tree)}"
+
+
 def _is_temporary_node(node: Any) -> bool:
     return node is not None and _node_name(node).startswith(_TEMPORARY_PREFIXES)
 
@@ -85,39 +110,50 @@ def _socket_name(socket: Any) -> str:
     return value or "Socket"
 
 
-def _iter_nodes(node_tree: Any) -> tuple[Any, ...]:
+def _socket_identifier(socket: Any) -> str:
+    return str(getattr(socket, "identifier", "") or "").strip()
+
+
+def _iter_collection(value: Any, *, label: str) -> tuple[Any, ...]:
     try:
-        return tuple(node for node in node_tree.nodes if not _is_temporary_node(node))
+        return tuple(value or ())
     except Exception as exc:
-        raise MaterialGraphAnalysisError("Unable to iterate material nodes") from exc
+        raise MaterialGraphAnalysisError(f"Unable to iterate {label}") from exc
+
+
+def _iter_nodes(node_tree: Any) -> tuple[Any, ...]:
+    return tuple(
+        node
+        for node in _iter_collection(getattr(node_tree, "nodes", ()), label="nodes")
+        if not _is_temporary_node(node)
+    )
 
 
 def _iter_links(node_tree: Any) -> tuple[Any, ...]:
-    try:
-        links = tuple(getattr(node_tree, "links", ()))
-    except Exception as exc:
-        raise MaterialGraphAnalysisError("Unable to iterate material links") from exc
     return tuple(
         link
-        for link in links
+        for link in _iter_collection(getattr(node_tree, "links", ()), label="links")
         if not _is_temporary_node(getattr(link, "from_node", None))
         and not _is_temporary_node(getattr(link, "to_node", None))
     )
 
 
+def _find_active_node(nodes: tuple[Any, ...], node_type: str) -> Any | None:
+    matches = tuple(node for node in nodes if _node_type(node) == node_type)
+    if not matches:
+        return None
+    active = tuple(node for node in matches if bool(getattr(node, "is_active_output", False)))
+    return active[0] if active else matches[0]
+
+
 def _find_active_output(nodes: tuple[Any, ...]) -> Any | None:
-    outputs = tuple(node for node in nodes if _node_type(node) == "OUTPUT_MATERIAL")
-    if not outputs:
-        return None
-    active = tuple(node for node in outputs if bool(getattr(node, "is_active_output", False)))
-    return active[0] if active else outputs[0]
+    return _find_active_node(nodes, "OUTPUT_MATERIAL")
 
 
-def _input_socket(node: Any, name: str) -> Any | None:
-    inputs = getattr(node, "inputs", None)
-    if inputs is None:
+def _socket_by_name(collection: Any, name: str) -> Any | None:
+    if collection is None:
         return None
-    getter = getattr(inputs, "get", None)
+    getter = getattr(collection, "get", None)
     if callable(getter):
         try:
             socket = getter(name)
@@ -126,12 +162,16 @@ def _input_socket(node: Any, name: str) -> Any | None:
         except Exception:
             logger.debug("Socket lookup by name failed", exc_info=True)
     try:
-        for socket in inputs:
+        for socket in collection:
             if _socket_name(socket) == name:
                 return socket
     except Exception:
         return None
     return None
+
+
+def _input_socket(node: Any, name: str) -> Any | None:
+    return _socket_by_name(getattr(node, "inputs", None), name)
 
 
 def _first_input_socket(node: Any, names: tuple[str, ...]) -> Any | None:
@@ -142,69 +182,44 @@ def _first_input_socket(node: Any, names: tuple[str, ...]) -> Any | None:
     return None
 
 
-def _incoming_by_node_name(links: tuple[Any, ...]) -> dict[str, tuple[Any, ...]]:
-    grouped: dict[str, list[Any]] = {}
-    for link in links:
-        to_node = getattr(link, "to_node", None)
-        if to_node is None:
-            continue
-        grouped.setdefault(_node_name(to_node), []).append(link)
-    return {
-        key: tuple(
-            sorted(
-                values,
-                key=lambda link: (
-                    _node_name(getattr(link, "from_node", None)).casefold(),
-                    _socket_name(getattr(link, "from_socket", None)).casefold(),
-                    _socket_name(getattr(link, "to_socket", None)).casefold(),
-                ),
-            )
-        )
-        for key, values in grouped.items()
-    }
-
-
-def _reachable_from_nodes(
-    roots: Iterable[Any],
-    incoming: dict[str, tuple[Any, ...]],
-) -> tuple[set[str], tuple[Any, ...]]:
-    pending = list(roots)
-    seen: set[str] = set()
-    used_links: list[Any] = []
-    while pending:
-        node = pending.pop()
-        if node is None:
-            continue
-        node_name = _node_name(node)
-        if node_name in seen:
-            continue
-        seen.add(node_name)
-        for link in incoming.get(node_name, ()):
-            used_links.append(link)
-            pending.append(getattr(link, "from_node", None))
-    return seen, tuple(used_links)
-
-
-def _socket_roots(socket: Any | None, links: tuple[Any, ...]) -> tuple[Any, ...]:
-    if socket is None:
-        return ()
+def _socket_index(collection: Any, target: Any) -> int | None:
+    if collection is None or target is None:
+        return None
     try:
-        socket_links = tuple(getattr(socket, "links", ()))
+        for index, socket in enumerate(collection):
+            if socket is target:
+                return index
     except Exception:
-        socket_links = ()
-    if socket_links:
-        return tuple(
-            getattr(link, "from_node", None)
-            for link in socket_links
-            if getattr(link, "from_node", None) is not None
-        )
+        return None
+    return None
 
-    socket_name = _socket_name(socket)
-    return tuple(
-        getattr(link, "from_node", None)
-        for link in links
-        if _socket_name(getattr(link, "to_socket", None)) == socket_name
-    )
+
+def _matching_socket(collection: Any, reference: Any) -> Any | None:
+    """Resolve a group interface socket across Blender API versions."""
+
+    if collection is None or reference is None:
+        return None
+    sockets = _iter_collection(collection, label="group sockets")
+    identifier = _socket_identifier(reference)
+    if identifier:
+        matches = tuple(item for item in sockets if _socket_identifier(item) == identifier)
+        if len(matches) == 1:
+            return matches[0]
+    name = _socket_name(reference)
+    matches = tuple(item for item in sockets if _socket_name(item) == name)
+    if len(matches) == 1:
+        return matches[0]
+    reference_node = getattr(reference, "node", None)
+    if reference_node is not None:
+        source_collection = (
+            getattr(reference_node, "outputs", None)
+            if bool(getattr(reference, "is_output", False))
+            else getattr(reference_node, "inputs", None)
+        )
+        index = _socket_index(source_collection, reference)
+        if index is not None and index < len(sockets):
+            return sockets[index]
+    return None
 
 
 def _numeric_default(socket: Any | None, default: float) -> float:
@@ -293,35 +308,261 @@ def _principled_dependencies(node: Any) -> set[MaterialDependencyKind]:
     return result
 
 
-def _semantic_channels(
-    output: Any | None,
-    nodes: tuple[Any, ...],
-    links: tuple[Any, ...],
-    incoming: dict[str, tuple[Any, ...]],
-) -> tuple[MaterialSemanticChannel, ...]:
-    if output is None:
-        surface_nodes = nodes
-        volume_nodes: tuple[Any, ...] = ()
-        displacement_nodes: tuple[Any, ...] = ()
-    else:
-        surface_names, _ = _reachable_from_nodes(
-            _socket_roots(_input_socket(output, "Surface"), links),
-            incoming,
-        )
-        volume_names, _ = _reachable_from_nodes(
-            _socket_roots(_input_socket(output, "Volume"), links),
-            incoming,
-        )
-        displacement_names, _ = _reachable_from_nodes(
-            _socket_roots(_input_socket(output, "Displacement"), links),
-            incoming,
-        )
-        surface_nodes = tuple(node for node in nodes if _node_name(node) in surface_names)
-        volume_nodes = tuple(node for node in nodes if _node_name(node) in volume_names)
-        displacement_nodes = tuple(
-            node for node in nodes if _node_name(node) in displacement_names
+@dataclass(frozen=True, slots=True)
+class _GraphFrame:
+    node_tree: Any
+    group_path: tuple[str, ...]
+    parent: "_GraphFrame | None" = None
+    parent_group_node: Any | None = None
+    tree_stack: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _ReachableNode:
+    node: Any
+    frame: _GraphFrame
+
+    @property
+    def node_id(self) -> str:
+        return "::".join(self.frame.group_path + (_node_name(self.node),))
+
+
+class _RecursiveGraphWalker:
+    def __init__(self, material_name: str, root_tree: Any) -> None:
+        self.material_name = material_name
+        self.root_tree = root_tree
+        self.nodes: dict[str, _ReachableNode] = {}
+        self.links: dict[tuple[str, str, str, str], ShaderLinkSnapshot] = {}
+        self.channel_nodes: dict[str, set[str]] = {
+            "SURFACE": set(),
+            "VOLUME": set(),
+            "DISPLACEMENT": set(),
+            "ALL": set(),
+        }
+        self.node_trees: dict[int, Any] = {id(root_tree): root_tree}
+        self.issues: list[str] = []
+        self._visited_outputs: set[tuple[int, tuple[str, ...], str, str, str]] = set()
+        self._visited_inputs: set[tuple[int, tuple[str, ...], str, str, str]] = set()
+
+    def root_frame(self) -> _GraphFrame:
+        return _GraphFrame(
+            node_tree=self.root_tree,
+            group_path=(),
+            tree_stack=(id(self.root_tree),),
         )
 
+    def _node_id(self, frame: _GraphFrame, node: Any) -> str:
+        return "::".join(frame.group_path + (_node_name(node),))
+
+    def _record_node(self, frame: _GraphFrame, node: Any, channel: str) -> str:
+        node_id = self._node_id(frame, node)
+        self.nodes.setdefault(node_id, _ReachableNode(node=node, frame=frame))
+        self.channel_nodes.setdefault(channel, set()).add(node_id)
+        self.channel_nodes["ALL"].add(node_id)
+        return node_id
+
+    def _record_link(self, frame: _GraphFrame, link: Any, channel: str) -> None:
+        from_node = getattr(link, "from_node", None)
+        to_node = getattr(link, "to_node", None)
+        if from_node is None or to_node is None:
+            return
+        from_id = self._record_node(frame, from_node, channel)
+        to_id = self._record_node(frame, to_node, channel)
+        snapshot = ShaderLinkSnapshot(
+            from_node_id=from_id,
+            from_socket=_socket_name(getattr(link, "from_socket", None)),
+            to_node_id=to_id,
+            to_socket=_socket_name(getattr(link, "to_socket", None)),
+        )
+        key = (
+            snapshot.from_node_id,
+            snapshot.from_socket,
+            snapshot.to_node_id,
+            snapshot.to_socket,
+        )
+        self.links.setdefault(key, snapshot)
+
+    def _incoming_links(self, socket: Any, frame: _GraphFrame) -> tuple[Any, ...]:
+        direct = _iter_collection(getattr(socket, "links", ()), label="socket links")
+        if direct:
+            return tuple(
+                link
+                for link in direct
+                if not _is_temporary_node(getattr(link, "from_node", None))
+                and not _is_temporary_node(getattr(link, "to_node", None))
+            )
+        node = getattr(socket, "node", None)
+        identifier = _socket_identifier(socket)
+        name = _socket_name(socket)
+        return tuple(
+            link
+            for link in _iter_links(frame.node_tree)
+            if getattr(link, "to_node", None) is node
+            and (
+                getattr(link, "to_socket", None) is socket
+                or (identifier and _socket_identifier(getattr(link, "to_socket", None)) == identifier)
+                or _socket_name(getattr(link, "to_socket", None)) == name
+            )
+        )
+
+    def walk_input(self, socket: Any | None, frame: _GraphFrame, channel: str) -> None:
+        if socket is None:
+            return
+        node = getattr(socket, "node", None)
+        node_name = _node_name(node) if node is not None else "SocketOwner"
+        key = (
+            id(frame.node_tree),
+            frame.group_path,
+            node_name,
+            _socket_identifier(socket) or _socket_name(socket),
+            channel,
+        )
+        if key in self._visited_inputs:
+            return
+        self._visited_inputs.add(key)
+        if node is not None:
+            self._record_node(frame, node, channel)
+        for link in self._incoming_links(socket, frame):
+            self._record_link(frame, link, channel)
+            self.walk_output(
+                getattr(link, "from_node", None),
+                getattr(link, "from_socket", None),
+                frame,
+                channel,
+            )
+
+    def walk_output(
+        self,
+        node: Any | None,
+        output_socket: Any | None,
+        frame: _GraphFrame,
+        channel: str,
+    ) -> None:
+        if node is None:
+            return
+        node_id = self._record_node(frame, node, channel)
+        key = (
+            id(frame.node_tree),
+            frame.group_path,
+            node_id,
+            _socket_identifier(output_socket) or _socket_name(output_socket),
+            channel,
+        )
+        if key in self._visited_outputs:
+            return
+        self._visited_outputs.add(key)
+
+        node_type = _node_type(node)
+        if node_type in _GROUP_NODE_TYPES:
+            self._walk_group_output(node, output_socket, frame, channel)
+            return
+        if node_type in _GROUP_INPUT_TYPES:
+            self._walk_parent_group_input(output_socket, frame, channel)
+            return
+
+        for input_socket in _iter_collection(getattr(node, "inputs", ()), label="node inputs"):
+            self.walk_input(input_socket, frame, channel)
+
+    def _walk_group_output(
+        self,
+        group_node: Any,
+        output_socket: Any | None,
+        parent_frame: _GraphFrame,
+        channel: str,
+    ) -> None:
+        group_tree = getattr(group_node, "node_tree", None)
+        group_name = _node_name(group_node)
+        if group_tree is None:
+            self.issues.append(f"Reachable node group '{group_name}' has no node tree")
+            return
+        if len(parent_frame.group_path) >= _MAX_GROUP_DEPTH:
+            self.issues.append(
+                f"Node group expansion exceeded {_MAX_GROUP_DEPTH} levels at '{group_name}'"
+            )
+            return
+        tree_identity = id(group_tree)
+        if tree_identity in parent_frame.tree_stack:
+            cycle = " -> ".join(
+                parent_frame.group_path + (group_name, _tree_name(group_tree))
+            )
+            self.issues.append(f"Recursive node group cycle detected: {cycle}")
+            return
+
+        nodes = _iter_nodes(group_tree)
+        group_output = _find_active_node(nodes, "GROUP_OUTPUT")
+        if group_output is None:
+            self.issues.append(
+                f"Reachable node group '{group_name}' has no Group Output node"
+            )
+            return
+        internal_input = _matching_socket(getattr(group_output, "inputs", None), output_socket)
+        if internal_input is None:
+            self.issues.append(
+                f"Unable to map output '{_socket_name(output_socket)}' of node group "
+                f"'{group_name}' to its Group Output interface"
+            )
+            return
+
+        child_frame = _GraphFrame(
+            node_tree=group_tree,
+            group_path=parent_frame.group_path + (group_name,),
+            parent=parent_frame,
+            parent_group_node=group_node,
+            tree_stack=parent_frame.tree_stack + (tree_identity,),
+        )
+        self.node_trees[tree_identity] = group_tree
+        self._record_node(child_frame, group_output, channel)
+        self.walk_input(internal_input, child_frame, channel)
+
+    def _walk_parent_group_input(
+        self,
+        internal_output: Any | None,
+        child_frame: _GraphFrame,
+        channel: str,
+    ) -> None:
+        parent_frame = child_frame.parent
+        group_node = child_frame.parent_group_node
+        if parent_frame is None or group_node is None:
+            return
+        parent_input = _matching_socket(getattr(group_node, "inputs", None), internal_output)
+        if parent_input is None:
+            self.issues.append(
+                f"Unable to map Group Input output '{_socket_name(internal_output)}' "
+                f"for node group '{_node_name(group_node)}'"
+            )
+            return
+        self.walk_input(parent_input, parent_frame, channel)
+
+    def walk_material_output(self, output: Any) -> None:
+        frame = self.root_frame()
+        self._record_node(frame, output, "ALL")
+        for socket_name, channel in (
+            ("Surface", "SURFACE"),
+            ("Volume", "VOLUME"),
+            ("Displacement", "DISPLACEMENT"),
+        ):
+            self.walk_input(_input_socket(output, socket_name), frame, channel)
+
+    def walk_all_nodes(self) -> None:
+        frame = self.root_frame()
+        for node in _iter_nodes(self.root_tree):
+            self._record_node(frame, node, "ALL")
+            if _node_type(node) == "GROUP":
+                for output_socket in _iter_collection(
+                    getattr(node, "outputs", ()), label="group outputs"
+                ):
+                    self.walk_output(node, output_socket, frame, "ALL")
+            else:
+                for input_socket in _iter_collection(
+                    getattr(node, "inputs", ()), label="node inputs"
+                ):
+                    self.walk_input(input_socket, frame, "ALL")
+
+
+def _semantic_channels(walker: _RecursiveGraphWalker) -> tuple[MaterialSemanticChannel, ...]:
+    surface_nodes = tuple(
+        walker.nodes[node_id].node for node_id in walker.channel_nodes.get("SURFACE", ())
+    )
     surface_types = {_node_type(node) for node in surface_nodes}
     channels: set[MaterialSemanticChannel] = set()
     if surface_types & _SURFACE_SHADER_TYPES:
@@ -334,14 +575,26 @@ def _semantic_channels(
         _principled_alpha_enabled(node) for node in surface_nodes
     ):
         channels.add(MaterialSemanticChannel.ALPHA)
-    if volume_nodes:
+
+    volume_types = {
+        _node_type(walker.nodes[node_id].node)
+        for node_id in walker.channel_nodes.get("VOLUME", ())
+    }
+    if volume_types - {"OUTPUT_MATERIAL", "GROUP_OUTPUT", "GROUP"}:
         channels.add(MaterialSemanticChannel.VOLUME)
-    if displacement_nodes:
+    displacement_types = {
+        _node_type(walker.nodes[node_id].node)
+        for node_id in walker.channel_nodes.get("DISPLACEMENT", ())
+    }
+    if displacement_types - {"OUTPUT_MATERIAL", "GROUP_OUTPUT", "GROUP"}:
         channels.add(MaterialSemanticChannel.DISPLACEMENT)
 
     known_non_surface = {
         "EMISSION",
         "OUTPUT_MATERIAL",
+        "GROUP",
+        "GROUP_INPUT",
+        "GROUP_OUTPUT",
         "MIX_SHADER",
         "ADD_SHADER",
         "BSDF_TRANSPARENT",
@@ -353,10 +606,10 @@ def _semantic_channels(
 
 def _dependencies(
     material: Any,
-    node_tree: Any,
-    reachable_nodes: tuple[Any, ...],
+    walker: _RecursiveGraphWalker,
 ) -> tuple[MaterialDependencyKind, ...]:
     result: set[MaterialDependencyKind] = set()
+    reachable_nodes = tuple(item.node for item in walker.nodes.values())
     node_types = {_node_type(node) for node in reachable_nodes}
     if "TEX_IMAGE" in node_types or "TEX_ENVIRONMENT" in node_types:
         result.add(MaterialDependencyKind.IMAGE)
@@ -393,7 +646,7 @@ def _dependencies(
         result.add(MaterialDependencyKind.TRANSMISSION)
     if "TEX_ENVIRONMENT" in node_types:
         result.update({MaterialDependencyKind.VIEW, MaterialDependencyKind.CAMERA})
-    if "GROUP" in node_types:
+    if node_types & (_GROUP_NODE_TYPES | _GROUP_INPUT_TYPES | _GROUP_OUTPUT_TYPES):
         result.add(MaterialDependencyKind.NODE_GROUP)
 
     for node in reachable_nodes:
@@ -405,15 +658,17 @@ def _dependencies(
         duration = int(getattr(image, "frame_duration", 1) or 1) if image else 1
         if source in {"SEQUENCE", "MOVIE"} or duration > 1:
             result.add(MaterialDependencyKind.TIME)
-    if getattr(material, "animation_data", None) is not None or getattr(
-        node_tree, "animation_data", None
-    ) is not None:
+
+    if getattr(material, "animation_data", None) is not None:
         result.add(MaterialDependencyKind.TIME)
+    for node_tree in walker.node_trees.values():
+        if getattr(node_tree, "animation_data", None) is not None:
+            result.add(MaterialDependencyKind.TIME)
     return tuple(sorted(result, key=lambda value: value.value))
 
 
 def analyse_material_graph(material: Any) -> MaterialGraphSnapshot:
-    """Analyze only nodes reachable from the active Material Output when possible."""
+    """Analyze reachable nodes, recursively expanding used Shader Node Groups."""
 
     if material is None:
         raise MaterialGraphAnalysisError("material cannot be None")
@@ -423,45 +678,32 @@ def analyse_material_graph(material: Any) -> MaterialGraphSnapshot:
         raise MaterialGraphAnalysisError(f"Material '{material_name}' has no node tree")
 
     nodes = _iter_nodes(node_tree)
-    links = _iter_links(node_tree)
     output = _find_active_output(nodes)
-    issues: list[str] = []
-    incoming = _incoming_by_node_name(links)
+    walker = _RecursiveGraphWalker(material_name, node_tree)
     if output is None:
-        issues.append(
+        walker.issues.append(
             "Active Material Output was not found; semantic analysis used all nodes"
         )
-        reachable_nodes = nodes
-        reachable_links = links
+        walker.walk_all_nodes()
     else:
-        reachable_names, reachable_links = _reachable_from_nodes((output,), incoming)
-        reachable_nodes = tuple(
-            node for node in nodes if _node_name(node) in reachable_names
-        )
+        walker.walk_material_output(output)
 
     node_snapshots = tuple(
         ShaderNodeSnapshot(
-            node_id=_node_name(node),
-            node_type=_node_type(node),
-            node_name=_node_name(node),
+            node_id=node_id,
+            node_type=_node_type(item.node),
+            node_name=_node_name(item.node),
+            group_path=item.frame.group_path,
         )
-        for node in sorted(reachable_nodes, key=lambda item: _node_name(item).casefold())
+        for node_id, item in sorted(
+            walker.nodes.items(), key=lambda pair: pair[0].casefold()
+        )
     )
     link_snapshots = tuple(
-        ShaderLinkSnapshot(
-            from_node_id=_node_name(getattr(link, "from_node", None)),
-            from_socket=_socket_name(getattr(link, "from_socket", None)),
-            to_node_id=_node_name(getattr(link, "to_node", None)),
-            to_socket=_socket_name(getattr(link, "to_socket", None)),
-        )
-        for link in sorted(
-            reachable_links,
-            key=lambda item: (
-                _node_name(getattr(item, "from_node", None)).casefold(),
-                _socket_name(getattr(item, "from_socket", None)).casefold(),
-                _node_name(getattr(item, "to_node", None)).casefold(),
-                _socket_name(getattr(item, "to_socket", None)).casefold(),
-            ),
+        walker.links[key]
+        for key in sorted(
+            walker.links,
+            key=lambda item: tuple(component.casefold() for component in item),
         )
     )
     snapshot = MaterialGraphSnapshot(
@@ -469,15 +711,16 @@ def analyse_material_graph(material: Any) -> MaterialGraphSnapshot:
         active_output_node_id=None if output is None else _node_name(output),
         reachable_nodes=node_snapshots,
         reachable_links=link_snapshots,
-        semantic_channels=_semantic_channels(output, reachable_nodes, links, incoming),
-        dependencies=_dependencies(material, node_tree, reachable_nodes),
-        issues=tuple(issues),
+        semantic_channels=_semantic_channels(walker),
+        dependencies=_dependencies(material, walker),
+        issues=tuple(dict.fromkeys(walker.issues)),
     )
     logger.debug(
-        "Analyzed reachable shader graph '%s': nodes=%d channels=%s dependencies=%s",
+        "Analyzed recursive shader graph '%s': nodes=%d channels=%s dependencies=%s issues=%s",
         material_name,
         len(snapshot.reachable_nodes),
         tuple(value.value for value in snapshot.semantic_channels),
         tuple(value.value for value in snapshot.dependencies),
+        snapshot.issues,
     )
     return snapshot
