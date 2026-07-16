@@ -25,6 +25,7 @@ from ..application import (
     A1ZGroupAssignmentPlan,
     ExportIssue,
     IssueSeverity,
+    assemble_a1_camera_projection_document,
     assemble_a1_document,
     build_a1_attachment_path,
     build_a1_attachment_sequence,
@@ -38,7 +39,12 @@ from ..application import (
     resolve_a1_names,
     resolve_a1_output_paths,
 )
-from ..domain.baking import BakePlan, ObjectMaterialAnalysis, build_bake_plan
+from ..domain.baking import (
+    BakePlan,
+    CameraProjectionPlan,
+    ObjectMaterialAnalysis,
+    build_texture_plan,
+)
 from ..domain.geometry import LineageSeverity, MeshSnapshot
 from ..domain.spine import (
     LegacyRigBuildRequest,
@@ -359,14 +365,18 @@ def prepare_a1_object(
             scene=scene,
             context=context,
         )
-        bake_plan = build_bake_plan(
+        bake_plan = build_texture_plan(
             material_analysis,
             build_a1_bake_settings(object_id, settings),
             object_context=object_bake_context,
             scene_context=scene_bake_context,
         )
+        camera_projection = isinstance(bake_plan, CameraProjectionPlan)
         statistics.update(
             {
+                "texture_pipeline": (
+                    "CAMERA_RENDER_PROJECTION" if camera_projection else "OBJECT_BAKE"
+                ),
                 "bake_mode": bake_plan.bake_mode.value,
                 "bake_frame_count": len(bake_plan.frame_tasks),
                 "bake_pass_count": len(bake_plan.passes),
@@ -390,9 +400,10 @@ def prepare_a1_object(
                 texture_width=settings.export.texture_width,
                 texture_height=settings.export.texture_height,
                 z_groups=z_groups.groups,
-                main_position_pixels=calculate_a1_main_position_pixels(
-                    source_snapshot,
-                    settings,
+                main_position_pixels=(
+                    None
+                    if camera_projection
+                    else calculate_a1_main_position_pixels(source_snapshot, settings)
                 ),
                 scale_mode=settings.rig_scale_mode,
             )
@@ -401,33 +412,45 @@ def prepare_a1_object(
 
         stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
         attachment_path = build_a1_attachment_path(bake_plan, output_paths)
-        document_assembly = assemble_a1_document(
-            rig,
-            z_groups,
-            uv_regions.snapshots,
-            A1DocumentAssemblySettings(
-                prefix=prefix,
-                uv_layer_name=settings.uv.layer_name,
-                image_path=attachment_path,
-                attachment_width=settings.export.texture_width,
-                attachment_height=settings.export.texture_height,
-                center_x=bounds.center_x,
-                center_y=bounds.center_y,
-                sequence=build_a1_attachment_sequence(bake_plan),
-                include_control_icons=settings.include_control_icons,
-                include_preview_animation=settings.include_preview_animation,
-            ),
-            skeleton_metadata={
-                "hash": "hash_value_placeholder",
-                "spine": settings.export.spine_version,
-                "x": 0,
-                "y": 0,
-                "width": settings.export.texture_width,
-                "height": settings.export.texture_height,
-                "images": "",
-                "audio": "./audio",
-            },
+        assembly_settings = A1DocumentAssemblySettings(
+            prefix=prefix,
+            uv_layer_name=settings.uv.layer_name,
+            image_path=attachment_path,
+            attachment_width=settings.export.texture_width,
+            attachment_height=settings.export.texture_height,
+            center_x=0.0 if camera_projection else bounds.center_x,
+            center_y=0.0 if camera_projection else bounds.center_y,
+            sequence=build_a1_attachment_sequence(bake_plan),
+            include_control_icons=settings.include_control_icons,
+            include_preview_animation=settings.include_preview_animation,
         )
+        skeleton_metadata = {
+            "hash": "hash_value_placeholder",
+            "spine": settings.export.spine_version,
+            "x": 0,
+            "y": 0,
+            "width": settings.export.texture_width,
+            "height": settings.export.texture_height,
+            "images": "",
+            "audio": "./audio",
+        }
+        if camera_projection:
+            assert isinstance(bake_plan, CameraProjectionPlan)
+            document_assembly = assemble_a1_camera_projection_document(
+                rig,
+                z_groups,
+                bake_plan,
+                assembly_settings,
+                skeleton_metadata=skeleton_metadata,
+            )
+        else:
+            document_assembly = assemble_a1_document(
+                rig,
+                z_groups,
+                uv_regions.snapshots,
+                assembly_settings,
+                skeleton_metadata=skeleton_metadata,
+            )
         document = document_assembly.document
         statistics.update(
             {
