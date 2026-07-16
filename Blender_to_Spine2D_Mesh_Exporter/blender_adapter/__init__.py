@@ -8,9 +8,9 @@ from .a1_multi_object_export import (
     A1MultiObjectPreparationError,
     A1MultiObjectSource,
     PreparedA1MultiObject,
-    export_a1_multi_object,
     prepare_a1_multi_object,
 )
+from .a1_multi_object_output import export_a1_multi_object
 from .a1_object_preparation import (
     A1ObjectPreparationError,
     PreparedA1Object,
@@ -48,6 +48,7 @@ from .camera_projection_executor import (
     execute_camera_projection_plan,
     preserve_camera_projection_state,
     stage_camera_projection_outputs,
+    stage_camera_projection_outputs_detailed,
 )
 from .context_state import (
     BlenderContextError,
@@ -140,6 +141,7 @@ __all__ = [
     "read_source_mesh_snapshot",
     "stage_bake_plan_outputs",
     "stage_camera_projection_outputs",
+    "stage_camera_projection_outputs_detailed",
     "temporary_bake_materials",
     "temporary_mesh_object",
     "unwrap_snapshot_uv",
