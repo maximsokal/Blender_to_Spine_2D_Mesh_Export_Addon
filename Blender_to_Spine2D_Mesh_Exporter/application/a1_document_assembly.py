@@ -38,8 +38,8 @@ class A1DocumentAssemblySettings:
     sequence: LegacyAttachmentSequence | None = None
     skin_name: str = "default"
     segment_index_base: int = 0
-    include_control_icons: bool = True
-    include_preview_animation: bool = True
+    include_control_icons: bool = False
+    include_preview_animation: bool = False
 
     def __post_init__(self) -> None:
         for field_name in ("prefix", "uv_layer_name", "image_path", "skin_name"):
