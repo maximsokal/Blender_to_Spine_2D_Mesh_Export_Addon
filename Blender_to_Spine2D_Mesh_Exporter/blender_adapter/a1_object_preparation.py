@@ -1,12 +1,9 @@
 """Prepare one Blender mesh for A1 export without writing output files.
 
-The preparation service is the reusable boundary shared by single-object and future
-multi-object orchestration. It reads/evaluates the live source object, produces only
-immutable domain/application values, and returns after every temporary Blender
-datablock and context mutation has already been cleaned up.
-
-No JSON or texture file is created here. The caller owns document composition,
-serialization, bake staging, and the final atomic filesystem transaction.
+The preparation service is the reusable boundary shared by single- and multi-object
+orchestration. It reads/evaluates the live source object, produces immutable domain and
+application values, and returns after temporary Blender datablocks and context mutations
+have already been cleaned up.
 """
 
 from __future__ import annotations
@@ -212,12 +209,7 @@ def prepare_a1_object(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> PreparedA1Object:
-    """Run every A1 object stage up to a validated in-memory Spine document.
-
-    The returned ``bake_target_snapshot`` contains the global shared UV layout used
-    by every region attachment. The live ``source_object`` is retained only so an
-    outer transaction can evaluate its materials during Cycles baking.
-    """
+    """Run every A1 object stage up to a validated in-memory Spine document."""
 
     stage = A1SingleObjectStage.VALIDATE_REQUEST
     object_id: str | None = None
@@ -235,6 +227,10 @@ def prepare_a1_object(
                 "source_object": object_id,
                 "rig_prefix": prefix,
                 "source_geometry_mode": settings.source_geometry_mode.value,
+                "include_control_icons": int(settings.include_control_icons),
+                "include_preview_animation": int(
+                    settings.include_preview_animation
+                ),
             }
         )
 
@@ -400,6 +396,8 @@ def prepare_a1_object(
                 center_x=bounds.center_x,
                 center_y=bounds.center_y,
                 sequence=build_a1_attachment_sequence(bake_plan),
+                include_control_icons=settings.include_control_icons,
+                include_preview_animation=settings.include_preview_animation,
             ),
             skeleton_metadata={
                 "hash": "hash_value_placeholder",
