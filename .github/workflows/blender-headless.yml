@@ -104,6 +104,17 @@ jobs:
             --python tests/blender_headless/run_parity_integration.py \
             2>&1 | tee test-results/blender-parity.log
 
+      - name: Run real Blender multi-object export tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_multi_object_export_integration.py \
+            2>&1 | tee test-results/blender-multi-object.log
+
       - name: Upload Blender integration logs
         if: always()
         uses: actions/upload-artifact@v4
