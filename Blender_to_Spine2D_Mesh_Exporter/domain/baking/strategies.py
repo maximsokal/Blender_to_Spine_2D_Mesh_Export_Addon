@@ -17,6 +17,8 @@ from .model import (
     BakeStrategyId,
     MaterialAnalysis,
     MaterialKind,
+    MaterialPreparationMode,
+    MaterialSlotPreparation,
     ObjectMaterialAnalysis,
 )
 
@@ -43,6 +45,13 @@ class BakeStrategy(Protocol):
     ) -> BakeMode:
         ...
 
+    def material_preparations(
+        self,
+        matched_slots: Tuple[MaterialAnalysis, ...],
+        usable_slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSlotPreparation, ...]:
+        ...
+
 
 def _slot_requires_procedural_mode(
     slot: MaterialAnalysis,
@@ -63,25 +72,14 @@ class SurfaceColorBakeStrategy:
     priority: int = 100
 
     def supports(self, slot: MaterialAnalysis) -> bool:
-        channels = set(slot.semantic_channels)
-        return bool(
-            channels
-            & {
-                MaterialSemanticChannel.SURFACE_COLOR,
-                # Alpha gets its own pass/compositor in B2. Until then it follows the
-                # historical surface pass instead of silently dropping the material.
-                MaterialSemanticChannel.ALPHA,
-            }
-        )
+        return MaterialSemanticChannel.SURFACE_COLOR in slot.semantic_channels
 
     def semantic_channels(
         self,
         slots: Tuple[MaterialAnalysis, ...],
     ) -> Tuple[MaterialSemanticChannel, ...]:
-        channels = {MaterialSemanticChannel.SURFACE_COLOR}
-        if any(MaterialSemanticChannel.ALPHA in slot.semantic_channels for slot in slots):
-            channels.add(MaterialSemanticChannel.ALPHA)
-        return tuple(sorted(channels, key=lambda value: value.value))
+        del slots
+        return (MaterialSemanticChannel.SURFACE_COLOR,)
 
     def select_mode(
         self,
@@ -94,6 +92,14 @@ class SurfaceColorBakeStrategy:
         ):
             return settings.procedural_mode
         return settings.diffuse_mode
+
+    def material_preparations(
+        self,
+        matched_slots: Tuple[MaterialAnalysis, ...],
+        usable_slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSlotPreparation, ...]:
+        del matched_slots, usable_slots
+        return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +124,58 @@ class EmissionBakeStrategy:
     ) -> BakeMode:
         del slots, settings
         return BakeMode.EMIT
+
+    def material_preparations(
+        self,
+        matched_slots: Tuple[MaterialAnalysis, ...],
+        usable_slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSlotPreparation, ...]:
+        del matched_slots, usable_slots
+        return ()
+
+
+@dataclass(frozen=True, slots=True)
+class AlphaBakeStrategy:
+    """Expose computed material opacity as a grayscale EMIT pass."""
+
+    strategy_id: BakeStrategyId = BakeStrategyId.ALPHA
+    priority: int = 300
+
+    def supports(self, slot: MaterialAnalysis) -> bool:
+        return MaterialSemanticChannel.ALPHA in slot.semantic_channels
+
+    def semantic_channels(
+        self,
+        slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSemanticChannel, ...]:
+        del slots
+        return (MaterialSemanticChannel.ALPHA,)
+
+    def select_mode(
+        self,
+        slots: Tuple[MaterialAnalysis, ...],
+        settings: BakeSettings,
+    ) -> BakeMode:
+        del slots, settings
+        return BakeMode.EMIT
+
+    def material_preparations(
+        self,
+        matched_slots: Tuple[MaterialAnalysis, ...],
+        usable_slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSlotPreparation, ...]:
+        alpha_slots = {slot.slot_index for slot in matched_slots}
+        return tuple(
+            MaterialSlotPreparation(
+                slot_index=slot.slot_index,
+                mode=(
+                    MaterialPreparationMode.EXTRACT_ALPHA_TO_EMISSION
+                    if slot.slot_index in alpha_slots
+                    else MaterialPreparationMode.OPAQUE_ALPHA_TO_EMISSION
+                ),
+            )
+            for slot in usable_slots
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +251,10 @@ class BakeStrategyRegistry:
                     bake_mode=strategy.select_mode(matched, settings),
                     material_slot_indices=slot_indices,
                     semantic_channels=strategy.semantic_channels(matched),
+                    material_preparations=strategy.material_preparations(
+                        matched,
+                        usable,
+                    ),
                 )
             )
 
@@ -209,11 +271,10 @@ class BakeStrategyRegistry:
         if not resolved:
             raise BakePlanError("strategy registry produced no bake passes")
 
-        if len(resolved) > 1:
-            # COMBINED already contains emission, so composing it with a separate EMIT
-            # pass would count the same energy twice. A semantic SURFACE_COLOR pass is
-            # therefore normalized to DIFFUSE Color whenever another strategy also
-            # contributes to the final image. Single-pass legacy behavior is unchanged.
+        has_emission_pass = any(
+            item.strategy_id is BakeStrategyId.EMISSION for item in resolved
+        )
+        if has_emission_pass:
             resolved = [
                 replace(item, bake_mode=BakeMode.DIFFUSE)
                 if item.strategy_id is BakeStrategyId.SURFACE_COLOR
@@ -222,12 +283,35 @@ class BakeStrategyRegistry:
                 for item in resolved
             ]
 
-        composite_mode = (
-            BakeCompositeMode.SINGLE
-            if len(resolved) == 1
-            else BakeCompositeMode.ADD_RGB_MAX_ALPHA
+        alpha_indices = tuple(
+            item.pass_index
+            for item in resolved
+            if item.strategy_id is BakeStrategyId.ALPHA
         )
-        return tuple(resolved), BakeCompositePlan(mode=composite_mode, clamp_rgb=True)
+        if len(alpha_indices) > 1:
+            raise BakePlanError("only one alpha strategy pass may be registered")
+        if alpha_indices:
+            alpha_index = alpha_indices[0]
+            color_indices = tuple(
+                item.pass_index
+                for item in resolved
+                if item.pass_index != alpha_index
+            )
+            composite = BakeCompositePlan(
+                mode=BakeCompositeMode.ADD_RGB_REPLACE_ALPHA,
+                clamp_rgb=True,
+                color_pass_indices=color_indices,
+                alpha_pass_index=alpha_index,
+            )
+        elif len(resolved) == 1:
+            composite = BakeCompositePlan(mode=BakeCompositeMode.SINGLE, clamp_rgb=True)
+        else:
+            composite = BakeCompositePlan(
+                mode=BakeCompositeMode.ADD_RGB_MAX_ALPHA,
+                clamp_rgb=True,
+                color_pass_indices=tuple(item.pass_index for item in resolved),
+            )
+        return tuple(resolved), composite
 
 
 def build_default_bake_strategy_registry() -> BakeStrategyRegistry:
@@ -235,6 +319,7 @@ def build_default_bake_strategy_registry() -> BakeStrategyRegistry:
         strategies=(
             SurfaceColorBakeStrategy(),
             EmissionBakeStrategy(),
+            AlphaBakeStrategy(),
         )
     )
 
