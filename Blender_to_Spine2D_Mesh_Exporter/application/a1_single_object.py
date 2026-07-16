@@ -78,6 +78,8 @@ class A1SingleObjectExportSettings:
     bake_execution: BakeExecutionSettings = BakeExecutionSettings()
     rig_scale_mode: UniformScaleMode = UniformScaleMode.AVERAGE
     use_world_location_for_main_bone: bool = True
+    include_control_icons: bool = True
+    include_preview_animation: bool = True
     json_indent: int = 2
 
     def __post_init__(self) -> None:
@@ -122,8 +124,13 @@ class A1SingleObjectExportSettings:
             raise TypeError("bake_execution must be BakeExecutionSettings")
         if not isinstance(self.rig_scale_mode, UniformScaleMode):
             raise TypeError("rig_scale_mode must be UniformScaleMode")
-        if not isinstance(self.use_world_location_for_main_bone, bool):
-            raise TypeError("use_world_location_for_main_bone must be bool")
+        for field_name in (
+            "use_world_location_for_main_bone",
+            "include_control_icons",
+            "include_preview_animation",
+        ):
+            if not isinstance(getattr(self, field_name), bool):
+                raise TypeError(f"{field_name} must be bool")
         if not isinstance(self.json_indent, int) or not 0 <= self.json_indent <= 16:
             raise ValueError("json_indent must be an integer in [0, 16]")
 
