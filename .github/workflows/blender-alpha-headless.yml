@@ -60,6 +60,17 @@ jobs:
             --python tests/blender_headless/run_alpha_bake_integration.py \
             2>&1 | tee test-results/blender-alpha-bake.log
 
+      - name: Run renderer-specific material proxy test
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_renderer_specific_proxy_integration.py \
+            2>&1 | tee test-results/blender-alpha-renderer-proxy.log
+
       - name: Run alpha sequence nested and rollback tests
         shell: bash
         run: |
