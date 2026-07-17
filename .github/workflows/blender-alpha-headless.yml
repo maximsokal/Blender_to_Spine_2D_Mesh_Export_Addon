@@ -71,6 +71,17 @@ jobs:
             --python tests/blender_headless/run_renderer_specific_proxy_integration.py \
             2>&1 | tee test-results/blender-alpha-renderer-proxy.log
 
+      - name: Run source and bake UV role test
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_uv_sampling_role_integration.py \
+            2>&1 | tee test-results/blender-alpha-uv-sampling-role.log
+
       - name: Run alpha sequence nested and rollback tests
         shell: bash
         run: |
