@@ -8,9 +8,11 @@ triangulation. It creates no Blender objects and performs no UV operators.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Tuple
 
 from ..domain.geometry import (
+    A1AngularMode,
     DecompositionSettings,
     MeshDecompositionPlan,
     MeshSnapshot,
@@ -38,6 +40,8 @@ class A1GeometryPreparationSettings:
     segmentation: SegmentationSettings = SegmentationSettings()
     decomposition: DecompositionSettings = DecompositionSettings()
     triangulation: TriangulationSettings = TriangulationSettings()
+    angular_mode: A1AngularMode = A1AngularMode.LEGACY_SEED_CONE
+    local_angle_limit_degrees: float | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.segmentation, SegmentationSettings):
@@ -46,6 +50,16 @@ class A1GeometryPreparationSettings:
             raise TypeError("decomposition must be DecompositionSettings")
         if not isinstance(self.triangulation, TriangulationSettings):
             raise TypeError("triangulation must be TriangulationSettings")
+        if not isinstance(self.angular_mode, A1AngularMode):
+            raise TypeError("angular_mode must be A1AngularMode")
+        if self.local_angle_limit_degrees is not None:
+            value = self.local_angle_limit_degrees
+            if not isinstance(value, (int, float)) or not isfinite(float(value)):
+                raise ValueError("local_angle_limit_degrees must be finite or None")
+            if float(value) < 0.0 or float(value) > 180.0:
+                raise ValueError(
+                    "local_angle_limit_degrees must be in the range [0, 180]"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,8 +74,13 @@ class A1PreparedRegion:
     def __post_init__(self) -> None:
         if not isinstance(self.region_index, int) or self.region_index < 0:
             raise ValueError("region_index must be a non-negative integer")
-        if not isinstance(self.decomposition_region_id, int) or self.decomposition_region_id < 0:
-            raise ValueError("decomposition_region_id must be a non-negative integer")
+        if (
+            not isinstance(self.decomposition_region_id, int)
+            or self.decomposition_region_id < 0
+        ):
+            raise ValueError(
+                "decomposition_region_id must be a non-negative integer"
+            )
         if not isinstance(self.source_segment_id, int) or self.source_segment_id < 0:
             raise ValueError("source_segment_id must be a non-negative integer")
         if not isinstance(self.source_face_ids, tuple) or not self.source_face_ids:
@@ -156,6 +175,8 @@ def prepare_a1_geometry_regions(
     segmentation = segment_mesh_a1(
         source_snapshot,
         resolved_settings.segmentation,
+        angular_mode=resolved_settings.angular_mode,
+        local_angle_limit_degrees=resolved_settings.local_angle_limit_degrees,
     )
     decomposition = decompose_complex_segments(
         source_snapshot,
