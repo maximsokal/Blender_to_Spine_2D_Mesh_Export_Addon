@@ -183,6 +183,10 @@ class DiskRegionState:
         "_vertex_ids",
         "_boundary_edge_ids",
         "_boundary_degrees",
+        "_invalid_edge_count",
+        "_invalid_boundary_degree_count",
+        "_minimum_face_index",
+        "_maximum_face_index",
         "_revision",
     )
 
@@ -199,13 +203,35 @@ class DiskRegionState:
     ) -> None:
         if not isinstance(topology_index, DiskTopologyIndex):
             raise TypeError("topology_index must be DiskTopologyIndex")
+        resolved_faces = set(face_ids)
+        if not resolved_faces:
+            raise RegionTopologyError("DiskRegionState requires at least one face")
         self._index = topology_index
-        self._face_ids = set(face_ids)
+        self._face_ids = resolved_faces
         self._edge_face_counts = dict(edge_face_counts)
         self._vertex_ids = set(vertex_ids)
         self._boundary_edge_ids = set(boundary_edge_ids)
-        self._boundary_degrees = dict(boundary_degrees)
+        self._boundary_degrees = {
+            vertex_id: degree
+            for vertex_id, degree in boundary_degrees.items()
+            if degree
+        }
+        self._invalid_edge_count = sum(
+            not self._edge_incidence_is_valid(edge_id, count)
+            for edge_id, count in self._edge_face_counts.items()
+        )
+        self._invalid_boundary_degree_count = sum(
+            degree != 2 for degree in self._boundary_degrees.values()
+        )
+        self._minimum_face_index = min(face_id.index for face_id in resolved_faces)
+        self._maximum_face_index = max(face_id.index for face_id in resolved_faces)
         self._revision = revision
+
+    def _edge_incidence_is_valid(self, edge_id: EdgeId, count: int) -> bool:
+        return (
+            1 <= count <= 2
+            and len(self._index.edge_to_faces.get(edge_id, ())) <= 2
+        )
 
     @classmethod
     def from_face(
@@ -268,32 +294,34 @@ class DiskRegionState:
         return len(self._face_ids)
 
     @property
+    def minimum_face_index(self) -> int:
+        return self._minimum_face_index
+
+    @property
+    def maximum_face_index(self) -> int:
+        return self._maximum_face_index
+
+    @property
     def boundary_edge_ids(self) -> Tuple[EdgeId, ...]:
         return tuple(sorted(self._boundary_edge_ids, key=lambda item: item.index))
 
     @property
     def topology(self) -> SegmentTopology:
-        euler_characteristic = (
-            len(self._vertex_ids)
-            - len(self._edge_face_counts)
-            + len(self._face_ids)
-        )
-        edge_manifold = all(
-            1 <= count <= 2
-            and len(self._index.edge_to_faces.get(edge_id, ())) <= 2
-            for edge_id, count in self._edge_face_counts.items()
-        )
-        boundary_manifold = all(
-            degree == 2 for degree in self._boundary_degrees.values()
-        )
         return SegmentTopology(
             vertex_count=len(self._vertex_ids),
             edge_count=len(self._edge_face_counts),
             face_count=len(self._face_ids),
-            euler_characteristic=euler_characteristic,
+            euler_characteristic=(
+                len(self._vertex_ids)
+                - len(self._edge_face_counts)
+                + len(self._face_ids)
+            ),
             boundary_edge_count=len(self._boundary_edge_ids),
             boundary_component_count=1 if self._boundary_edge_ids else 0,
-            manifold=edge_manifold and boundary_manifold,
+            manifold=(
+                self._invalid_edge_count == 0
+                and self._invalid_boundary_degree_count == 0
+            ),
         )
 
     def preview_add_face(self, face_id: FaceId) -> DiskRegionAddition | None:
@@ -340,8 +368,9 @@ class DiskRegionState:
             for edge_id in boundary_edges_to_remove
             for vertex_id in edge_map[edge_id].vertex_ids
         }
+        candidate_vertex_set = set(vertex_ids)
         # Additional vertex-only contact creates a pinched/non-manifold union.
-        if set(vertex_ids) & self._vertex_ids != interface_vertices:
+        if candidate_vertex_set & self._vertex_ids != interface_vertices:
             return None
 
         degree_deltas: dict[VertexId, int] = defaultdict(int)
@@ -356,7 +385,9 @@ class DiskRegionState:
             if resulting_degree not in (0, 2):
                 return None
 
-        resulting_vertex_count = len(self._vertex_ids | set(vertex_ids))
+        resulting_vertex_count = len(self._vertex_ids) + sum(
+            vertex_id not in self._vertex_ids for vertex_id in vertex_ids
+        )
         resulting_edge_count = (
             len(self._edge_face_counts) + len(boundary_edges_to_add)
         )
@@ -406,17 +437,41 @@ class DiskRegionState:
             )
 
         self._face_ids.add(addition.face_id)
+        self._minimum_face_index = min(
+            self._minimum_face_index,
+            addition.face_id.index,
+        )
+        self._maximum_face_index = max(
+            self._maximum_face_index,
+            addition.face_id.index,
+        )
         self._vertex_ids.update(addition.vertex_ids)
         for edge_id in addition.edge_ids:
-            self._edge_face_counts[edge_id] = (
-                self._edge_face_counts.get(edge_id, 0) + 1
+            previous_count = self._edge_face_counts.get(edge_id, 0)
+            previous_invalid = not self._edge_incidence_is_valid(
+                edge_id,
+                previous_count,
+            ) if previous_count else False
+            resulting_count = previous_count + 1
+            resulting_invalid = not self._edge_incidence_is_valid(
+                edge_id,
+                resulting_count,
             )
+            self._invalid_edge_count += int(resulting_invalid) - int(previous_invalid)
+            self._edge_face_counts[edge_id] = resulting_count
+
         self._boundary_edge_ids.difference_update(
             addition.boundary_edges_to_remove
         )
         self._boundary_edge_ids.update(addition.boundary_edges_to_add)
         for vertex_id, delta in addition.boundary_degree_deltas:
-            resulting_degree = self._boundary_degrees.get(vertex_id, 0) + delta
+            previous_degree = self._boundary_degrees.get(vertex_id, 0)
+            previous_invalid = previous_degree not in (0, 2)
+            resulting_degree = previous_degree + delta
+            resulting_invalid = resulting_degree not in (0, 2)
+            self._invalid_boundary_degree_count += (
+                int(resulting_invalid) - int(previous_invalid)
+            )
             if resulting_degree:
                 self._boundary_degrees[vertex_id] = resulting_degree
             else:
@@ -439,11 +494,10 @@ class DiskRegionState:
         if self._face_ids & other._face_ids:
             return None
 
-        common_edges = set(self._edge_face_counts) & set(other._edge_face_counts)
         shared_boundary_edges = (
             self._boundary_edge_ids & other._boundary_edge_ids
         )
-        if not shared_boundary_edges or common_edges != shared_boundary_edges:
+        if not shared_boundary_edges:
             return None
 
         edge_map = self._index.edge_map
@@ -471,9 +525,15 @@ class DiskRegionState:
             if resulting_degree not in (0, 2):
                 return None
 
-        resulting_vertex_count = len(self._vertex_ids | other._vertex_ids)
-        resulting_edge_count = len(
-            set(self._edge_face_counts) | set(other._edge_face_counts)
+        resulting_vertex_count = (
+            len(self._vertex_ids)
+            + len(other._vertex_ids)
+            - len(interface_vertices)
+        )
+        resulting_edge_count = (
+            len(self._edge_face_counts)
+            + len(other._edge_face_counts)
+            - len(shared_boundary_edges)
         )
         resulting_face_count = len(self._face_ids) + len(other._face_ids)
         if (
