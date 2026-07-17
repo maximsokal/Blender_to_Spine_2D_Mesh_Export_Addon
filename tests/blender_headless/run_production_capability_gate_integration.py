@@ -104,9 +104,27 @@ def _value_emission_material(name: str, node_type: str, output_name: str):
     return material
 
 
-def _prepare_with_material(material, stem: str):
+def _texture_coordinate_uv_material(name: str):
+    material = bpy.data.materials.new(name=name)
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    nodes.clear()
+    output = nodes.new(type="ShaderNodeOutputMaterial")
+    texture_coordinate = nodes.new(type="ShaderNodeTexCoord")
+    separate = nodes.new(type="ShaderNodeSeparateXYZ")
+    emission = nodes.new(type="ShaderNodeEmission")
+    material.node_tree.links.new(texture_coordinate.outputs["UV"], separate.inputs["Vector"])
+    material.node_tree.links.new(separate.outputs["X"], emission.inputs["Color"])
+    material.node_tree.links.new(emission.outputs["Emission"], output.inputs["Surface"])
+    return material
+
+
+def _prepare_with_material(material, stem: str, *, remove_uv_layers: bool = False):
     with tempfile.TemporaryDirectory(prefix=f"spine2d-capability-{stem}-") as directory:
         source = _create_quad(f"{stem}Source")
+        if remove_uv_layers:
+            while source.data.uv_layers:
+                source.data.uv_layers.remove(source.data.uv_layers[0])
         source.data.materials.append(material)
         return prepare_a1_object(source, _settings(Path(directory), stem))
 
@@ -149,6 +167,24 @@ def test_object_and_camera_inputs_route_to_b4() -> None:
         )
 
 
+def test_missing_source_uv_does_not_reuse_spine_bake_uv() -> None:
+    _prepare_scene_with_sentinel()
+    prepared = _prepare_with_material(
+        _texture_coordinate_uv_material("MissingSourceUvMaterial"),
+        "MissingSourceUv",
+        remove_uv_layers=True,
+    )
+
+    _assert(
+        isinstance(prepared.bake_plan, CameraProjectionPlan),
+        "Texture Coordinate UV without a source UV was assigned to object bake",
+    )
+    _assert(
+        prepared.statistics["shader_capability"] == "CAMERA_RENDER_REQUIRED",
+        f"missing source UV has wrong capability: {prepared.statistics['shader_capability']}",
+    )
+
+
 def test_particle_context_fails_before_bake() -> None:
     _prepare_scene_with_sentinel()
     material = _value_emission_material(
@@ -176,6 +212,7 @@ def main() -> None:
     tests = (
         test_alpha_proxy_boundaries_route_to_b4,
         test_object_and_camera_inputs_route_to_b4,
+        test_missing_source_uv_does_not_reuse_spine_bake_uv,
         test_particle_context_fails_before_bake,
     )
     for test in tests:
