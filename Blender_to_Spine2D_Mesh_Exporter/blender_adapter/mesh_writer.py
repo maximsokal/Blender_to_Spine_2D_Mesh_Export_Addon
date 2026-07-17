@@ -117,6 +117,43 @@ def _write_face_properties(snapshot: MeshSnapshot, mesh: Any) -> None:
         polygon.use_smooth = face.smooth
 
 
+def _write_uv_roles(snapshot: MeshSnapshot, mesh: Any) -> None:
+    layers = getattr(mesh, "uv_layers", None)
+    if layers is None:
+        if snapshot.uv_layer_names:
+            raise MeshWriteError("Generated mesh has no UV layer collection")
+        return
+
+    if snapshot.active_uv_layer is not None:
+        active = layers.get(snapshot.active_uv_layer)
+        if active is None:
+            raise MeshWriteError(
+                f"Active UV layer '{snapshot.active_uv_layer}' was not materialized"
+            )
+        try:
+            layers.active = active
+        except Exception as exc:
+            raise MeshWriteError(
+                f"Unable to activate bake UV layer '{snapshot.active_uv_layer}'"
+            ) from exc
+
+    render_name = snapshot.render_uv_layer or snapshot.active_uv_layer
+    if render_name is None:
+        return
+    render_layer = layers.get(render_name)
+    if render_layer is None:
+        raise MeshWriteError(
+            f"Render UV layer '{render_name}' was not materialized"
+        )
+    try:
+        for layer in layers:
+            layer.active_render = layer is render_layer or layer.name == render_name
+    except Exception as exc:
+        raise MeshWriteError(
+            f"Unable to activate shader render UV layer '{render_name}'"
+        ) from exc
+
+
 def _write_uv_layers(snapshot: MeshSnapshot, mesh: Any) -> None:
     loop_map = snapshot.loop_by_id()
     for layer_name in snapshot.uv_layer_names:
@@ -138,13 +175,7 @@ def _write_uv_layers(snapshot: MeshSnapshot, mesh: Any) -> None:
                     )
                 layer.data[mesh_loop_index].uv = coordinate
 
-    if snapshot.active_uv_layer is not None:
-        active = mesh.uv_layers.get(snapshot.active_uv_layer)
-        if active is None:
-            raise MeshWriteError(
-                f"Active UV layer '{snapshot.active_uv_layer}' was not materialized"
-            )
-        mesh.uv_layers.active = active
+    _write_uv_roles(snapshot, mesh)
 
 
 def _remove_collection(bpy_module: Any, collection: Any | None) -> None:
