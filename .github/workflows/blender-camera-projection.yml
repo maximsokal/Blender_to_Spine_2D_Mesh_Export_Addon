@@ -1,35 +1,7 @@
 name: Blender 4.4 Camera Projection
 
+# Manual-only while the rewrite branch is under active development.
 on:
-  pull_request:
-    branches: ["main", "master"]
-    paths:
-      - ".github/workflows/blender-camera-projection.yml"
-      - "Blender_to_Spine2D_Mesh_Exporter/application/a1_camera_projection.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/application/__init__.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/a1_object_preparation.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/a1_projection_finalization.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/a1_single_object_export.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/a1_multi_object_output.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/a1_mixed_object_output.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/bake_executor.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/camera_projection_executor.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/camera_projection_executor_core.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/camera_projection_image.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/camera_projection_state.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/shader_graph_analyzer.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/texture_executor.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/domain/baking/camera_projection.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/domain/baking/projection_layout.py"
-      - "tests/test_camera_projection_planning.py"
-      - "tests/test_projection_layout.py"
-      - "tests/test_recursive_node_group_analysis.py"
-      - "tests/blender_headless/run_camera_projection_integration.py"
-      - "tests/blender_headless/run_camera_projection_multi_integration.py"
-      - "tests/blender_headless/run_recursive_node_group_integration.py"
-      - "docs/REWRITE_CAMERA_PROJECTION.md"
-      - "docs/REWRITE_BAKE_STRATEGIES.md"
-      - "docs/REWRITE_STATUS.md"
   workflow_dispatch:
 
 permissions:
