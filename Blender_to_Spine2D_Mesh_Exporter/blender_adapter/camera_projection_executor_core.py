@@ -16,8 +16,8 @@ from ..domain.baking import (
 from ..domain.baking.projection_layout import (
     CameraProjectionLayout,
     CameraProjectionLayoutError,
+    ProjectionAlphaUnionAccumulator,
     build_full_frame_layout,
-    build_sequence_union_layout,
 )
 from ..infrastructure import (
     AtomicFileTransaction,
@@ -56,7 +56,7 @@ class CameraProjectionStageResult:
         if not isinstance(self.layout, CameraProjectionLayout):
             raise TypeError("layout must be CameraProjectionLayout")
         if len(self.reservations) != self.layout.frame_count:
-            raise ValueError("reservation count must match layout frame_count")
+            raise ValueError("reservation count must match layout.frame_count")
 
 
 def _render_to_reservations(
@@ -76,7 +76,16 @@ def _render_to_reservations(
         scene=scene,
     )
     resolved = require_reservations(plan, reservations)
-    masks: list[bytes] = []
+    union_accumulator = (
+        ProjectionAlphaUnionAccumulator(
+            width=plan.settings.width,
+            height=plan.settings.height,
+            alpha_threshold=_ALPHA_THRESHOLD,
+            padding_pixels=plan.settings.margin_pixels,
+        )
+        if apply_crop
+        else None
+    )
 
     with preserve_camera_projection_state(resolved_scene):
         configure_camera_visibility(
@@ -107,37 +116,40 @@ def _render_to_reservations(
                 raise CameraProjectionExecutionError(
                     f"Projection staged output is missing or empty: {reservation.staged_path}"
                 )
-            if apply_crop:
-                masks.append(
-                    read_staged_alpha_mask(
-                        bpy_module,
-                        reservation.staged_path,
-                        width=plan.settings.width,
-                        height=plan.settings.height,
-                        threshold=_ALPHA_THRESHOLD,
-                    )
+            if union_accumulator is not None:
+                mask = read_staged_alpha_mask(
+                    bpy_module,
+                    reservation.staged_path,
+                    width=plan.settings.width,
+                    height=plan.settings.height,
+                    threshold=_ALPHA_THRESHOLD,
+                )
+                newly_visible = union_accumulator.add_mask(
+                    mask,
+                    frame_index=task.task_index,
+                )
+                logger.debug(
+                    "Merged B4 projection frame %d into alpha union: new=%d total=%d",
+                    task.task_index,
+                    newly_visible,
+                    union_accumulator.visible_pixel_count,
                 )
 
-        if not apply_crop:
+        if union_accumulator is None:
             return build_full_frame_layout(
                 plan.settings.width,
                 plan.settings.height,
                 frame_count=len(plan.frame_tasks),
             )
         try:
-            layout = build_sequence_union_layout(
-                tuple(masks),
-                width=plan.settings.width,
-                height=plan.settings.height,
-                alpha_threshold=_ALPHA_THRESHOLD,
-                padding_pixels=plan.settings.margin_pixels,
-            )
+            layout = union_accumulator.build_layout()
         except CameraProjectionLayoutError as exc:
             raise CameraProjectionExecutionError(str(exc)) from exc
         for reservation in resolved:
             rewrite_staged_image_with_crop(bpy_module, plan, reservation, layout)
         logger.info(
-            "B4 union layout '%s': full=%dx%d crop=(%d,%d)-(%d,%d) size=%dx%d hull=%d",
+            "B4 union layout '%s': full=%dx%d crop=(%d,%d)-(%d,%d) "
+            "size=%dx%d hull=%d frames=%d union_bytes=%d",
             plan.source_object_id,
             layout.full_width,
             layout.full_height,
@@ -148,6 +160,8 @@ def _render_to_reservations(
             layout.cropped_width,
             layout.cropped_height,
             len(layout.hull),
+            union_accumulator.frame_count,
+            union_accumulator.allocated_mask_bytes,
         )
         return layout
 
@@ -228,8 +242,12 @@ def _build_execution_result(
     committed_paths: Iterable[Path],
     layout: CameraProjectionLayout,
 ) -> BakeExecutionResult:
-    resolved = tuple(Path(path).expanduser().resolve(strict=False) for path in committed_paths)
-    expected = tuple(task.output_path.expanduser().resolve(strict=False) for task in plan.frame_tasks)
+    resolved = tuple(
+        Path(path).expanduser().resolve(strict=False) for path in committed_paths
+    )
+    expected = tuple(
+        task.output_path.expanduser().resolve(strict=False) for task in plan.frame_tasks
+    )
     if resolved != expected:
         raise CameraProjectionExecutionError(
             f"Committed projection paths do not match plan; expected={expected}, got={resolved}"
