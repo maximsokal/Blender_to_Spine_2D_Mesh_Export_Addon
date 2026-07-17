@@ -264,7 +264,6 @@ def _ear_clip(points: Tuple[Vector2, ...], epsilon: float) -> Tuple[Tuple[int, i
             ear_position = position
             triangles.append((previous, current, following))
             break
-
         if ear_position is None:
             raise TriangulationError(
                 "Ear clipping found no valid ear; polygon may contain duplicate, "
@@ -458,6 +457,7 @@ def triangulate_snapshot(
         uv_layer_names=snapshot.uv_layer_names,
         active_uv_layer=snapshot.active_uv_layer,
         world_matrix=snapshot.world_matrix,
+        render_uv_layer=snapshot.render_uv_layer,
     )
     MeshSnapshotValidator().validate_or_raise(output)
     generated_edge_ids = tuple(
