@@ -71,6 +71,17 @@ jobs:
             --python tests/blender_headless/run_recursive_node_group_integration.py \
             2>&1 | tee test-results/blender-recursive-node-groups.log
 
+      - name: Run shader capability audit fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_shader_capability_audit_integration.py \
+            2>&1 | tee test-results/blender-shader-capability-audit.log
+
       - name: Run multi-object projection crop fixtures
         shell: bash
         run: |
