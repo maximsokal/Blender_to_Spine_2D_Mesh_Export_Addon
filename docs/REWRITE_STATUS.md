@@ -122,18 +122,22 @@ Group Input output -> matching outer Group input
 
 Implemented guarantees:
 
-- only sockets contributing to the active Material Output are expanded;
+- only sockets contributing to the renderer-effective Material Output are expanded;
+- Cycles, Eevee and generic Material Output targets are resolved independently;
+- muted nodes and muted groups follow Blender `internal_links` bypass mappings;
 - unused group inputs do not leak Camera/View dependencies;
 - stable instance-qualified nested node IDs;
 - explicit `group_path` snapshots;
 - nested Image, Time, Camera, View, Reflection, Transmission and Volume discovery;
 - nested node-tree animation detection;
+- reachable-only material kind and image dependency classification;
 - socket matching by identifier/name/index across Blender API variants;
 - recursive-cycle detection;
 - maximum traversal depth 64;
 - no mutation of node groups.
 
-Real Blender fixtures cover nested Layer Weight, nested Principled Volume, and an unused
+Real Blender fixtures cover nested Layer Weight, nested Principled Volume, nested Image Texture,
+renderer-specific outputs, muted camera branches, repeated group instances, and an unused
 camera-bearing parent input that correctly remains outside the reachable graph.
 
 ## B4: camera-render projection
@@ -156,19 +160,23 @@ For every static or sequence frame B4:
    transmission, diffuse, occlusion and shadow rays;
 4. renders a transparent full frame to the transaction's staged path;
 5. decodes the actual staged image and extracts alpha using threshold `1 / 255`;
-6. unions every frame mask;
-7. expands the union bounds by existing `bake_margin`;
-8. builds one counter-clockwise convex screen-space hull;
-9. rewrites every staged frame using the same crop dimensions;
-10. restores all Blender state in `finally`.
+6. immediately ORs that frame into one fixed-size alpha union buffer;
+7. releases the per-frame mask before rendering the next frame;
+8. expands the union bounds by existing `bake_margin`;
+9. builds one counter-clockwise convex screen-space hull;
+10. rewrites every staged frame using the same crop dimensions;
+11. restores all Blender state in `finally`.
+
+The render executor therefore retains `O(width * height)` alpha-mask memory regardless of
+sequence length. The compatibility tuple API remains available for existing pure-domain callers.
 
 Blender 4.4 headless exposes a zero-sized `Render Result` after completed renders. The staged
 file is therefore the source of truth for alpha analysis.
 
 ### Stable cropped Spine attachment
 
-`domain/baking/projection_layout.py` provides immutable crop/hull contracts and deterministic
-monotonic-chain convex hull generation.
+`domain/baking/projection_layout.py` provides immutable crop/hull contracts, a fixed-size
+incremental alpha-union accumulator, and deterministic monotonic-chain convex hull generation.
 
 Every frame in a sequence shares crop bounds, texture dimensions, full-frame screen offset,
 UVs, hull vertices, triangle fan and attachment dimensions. The hull follows the union alpha
@@ -204,13 +212,14 @@ merged. Each attachment width/height is validated against its decoded cropped im
 - `semantic_bake_executor.py`: B1-B3 passes, material preparation and RGBA composition;
 - `camera_projection_state.py`: reversible Scene/frame/visibility state;
 - `camera_projection_image.py`: staged-image decode, alpha mask and crop rewrite;
-- `camera_projection_executor_core.py`: B4 render/union/crop orchestration;
+- `camera_projection_executor_core.py`: B4 render/incremental-union/crop orchestration;
 - `camera_projection_executor.py`: stable B4 facade;
 - `texture_executor.py`: plan dispatch and detailed layout result without operator access;
 - `bake_executor.py`: stable public facade containing only object-bake and render hooks.
 
 Architecture tests verify that helper, finalization and output modules contain no direct
-`bpy.ops` access.
+`bpy.ops` access, and that B4 uses one streaming union accumulator rather than retaining a list
+of full-frame masks.
 
 ## Real Blender compatibility matrix
 
@@ -235,16 +244,19 @@ Dedicated B4 coverage includes:
 
 ## Validation
 
-- Python 3.10: **484 passed, 4 skipped**;
-- Python 3.11: **484 passed, 4 skipped**;
-- `Blender 4.4 Alpha Bake`: success;
-- `Blender 4.4 Scene Bake`: success;
-- `Blender 4.4 Camera Projection`: success, including static/sequence, recursive group and
-  standalone/connected/mixed crop fixtures;
-- full `Blender 4.4 Headless`: success.
+- Python 3.10: **484 passed, 4 skipped** on the last full automatic matrix before manual-only CI;
+- Python 3.11: **484 passed, 4 skipped** on the last full automatic matrix before manual-only CI;
+- `Blender 4.4 Alpha Bake`: success on the last full matrix;
+- `Blender 4.4 Scene Bake`: success on the last full matrix;
+- `Blender 4.4 Camera Projection`: success on the last full matrix;
+- full `Blender 4.4 Headless`: success on the last full matrix;
+- current recursive hardening focused tests: **21 passed**;
+- current incremental union focused tests: **14 passed**;
+- 1000 randomized old/new union-layout differential cases: identical.
 
-Validation was repeated on the documentation-final branch head after code, tests and workflow
-changes were complete.
+Automatic workflow triggers remain disabled on the active rewrite branch, so the latest focused
+hardening commits have not consumed GitHub Actions minutes. Real Blender fixtures added after the
+last complete matrix remain pending a deliberate manual validation run.
 
 ## Production defects found by the matrix
 
@@ -261,7 +273,9 @@ changes were complete.
 11. scanning all group nodes would make unused inputs leak camera dependencies;
 12. Blender 4.4 headless `Render Result` can remain zero-sized after success;
 13. JSON must be serialized after render-derived crop/hull finalization;
-14. multi/mixed output must recompose typed documents after component layouts are known.
+14. multi/mixed output must recompose typed documents after component layouts are known;
+15. sequence B4 retained every full-frame alpha mask before allocating the union mask;
+16. renderer-specific Material Outputs and muted-node bypasses were not respected.
 
 ## Explicit remaining boundaries
 
