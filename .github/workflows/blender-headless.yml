@@ -1,13 +1,7 @@
 name: Blender 4.4 Headless
 
+# Manual-only while the rewrite branch is under active development.
 on:
-  pull_request:
-    branches: ["main", "master"]
-    paths:
-      - ".github/workflows/blender-headless.yml"
-      - "Blender_to_Spine2D_Mesh_Exporter/**"
-      - "tests/blender_headless/**"
-      - "tools/**"
   workflow_dispatch:
 
 permissions:
