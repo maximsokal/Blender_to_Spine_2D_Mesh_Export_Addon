@@ -46,6 +46,7 @@ class ShaderNodeSnapshot:
     node_type: str
     node_name: str
     group_path: Tuple[str, ...] = ()
+    muted: bool = False
 
     def __post_init__(self) -> None:
         for field_name in ("node_id", "node_type", "node_name"):
@@ -56,6 +57,8 @@ class ShaderNodeSnapshot:
             isinstance(value, str) and value.strip() for value in self.group_path
         ):
             raise TypeError("group_path must be a tuple of non-empty strings")
+        if not isinstance(self.muted, bool):
+            raise TypeError("muted must be bool")
 
 
 @dataclass(frozen=True, slots=True)
