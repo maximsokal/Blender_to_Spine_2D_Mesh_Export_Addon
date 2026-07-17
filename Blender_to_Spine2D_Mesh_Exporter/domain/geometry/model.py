@@ -190,6 +190,7 @@ class MeshSnapshot:
     uv_layer_names: Tuple[str, ...] = ()
     active_uv_layer: str | None = None
     world_matrix: Matrix4x4 = IDENTITY_MATRIX_4X4
+    render_uv_layer: str | None = None
 
     def __post_init__(self) -> None:
         _validate_name(self.snapshot_id, "snapshot_id")
@@ -207,6 +208,13 @@ class MeshSnapshot:
             and self.active_uv_layer not in self.uv_layer_names
         ):
             raise ValueError("active_uv_layer must be present in uv_layer_names")
+        if self.render_uv_layer is None and self.active_uv_layer is not None:
+            object.__setattr__(self, "render_uv_layer", self.active_uv_layer)
+        if (
+            self.render_uv_layer is not None
+            and self.render_uv_layer not in self.uv_layer_names
+        ):
+            raise ValueError("render_uv_layer must be present in uv_layer_names")
         _validate_vector(self.world_matrix, 16, "world_matrix")
 
     def vertex_by_id(self) -> dict[VertexId, MeshVertex]:
