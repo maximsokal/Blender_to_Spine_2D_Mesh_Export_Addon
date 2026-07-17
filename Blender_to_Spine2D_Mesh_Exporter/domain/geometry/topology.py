@@ -2,8 +2,8 @@
 
 The legacy implementation calculated ``holes = max(0, 1 - Euler)`` in several
 places. That is insufficient for disconnected, closed, or non-manifold input.
-This module keeps the calculation in one deterministic implementation and
-reports both Euler characteristic and boundary-component count.
+This module keeps the full calculation in one deterministic implementation.
+The hot decomposition loops use the companion incremental disk state.
 """
 
 from __future__ import annotations
@@ -55,6 +55,23 @@ def face_edge_ids(snapshot: MeshSnapshot, face_id: FaceId) -> Tuple[EdgeId, ...]
     return tuple(ordered)
 
 
+def face_vertex_ids(snapshot: MeshSnapshot, face_id: FaceId) -> Tuple[VertexId, ...]:
+    """Return the ordered unique vertex IDs used by one face."""
+
+    face = snapshot.face_by_id().get(face_id)
+    if face is None:
+        raise RegionTopologyError(f"Unknown face id {face_id.index}")
+    loop_map = snapshot.loop_by_id()
+    ordered: list[VertexId] = []
+    seen: set[VertexId] = set()
+    for loop_id in face.loop_ids:
+        vertex_id = loop_map[loop_id].vertex_id
+        if vertex_id not in seen:
+            seen.add(vertex_id)
+            ordered.append(vertex_id)
+    return tuple(ordered)
+
+
 def _boundary_component_count(
     boundary_edge_ids: Iterable[EdgeId],
     snapshot: MeshSnapshot,
@@ -99,8 +116,8 @@ def analyse_face_region(
     """Calculate topology invariants for a connected or disconnected face subset.
 
     Passing a precomputed ``edge_to_faces`` map means the caller has already
-    validated the snapshot. This is used by decomposition, where hundreds of
-    candidate regions may be analysed against one immutable snapshot.
+    validated the snapshot. This is used by decomposition for original/final
+    verification, while candidate growth uses the incremental disk state.
     """
 
     if edge_to_faces is None:
@@ -188,7 +205,11 @@ def build_face_adjacency(
     ordered_face_ids = tuple(sorted(set(face_ids), key=lambda item: item.index))
     region = set(ordered_face_ids)
     blocked = set(blocked_edge_ids)
-    resolved_edge_to_faces = edge_to_faces or build_edge_to_faces(snapshot)
+    resolved_edge_to_faces = (
+        build_edge_to_faces(snapshot)
+        if edge_to_faces is None
+        else edge_to_faces
+    )
     adjacency: dict[FaceId, set[FaceId]] = {
         face_id: set() for face_id in ordered_face_ids
     }
