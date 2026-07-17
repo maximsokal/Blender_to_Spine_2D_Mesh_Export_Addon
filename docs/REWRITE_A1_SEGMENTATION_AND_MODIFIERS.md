@@ -31,6 +31,24 @@ accepted neighbour may still reach it through a locally smoother edge.
 The mode is opt-in through `A1GeometryPreparationSettings`. The default remains
 `LEGACY_SEED_CONE`, so existing A1 segmentation results do not change.
 
+### Blender UI and bridge contract
+
+The Cut panel exposes:
+
+- `Seed angle limit`;
+- `Angular mode`;
+- `Local edge angle limit` only for `SEED_CONE_AND_LOCAL_DIHEDRAL`.
+
+`CUSTOM` seam mode disables angular splitting, so the angular controls are hidden
+instead of showing settings that the pipeline will ignore.
+
+The Blender bridge converts the RNA enum to `A1AngularMode` before the application
+pipeline starts. Missing properties in older `.blend` files resolve to
+`LEGACY_SEED_CONE`. In legacy mode, the stored RNA local limit is normalized to
+`None`, keeping the internal `A1GeometryPreparationSettings` object identical to
+the pre-feature default. The same typed geometry settings are used by single,
+standalone multi, connected multi, and mixed exports.
+
 ## Deterministic complex-region decomposition
 
 The historical code contains multiple incompatible hole strategies and a partially
@@ -63,17 +81,25 @@ One `DiskTopologyIndex` is built per immutable `MeshSnapshot` and caches:
 - `face -> ordered vertices`;
 - the immutable edge map.
 
-Every `DiskRegionState` then maintains only its current:
+Every `DiskRegionState` maintains its current:
 
-- face set;
+- face set and cached ordered face tuple;
+- minimum and maximum face indices;
 - edge incidence counts;
 - vertex set;
 - boundary edge set;
 - boundary vertex degrees;
-- Euler counts.
+- count of invalid edge incidences;
+- count of invalid boundary degrees;
+- Euler counts and revision.
 
-Adding one candidate touches only the candidate corners and affected boundary
-vertices. A candidate is accepted only when:
+`topology` is therefore assembled in constant time from cached counts. Applying one
+validated face delta updates only the candidate edges and affected boundary vertices.
+It does not iterate over all edges or vertices already in the region. Counting newly
+introduced vertices also checks only the candidate face instead of copying the complete
+region vertex set.
+
+A candidate is accepted only when:
 
 - its shared edges form one non-empty proper cyclic interval on the candidate;
 - no already-internal edge is reused;
@@ -84,11 +110,31 @@ vertices. A candidate is accepted only when:
 
 Two disk regions merge only when their common boundary is one connected open edge
 path, they have no additional shared vertex, the resulting boundary degrees remain
-manifold, and Euler remains one.
+manifold, and Euler remains one. Open-path degree is counted by distinct `EdgeId`
+incidence, not by unique neighbouring vertices, so two parallel edges correctly form
+a two-edge cycle and cannot be mistaken for one open interface. Manually constructed
+states are also rejected when they share an internal edge outside the boundary path.
 
 The growth frontier is updated only from the accepted face. Region-to-region shared
 edge counts are built once and updated locally after each merge. Candidate ordering
 and merge tie-breaking remain compatible with the previous deterministic algorithm.
+
+### Validation matrix
+
+The focused regression set covers:
+
+- implicit default versus explicit `LEGACY_SEED_CONE` equality;
+- a `0° -> +25° -> -25°` fold where legacy stays joined and hybrid cuts the
+  `50°` local transition;
+- exact deterministic ring, closed cube, and periodic torus partitions;
+- candidate decisions compared with complete `analyse_face_region()` results;
+- complete-analysis call counts limited to input and finalized regions;
+- stale incremental deltas;
+- open path, disconnected path, repeated edge, and parallel-edge interfaces;
+- a no-full-scan mapping fixture proving `topology`, preview, and apply use only
+  local access after state construction;
+- real Blender Mesh normals and real Scene RNA register/unregister behavior in the
+  existing Blender 4.4 headless integration script.
 
 ## Evaluated modifier lineage
 
