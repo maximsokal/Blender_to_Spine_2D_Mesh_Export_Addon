@@ -9,6 +9,7 @@ from typing import Any, Iterable, Iterator, Tuple
 from uuid import uuid4
 
 from ..domain.baking import BakePassPlan
+from .render_engine_contract import render_engine_contract
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,19 @@ class PreparedBakeMaterials:
     image_nodes: Tuple[Any, ...]
     placeholder_slot_indices: Tuple[int, ...]
     used_material_indices: Tuple[int, ...]
+    render_target: str = "CYCLES"
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "materials",
+            "image_nodes",
+            "placeholder_slot_indices",
+            "used_material_indices",
+        ):
+            if not isinstance(getattr(self, field_name), tuple):
+                raise TypeError(f"{field_name} must be tuple")
+        normalized_target = render_engine_contract(self.render_target).shader_target
+        object.__setattr__(self, "render_target", normalized_target)
 
     def assign_image(self, image: Any) -> None:
         if image is None:
@@ -42,6 +56,7 @@ class PreparedBakeMaterials:
             self.materials,
             pass_plan,
             used_material_indices=self.used_material_indices,
+            render_target=self.render_target,
         ):
             yield
 
@@ -187,11 +202,13 @@ def temporary_bake_materials(
     *,
     used_material_indices: Iterable[int],
     face_material_indices: Iterable[int],
+    render_target: str = "CYCLES",
 ) -> Iterator[PreparedBakeMaterials]:
     """Copy source slots, restore polygon bindings, and create active bake nodes."""
 
     if source_obj is None or target_obj is None:
         raise BakeMaterialError("source_obj and target_obj are required")
+    normalized_target = render_engine_contract(render_target).shader_target
     source_slots = tuple(getattr(source_obj, "material_slots", ()))
     used = tuple(sorted(set(used_material_indices)))
     if any(not isinstance(index, int) or index < 0 for index in used):
@@ -247,6 +264,7 @@ def temporary_bake_materials(
             image_nodes=tuple(image_nodes),
             placeholder_slot_indices=tuple(placeholder_indices),
             used_material_indices=used,
+            render_target=normalized_target,
         )
         yield prepared
     finally:
