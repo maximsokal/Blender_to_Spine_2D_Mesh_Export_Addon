@@ -66,6 +66,12 @@ from .material_analyzer import (
 )
 from .mesh_reader import MeshReadError, read_source_mesh_snapshot
 from .mesh_writer import MeshWriteError, TemporaryMeshObject, temporary_mesh_object
+from .render_engine_contract import (
+    RenderEngineContract,
+    RenderEngineContractError,
+    render_engine_contract,
+    render_engine_contract_from_execution,
+)
 from .scene_bake_analyzer import (
     SceneBakeAnalysisError,
     analyse_bake_contexts,
@@ -108,6 +114,8 @@ __all__ = [
     "PreparedA1MultiObject",
     "PreparedA1Object",
     "PreparedBakeMaterials",
+    "RenderEngineContract",
+    "RenderEngineContractError",
     "SceneBakeAnalysisError",
     "StatisticsValue",
     "TemporaryMeshObject",
@@ -139,6 +147,8 @@ __all__ = [
     "read_bake_image_pixels",
     "read_evaluated_mesh_snapshot",
     "read_source_mesh_snapshot",
+    "render_engine_contract",
+    "render_engine_contract_from_execution",
     "stage_bake_plan_outputs",
     "stage_camera_projection_outputs",
     "stage_camera_projection_outputs_detailed",
