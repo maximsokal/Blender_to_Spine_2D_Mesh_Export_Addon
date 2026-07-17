@@ -206,16 +206,23 @@ def _validate_strict_convex_hull(
     if _signed_double_area(points) <= 0:
         raise ValueError("hull must be counter-clockwise and non-degenerate")
 
-    invalid_turns = tuple(
-        index
-        for index in range(len(points))
-        if _cross(points[index - 1], points[index], points[(index + 1) % len(points)])
-        <= 0
-    )
-    if invalid_turns:
+    invalid_edges: list[tuple[int, Tuple[int, ...]]] = []
+    for edge_index, first in enumerate(points):
+        second_index = (edge_index + 1) % len(points)
+        second = points[second_index]
+        invalid_vertices = tuple(
+            vertex_index
+            for vertex_index, point in enumerate(points)
+            if vertex_index not in (edge_index, second_index)
+            and _cross(first, second, point) <= 0
+        )
+        if invalid_vertices:
+            invalid_edges.append((edge_index, invalid_vertices))
+    if invalid_edges:
         raise ValueError(
-            "hull must be strictly convex without collinear or reflex vertices; "
-            f"invalid vertex indices={invalid_turns}"
+            "hull must be a simple strictly convex polygon without collinear, reflex, "
+            "or self-intersecting edges; "
+            f"invalid edge/vertex indices={tuple(invalid_edges)}"
         )
 
 
@@ -226,10 +233,16 @@ def triangulate_convex_hull(
 
     _validate_strict_convex_hull(points)
     triangles = tuple((0, index, index + 1) for index in range(1, len(points) - 1))
-    fan_double_area = sum(
+    triangle_double_areas = tuple(
         _cross(points[first], points[second], points[third])
         for first, second, third in triangles
     )
+    if any(area <= 0 for area in triangle_double_areas):
+        raise CameraProjectionLayoutError(
+            "convex hull fan contains a clockwise or degenerate triangle; "
+            f"triangle_areas2={triangle_double_areas}"
+        )
+    fan_double_area = sum(triangle_double_areas)
     polygon_double_area = _signed_double_area(points)
     if fan_double_area != polygon_double_area:
         raise CameraProjectionLayoutError(
