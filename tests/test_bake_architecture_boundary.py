@@ -101,6 +101,7 @@ def test_camera_projection_core_streams_one_union_buffer():
     assert "ProjectionAlphaUnionAccumulator" in source
     assert "build_sequence_union_layout" not in source
     assert "masks: list" not in source
+    assert "del mask" in source
 
 
 def test_object_bake_operator_is_confined_to_core_helper():
