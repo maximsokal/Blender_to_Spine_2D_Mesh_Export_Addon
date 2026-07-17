@@ -4,7 +4,7 @@
 
 The legacy angular pass compares every candidate face normal against the normal of
 the segment seed face. It does not accumulate pairwise normal drift. The rewrite
-preserves this rule with a strict comparison:
+preserves this rule as the default `LEGACY_SEED_CONE` mode with a strict comparison:
 
 ```text
 angle(seed_normal, candidate_normal) < angle_limit
@@ -12,6 +12,24 @@ angle(seed_normal, candidate_normal) < angle_limit
 
 Unlike the public legacy function, the rewrite guarantees a true partition: every
 face appears exactly once and no face can be revisited by a later seed.
+
+### Optional local-dihedral guard
+
+`SEED_CONE_AND_LOCAL_DIHEDRAL` keeps the same seed-cone requirement and adds a
+second check for every traversed adjacency edge:
+
+```text
+angle(seed_normal, candidate_normal) < angle_limit
+AND
+angle(current_normal, candidate_normal) < local_angle_limit
+```
+
+When no separate local limit is supplied, `angle_limit` is reused. Rejecting one
+edge does not permanently reject or queue the candidate face; another already
+accepted neighbour may still reach it through a locally smoother edge.
+
+The mode is opt-in through `A1GeometryPreparationSettings`. The default remains
+`LEGACY_SEED_CONE`, so existing A1 segmentation results do not change.
 
 ## Deterministic complex-region decomposition
 
@@ -31,6 +49,46 @@ The replacement algorithm:
 There is no random seed, time-dependent ordering, Blender object creation, or name
 search. Non-manifold input is rejected until a separate explicit repair policy is
 implemented.
+
+### Incremental disk topology
+
+A complete `analyse_face_region()` scan is retained for the original segment and
+for every finalized output region. It is no longer executed for every growth or
+merge candidate.
+
+One `DiskTopologyIndex` is built per immutable `MeshSnapshot` and caches:
+
+- `edge -> linked faces`;
+- `face -> ordered edges`;
+- `face -> ordered vertices`;
+- the immutable edge map.
+
+Every `DiskRegionState` then maintains only its current:
+
+- face set;
+- edge incidence counts;
+- vertex set;
+- boundary edge set;
+- boundary vertex degrees;
+- Euler counts.
+
+Adding one candidate touches only the candidate corners and affected boundary
+vertices. A candidate is accepted only when:
+
+- its shared edges form one non-empty proper cyclic interval on the candidate;
+- no already-internal edge is reused;
+- there is no extra vertex-only contact;
+- boundary degrees remain zero or two;
+- Euler remains one;
+- the boundary remains non-empty.
+
+Two disk regions merge only when their common boundary is one connected open edge
+path, they have no additional shared vertex, the resulting boundary degrees remain
+manifold, and Euler remains one.
+
+The growth frontier is updated only from the accepted face. Region-to-region shared
+edge counts are built once and updated locally after each merge. Candidate ordering
+and merge tie-breaking remain compatible with the previous deterministic algorithm.
 
 ## Evaluated modifier lineage
 
