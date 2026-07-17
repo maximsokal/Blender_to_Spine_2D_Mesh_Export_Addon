@@ -28,15 +28,14 @@ def test_angular_scene_properties_are_registered_symmetrically():
 
 
 def test_reset_restores_legacy_angular_contract():
+    operator = SimpleNamespace(report=MagicMock())
+    context = SimpleNamespace(scene=SimpleNamespace())
+
     with patch(
         "Blender_to_Spine2D_Mesh_Exporter.ui.get_default_output_dir",
         return_value="/tmp/spine",
     ):
-        operator = ui.SPINE2D_OT_ResetSettings()
-        operator.report = MagicMock()
-        context = SimpleNamespace(scene=SimpleNamespace())
-
-        result = operator.execute(context)
+        result = ui.SPINE2D_OT_ResetSettings.execute(operator, context)
 
     assert result == {"FINISHED"}
     assert context.scene.spine2d_angular_mode == "LEGACY_SEED_CONE"
