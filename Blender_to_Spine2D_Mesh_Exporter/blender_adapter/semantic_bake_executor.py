@@ -36,6 +36,7 @@ from .bake_scene_state import (
 )
 from .context_state import BlenderContextError, activate_object_for_operator
 from .mesh_writer import MeshWriteError, temporary_mesh_object
+from .render_engine_contract import render_engine_contract_from_execution
 from .scene_bake_analyzer import (
     SceneBakeAnalysisError,
     validate_runtime_scene_context,
@@ -233,6 +234,12 @@ def _run_bake_to_reservations(
         plan,
     )
     resolved_reservations = core._require_reservations(plan, reservations)
+    renderer = render_engine_contract_from_execution(execution_settings)
+    if renderer.uses_eevee:
+        raise BakeExecutionError(
+            "Blender object baking is restricted to Cycles; Eevee materials must use "
+            "camera-render projection"
+        )
     bpy_module = core._load_bpy()
     resolved_context = context or bpy_module.context
     resolved_scene = scene or getattr(resolved_context, "scene", None)
@@ -265,6 +272,7 @@ def _run_bake_to_reservations(
                     temporary.object,
                     used_material_indices=used_material_indices,
                     face_material_indices=face_material_indices,
+                    render_target=renderer.shader_target,
                 ) as prepared_materials:
                     with activate_object_for_operator(
                         temporary.object,
