@@ -1,5 +1,11 @@
 """Blender-independent material analysis and texture planning contracts."""
 
+from .capabilities import (
+    MaterialCapabilityAudit,
+    ShaderBakeCapability,
+    ShaderCapabilityFinding,
+    strongest_shader_capability,
+)
 from .context import (
     CameraBakeSnapshot,
     ColorManagementSnapshot,
@@ -98,6 +104,7 @@ __all__ = [
     "ImageDependency",
     "LightBakeSnapshot",
     "MaterialAnalysis",
+    "MaterialCapabilityAudit",
     "MaterialDependencyKind",
     "MaterialGraphSnapshot",
     "MaterialKind",
@@ -112,6 +119,8 @@ __all__ = [
     "ProjectionTriangle",
     "SceneBakeContext",
     "SceneCombinedBakeStrategy",
+    "ShaderBakeCapability",
+    "ShaderCapabilityFinding",
     "ShaderLinkSnapshot",
     "ShaderNodeSnapshot",
     "SurfaceColorBakeStrategy",
@@ -128,6 +137,7 @@ __all__ = [
     "requires_camera_projection",
     "resolve_bake_strategy_plan",
     "sanitize_filename_stem",
+    "strongest_shader_capability",
     "texture_plan_output_paths",
     "triangulate_convex_hull",
 ]
