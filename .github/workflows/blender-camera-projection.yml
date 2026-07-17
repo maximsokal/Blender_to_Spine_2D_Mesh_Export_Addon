@@ -93,6 +93,17 @@ jobs:
             --python tests/blender_headless/run_render_engine_contract_integration.py \
             2>&1 | tee test-results/blender-render-engine-contract.log
 
+      - name: Run production capability gate fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_production_capability_gate_integration.py \
+            2>&1 | tee test-results/blender-production-capability-gate.log
+
       - name: Run multi-object projection crop fixtures
         shell: bash
         run: |
