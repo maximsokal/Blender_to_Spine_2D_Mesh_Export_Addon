@@ -174,6 +174,7 @@ def transfer_uv_by_source_loop(
         uv_layer_names=uv_layer_names,
         active_uv_layer=target_layer_name,
         world_matrix=target.world_matrix,
+        render_uv_layer=target.render_uv_layer,
     )
     MeshSnapshotValidator().validate_or_raise(updated_snapshot)
 
@@ -292,6 +293,7 @@ def extract_face_subset(
         uv_layer_names=snapshot.uv_layer_names,
         active_uv_layer=snapshot.active_uv_layer,
         world_matrix=snapshot.world_matrix,
+        render_uv_layer=snapshot.render_uv_layer,
     )
     MeshSnapshotValidator().validate_or_raise(result)
     return result
