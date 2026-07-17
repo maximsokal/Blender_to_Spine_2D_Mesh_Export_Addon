@@ -1,18 +1,18 @@
 """A1-compatible seed-normal segmentation without legacy overlap bugs.
 
 The legacy angular pass compares every candidate face with the normal and material
-of the seed face, not with the immediately adjacent face.  Reproducing that rule
-is important for compatibility on smoothly curving strips.  The old implementation
-could add a face to more than one segment because it did not exclude faces already
-assigned by an earlier seed.  This implementation preserves the seed-normal rule
-while guaranteeing a disjoint, complete partition.
+of the seed face, not with the immediately adjacent face. Reproducing that rule
+is important for compatibility on smoothly curving strips. The optional hybrid
+mode keeps that seed cone and additionally rejects traversal across a locally
+sharp dihedral edge.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import replace
-from math import acos, degrees, sqrt
+from enum import Enum
+from math import acos, degrees, isfinite, sqrt
 from typing import Iterable, Tuple
 
 from .ids import EdgeId, FaceId
@@ -33,6 +33,13 @@ class A1SegmentationError(ValueError):
     """Raised when the A1 segmentation contract cannot be satisfied."""
 
 
+class A1AngularMode(str, Enum):
+    """Angular growth policies available to the A1 segmentation pass."""
+
+    LEGACY_SEED_CONE = "LEGACY_SEED_CONE"
+    SEED_CONE_AND_LOCAL_DIHEDRAL = "SEED_CONE_AND_LOCAL_DIHEDRAL"
+
+
 def _vector_length(value: Vector3) -> float:
     return sqrt(sum(component * component for component in value))
 
@@ -49,6 +56,39 @@ def _normal_angle_degrees(first: Vector3, second: Vector3) -> float | None:
     return degrees(acos(dot))
 
 
+def _resolve_angular_mode(value: A1AngularMode | str) -> A1AngularMode:
+    if isinstance(value, A1AngularMode):
+        return value
+    if not isinstance(value, str):
+        raise TypeError("angular_mode must be A1AngularMode or str")
+    try:
+        return A1AngularMode(value.strip().upper())
+    except ValueError as exc:
+        supported = tuple(mode.value for mode in A1AngularMode)
+        raise ValueError(
+            f"Unsupported A1 angular mode {value!r}; supported={supported}"
+        ) from exc
+
+
+def _resolve_local_angle_limit(
+    settings: SegmentationSettings,
+    angular_mode: A1AngularMode,
+    value: float | None,
+) -> float:
+    if value is None:
+        return float(settings.angle_limit_degrees)
+    if not isinstance(value, (int, float)) or not isfinite(float(value)):
+        raise ValueError("local_angle_limit_degrees must be finite or None")
+    resolved = float(value)
+    if resolved < 0.0 or resolved > 180.0:
+        raise ValueError("local_angle_limit_degrees must be in the range [0, 180]")
+    # Validate the value even in legacy mode so a later mode switch cannot reveal
+    # a dormant invalid setting. Legacy behavior itself does not consume it.
+    if not isinstance(angular_mode, A1AngularMode):
+        raise TypeError("angular_mode must be A1AngularMode")
+    return resolved
+
+
 def _seed_normal_groups(
     snapshot: MeshSnapshot,
     face_ids: Iterable[FaceId],
@@ -56,6 +96,8 @@ def _seed_normal_groups(
     blocked_edge_ids: set[EdgeId],
     edge_to_faces: dict[EdgeId, Tuple[FaceId, ...]],
     settings: SegmentationSettings,
+    angular_mode: A1AngularMode,
+    local_angle_limit_degrees: float,
 ) -> Tuple[Tuple[FaceId, ...], ...]:
     face_map = snapshot.face_by_id()
     remaining = set(face_ids)
@@ -68,7 +110,7 @@ def _seed_normal_groups(
         seed_material = seed_face.material_index
 
         # The legacy code skipped zero-length normals entirely, which could drop
-        # faces from export.  A valid rewrite must never lose geometry, so an
+        # faces from export. A valid rewrite must never lose geometry, so an
         # invalid-normal face becomes its own deterministic segment.
         if _normal_angle_degrees(seed_normal, seed_normal) is None:
             remaining.remove(seed_id)
@@ -97,23 +139,44 @@ def _seed_normal_groups(
                 if edge_id in blocked_edge_ids:
                     continue
                 for neighbour_id in edge_to_faces.get(edge_id, ()):
+                    if neighbour_id not in remaining or neighbour_id in queued:
+                        continue
+                    neighbour = face_map[neighbour_id]
                     if (
-                        neighbour_id in remaining
-                        and neighbour_id not in queued
+                        settings.split_materials
+                        and neighbour.material_index != seed_material
                     ):
-                        queued.add(neighbour_id)
-                        neighbour = face_map[neighbour_id]
+                        continue
+                    seed_angle = _normal_angle_degrees(
+                        seed_normal,
+                        neighbour.normal,
+                    )
+                    if (
+                        seed_angle is None
+                        or seed_angle >= settings.angle_limit_degrees
+                    ):
+                        continue
+                    if (
+                        angular_mode
+                        is A1AngularMode.SEED_CONE_AND_LOCAL_DIHEDRAL
+                    ):
+                        local_angle = _normal_angle_degrees(
+                            current_face.normal,
+                            neighbour.normal,
+                        )
                         if (
-                            settings.split_materials
-                            and neighbour.material_index != seed_material
+                            local_angle is None
+                            or local_angle >= local_angle_limit_degrees
                         ):
+                            # Do not mark the face as queued. It may still be
+                            # reachable from another accepted face through a
+                            # locally smoother edge.
                             continue
-                        angle = _normal_angle_degrees(seed_normal, neighbour.normal)
-                        if angle is not None and angle < settings.angle_limit_degrees:
-                            queue.append(neighbour_id)
+                    queued.add(neighbour_id)
+                    queue.append(neighbour_id)
 
         if not accepted:
-            # Defensive fallback.  The seed has already been validated above, so
+            # Defensive fallback. The seed has already been validated above, so
             # this should not occur, but it prevents an infinite loop if model
             # validation rules change later.
             remaining.remove(seed_id)
@@ -126,16 +189,31 @@ def _seed_normal_groups(
 def segment_mesh_a1(
     snapshot: MeshSnapshot,
     settings: SegmentationSettings | None = None,
+    *,
+    angular_mode: A1AngularMode | str = A1AngularMode.LEGACY_SEED_CONE,
+    local_angle_limit_degrees: float | None = None,
 ) -> SegmentationPlan:
-    """Segment a snapshot using deterministic legacy seed-normal semantics.
+    """Segment a snapshot using deterministic A1 seed-cone semantics.
 
-    Non-angular boundaries are calculated by :func:`segment_mesh`.  Each resulting
-    primary component is then partitioned by comparing every candidate normal with
-    the component seed normal.  Every face is assigned exactly once.
+    ``LEGACY_SEED_CONE`` is the default and preserves the existing A1 output:
+    every candidate is compared only with the seed normal. The optional
+    ``SEED_CONE_AND_LOCAL_DIHEDRAL`` mode additionally requires each traversed
+    face edge to satisfy ``local_angle_limit_degrees`` (or the global angle limit
+    when no separate local limit is supplied).
+
+    Non-angular boundaries are calculated by :func:`segment_mesh`. Each resulting
+    primary component is then partitioned by the selected angular policy. Every
+    face is assigned exactly once.
     """
 
     MeshSnapshotValidator().validate_or_raise(snapshot)
     resolved_settings = settings or SegmentationSettings()
+    resolved_mode = _resolve_angular_mode(angular_mode)
+    resolved_local_limit = _resolve_local_angle_limit(
+        resolved_settings,
+        resolved_mode,
+        local_angle_limit_degrees,
+    )
     if not resolved_settings.split_by_angle:
         return segment_mesh(snapshot, resolved_settings)
 
@@ -159,6 +237,8 @@ def segment_mesh_a1(
                 blocked_edge_ids=blocked_edge_ids,
                 edge_to_faces=edge_to_faces,
                 settings=resolved_settings,
+                angular_mode=resolved_mode,
+                local_angle_limit_degrees=resolved_local_limit,
             )
         )
 
@@ -207,8 +287,14 @@ def segment_mesh_a1(
             continue
         if edge_id in blocked_edge_ids:
             continue
-        first_angle = _normal_angle_degrees(face_map[first_id].normal, face_map[first_id].normal)
-        second_angle = _normal_angle_degrees(face_map[second_id].normal, face_map[second_id].normal)
+        first_angle = _normal_angle_degrees(
+            face_map[first_id].normal,
+            face_map[first_id].normal,
+        )
+        second_angle = _normal_angle_degrees(
+            face_map[second_id].normal,
+            face_map[second_id].normal,
+        )
         if first_angle is None or second_angle is None:
             final_reasons[edge_id].add(SegmentBoundaryReason.INVALID_NORMAL)
         else:
