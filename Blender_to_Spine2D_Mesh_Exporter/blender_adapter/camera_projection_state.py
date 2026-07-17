@@ -15,6 +15,7 @@ from .render_engine_contract import (
     render_engine_contract_from_execution,
 )
 from .scene_bake_analyzer import validate_runtime_scene_context
+from .view_layer_contract import validate_source_view_layer_for_camera_projection
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +317,10 @@ def validate_projection_runtime(
         raise CameraProjectionExecutionError("A Blender Scene is required")
     if getattr(resolved_scene, "camera", None) is None:
         raise CameraProjectionExecutionError("Scene has no active camera")
+    validate_source_view_layer_for_camera_projection(
+        source_obj,
+        getattr(resolved_context, "view_layer", None),
+    )
     validate_runtime_scene_context(
         source_obj,
         plan.object_context,
