@@ -179,6 +179,7 @@ class DiskRegionState:
     __slots__ = (
         "_index",
         "_face_ids",
+        "_ordered_face_ids_cache",
         "_edge_face_counts",
         "_vertex_ids",
         "_boundary_edge_ids",
@@ -208,6 +209,7 @@ class DiskRegionState:
             raise RegionTopologyError("DiskRegionState requires at least one face")
         self._index = topology_index
         self._face_ids = resolved_faces
+        self._ordered_face_ids_cache: Tuple[FaceId, ...] | None = None
         self._edge_face_counts = dict(edge_face_counts)
         self._vertex_ids = set(vertex_ids)
         self._boundary_edge_ids = set(boundary_edge_ids)
@@ -287,7 +289,11 @@ class DiskRegionState:
 
     @property
     def face_ids(self) -> Tuple[FaceId, ...]:
-        return tuple(sorted(self._face_ids, key=lambda item: item.index))
+        if self._ordered_face_ids_cache is None:
+            self._ordered_face_ids_cache = tuple(
+                sorted(self._face_ids, key=lambda item: item.index)
+            )
+        return self._ordered_face_ids_cache
 
     @property
     def face_count(self) -> int:
@@ -437,6 +443,7 @@ class DiskRegionState:
             )
 
         self._face_ids.add(addition.face_id)
+        self._ordered_face_ids_cache = None
         self._minimum_face_index = min(
             self._minimum_face_index,
             addition.face_id.index,
@@ -448,10 +455,11 @@ class DiskRegionState:
         self._vertex_ids.update(addition.vertex_ids)
         for edge_id in addition.edge_ids:
             previous_count = self._edge_face_counts.get(edge_id, 0)
-            previous_invalid = not self._edge_incidence_is_valid(
-                edge_id,
-                previous_count,
-            ) if previous_count else False
+            previous_invalid = (
+                not self._edge_incidence_is_valid(edge_id, previous_count)
+                if previous_count
+                else False
+            )
             resulting_count = previous_count + 1
             resulting_invalid = not self._edge_incidence_is_valid(
                 edge_id,
@@ -498,6 +506,21 @@ class DiskRegionState:
             self._boundary_edge_ids & other._boundary_edge_ids
         )
         if not shared_boundary_edges:
+            return None
+
+        # Production states originate from one validated manifold snapshot, so
+        # every common edge should be a boundary edge in both regions. Keep the
+        # explicit guard because DiskRegionState is a public contract and can be
+        # constructed manually in tests or downstream tooling.
+        smaller_edges, larger_edges = (
+            (self._edge_face_counts, other._edge_face_counts)
+            if len(self._edge_face_counts) <= len(other._edge_face_counts)
+            else (other._edge_face_counts, self._edge_face_counts)
+        )
+        if any(
+            edge_id in larger_edges and edge_id not in shared_boundary_edges
+            for edge_id in smaller_edges
+        ):
             return None
 
         edge_map = self._index.edge_map
