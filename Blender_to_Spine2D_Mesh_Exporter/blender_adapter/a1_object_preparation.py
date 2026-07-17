@@ -43,6 +43,7 @@ from ..domain.baking import (
     BakePlan,
     CameraProjectionPlan,
     ObjectMaterialAnalysis,
+    build_camera_projection_plan,
     build_texture_plan,
 )
 from ..domain.geometry import LineageSeverity, MeshSnapshot
@@ -56,6 +57,7 @@ from ..domain.uv import UvUnwrapResult
 from .evaluated_mesh_reader import read_evaluated_mesh_snapshot
 from .material_analyzer import analyse_object_materials
 from .mesh_reader import read_source_mesh_snapshot
+from .render_engine_contract import render_engine_contract_from_execution
 from .scene_bake_analyzer import analyse_bake_contexts
 from .uv_unwrap import unwrap_snapshot_uv
 
@@ -229,6 +231,7 @@ def prepare_a1_object(
         object_id = _object_name(source_obj)
         prefix, _ = resolve_a1_names(object_id, settings)
         output_paths = resolve_a1_output_paths(object_id, settings)
+        renderer = render_engine_contract_from_execution(settings.bake_execution)
         statistics.update(
             {
                 "source_object": object_id,
@@ -238,6 +241,8 @@ def prepare_a1_object(
                 "include_preview_animation": int(
                     settings.include_preview_animation
                 ),
+                "render_engine": renderer.blender_engine,
+                "shader_render_target": renderer.shader_target,
             }
         )
 
@@ -341,6 +346,7 @@ def prepare_a1_object(
         material_analysis = analyse_object_materials(
             source_obj,
             source_object_id=source_snapshot.source_object_id,
+            render_target=renderer.shader_target,
         )
         statistics["material_slot_count"] = len(material_analysis.slots)
         for slot in material_analysis.slots:
@@ -365,12 +371,22 @@ def prepare_a1_object(
             scene=scene,
             context=context,
         )
-        bake_plan = build_texture_plan(
-            material_analysis,
-            build_a1_bake_settings(object_id, settings),
-            object_context=object_bake_context,
-            scene_context=scene_bake_context,
-        )
+        renderer.validate_scene(scene_bake_context)
+        bake_settings = build_a1_bake_settings(object_id, settings)
+        if renderer.uses_eevee:
+            bake_plan = build_camera_projection_plan(
+                material_analysis,
+                bake_settings,
+                object_context=object_bake_context,
+                scene_context=scene_bake_context,
+            )
+        else:
+            bake_plan = build_texture_plan(
+                material_analysis,
+                bake_settings,
+                object_context=object_bake_context,
+                scene_context=scene_bake_context,
+            )
         camera_projection = isinstance(bake_plan, CameraProjectionPlan)
         statistics.update(
             {
