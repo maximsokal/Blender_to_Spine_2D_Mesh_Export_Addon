@@ -115,6 +115,17 @@ jobs:
             --python tests/blender_headless/run_camera_projection_postprocess_isolation_integration.py \
             2>&1 | tee test-results/blender-postprocess-isolation.log
 
+      - name: Run View Layer contract fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_view_layer_contract_integration.py \
+            2>&1 | tee test-results/blender-view-layer-contract.log
+
       - name: Run multi-object projection crop fixtures
         shell: bash
         run: |
