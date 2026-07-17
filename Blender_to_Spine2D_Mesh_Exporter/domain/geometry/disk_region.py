@@ -118,34 +118,53 @@ def _edge_set_is_open_path(
     edge_ids: Iterable[EdgeId],
     edge_map: dict,
 ) -> bool:
-    """Return whether edges form one connected non-cyclic manifold path."""
+    """Return whether distinct edges form one connected non-cyclic manifold path.
+
+    Vertex degree is counted by incident ``EdgeId`` values rather than by unique
+    neighbouring vertices. This matters for malformed or non-manifold snapshots
+    containing parallel edges between the same two vertices: two parallel edges
+    form a cycle of length two, not one open edge.
+    """
 
     resolved = tuple(edge_ids)
-    if not resolved:
+    if not resolved or len(resolved) != len(set(resolved)):
         return False
-    adjacency: dict[VertexId, set[VertexId]] = defaultdict(set)
+
+    adjacency: dict[VertexId, list[tuple[EdgeId, VertexId]]] = defaultdict(list)
     for edge_id in resolved:
-        first, second = edge_map[edge_id].vertex_ids
-        adjacency[first].add(second)
-        adjacency[second].add(first)
-    if any(len(neighbours) > 2 for neighbours in adjacency.values()):
+        edge = edge_map.get(edge_id)
+        if edge is None:
+            return False
+        first, second = edge.vertex_ids
+        adjacency[first].append((edge_id, second))
+        adjacency[second].append((edge_id, first))
+
+    if any(len(links) > 2 for links in adjacency.values()):
         return False
     endpoints = [
         vertex_id
-        for vertex_id, neighbours in adjacency.items()
-        if len(neighbours) == 1
+        for vertex_id, links in adjacency.items()
+        if len(links) == 1
     ]
     if len(endpoints) != 2:
         return False
-    visited = {endpoints[0]}
+
+    visited_vertices = {endpoints[0]}
+    visited_edges: set[EdgeId] = set()
     queue = deque([endpoints[0]])
     while queue:
         current = queue.popleft()
-        for neighbour in adjacency[current]:
-            if neighbour not in visited:
-                visited.add(neighbour)
+        for edge_id, neighbour in adjacency[current]:
+            if edge_id in visited_edges:
+                continue
+            visited_edges.add(edge_id)
+            if neighbour not in visited_vertices:
+                visited_vertices.add(neighbour)
                 queue.append(neighbour)
-    return len(visited) == len(adjacency)
+    return (
+        len(visited_edges) == len(resolved)
+        and len(visited_vertices) == len(adjacency)
+    )
 
 
 class DiskRegionState:
