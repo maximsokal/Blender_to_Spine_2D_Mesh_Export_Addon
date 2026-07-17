@@ -60,6 +60,35 @@ def test_local_image_graph_is_audited_as_local_uv_safe():
     assert audit.required_capability is ShaderBakeCapability.LOCAL_UV_SAFE
 
 
+def test_common_normal_and_vector_nodes_remain_local_safe():
+    for node_type in ("NORMAL_MAP", "BUMP", "TANGENT", "VECTOR_ROTATE"):
+        audit = audit_material_graph_capabilities(
+            _graph(node_type, output_socket="Normal"),
+            render_target="CYCLES",
+        )
+        assert audit.required_capability is ShaderBakeCapability.LOCAL_UV_SAFE, (
+            node_type,
+            audit,
+        )
+
+
+def test_vector_transform_and_hair_closures_require_camera_render():
+    for node_type in (
+        "VECT_TRANSFORM",
+        "BSDF_HAIR",
+        "BSDF_HAIR_PRINCIPLED",
+        "BSDF_ANISOTROPIC",
+    ):
+        audit = audit_material_graph_capabilities(
+            _graph(node_type),
+            render_target="CYCLES",
+        )
+        assert audit.required_capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED, (
+            node_type,
+            audit,
+        )
+
+
 def test_texture_coordinate_uv_is_local_but_window_requires_camera():
     local = audit_material_graph_capabilities(
         _graph("TEX_COORD", output_socket="UV"),
