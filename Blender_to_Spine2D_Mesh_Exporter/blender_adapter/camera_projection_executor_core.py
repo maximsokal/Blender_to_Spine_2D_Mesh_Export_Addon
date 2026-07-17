@@ -128,6 +128,7 @@ def _render_to_reservations(
                     mask,
                     frame_index=task.task_index,
                 )
+                del mask
                 logger.debug(
                     "Merged B4 projection frame %d into alpha union: new=%d total=%d",
                     task.task_index,
