@@ -14,10 +14,10 @@ from enum import Enum
 from typing import Iterable, Tuple
 
 from .correspondence import extract_face_subset
-from .disk_region import DiskRegionState, DiskTopologyIndex
 from .ids import EdgeId, FaceId, SourceEdgeId, SourceFaceId
 from .model import MeshSnapshot
 from .segmentation import SegmentTopology, SegmentationPlan
+from .disk_region import DiskRegionState, DiskTopologyIndex
 from .topology import (
     RegionTopologyError,
     analyse_face_region,
@@ -162,7 +162,7 @@ def _grow_disk_regions(
     adjacency: dict[FaceId, Tuple[FaceId, ...]],
     topology_cache: _RegionTopologyCache,
 ) -> list[DiskRegionState]:
-    """Grow maximal deterministic disks using local candidate topology deltas."""
+    """Grow maximal deterministic disks with an incrementally updated frontier."""
 
     remaining = set(face_ids)
     regions: list[DiskRegionState] = []
@@ -180,20 +180,16 @@ def _grow_disk_regions(
                 f"Face {seed.index} is not a valid manifold disk by itself"
             ) from exc
         remaining.remove(seed)
+        region_faces = {seed}
+        frontier = {
+            neighbour
+            for neighbour in adjacency[seed]
+            if neighbour in remaining
+        }
 
-        while True:
-            region_faces = set(state.face_ids)
-            candidates = {
-                neighbour
-                for face_id in region_faces
-                for neighbour in adjacency[face_id]
-                if neighbour in remaining
-            }
-            if not candidates:
-                break
-
+        while frontier:
             ordered_candidates = sorted(
-                candidates,
+                frontier,
                 key=lambda face_id: (
                     -_shared_neighbour_count(face_id, region_faces, adjacency),
                     face_id.index,
@@ -207,8 +203,17 @@ def _grow_disk_regions(
                     break
             if accepted is None:
                 break
+
+            accepted_face = accepted.face_id
             state.apply_addition(accepted)
-            remaining.remove(accepted.face_id)
+            remaining.remove(accepted_face)
+            region_faces.add(accepted_face)
+            frontier.discard(accepted_face)
+            frontier.update(
+                neighbour
+                for neighbour in adjacency[accepted_face]
+                if neighbour in remaining
+            )
 
         regions.append(state)
 
@@ -219,7 +224,7 @@ def _adjacent_region_pair_counts(
     regions: list[DiskRegionState],
     adjacency: dict[FaceId, Tuple[FaceId, ...]],
 ) -> dict[tuple[int, int], int]:
-    """Build only actually adjacent region pairs and their shared-edge counts."""
+    """Build initial adjacent region pairs and their shared-edge counts once."""
 
     face_to_region = {
         face_id: region_index
@@ -243,22 +248,41 @@ def _adjacent_region_pair_counts(
     return pair_counts
 
 
+def _pair_key(first: int, second: int) -> tuple[int, int]:
+    return (first, second) if first < second else (second, first)
+
+
 def _merge_compatible_regions(
     regions: list[DiskRegionState],
     adjacency: dict[FaceId, Tuple[FaceId, ...]],
 ) -> list[DiskRegionState]:
-    """Greedily merge the same best compatible pair without full union scans."""
+    """Greedily merge compatible neighbours with local adjacency updates."""
 
-    working = list(regions)
+    order = list(range(len(regions)))
+    states = {region_id: region for region_id, region in enumerate(regions)}
+    pair_counts = _adjacent_region_pair_counts(regions, adjacency)
+
     while True:
-        pair_counts = _adjacent_region_pair_counts(working, adjacency)
+        positions = {region_id: index for index, region_id in enumerate(order)}
         candidates: list[
-            tuple[tuple[int, int, int, int], int, int, DiskRegionState]
+            tuple[
+                tuple[int, int, int, int],
+                int,
+                int,
+                int,
+                int,
+                DiskRegionState,
+            ]
         ] = []
-        for (first_index, second_index), shared in pair_counts.items():
-            first = working[first_index]
-            second = working[second_index]
-            merged = first.merged_with(second)
+        for (first_id, second_id), shared in pair_counts.items():
+            if first_id not in states or second_id not in states:
+                continue
+            first_position = positions[first_id]
+            second_position = positions[second_id]
+            if first_position > second_position:
+                first_id, second_id = second_id, first_id
+                first_position, second_position = second_position, first_position
+            merged = states[first_id].merged_with(states[second_id])
             if merged is None:
                 continue
             score = (
@@ -267,18 +291,56 @@ def _merge_compatible_regions(
                 min(face_id.index for face_id in merged.face_ids),
                 max(face_id.index for face_id in merged.face_ids),
             )
-            candidates.append((score, first_index, second_index, merged))
+            # The old list implementation resolved equal scores by first pair
+            # encounter. Explicit positions preserve that deterministic tie-break.
+            candidates.append(
+                (
+                    score,
+                    first_position,
+                    second_position,
+                    first_id,
+                    second_id,
+                    merged,
+                )
+            )
 
         if not candidates:
             break
-        _, first_index, second_index, merged = min(
-            candidates,
-            key=lambda item: item[0],
-        )
-        working[first_index] = merged
-        del working[second_index]
+        (
+            _,
+            _,
+            _,
+            first_id,
+            second_id,
+            merged,
+        ) = min(candidates, key=lambda item: (item[0], item[1], item[2]))
 
-    return working
+        neighbour_ids = {
+            other_id
+            for pair in pair_counts
+            if first_id in pair or second_id in pair
+            for other_id in pair
+            if other_id not in {first_id, second_id}
+        }
+        merged_pair_counts = {
+            other_id: (
+                pair_counts.get(_pair_key(first_id, other_id), 0)
+                + pair_counts.get(_pair_key(second_id, other_id), 0)
+            )
+            for other_id in neighbour_ids
+        }
+        for pair in tuple(pair_counts):
+            if first_id in pair or second_id in pair:
+                del pair_counts[pair]
+        for other_id, shared in merged_pair_counts.items():
+            if other_id in states and shared:
+                pair_counts[_pair_key(first_id, other_id)] = shared
+
+        states[first_id] = merged
+        del states[second_id]
+        order.remove(second_id)
+
+    return [states[region_id] for region_id in order]
 
 
 def _decompose_segment_faces(
