@@ -33,7 +33,13 @@ from ..domain.geometry import (
     analyse_evaluated_lineage,
     require_valid_evaluated_lineage,
 )
-from .mesh_reader import MeshReadError, _matrix_tuple, _resolve_uv_layers, _vector_tuple
+from .mesh_reader import (
+    MeshReadError,
+    _active_render_uv_name,
+    _matrix_tuple,
+    _resolve_uv_layers,
+    _vector_tuple,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +291,7 @@ def read_evaluated_mesh_snapshot(
             if active_layer is not None and active_layer.name in resolved_uv_names
             else None
         )
+        render_uv_name = _active_render_uv_name(resolved_uv_layers, active_layer)
 
         vertices = tuple(
             MeshVertex(
@@ -397,15 +404,19 @@ def read_evaluated_mesh_snapshot(
             uv_layer_names=resolved_uv_names,
             active_uv_layer=active_uv_name,
             world_matrix=_matrix_tuple(obj.matrix_world),
+            render_uv_layer=render_uv_name,
         )
         MeshSnapshotValidator().validate_or_raise(snapshot)
         logger.info(
-            "Evaluated '%s' with %d modifiers: %d vertices, %d edges, %d faces",
+            "Evaluated '%s' with %d modifiers: %d vertices, %d edges, %d faces "
+            "active_uv=%s render_uv=%s",
             object_name,
             len(modifier_stack),
             len(snapshot.vertices),
             len(snapshot.edges),
             len(snapshot.faces),
+            snapshot.active_uv_layer,
+            snapshot.render_uv_layer,
         )
         return EvaluatedMeshSnapshotResult(
             snapshot=snapshot,
