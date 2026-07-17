@@ -53,9 +53,11 @@ from .projection_layout import (
     ProjectionAlphaUnionAccumulator,
     ProjectionCropBounds,
     ProjectionPixelPoint,
+    ProjectionTriangle,
     build_full_frame_layout,
     build_sequence_union_layout,
     convex_hull,
+    triangulate_convex_hull,
 )
 from .strategies import (
     AlphaBakeStrategy,
@@ -107,6 +109,7 @@ __all__ = [
     "ProjectionAlphaUnionAccumulator",
     "ProjectionCropBounds",
     "ProjectionPixelPoint",
+    "ProjectionTriangle",
     "SceneBakeContext",
     "SceneCombinedBakeStrategy",
     "ShaderLinkSnapshot",
@@ -126,4 +129,5 @@ __all__ = [
     "resolve_bake_strategy_plan",
     "sanitize_filename_stem",
     "texture_plan_output_paths",
+    "triangulate_convex_hull",
 ]
