@@ -73,6 +73,7 @@ from .scene_bake_analyzer import (
     analyse_scene_bake_context,
     validate_runtime_scene_context,
 )
+from .shader_capability_audit import audit_material_graph_capabilities
 from .shader_graph_analyzer import (
     MaterialGraphAnalysisError,
     analyse_material_graph,
@@ -119,6 +120,7 @@ __all__ = [
     "analyse_object_bake_context",
     "analyse_object_materials",
     "analyse_scene_bake_context",
+    "audit_material_graph_capabilities",
     "build_bake_execution_result",
     "build_uv_operator_plan",
     "compose_bake_passes",
