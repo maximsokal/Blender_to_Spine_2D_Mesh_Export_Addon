@@ -1,9 +1,10 @@
 """Deterministic decomposition of complex face regions into exportable disks.
 
 The legacy exporter attempted random spatial k-means and could produce different
-results for the same mesh.  This module grows connected topological disks, then
-merges adjacent disks whenever the union remains a disk.  It guarantees that
-faces are neither lost nor duplicated and contains no random state.
+results for the same mesh. This module grows connected topological disks, then
+merges adjacent disks whenever the union remains a disk. Candidate growth and
+merge checks use incremental boundary state; complete topology analysis remains
+as an invariant check for original and finalized regions.
 """
 
 from __future__ import annotations
@@ -13,10 +14,12 @@ from enum import Enum
 from typing import Iterable, Tuple
 
 from .correspondence import extract_face_subset
+from .disk_region import DiskRegionState, DiskTopologyIndex
 from .ids import EdgeId, FaceId, SourceEdgeId, SourceFaceId
 from .model import MeshSnapshot
 from .segmentation import SegmentTopology, SegmentationPlan
 from .topology import (
+    RegionTopologyError,
     analyse_face_region,
     build_edge_to_faces,
     build_face_adjacency,
@@ -99,16 +102,24 @@ class DecompositionError(ValueError):
 
 
 class _RegionTopologyCache:
-    """Memoize topology checks performed by deterministic region growth."""
+    """Memoize complete checks used for original and finalized regions only."""
 
     def __init__(self, snapshot: MeshSnapshot) -> None:
         self._snapshot = snapshot
         self._edge_to_faces = build_edge_to_faces(snapshot)
+        self._disk_index = DiskTopologyIndex(
+            snapshot,
+            edge_to_faces=self._edge_to_faces,
+        )
         self._cache: dict[frozenset[FaceId], SegmentTopology] = {}
 
     @property
     def edge_to_faces(self) -> dict[EdgeId, Tuple[FaceId, ...]]:
         return self._edge_to_faces
+
+    @property
+    def disk_index(self) -> DiskTopologyIndex:
+        return self._disk_index
 
     def topology(self, face_ids: Iterable[FaceId]) -> SegmentTopology:
         key = frozenset(face_ids)
@@ -146,29 +157,35 @@ def _shared_neighbour_count(
 
 
 def _grow_disk_regions(
+    snapshot: MeshSnapshot,
     face_ids: Tuple[FaceId, ...],
     adjacency: dict[FaceId, Tuple[FaceId, ...]],
     topology_cache: _RegionTopologyCache,
-) -> list[set[FaceId]]:
-    """Grow maximal deterministic disk regions from the lowest unassigned face."""
+) -> list[DiskRegionState]:
+    """Grow maximal deterministic disks using local candidate topology deltas."""
 
     remaining = set(face_ids)
-    regions: list[set[FaceId]] = []
+    regions: list[DiskRegionState] = []
 
     while remaining:
         seed = min(remaining, key=lambda item: item.index)
-        region = {seed}
-        remaining.remove(seed)
-
-        if not is_simple_disk(topology_cache.topology(region)):
+        try:
+            state = DiskRegionState.from_face(
+                snapshot,
+                seed,
+                topology_index=topology_cache.disk_index,
+            )
+        except RegionTopologyError as exc:
             raise DecompositionError(
                 f"Face {seed.index} is not a valid manifold disk by itself"
-            )
+            ) from exc
+        remaining.remove(seed)
 
         while True:
+            region_faces = set(state.face_ids)
             candidates = {
                 neighbour
-                for face_id in region
+                for face_id in region_faces
                 for neighbour in adjacency[face_id]
                 if neighbour in remaining
             }
@@ -178,70 +195,86 @@ def _grow_disk_regions(
             ordered_candidates = sorted(
                 candidates,
                 key=lambda face_id: (
-                    -_shared_neighbour_count(face_id, region, adjacency),
+                    -_shared_neighbour_count(face_id, region_faces, adjacency),
                     face_id.index,
                 ),
             )
-            accepted: FaceId | None = None
+            accepted = None
             for candidate in ordered_candidates:
-                candidate_region = set(region)
-                candidate_region.add(candidate)
-                if is_simple_disk(topology_cache.topology(candidate_region)):
-                    accepted = candidate
+                addition = state.preview_add_face(candidate)
+                if addition is not None:
+                    accepted = addition
                     break
             if accepted is None:
                 break
-            region.add(accepted)
-            remaining.remove(accepted)
+            state.apply_addition(accepted)
+            remaining.remove(accepted.face_id)
 
-        regions.append(region)
+        regions.append(state)
 
     return regions
 
 
-def _regions_are_adjacent(
-    first: set[FaceId],
-    second: set[FaceId],
+def _adjacent_region_pair_counts(
+    regions: list[DiskRegionState],
     adjacency: dict[FaceId, Tuple[FaceId, ...]],
-) -> int:
-    return sum(
-        neighbour in second
-        for face_id in first
-        for neighbour in adjacency[face_id]
-    )
+) -> dict[tuple[int, int], int]:
+    """Build only actually adjacent region pairs and their shared-edge counts."""
+
+    face_to_region = {
+        face_id: region_index
+        for region_index, region in enumerate(regions)
+        for face_id in region.face_ids
+    }
+    pair_counts: dict[tuple[int, int], int] = {}
+    for face_id, neighbours in adjacency.items():
+        first_region = face_to_region.get(face_id)
+        if first_region is None:
+            continue
+        for neighbour in neighbours:
+            # Adjacency is symmetric; count each shared edge exactly once.
+            if face_id.index >= neighbour.index:
+                continue
+            second_region = face_to_region.get(neighbour)
+            if second_region is None or second_region == first_region:
+                continue
+            pair = tuple(sorted((first_region, second_region)))
+            pair_counts[pair] = pair_counts.get(pair, 0) + 1
+    return pair_counts
 
 
 def _merge_compatible_regions(
-    regions: list[set[FaceId]],
+    regions: list[DiskRegionState],
     adjacency: dict[FaceId, Tuple[FaceId, ...]],
-    topology_cache: _RegionTopologyCache,
-) -> list[set[FaceId]]:
-    """Greedily merge the largest compatible adjacent pair until convergence."""
+) -> list[DiskRegionState]:
+    """Greedily merge the same best compatible pair without full union scans."""
 
-    working = [set(region) for region in regions]
+    working = list(regions)
     while True:
-        candidates: list[tuple[tuple[int, int, int, int], int, int, set[FaceId]]] = []
-        for first_index in range(len(working)):
-            for second_index in range(first_index + 1, len(working)):
-                first = working[first_index]
-                second = working[second_index]
-                shared = _regions_are_adjacent(first, second, adjacency)
-                if shared == 0:
-                    continue
-                merged = first | second
-                if not is_simple_disk(topology_cache.topology(merged)):
-                    continue
-                score = (
-                    -len(merged),
-                    -shared,
-                    min(face_id.index for face_id in merged),
-                    max(face_id.index for face_id in merged),
-                )
-                candidates.append((score, first_index, second_index, merged))
+        pair_counts = _adjacent_region_pair_counts(working, adjacency)
+        candidates: list[
+            tuple[tuple[int, int, int, int], int, int, DiskRegionState]
+        ] = []
+        for (first_index, second_index), shared in pair_counts.items():
+            first = working[first_index]
+            second = working[second_index]
+            merged = first.merged_with(second)
+            if merged is None:
+                continue
+            score = (
+                -merged.face_count,
+                -shared,
+                min(face_id.index for face_id in merged.face_ids),
+                max(face_id.index for face_id in merged.face_ids),
+            )
+            candidates.append((score, first_index, second_index, merged))
 
         if not candidates:
             break
-        _, first_index, second_index, merged = min(candidates, key=lambda item: item[0])
+        _, first_index, second_index, merged = min(
+            candidates,
+            key=lambda item: item[0],
+        )
         working[first_index] = merged
         del working[second_index]
 
@@ -259,15 +292,23 @@ def _decompose_segment_faces(
         face_ids,
         edge_to_faces=topology_cache.edge_to_faces,
     )
-    regions = _grow_disk_regions(face_ids, adjacency, topology_cache)
+    region_states = _grow_disk_regions(
+        snapshot,
+        face_ids,
+        adjacency,
+        topology_cache,
+    )
     if settings.merge_compatible_regions:
-        regions = _merge_compatible_regions(regions, adjacency, topology_cache)
+        region_states = _merge_compatible_regions(region_states, adjacency)
 
     ordered = tuple(
-        tuple(sorted(region, key=lambda item: item.index))
+        region.face_ids
         for region in sorted(
-            regions,
-            key=lambda item: (min(face_id.index for face_id in item), len(item)),
+            region_states,
+            key=lambda item: (
+                min(face_id.index for face_id in item.face_ids),
+                item.face_count,
+            ),
         )
     )
     covered = [face_id for region in ordered for face_id in region]
@@ -277,7 +318,8 @@ def _decompose_segment_faces(
         missing = sorted(face_id.index for face_id in set(face_ids) - set(covered))
         raise DecompositionError(f"Decomposition lost faces: {missing}")
     for region in ordered:
-        if not is_simple_disk(topology_cache.topology(region)):
+        complete_topology = topology_cache.topology(region)
+        if not is_simple_disk(complete_topology):
             raise DecompositionError(
                 "Decomposition produced a region that is not a manifold disk: "
                 + str([face_id.index for face_id in region])
