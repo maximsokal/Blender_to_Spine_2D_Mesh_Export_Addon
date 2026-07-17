@@ -8,6 +8,12 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.scene_material_preparation
     _renderer_output,
     _temporary_renderer_output_selection,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
+    BakeMode,
+    BakePassPlan,
+    BakeStrategyId,
+    MaterialSemanticChannel,
+)
 
 
 class FakeOutput:
@@ -70,21 +76,24 @@ def test_prepared_materials_normalize_and_forward_renderer_target(monkeypatch):
         "temporary_prepare_scene_material_pass",
         fake_prepare,
     )
+    material = object()
     prepared = PreparedBakeMaterials(
-        materials=(object(),),
+        materials=(material,),
         image_nodes=(),
         placeholder_slot_indices=(),
         used_material_indices=(0,),
         render_target="BLENDER_EEVEE_NEXT",
     )
-    pass_plan = object()
+    pass_plan = BakePassPlan(
+        pass_index=0,
+        strategy_id=BakeStrategyId.ALPHA,
+        bake_mode=BakeMode.EMIT,
+        material_slot_indices=(0,),
+        semantic_channels=(MaterialSemanticChannel.ALPHA,),
+    )
 
-    try:
-        with prepared.prepare_pass(pass_plan):
-            pass
-    except TypeError:
-        # PreparedBakeMaterials intentionally validates the public pass type before delegation.
+    with prepared.prepare_pass(pass_plan):
         pass
 
     assert prepared.render_target == "EEVEE"
-    assert not calls
+    assert calls == [((material,), pass_plan, (0,), "EEVEE")]
