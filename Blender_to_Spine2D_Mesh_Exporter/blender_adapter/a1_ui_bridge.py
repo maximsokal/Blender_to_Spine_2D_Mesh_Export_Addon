@@ -13,7 +13,7 @@ from ..application import (
     ExportResult,
     ExportSettings,
 )
-from ..domain.baking import sanitize_filename_stem
+from ..domain.baking import BakeExecutionSettings, sanitize_filename_stem
 from ..domain.uv import UvUnwrapSettings
 from .a1_mixed_object_export import export_a1_mixed_object
 from .a1_multi_object_export import A1MultiObjectSource, export_a1_multi_object
@@ -117,6 +117,9 @@ def _common_object_settings(
     object_name = _object_name(obj)
     seam_mode = str(getattr(scene, "spine2d_seam_maker_mode", "AUTO"))
     angle_limit = float(getattr(scene, "spine2d_angle_limit", 30.0))
+    render_engine = str(
+        getattr(getattr(scene, "render", None), "engine", "CYCLES") or "CYCLES"
+    )
     return A1SingleObjectExportSettings(
         export=ExportSettings(
             texture_width=texture_size,
@@ -134,6 +137,7 @@ def _common_object_settings(
         json_output_stem=json_output_stem,
         source_geometry_mode=A1SourceGeometryMode.ORIGINAL,
         uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
+        bake_execution=BakeExecutionSettings(render_engine=render_engine),
         include_control_icons=bool(
             getattr(scene, "spine2d_control_icons", True)
         ),
