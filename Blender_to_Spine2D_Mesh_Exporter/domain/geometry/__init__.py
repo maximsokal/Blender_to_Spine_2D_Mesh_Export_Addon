@@ -1,6 +1,6 @@
 """Immutable mesh snapshots and exact source-lineage correspondence."""
 
-from .a1_segmentation import A1SegmentationError, segment_mesh_a1
+from .a1_segmentation import A1AngularMode, A1SegmentationError, segment_mesh_a1
 from .correspondence import (
     ConflictingSourceLoopUVError,
     CorrespondenceError,
@@ -23,6 +23,7 @@ from .decomposition import (
     decompose_complex_segments,
     materialize_decomposed_snapshots,
 )
+from .disk_region import DiskRegionAddition, DiskRegionState, DiskTopologyIndex
 from .fingerprint import build_mesh_fingerprint
 from .ids import (
     EdgeId,
@@ -73,6 +74,7 @@ from .topology import (
     build_edge_to_faces,
     build_face_adjacency,
     face_edge_ids,
+    face_vertex_ids,
     is_simple_disk,
 )
 from .triangulation import (
@@ -90,6 +92,7 @@ from .validator import (
 )
 
 __all__ = [
+    "A1AngularMode",
     "A1SegmentationError",
     "ConflictingSourceLoopUVError",
     "CorrespondenceError",
@@ -98,6 +101,9 @@ __all__ = [
     "DecompositionError",
     "DecompositionReason",
     "DecompositionSettings",
+    "DiskRegionAddition",
+    "DiskRegionState",
+    "DiskTopologyIndex",
     "EdgeId",
     "EvaluatedLineageError",
     "EvaluatedLineageReport",
@@ -153,6 +159,7 @@ __all__ = [
     "decompose_complex_segments",
     "extract_face_subset",
     "face_edge_ids",
+    "face_vertex_ids",
     "is_simple_disk",
     "materialize_decomposed_snapshots",
     "materialize_segment_snapshots",
