@@ -23,6 +23,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
     CameraProjectionPlan,
     MaterialDependencyKind,
+    MaterialKind,
     MaterialSemanticChannel,
 )
 from run_bake_integration import _assert  # noqa: E402
@@ -139,6 +140,97 @@ def _create_group_with_unused_camera_input(name: str):
     return material
 
 
+def _create_nested_image_material(name: str):
+    group = bpy.data.node_groups.new(f"{name}_Group", "ShaderNodeTree")
+    _new_group_socket(group, "Shader", in_out="OUTPUT", socket_type="NodeSocketShader")
+    group_output = group.nodes.new(type="NodeGroupOutput")
+    group_output.is_active_output = True
+    generated = bpy.data.images.new(
+        f"{name}_Generated",
+        width=8,
+        height=8,
+        alpha=True,
+    )
+    generated.generated_color = (0.1, 0.7, 0.2, 1.0)
+    image = group.nodes.new(type="ShaderNodeTexImage")
+    image.name = "Nested Reachable Image"
+    image.image = generated
+    emission = group.nodes.new(type="ShaderNodeEmission")
+    group.links.new(image.outputs["Color"], emission.inputs["Color"])
+    group.links.new(emission.outputs["Emission"], group_output.inputs["Shader"])
+
+    material = bpy.data.materials.new(name=name)
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    nodes.clear()
+    output = nodes.new(type="ShaderNodeOutputMaterial")
+    instance = nodes.new(type="ShaderNodeGroup")
+    instance.name = "Nested Image Instance"
+    instance.node_tree = group
+    unused = nodes.new(type="ShaderNodeTexImage")
+    unused.name = "Unreachable Missing Image"
+    material.node_tree.links.new(instance.outputs["Shader"], output.inputs["Surface"])
+    return material, generated
+
+
+def _create_muted_camera_group_material(name: str):
+    group = bpy.data.node_groups.new(f"{name}_Group", "ShaderNodeTree")
+    _new_group_socket(group, "Shader", in_out="INPUT", socket_type="NodeSocketShader")
+    _new_group_socket(group, "Shader", in_out="OUTPUT", socket_type="NodeSocketShader")
+    group.nodes.new(type="NodeGroupInput")
+    output = group.nodes.new(type="NodeGroupOutput")
+    output.is_active_output = True
+    layer_weight = group.nodes.new(type="ShaderNodeLayerWeight")
+    layer_weight.name = "Muted Nested Layer Weight"
+    emission = group.nodes.new(type="ShaderNodeEmission")
+    group.links.new(layer_weight.outputs["Facing"], emission.inputs["Color"])
+    group.links.new(emission.outputs["Emission"], output.inputs["Shader"])
+
+    material = bpy.data.materials.new(name=name)
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    nodes.clear()
+    material_output = nodes.new(type="ShaderNodeOutputMaterial")
+    diffuse = nodes.new(type="ShaderNodeBsdfDiffuse")
+    diffuse.inputs["Color"].default_value = (0.2, 0.6, 0.9, 1.0)
+    instance = nodes.new(type="ShaderNodeGroup")
+    instance.name = "Muted Camera Group"
+    instance.node_tree = group
+    instance.mute = True
+    material.node_tree.links.new(diffuse.outputs["BSDF"], instance.inputs["Shader"])
+    material.node_tree.links.new(
+        instance.outputs["Shader"], material_output.inputs["Surface"]
+    )
+    return material, instance
+
+
+def _create_renderer_specific_material(name: str):
+    material = bpy.data.materials.new(name=name)
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    nodes.clear()
+
+    cycles_output = nodes.new(type="ShaderNodeOutputMaterial")
+    cycles_output.name = "Cycles Material Output"
+    cycles_output.target = "CYCLES"
+    eevee_output = nodes.new(type="ShaderNodeOutputMaterial")
+    eevee_output.name = "Eevee Material Output"
+    eevee_output.target = "EEVEE"
+
+    layer_weight = nodes.new(type="ShaderNodeLayerWeight")
+    layer_weight.name = "Cycles Layer Weight"
+    emission = nodes.new(type="ShaderNodeEmission")
+    material.node_tree.links.new(layer_weight.outputs["Facing"], emission.inputs["Color"])
+    material.node_tree.links.new(
+        emission.outputs["Emission"], cycles_output.inputs["Surface"]
+    )
+
+    diffuse = nodes.new(type="ShaderNodeBsdfDiffuse")
+    diffuse.inputs["Color"].default_value = (0.8, 0.25, 0.05, 1.0)
+    material.node_tree.links.new(diffuse.outputs["BSDF"], eevee_output.inputs["Surface"])
+    return material
+
+
 def test_nested_camera_group_routes_to_b4_and_renders() -> None:
     _prepare_scene_with_sentinel()
     with tempfile.TemporaryDirectory(prefix="spine2d-recursive-camera-") as directory:
@@ -245,12 +337,100 @@ def test_unused_group_input_does_not_select_camera_projection() -> None:
         )
 
 
+def test_nested_image_controls_material_kind_and_ignores_orphan_image() -> None:
+    _prepare_scene_with_sentinel()
+    source = _create_quad("NestedImageSource")
+    material, generated = _create_nested_image_material("NestedImageMaterial")
+    source.data.materials.append(material)
+
+    analysis = analyse_object_materials(source, source_object_id=source.name)
+    slot = analysis.slots[0]
+    _assert(slot.kind is MaterialKind.IMAGE, f"unexpected nested image kind: {slot.kind}")
+    _assert(
+        tuple(item.image_name for item in slot.image_dependencies) == (generated.name,),
+        f"nested image dependency mismatch: {slot.image_dependencies}",
+    )
+    _assert(
+        all("Unreachable Missing Image" not in issue for issue in slot.issues),
+        f"orphan image leaked into issues: {slot.issues}",
+    )
+
+
+def test_muted_group_uses_internal_bypass_and_stays_local() -> None:
+    _prepare_scene_with_sentinel()
+    with tempfile.TemporaryDirectory(prefix="spine2d-recursive-muted-") as directory:
+        output_directory = Path(directory)
+        source = _create_quad("MutedGroupSource")
+        material, instance = _create_muted_camera_group_material("MutedGroupMaterial")
+        source.data.materials.append(material)
+        _assert(tuple(instance.internal_links), "Blender did not create muted group bypass links")
+
+        analysis = analyse_object_materials(source, source_object_id=source.name)
+        graph = analysis.slots[0].graph
+        _assert(graph is not None, "muted group material has no graph snapshot")
+        _assert(
+            MaterialDependencyKind.CAMERA not in graph.dependencies,
+            f"muted nested camera dependency leaked: {graph.dependencies}",
+        )
+        _assert(
+            MaterialDependencyKind.NODE_GROUP not in graph.dependencies,
+            f"muted group was treated as evaluated: {graph.dependencies}",
+        )
+        prepared = prepare_a1_object(
+            source,
+            _settings(output_directory, "MutedGroupLocal"),
+        )
+        _assert(
+            not isinstance(prepared.bake_plan, CameraProjectionPlan),
+            "muted group incorrectly selected B4",
+        )
+
+
+def test_renderer_specific_material_outputs_follow_active_engine() -> None:
+    _prepare_scene_with_sentinel()
+    source = _create_quad("RendererSpecificSource")
+    source.data.materials.append(_create_renderer_specific_material("RendererSpecificMaterial"))
+    scene = bpy.context.scene
+    original_engine = scene.render.engine
+    try:
+        scene.render.engine = "CYCLES"
+        cycles = analyse_object_materials(source, source_object_id=source.name)
+        cycles_graph = cycles.slots[0].graph
+        _assert(cycles_graph is not None, "Cycles graph snapshot is missing")
+        _assert(
+            cycles_graph.active_output_node_id == "Cycles Material Output",
+            f"wrong Cycles output: {cycles_graph.active_output_node_id}",
+        )
+        _assert(
+            MaterialDependencyKind.CAMERA in cycles_graph.dependencies,
+            f"Cycles camera dependency missing: {cycles_graph.dependencies}",
+        )
+
+        scene.render.engine = "BLENDER_EEVEE_NEXT"
+        eevee = analyse_object_materials(source, source_object_id=source.name)
+        eevee_graph = eevee.slots[0].graph
+        _assert(eevee_graph is not None, "Eevee graph snapshot is missing")
+        _assert(
+            eevee_graph.active_output_node_id == "Eevee Material Output",
+            f"wrong Eevee output: {eevee_graph.active_output_node_id}",
+        )
+        _assert(
+            MaterialDependencyKind.CAMERA not in eevee_graph.dependencies,
+            f"Cycles branch leaked into Eevee: {eevee_graph.dependencies}",
+        )
+    finally:
+        scene.render.engine = original_engine
+
+
 def main() -> None:
     print(f"Blender version: {bpy.app.version_string}")
     tests = (
         test_nested_camera_group_routes_to_b4_and_renders,
         test_nested_volume_group_routes_to_b4_and_renders,
         test_unused_group_input_does_not_select_camera_projection,
+        test_nested_image_controls_material_kind_and_ignores_orphan_image,
+        test_muted_group_uses_internal_bypass_and_stays_local,
+        test_renderer_specific_material_outputs_follow_active_engine,
     )
     for test in tests:
         print(f"[RECURSIVE-GROUP] RUN {test.__name__}")
