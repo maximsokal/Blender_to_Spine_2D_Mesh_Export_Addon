@@ -1,11 +1,10 @@
 # .github/workflows/ci.yml
 name: Blender Add-on CI
 
+# Manual-only while the rewrite branch is under active development.
+# This prevents pull-request commits from consuming Actions minutes and sending noisy mail.
 on:
-  push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
+  workflow_dispatch:
 
 jobs:
   test:
