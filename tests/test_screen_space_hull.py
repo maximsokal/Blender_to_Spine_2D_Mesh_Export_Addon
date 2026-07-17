@@ -84,6 +84,19 @@ def test_clockwise_hull_is_rejected():
         )
 
 
+def test_self_intersecting_star_hull_is_rejected():
+    with pytest.raises(ValueError, match="self-intersecting"):
+        _layout(
+            (
+                ProjectionPixelPoint(3, 7),
+                ProjectionPixelPoint(1, 1),
+                ProjectionPixelPoint(6, 5),
+                ProjectionPixelPoint(0, 5),
+                ProjectionPixelPoint(5, 1),
+            )
+        )
+
+
 def test_generated_irregular_hull_has_exact_non_degenerate_fan():
     mask = _mask(12, 10, {(1, 1), (9, 1), (10, 5), (7, 8), (2, 7)})
     layout = build_sequence_union_layout(
