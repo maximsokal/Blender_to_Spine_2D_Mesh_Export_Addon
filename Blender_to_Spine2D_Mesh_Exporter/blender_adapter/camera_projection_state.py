@@ -10,6 +10,10 @@ from typing import Any, Iterable, Iterator, Tuple
 
 from ..domain.baking import BakeExecutionSettings, CameraProjectionPlan, TextureFormat
 from ..infrastructure import AtomicOutputReservation
+from .render_engine_contract import (
+    render_engine_contract,
+    render_engine_contract_from_execution,
+)
 from .scene_bake_analyzer import validate_runtime_scene_context
 
 logger = logging.getLogger(__name__)
@@ -111,6 +115,8 @@ _SCENE_PATHS = (
     "render.filepath",
     "render.film_transparent",
     "render.use_file_extension",
+    "render.use_compositing",
+    "render.use_sequencer",
     "render.image_settings.file_format",
     "render.image_settings.color_mode",
     "render.image_settings.color_depth",
@@ -215,19 +221,35 @@ def configure_scene_for_camera_projection(
         raise TypeError("execution_settings must be BakeExecutionSettings")
     if not isinstance(staged_path, Path):
         raise TypeError("staged_path must be pathlib.Path")
-    scene.render.engine = execution_settings.render_engine
+
+    renderer = render_engine_contract_from_execution(execution_settings)
+    if plan.scene_context is None:
+        raise CameraProjectionExecutionError(
+            "CameraProjectionPlan is missing its renderer-specific SceneBakeContext"
+        )
+    planned_renderer = render_engine_contract(plan.scene_context.render_engine)
+    if renderer != planned_renderer:
+        raise CameraProjectionExecutionError(
+            "camera projection execution engine differs from the analyzed renderer; "
+            f"planned={planned_renderer.blender_engine}, "
+            f"execution={renderer.blender_engine}"
+        )
+
+    scene.render.engine = renderer.blender_engine
     scene.render.resolution_x = plan.settings.width
     scene.render.resolution_y = plan.settings.height
     scene.render.resolution_percentage = 100
     scene.render.filepath = str(staged_path)
     scene.render.film_transparent = plan.transparent_background
     scene.render.use_file_extension = True
+    scene.render.use_compositing = False
+    scene.render.use_sequencer = False
     scene.render.image_settings.file_format = plan.settings.texture_format.value
     scene.render.image_settings.color_mode = "RGBA"
     scene.render.image_settings.color_depth = (
         "32" if plan.settings.texture_format is TextureFormat.OPEN_EXR else "8"
     )
-    scene.cycles.samples = execution_settings.samples
+    _set_if_available(scene, "cycles.samples", execution_settings.samples)
     _set_if_available(scene, "cycles.film_transparent_glass", False)
 
 
