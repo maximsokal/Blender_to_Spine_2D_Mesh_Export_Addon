@@ -50,6 +50,7 @@ from .execution import BakeArtifact, BakeExecutionResult, BakeExecutionSettings
 from .projection_layout import (
     CameraProjectionLayout,
     CameraProjectionLayoutError,
+    ProjectionAlphaUnionAccumulator,
     ProjectionCropBounds,
     ProjectionPixelPoint,
     build_full_frame_layout,
@@ -103,6 +104,7 @@ __all__ = [
     "MaterialSlotPreparation",
     "ObjectBakeContext",
     "ObjectMaterialAnalysis",
+    "ProjectionAlphaUnionAccumulator",
     "ProjectionCropBounds",
     "ProjectionPixelPoint",
     "SceneBakeContext",
