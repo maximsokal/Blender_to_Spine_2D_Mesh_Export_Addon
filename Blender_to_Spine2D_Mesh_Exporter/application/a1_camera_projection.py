@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Mapping
+from typing import Mapping, Tuple
 
 from ..domain.baking import CameraProjectionPlan
 from ..domain.baking.projection_layout import (
     CameraProjectionLayout,
+    ProjectionTriangle,
     build_full_frame_layout,
 )
 from ..domain.geometry import (
@@ -72,20 +73,61 @@ def _resolved_layout(
     return layout
 
 
-def _edge_pairs(vertex_count: int) -> tuple[tuple[int, int], ...]:
-    if vertex_count < 3:
-        raise A1DocumentAssemblyError("camera projection hull requires at least 3 vertices")
-    boundary = tuple((index, (index + 1) % vertex_count) for index in range(vertex_count))
-    diagonals = tuple((0, index) for index in range(2, vertex_count - 1))
-    return boundary + diagonals
-
-
 def _normalized_pair(first: int, second: int) -> tuple[int, int]:
     return (first, second) if first < second else (second, first)
 
 
-def _face_vertices(vertex_count: int) -> tuple[tuple[int, int, int], ...]:
-    return tuple((0, index, index + 1) for index in range(1, vertex_count - 1))
+def _edge_pairs(
+    vertex_count: int,
+    triangle_indices: Tuple[ProjectionTriangle, ...],
+) -> tuple[tuple[int, int], ...]:
+    """Return boundary edges first, then deterministic internal fan diagonals."""
+
+    if vertex_count < 3:
+        raise A1DocumentAssemblyError("camera projection hull requires at least 3 vertices")
+    if len(triangle_indices) != vertex_count - 2:
+        raise A1DocumentAssemblyError(
+            "camera projection triangle count does not match convex hull vertex count"
+        )
+
+    boundary = tuple((index, (index + 1) % vertex_count) for index in range(vertex_count))
+    resolved: list[tuple[int, int]] = list(boundary)
+    seen = {_normalized_pair(first, second) for first, second in boundary}
+
+    for face_index, triangle in enumerate(triangle_indices):
+        if not isinstance(triangle, tuple) or len(triangle) != 3:
+            raise A1DocumentAssemblyError(
+                f"camera projection triangle {face_index} must contain three indices"
+            )
+        if any(
+            not isinstance(index, int) or index < 0 or index >= vertex_count
+            for index in triangle
+        ):
+            raise A1DocumentAssemblyError(
+                f"camera projection triangle {face_index} references an invalid vertex"
+            )
+        if len(set(triangle)) != 3:
+            raise A1DocumentAssemblyError(
+                f"camera projection triangle {face_index} is degenerate"
+            )
+        for first, second in (
+            (triangle[0], triangle[1]),
+            (triangle[1], triangle[2]),
+            (triangle[2], triangle[0]),
+        ):
+            pair = _normalized_pair(first, second)
+            if pair in seen:
+                continue
+            seen.add(pair)
+            resolved.append(pair)
+
+    expected_edge_count = vertex_count + max(0, vertex_count - 3)
+    if len(resolved) != expected_edge_count:
+        raise A1DocumentAssemblyError(
+            "camera projection fan produced an unexpected edge count; "
+            f"expected={expected_edge_count}, actual={len(resolved)}"
+        )
+    return tuple(resolved)
 
 
 def build_camera_projection_mesh_snapshot(
@@ -110,14 +152,14 @@ def build_camera_projection_mesh_snapshot(
 
     resolved_layout = _resolved_layout(plan, layout)
     points = resolved_layout.hull
+    triangle_indices = resolved_layout.triangle_indices
     lineage_id = plan.source_object_id
+    screen_positions = tuple(
+        resolved_layout.spine_position_pixels(point) for point in points
+    )
     positions = tuple(
-        (
-            resolved_layout.spine_position_pixels(point)[0] / scale,
-            resolved_layout.spine_position_pixels(point)[1] / scale,
-            0.0,
-        )
-        for point in points
+        (position_x / scale, position_y / scale, 0.0)
+        for position_x, position_y in screen_positions
     )
     uvs = tuple(resolved_layout.spine_uv(point) for point in points)
     vertices = tuple(
@@ -130,7 +172,7 @@ def build_camera_projection_mesh_snapshot(
         for index, position in enumerate(positions)
     )
 
-    edge_pairs = _edge_pairs(len(points))
+    edge_pairs = _edge_pairs(len(points), triangle_indices)
     edges = tuple(
         MeshEdge(
             id=EdgeId(index),
@@ -147,7 +189,7 @@ def build_camera_projection_mesh_snapshot(
     loops: list[MeshLoop] = []
     faces: list[MeshFace] = []
     loop_index = 0
-    for face_index, vertex_indices in enumerate(_face_vertices(len(points))):
+    for face_index, vertex_indices in enumerate(triangle_indices):
         triangle_pairs = (
             (vertex_indices[0], vertex_indices[1]),
             (vertex_indices[1], vertex_indices[2]),
