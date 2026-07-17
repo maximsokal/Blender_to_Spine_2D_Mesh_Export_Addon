@@ -68,6 +68,25 @@ def _resolve_uv_layers(
     return tuple(available_by_name[name] for name in requested)
 
 
+def _active_render_uv_name(
+    resolved_uv_layers: tuple[Any, ...],
+    active_layer: Any | None,
+) -> str | None:
+    render_layers = tuple(
+        layer for layer in resolved_uv_layers if bool(getattr(layer, "active_render", False))
+    )
+    if len(render_layers) > 1:
+        raise MeshReadError(
+            "Blender mesh reports more than one active_render UV layer: "
+            + str(tuple(layer.name for layer in render_layers))
+        )
+    if render_layers:
+        return str(render_layers[0].name)
+    if active_layer is not None and active_layer in resolved_uv_layers:
+        return str(active_layer.name)
+    return None
+
+
 def read_source_mesh_snapshot(
     obj: Any,
     *,
@@ -100,6 +119,7 @@ def read_source_mesh_snapshot(
             if active_layer is not None and active_layer.name in resolved_uv_names
             else None
         )
+        render_uv_name = _active_render_uv_name(resolved_uv_layers, active_layer)
 
         vertices = tuple(
             MeshVertex(
@@ -195,16 +215,19 @@ def read_source_mesh_snapshot(
             uv_layer_names=resolved_uv_names,
             active_uv_layer=active_uv_name,
             world_matrix=_matrix_tuple(obj.matrix_world),
+            render_uv_layer=render_uv_name,
         )
         MeshSnapshotValidator().validate_or_raise(snapshot)
         logger.debug(
             "Read source mesh snapshot '%s': %d vertices, %d edges, %d loops, "
-            "%d faces",
+            "%d faces active_uv=%s render_uv=%s",
             snapshot.snapshot_id,
             len(snapshot.vertices),
             len(snapshot.edges),
             len(snapshot.loops),
             len(snapshot.faces),
+            snapshot.active_uv_layer,
+            snapshot.render_uv_layer,
         )
         return snapshot
     except MeshReadError:
