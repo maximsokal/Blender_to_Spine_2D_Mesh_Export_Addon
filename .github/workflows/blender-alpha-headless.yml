@@ -1,16 +1,7 @@
 name: Blender 4.4 Alpha Bake
 
+# Manual-only while the rewrite branch is under active development.
 on:
-  pull_request:
-    branches: ["main", "master"]
-    paths:
-      - ".github/workflows/blender-alpha-headless.yml"
-      - "Blender_to_Spine2D_Mesh_Exporter/domain/baking/**"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/bake_*.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/semantic_bake_executor.py"
-      - "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/shader_graph_analyzer.py"
-      - "tests/blender_headless/run_alpha_bake_integration.py"
-      - "tests/blender_headless/run_alpha_sequence_rollback_integration.py"
   workflow_dispatch:
 
 permissions:
