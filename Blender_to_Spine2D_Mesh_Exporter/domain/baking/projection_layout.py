@@ -194,6 +194,27 @@ def _signed_double_area(points: Tuple[ProjectionPixelPoint, ...]) -> int:
     )
 
 
+def _monotonic_convex_hull(
+    points: Iterable[ProjectionPixelPoint],
+) -> Tuple[ProjectionPixelPoint, ...]:
+    unique = tuple(sorted(set(points)))
+    if len(unique) < 3:
+        return unique
+
+    lower: list[ProjectionPixelPoint] = []
+    for point in unique:
+        while len(lower) >= 2 and _cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+
+    upper: list[ProjectionPixelPoint] = []
+    for point in reversed(unique):
+        while len(upper) >= 2 and _cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+    return tuple(lower[:-1] + upper[:-1])
+
+
 def _validate_strict_convex_hull(
     points: Tuple[ProjectionPixelPoint, ...],
 ) -> None:
@@ -206,23 +227,17 @@ def _validate_strict_convex_hull(
     if _signed_double_area(points) <= 0:
         raise ValueError("hull must be counter-clockwise and non-degenerate")
 
-    invalid_edges: list[tuple[int, Tuple[int, ...]]] = []
-    for edge_index, first in enumerate(points):
-        second_index = (edge_index + 1) % len(points)
-        second = points[second_index]
-        invalid_vertices = tuple(
-            vertex_index
-            for vertex_index, point in enumerate(points)
-            if vertex_index not in (edge_index, second_index)
-            and _cross(first, second, point) <= 0
-        )
-        if invalid_vertices:
-            invalid_edges.append((edge_index, invalid_vertices))
-    if invalid_edges:
+    canonical = _monotonic_convex_hull(points)
+    if len(canonical) != len(points):
         raise ValueError(
-            "hull must be a simple strictly convex polygon without collinear, reflex, "
-            "or self-intersecting edges; "
-            f"invalid edge/vertex indices={tuple(invalid_edges)}"
+            "hull must be strictly convex without collinear or interior vertices"
+        )
+    canonical_start = points.index(canonical[0])
+    rotated = points[canonical_start:] + points[:canonical_start]
+    if rotated != canonical:
+        raise ValueError(
+            "hull must follow one simple convex boundary without reflex or "
+            "self-intersecting edges"
         )
 
 
@@ -257,31 +272,11 @@ def convex_hull(
 ) -> Tuple[ProjectionPixelPoint, ...]:
     """Return a deterministic counter-clockwise convex hull without repeated endpoint."""
 
-    unique = tuple(sorted(set(points)))
-    if len(unique) < 3:
+    resolved = _monotonic_convex_hull(points)
+    if len(resolved) < 3 or _signed_double_area(resolved) <= 0:
         raise CameraProjectionLayoutError(
-            "at least three unique pixel-boundary points are required for a hull"
+            "at least three non-collinear pixel-boundary points are required for a hull"
         )
-
-    lower: list[ProjectionPixelPoint] = []
-    for point in unique:
-        while len(lower) >= 2 and _cross(lower[-2], lower[-1], point) <= 0:
-            lower.pop()
-        lower.append(point)
-
-    upper: list[ProjectionPixelPoint] = []
-    for point in reversed(unique):
-        while len(upper) >= 2 and _cross(upper[-2], upper[-1], point) <= 0:
-            upper.pop()
-        upper.append(point)
-
-    resolved = tuple(lower[:-1] + upper[:-1])
-    try:
-        _validate_strict_convex_hull(resolved)
-    except (TypeError, ValueError) as exc:
-        raise CameraProjectionLayoutError(
-            f"visible alpha produced an invalid convex hull: {exc}"
-        ) from exc
     return resolved
 
 
