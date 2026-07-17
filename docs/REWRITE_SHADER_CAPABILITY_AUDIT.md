@@ -1,18 +1,19 @@
-# Shader capability audit
+# Shader capability audit and production gate
 
 ## Purpose
 
-`blender_adapter/shader_capability_audit.py` is a diagnostic boundary between reachable
-Blender shader analysis and production texture routing. It does not alter
-`build_texture_plan()` yet.
-
-The audit answers a narrower question before any bake is selected:
+The shader capability layer answers one question before a texture pipeline is selected:
 
 ```text
-Can the current reconstructed UV-bake target reproduce every reachable value?
+Can the current reconstructed UV-bake target reproduce every reachable Blender value?
 ```
 
-Each renderer-specific `MaterialGraphSnapshot` receives one strongest capability:
+`blender_adapter/shader_capability_audit.py` classifies immutable renderer-specific graph
+snapshots. `blender_adapter/production_shader_capabilities.py` enriches that report with live
+Blender facts that are intentionally absent from the domain model, including node mute state,
+source UV availability, named UV references, and copied-material proxy boundaries.
+
+Each used node material receives one strongest capability:
 
 ```text
 LOCAL_UV_SAFE
@@ -23,19 +24,62 @@ UNSUPPORTED
 ```
 
 Unknown reachable node types are deliberately `UNSUPPORTED`. New Blender nodes must receive an
-explicit policy before a later routing slice may treat them as safe.
+explicit policy before production routing may treat them as safe.
+
+## Production routing
+
+The production gate is now authoritative during `prepare_a1_object()`:
+
+```text
+renderer-specific reachable graph
+        -> capability audit
+        -> live source/proxy preflight
+        |
+        +-- LOCAL_UV_SAFE ----------> B1/B2 object UV bake
+        +-- SCENE_UV_SAFE ----------> B3 scene-aware Cycles UV bake
+        +-- CAMERA_RENDER_REQUIRED -> B4 source-only camera render
+        +-- GROUP_RENDER_REQUIRED --> explicit PLAN_BAKE failure
+        +-- UNSUPPORTED ------------> explicit PLAN_BAKE failure
+```
+
+The domain strategy registry remains Blender-independent. Live `bpy` inspection and capability
+routing stay at the Blender adapter boundary.
+
+## Renderer contract
+
+One immutable renderer contract is shared by:
+
+1. the explicit export Scene;
+2. renderer-specific Material Output analysis;
+3. capability auditing;
+4. copied-material proxy output selection;
+5. object-bake or camera-render execution.
+
+Supported canonical engines are:
+
+```text
+CYCLES             -> ShaderNodeTree target CYCLES
+BLENDER_EEVEE_NEXT -> ShaderNodeTree target EEVEE
+```
+
+Eevee materials never enter Blender object bake. They use B4 camera rendering. A Scene/execution
+engine mismatch is an explicit error rather than a silent Material Output substitution.
+
+Copied-material Alpha, straight-color, and slot-mask proxies temporarily select the exact
+renderer-specific Material Output and restore every original `is_active_output` flag in
+`finally`.
 
 ## Socket-level policies
 
-Node type alone is insufficient for nodes such as Texture Coordinate and Geometry. The audit
-uses `ShaderLinkSnapshot.from_socket` to classify only the outputs that actually contribute to
-the renderer-effective Material Output.
+Node type alone is insufficient for Texture Coordinate and Geometry. The audit uses
+`ShaderLinkSnapshot.from_socket` and classifies only outputs that actually contribute to the
+effective Material Output.
 
 Current Texture Coordinate policy:
 
 | Output | Capability | Reason |
 | --- | --- | --- |
-| UV | `LOCAL_UV_SAFE` | reconstructed target carries export UV data |
+| UV | `LOCAL_UV_SAFE` when source render UV exists | reads the preserved source sampling UV |
 | Camera | `CAMERA_RENDER_REQUIRED` | active camera coordinate system |
 | Window | `CAMERA_RENDER_REQUIRED` | screen-space coordinate system |
 | Reflection | `CAMERA_RENDER_REQUIRED` | view/reflection coordinate system |
@@ -44,66 +88,107 @@ Current Texture Coordinate policy:
 | Normal | `CAMERA_RENDER_REQUIRED` | original source shading context |
 | From Instancer | `GROUP_RENDER_REQUIRED` | instance context cannot be reconstructed locally |
 
-Geometry outputs `Incoming`, `Backfacing`, `Pointiness`, and `Random Per Island` are also marked
-as source/camera-bound.
+Geometry outputs `Incoming`, `Backfacing`, `Pointiness`, and `Random Per Island` are source- or
+camera-bound.
+
+## Separate source and bake UV roles
+
+`MeshSnapshot` now stores two independent roles:
+
+```text
+active_uv_layer -> Cycles bake destination, normally SpineBakeUV
+render_uv_layer -> source shader sampling UV
+```
+
+The original render UV survives source/evaluated reading, triangulation, face extraction, UV
+correspondence, and temporary Blender mesh materialization. The writer makes `SpineBakeUV`
+active for writing while keeping the original layer `active_render` for unlinked Image Texture
+Vector inputs and Texture Coordinate UV.
+
+When a graph requires Blender's default render UV but the source mesh has no source render UV,
+the whole object is routed to B4. The newly generated `SpineBakeUV` is never silently reused as
+source texture coordinates.
+
+Named UV Map, Normal Map, and Tangent references are also checked against live source UV layers.
+Missing named layers require B4 instead of producing an incorrect object bake.
+
+## Alpha proxy boundaries
+
+Blender material copies share nested Shader Node Group datablocks. Flattening or rewiring a
+nested group during Alpha extraction could therefore mutate the user's original group.
+
+For an Alpha-bearing graph, reachable Group, Reroute, or muted bypass nodes are classified as
+`CAMERA_RENDER_REQUIRED`. Native B4 rendering evaluates Blender's group interfaces and
+`internal_links` directly without modifying shared node-group data.
 
 ## Explicit high-risk families
 
-The audit currently records:
+The production gate currently records:
 
 - Camera Data and Object Info as `CAMERA_RENDER_REQUIRED`;
-- Shader to RGB as Eevee camera-render-only and unsupported for Cycles;
-- Attribute and Vertex Color as camera-render-required until generic/color attributes are
-  preserved on the bake target;
-- Particle Info, Hair Info, Curves Info, and Point Density as `GROUP_RENDER_REQUIRED`;
+- Shader to RGB as Eevee B4-only and unsupported for Cycles;
+- Attribute and Vertex Color as B4 until generic/color attributes are represented explicitly;
+- Particle Info, Hair Info, Curves Info, Point Density, and From Instancer as
+  `GROUP_RENDER_REQUIRED`;
 - OSL Script as `UNSUPPORTED` until engine/device/source/compilation preflight exists;
 - Volume and render displacement as `CAMERA_RENDER_REQUIRED`;
 - incomplete recursive graph analysis as `UNSUPPORTED`;
 - unclassified reachable node types as `UNSUPPORTED`.
 
-## Deliberate non-routing status
+Common local normal/tangent nodes such as Normal Map, Bump, Tangent, and Vector Rotate remain
+local-safe when their required source UV exists. Vector Transform and camera-sensitive closure
+families are routed to B4.
 
-Slice 4A is diagnostic only:
+## B4 render isolation
 
-```text
-analyse reachable graph
-        -> capability audit report
-        -> tests and logs
+B4 captures and restores Blender render state. During every source-only projection it now:
 
-analyse reachable graph
-        -> existing semantic dependencies
-        -> existing build_texture_plan() routing
-```
+- validates execution engine against the analyzed renderer;
+- disables `render.use_compositing`;
+- disables `render.use_sequencer`;
+- validates that the source has at least one direct path through the active View Layer;
+- rejects source objects available only through excluded, Holdout, or Indirect Only Layer
+  Collections.
 
-No production B1-B4 decision consumes the audit in this slice. This prevents a broad routing
-change before Blender fixtures establish the exact engine and source-context behavior.
+This prevents compositor/VSE changes and View Layer matte state from silently changing alpha,
+crop, or hull geometry.
 
-## Validation
+## Legacy non-node materials
 
-Pure tests cover local Image Texture, socket-specific Texture Coordinate outputs, Camera Data,
-Object Info, Shader to RGB renderer mismatch, Attribute, Particle Info, OSL, graph-analysis
-issues, Volume, scene dependencies, and unknown future node types.
+An opaque material with `use_nodes=False` is represented on an owned copied material as an
+explicit Principled Base Color graph. The source material remains unchanged.
 
-A manual-only Blender 4.4 fixture creates real nodes for:
+A transparent non-node `diffuse_color` is rejected with an actionable error requesting material
+nodes, because its opacity cannot currently be represented in the immutable semantic graph and
+must not be silently discarded.
 
-- Texture Coordinate UV, Window, and From Instancer;
-- Camera Data;
-- Object Info Random;
-- Attribute Color;
-- Particle Info Age;
-- Shader to RGB under Eevee and Cycles audit targets.
+## Validation fixtures
 
-The fixture is wired into `.github/workflows/blender-camera-projection.yml`, whose only trigger
-remains `workflow_dispatch`.
+Pure tests cover capability precedence, common node families, source UV roles, renderer
+selection, copied-material output restoration, production routing, postprocess state, non-node
+fallback, and View Layer rules.
 
-## Next slice
+Manual-only Blender 4.4 fixtures cover:
 
-Slice 4B must establish one immutable renderer contract shared by:
+- real Texture Coordinate, Camera Data, Object Info, Attribute, Particle Info, and Shader to RGB;
+- Cycles/Eevee renderer-specific Material Outputs;
+- renderer-specific copied-material Alpha proxies;
+- Group/Reroute/muted Alpha routing;
+- source render UV versus `SpineBakeUV` sampling;
+- opaque and transparent non-node materials;
+- compositor/sequencer isolation;
+- Holdout-only active View Layer rejection.
 
-1. the explicit export Scene;
-2. renderer-specific Material Output selection;
-3. capability auditing;
-4. object-bake or camera-render execution.
+The workflows remain `workflow_dispatch` only and are not run automatically during active
+rewrite development.
 
-Until that is implemented, the audit must remain diagnostic and must not automatically reroute
-materials.
+## Remaining boundaries
+
+The capability gate deliberately rejects or defers:
+
+- grouped particle/instance/strand rendering;
+- OSL execution without a complete preflight;
+- arbitrary connected-layer per-pixel depth intersections;
+- panoramic projection semantics;
+- full generic Geometry Nodes attribute preservation;
+- transparent non-node materials without an explicit node graph.
