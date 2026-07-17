@@ -7,6 +7,9 @@ from math import isfinite
 from typing import Iterable, Tuple
 
 
+ProjectionTriangle = Tuple[int, int, int]
+
+
 class CameraProjectionLayoutError(ValueError):
     """Raised when rendered alpha cannot produce a stable projection layout."""
 
@@ -54,7 +57,7 @@ class ProjectionCropBounds:
 
 @dataclass(frozen=True, slots=True)
 class CameraProjectionLayout:
-    """One stable crop and convex hull shared by every projection frame."""
+    """One stable crop and strictly convex hull shared by every projection frame."""
 
     full_width: int
     full_height: int
@@ -74,12 +77,7 @@ class CameraProjectionLayout:
             raise TypeError("crop must be ProjectionCropBounds")
         if self.crop.maximum_x > self.full_width or self.crop.maximum_y > self.full_height:
             raise ValueError("crop bounds exceed the full render dimensions")
-        if not isinstance(self.hull, tuple) or len(self.hull) < 3:
-            raise ValueError("hull must contain at least three points")
-        if not all(isinstance(point, ProjectionPixelPoint) for point in self.hull):
-            raise TypeError("hull must contain ProjectionPixelPoint values")
-        if len(self.hull) != len(set(self.hull)):
-            raise ValueError("hull cannot contain duplicate points")
+        _validate_strict_convex_hull(self.hull)
         for point in self.hull:
             if not (
                 self.crop.minimum_x <= point.x <= self.crop.maximum_x
@@ -96,8 +94,6 @@ class CameraProjectionLayout:
             raise ValueError("padding_pixels must be a non-negative integer")
         if not isinstance(self.visible_pixel_count, int) or self.visible_pixel_count <= 0:
             raise ValueError("visible_pixel_count must be a positive integer")
-        if _signed_double_area(self.hull) <= 0:
-            raise ValueError("hull must be counter-clockwise and non-degenerate")
 
     @property
     def cropped_width(self) -> int:
@@ -122,6 +118,12 @@ class CameraProjectionLayout:
             (self.crop.minimum_x + self.crop.maximum_x) / 2.0 - self.full_width / 2.0,
             (self.crop.minimum_y + self.crop.maximum_y) / 2.0 - self.full_height / 2.0,
         )
+
+    @property
+    def triangle_indices(self) -> Tuple[ProjectionTriangle, ...]:
+        """Return the deterministic fan used by the Spine projection mesh."""
+
+        return triangulate_convex_hull(self.hull)
 
     def crop_local_point(self, point: ProjectionPixelPoint) -> tuple[int, int]:
         if point not in self.hull:
@@ -192,6 +194,51 @@ def _signed_double_area(points: Tuple[ProjectionPixelPoint, ...]) -> int:
     )
 
 
+def _validate_strict_convex_hull(
+    points: Tuple[ProjectionPixelPoint, ...],
+) -> None:
+    if not isinstance(points, tuple) or len(points) < 3:
+        raise ValueError("hull must contain at least three points")
+    if not all(isinstance(point, ProjectionPixelPoint) for point in points):
+        raise TypeError("hull must contain ProjectionPixelPoint values")
+    if len(points) != len(set(points)):
+        raise ValueError("hull cannot contain duplicate points")
+    if _signed_double_area(points) <= 0:
+        raise ValueError("hull must be counter-clockwise and non-degenerate")
+
+    invalid_turns = tuple(
+        index
+        for index in range(len(points))
+        if _cross(points[index - 1], points[index], points[(index + 1) % len(points)])
+        <= 0
+    )
+    if invalid_turns:
+        raise ValueError(
+            "hull must be strictly convex without collinear or reflex vertices; "
+            f"invalid vertex indices={invalid_turns}"
+        )
+
+
+def triangulate_convex_hull(
+    points: Tuple[ProjectionPixelPoint, ...],
+) -> Tuple[ProjectionTriangle, ...]:
+    """Return a deterministic, non-degenerate fan for a strict CCW convex hull."""
+
+    _validate_strict_convex_hull(points)
+    triangles = tuple((0, index, index + 1) for index in range(1, len(points) - 1))
+    fan_double_area = sum(
+        _cross(points[first], points[second], points[third])
+        for first, second, third in triangles
+    )
+    polygon_double_area = _signed_double_area(points)
+    if fan_double_area != polygon_double_area:
+        raise CameraProjectionLayoutError(
+            "convex hull fan does not cover the polygon exactly; "
+            f"polygon_area2={polygon_double_area}, fan_area2={fan_double_area}"
+        )
+    return triangles
+
+
 def convex_hull(
     points: Iterable[ProjectionPixelPoint],
 ) -> Tuple[ProjectionPixelPoint, ...]:
@@ -216,8 +263,12 @@ def convex_hull(
         upper.append(point)
 
     resolved = tuple(lower[:-1] + upper[:-1])
-    if len(resolved) < 3 or _signed_double_area(resolved) <= 0:
-        raise CameraProjectionLayoutError("visible alpha produced a degenerate hull")
+    try:
+        _validate_strict_convex_hull(resolved)
+    except (TypeError, ValueError) as exc:
+        raise CameraProjectionLayoutError(
+            f"visible alpha produced an invalid convex hull: {exc}"
+        ) from exc
     return resolved
 
 
