@@ -35,6 +35,8 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene.spine2d_export_preview_animation = True
             scene.spine2d_multi_export_backend = "REWRITE"
             scene.spine2d_angle_limit = 30
+            scene.spine2d_angular_mode = "LEGACY_SEED_CONE"
+            scene.spine2d_local_angle_limit = 30.0
             scene.spine2d_seam_maker_mode = "AUTO"
             scene.spine2d_frames_for_render = 0
             scene.spine2d_bake_frame_start = 0
@@ -335,9 +337,26 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         column: bpy.types.UILayout,
         scene: bpy.types.Scene,
     ) -> None:
-        column.prop(scene, "spine2d_angle_limit", text="Angle limit")
-        column.separator()
         column.prop(scene, "spine2d_seam_maker_mode", text="Seam maker")
+        if str(scene.spine2d_seam_maker_mode).upper() == "CUSTOM":
+            column.label(
+                text="Angular splitting is disabled in Custom seam mode",
+                icon="INFO",
+            )
+            return
+
+        column.separator()
+        column.prop(scene, "spine2d_angle_limit", text="Seed angle limit")
+        column.prop(scene, "spine2d_angular_mode", text="Angular mode")
+        if (
+            str(scene.spine2d_angular_mode).upper()
+            == "SEED_CONE_AND_LOCAL_DIHEDRAL"
+        ):
+            column.prop(
+                scene,
+                "spine2d_local_angle_limit",
+                text="Local edge angle limit",
+            )
 
     def _draw_bake_settings(
         self,
@@ -452,6 +471,37 @@ SCENE_PROPERTIES = [
             name="Show Bake Settings",
             default=False,
             description="Show/hide baking parameters",
+        ),
+    ),
+    (
+        "spine2d_angular_mode",
+        bpy.props.EnumProperty(
+            name="Angular mode",
+            description="Choose seed-normal compatibility or add a local dihedral guard",
+            items=(
+                (
+                    "LEGACY_SEED_CONE",
+                    "Seed cone (legacy)",
+                    "Compare every candidate only with the segment seed normal",
+                ),
+                (
+                    "SEED_CONE_AND_LOCAL_DIHEDRAL",
+                    "Seed cone + local dihedral",
+                    "Keep the seed cone and reject traversal across locally sharp edges",
+                ),
+            ),
+            default="LEGACY_SEED_CONE",
+        ),
+    ),
+    (
+        "spine2d_local_angle_limit",
+        bpy.props.FloatProperty(
+            name="Local edge angle limit",
+            description="Maximum angle across each traversed edge in hybrid mode",
+            default=30.0,
+            min=0.0,
+            max=180.0,
+            precision=2,
         ),
     ),
     (
