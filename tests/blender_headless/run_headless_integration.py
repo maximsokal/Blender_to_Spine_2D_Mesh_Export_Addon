@@ -8,6 +8,7 @@ binary .blend files for the foundational adapter tests.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import tan, radians
 from pathlib import Path
 import sys
 import traceback
@@ -20,6 +21,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from Blender_to_Spine2D_Mesh_Exporter import ui as ui_module  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     EvaluatedMeshReadError,
     UvUnwrapError,
@@ -28,7 +30,15 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     unwrap_snapshot_uv,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import uv_unwrap as uv_module  # noqa: E402
-from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import ModifierLineagePolicy  # noqa: E402
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_bridge import (  # noqa: E402
+    _resolve_geometry_settings,
+)
+from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import (  # noqa: E402
+    A1AngularMode,
+    ModifierLineagePolicy,
+    SegmentationSettings,
+    segment_mesh_a1,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.uv import UvUnwrapSettings  # noqa: E402
 
 
@@ -129,6 +139,30 @@ def _create_offset_triangle(name: str = "MirrorTriangle"):
             (1.5, 0.75, 0.0),
         ),
         ((0, 1, 2),),
+    )
+
+
+def _create_folded_quad_strip(name: str = "FoldedStrip"):
+    height = 0.5
+    fold = tan(radians(25.0))
+    vertices = (
+        (0.0, -height, 0.0),
+        (0.0, height, 0.0),
+        (1.0, -height, 0.0),
+        (1.0, height, 0.0),
+        (2.0, -height, fold),
+        (2.0, height, fold),
+        (3.0, -height, 0.0),
+        (3.0, height, 0.0),
+    )
+    return _create_mesh_object(
+        name,
+        vertices,
+        (
+            (0, 2, 3, 1),
+            (2, 4, 5, 3),
+            (4, 6, 7, 5),
+        ),
     )
 
 
@@ -314,6 +348,80 @@ def test_uv_failure_in_edit_mode_restores_context_and_cleans_data() -> None:
     _assert(not _temporary_datablock_names(), "failed UV transaction leaked temporary data")
 
 
+def test_real_mesh_hybrid_dihedral_and_ui_registration() -> None:
+    _clear_scene()
+    source = _create_folded_quad_strip()
+    snapshot = read_source_mesh_snapshot(source)
+    settings = SegmentationSettings(
+        angle_limit_degrees=30.0,
+        split_uv_boundaries=False,
+    )
+
+    legacy = segment_mesh_a1(snapshot, settings)
+    hybrid = segment_mesh_a1(
+        snapshot,
+        settings,
+        angular_mode=A1AngularMode.SEED_CONE_AND_LOCAL_DIHEDRAL,
+        local_angle_limit_degrees=30.0,
+    )
+    legacy_faces = tuple(
+        tuple(face_id.index for face_id in segment.face_ids)
+        for segment in legacy.segments
+    )
+    hybrid_faces = tuple(
+        tuple(face_id.index for face_id in segment.face_ids)
+        for segment in hybrid.segments
+    )
+    _assert(legacy_faces == ((0, 1, 2),), f"legacy partition mismatch: {legacy_faces}")
+    _assert(hybrid_faces == ((0, 1), (2,)), f"hybrid partition mismatch: {hybrid_faces}")
+
+    _assert(
+        not hasattr(bpy.types.Scene, "spine2d_angular_mode"),
+        "angular mode property was unexpectedly registered before ui.register()",
+    )
+    registered = False
+    try:
+        ui_module.register()
+        registered = True
+        _assert(
+            hasattr(bpy.types.Scene, "spine2d_angular_mode"),
+            "angular mode property was not registered",
+        )
+        _assert(
+            hasattr(bpy.types.Scene, "spine2d_local_angle_limit"),
+            "local angle property was not registered",
+        )
+        scene = bpy.context.scene
+        _assert(
+            scene.spine2d_angular_mode == "LEGACY_SEED_CONE",
+            "RNA default no longer preserves legacy segmentation",
+        )
+        scene.spine2d_angular_mode = "SEED_CONE_AND_LOCAL_DIHEDRAL"
+        scene.spine2d_local_angle_limit = 17.5
+        geometry = _resolve_geometry_settings(scene)
+        _assert(
+            geometry.angular_mode
+            is A1AngularMode.SEED_CONE_AND_LOCAL_DIHEDRAL,
+            "UI bridge lost the real RNA angular mode",
+        )
+        _assert(
+            geometry.local_angle_limit_degrees == 17.5,
+            "UI bridge lost the real RNA local angle limit",
+        )
+    finally:
+        if registered:
+            ui_module.unregister()
+
+    _assert(
+        not hasattr(bpy.types.Scene, "spine2d_angular_mode"),
+        "angular mode property leaked after ui.unregister()",
+    )
+    _assert(
+        not hasattr(bpy.types.Scene, "spine2d_local_angle_limit"),
+        "local angle property leaked after ui.unregister()",
+    )
+
+
 def main() -> None:
     tests = (
         test_source_reader_preserves_context_and_datablocks,
@@ -322,6 +430,7 @@ def main() -> None:
         test_rejected_topology_change_cleans_all_temporary_data,
         test_uv_unwrap_is_global_transaction_and_restores_context,
         test_uv_failure_in_edit_mode_restores_context_and_cleans_data,
+        test_real_mesh_hybrid_dihedral_and_ui_registration,
     )
     print(f"Blender version: {bpy.app.version_string}")
     for test in tests:
