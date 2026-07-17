@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Tuple
 
 from ..application import (
+    A1GeometryPreparationSettings,
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
     A1SingleObjectExportSettings,
@@ -14,6 +15,7 @@ from ..application import (
     ExportSettings,
 )
 from ..domain.baking import BakeExecutionSettings, sanitize_filename_stem
+from ..domain.geometry import A1AngularMode
 from ..domain.uv import UvUnwrapSettings
 from .a1_mixed_object_export import export_a1_mixed_object
 from .a1_multi_object_export import A1MultiObjectSource, export_a1_multi_object
@@ -103,6 +105,42 @@ def _connect_enabled(obj: Any) -> bool:
     return bool(settings is not None and getattr(settings, "enabled", False))
 
 
+def _resolve_geometry_settings(scene: Any) -> A1GeometryPreparationSettings:
+    """Resolve the scene angular controls into a typed geometry contract.
+
+    Older .blend files and tests do not contain the new RNA properties. Missing
+    values therefore resolve to the exact legacy seed-cone behavior. The bridge
+    rejects unknown mode strings before any object or Blender state is mutated.
+    """
+
+    raw_mode = str(
+        getattr(
+            scene,
+            "spine2d_angular_mode",
+            A1AngularMode.LEGACY_SEED_CONE.value,
+        )
+        or A1AngularMode.LEGACY_SEED_CONE.value
+    ).strip().upper()
+    try:
+        angular_mode = A1AngularMode(raw_mode)
+    except ValueError as exc:
+        supported = tuple(mode.value for mode in A1AngularMode)
+        raise ValueError(
+            f"Unsupported Spine2D angular mode {raw_mode!r}; supported={supported}"
+        ) from exc
+
+    raw_local_limit = getattr(scene, "spine2d_local_angle_limit", None)
+    local_angle_limit = (
+        None
+        if raw_local_limit is None or raw_local_limit == ""
+        else float(raw_local_limit)
+    )
+    return A1GeometryPreparationSettings(
+        angular_mode=angular_mode,
+        local_angle_limit_degrees=local_angle_limit,
+    )
+
+
 def _common_object_settings(
     obj: Any,
     scene: Any,
@@ -136,6 +174,7 @@ def _common_object_settings(
         output_stem=sanitize_filename_stem(object_name),
         json_output_stem=json_output_stem,
         source_geometry_mode=A1SourceGeometryMode.ORIGINAL,
+        geometry=_resolve_geometry_settings(scene),
         uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
         bake_execution=BakeExecutionSettings(render_engine=render_engine),
         include_control_icons=bool(
