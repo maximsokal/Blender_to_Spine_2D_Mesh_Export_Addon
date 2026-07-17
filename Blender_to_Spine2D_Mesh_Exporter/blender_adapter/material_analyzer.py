@@ -1,9 +1,9 @@
 """Read Blender material slots into immutable semantic baking analysis.
 
 Legacy material kinds remain available for compatibility, while every node material
-also receives a graph snapshot rooted at the active Material Output. Strategy
-selection therefore depends on connected shader semantics instead of all nodes that
-happen to exist in the editor.
+also receives a graph snapshot rooted at the renderer-effective Material Output.
+Strategy selection therefore depends on connected shader semantics instead of all
+nodes that merely happen to exist in the editor.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from ..domain.baking import (
 )
 from .shader_graph_analyzer import (
     MaterialGraphAnalysisError,
-    analyse_material_graph,
+    analyse_material_graph_detailed,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,6 @@ _PROCEDURAL_NODE_TYPES = frozenset(
         "TEX_WAVE",
         "TEX_WHITE_NOISE",
         "SCRIPT",
-        "GROUP",
     }
 )
 
@@ -66,7 +65,55 @@ def _node_type(node: Any) -> str:
 
 def _is_temporary_bake_node(node: Any) -> bool:
     name = str(getattr(node, "name", "") or "")
-    return name.startswith(("TEMP_BAKE_", "TEMP_UV_", "__Spine2D_BakeTarget_"))
+    return name.startswith(
+        (
+            "TEMP_BAKE_",
+            "TEMP_UV_",
+            "__Spine2D_BakeTarget_",
+            "__Spine2D_Proxy_",
+        )
+    )
+
+
+def _normalise_render_target(value: str | None) -> str:
+    target = str(value or "ALL").strip().upper()
+    if target in {"ALL", "CYCLES", "EEVEE"}:
+        return target
+    if "CYCLE" in target:
+        return "CYCLES"
+    if "EEVEE" in target:
+        return "EEVEE"
+    return "ALL"
+
+
+def render_target_from_engine(render_engine: str | None) -> str:
+    """Translate Blender render-engine identifiers to ShaderNodeTree targets."""
+
+    return _normalise_render_target(render_engine)
+
+
+def _resolve_render_target(render_target: str | None) -> str:
+    """Resolve an explicit target or the active Blender scene renderer.
+
+    Adapter callers may pass a target directly for alternate-scene/headless workflows.
+    The context lookup preserves compatibility with existing production call sites that
+    analyze the active export scene without passing a renderer explicitly.
+    """
+
+    if render_target is not None:
+        return _normalise_render_target(render_target)
+    try:
+        import bpy  # pylint: disable=import-error,import-outside-toplevel
+
+        scene = getattr(getattr(bpy, "context", None), "scene", None)
+        engine = getattr(getattr(scene, "render", None), "engine", None)
+        return render_target_from_engine(engine)
+    except Exception:
+        logger.debug(
+            "Unable to resolve active Blender render target; using ALL",
+            exc_info=True,
+        )
+        return "ALL"
 
 
 def _image_dependency(node: Any) -> tuple[ImageDependency | None, str | None]:
@@ -101,7 +148,77 @@ def _image_dependency(node: Any) -> tuple[ImageDependency | None, str | None]:
     )
 
 
-def analyse_material_slot(slot_index: int, material: Any | None) -> MaterialAnalysis:
+def _classify_nodes(
+    nodes: tuple[Any, ...],
+) -> tuple[
+    MaterialKind,
+    tuple[str, ...],
+    tuple[ImageDependency, ...],
+    tuple[str, ...],
+]:
+    """Classify one already-resolved reachable node set deterministically."""
+
+    relevant_nodes = tuple(
+        node
+        for node in nodes
+        if not _is_temporary_bake_node(node)
+        and not bool(getattr(node, "mute", False))
+    )
+    node_types = tuple(sorted({_node_type(node) for node in relevant_nodes}))
+    procedural = any(
+        _node_type(node) in _PROCEDURAL_NODE_TYPES for node in relevant_nodes
+    )
+
+    dependencies_by_key: dict[
+        tuple[str, str, str | None, int], ImageDependency
+    ] = {}
+    issues: list[str] = []
+    invalid_image_count = 0
+    for node in relevant_nodes:
+        if _node_type(node) != "TEX_IMAGE":
+            continue
+        dependency, issue = _image_dependency(node)
+        if issue is not None:
+            invalid_image_count += 1
+            issues.append(issue)
+            continue
+        assert dependency is not None
+        key = (
+            dependency.image_name,
+            dependency.source,
+            dependency.filepath,
+            dependency.frame_duration,
+        )
+        dependencies_by_key[key] = dependency
+
+    dependencies = tuple(
+        dependency
+        for _, dependency in sorted(
+            dependencies_by_key.items(),
+            key=lambda item: item[0],
+        )
+    )
+
+    if invalid_image_count:
+        kind = MaterialKind.UNSUPPORTED
+    elif dependencies and procedural:
+        kind = MaterialKind.MIXED
+    elif dependencies:
+        kind = MaterialKind.IMAGE
+    elif procedural:
+        kind = MaterialKind.PROCEDURAL
+    else:
+        kind = MaterialKind.SOLID_COLOR
+
+    return kind, node_types, dependencies, tuple(issues)
+
+
+def analyse_material_slot(
+    slot_index: int,
+    material: Any | None,
+    *,
+    render_target: str | None = None,
+) -> MaterialAnalysis:
     """Analyze one Blender material slot without modifying its material."""
 
     if not isinstance(slot_index, int) or slot_index < 0:
@@ -126,75 +243,52 @@ def analyse_material_slot(slot_index: int, material: Any | None) -> MaterialAnal
         )
 
     try:
-        nodes = tuple(node_tree.nodes)
+        root_nodes = tuple(node_tree.nodes)
     except Exception as exc:
         raise MaterialAnalysisError(
             f"Unable to iterate nodes of material '{material_name}'"
         ) from exc
 
-    relevant_nodes = tuple(node for node in nodes if not _is_temporary_bake_node(node))
-    node_types = tuple(sorted({_node_type(node) for node in relevant_nodes}))
-    procedural = any(
-        _node_type(node) in _PROCEDURAL_NODE_TYPES for node in relevant_nodes
-    )
-
-    dependencies_by_key: dict[tuple[str, str, str | None, int], ImageDependency] = {}
-    issues: list[str] = []
-    image_node_count = 0
-    for node in relevant_nodes:
-        if _node_type(node) != "TEX_IMAGE":
-            continue
-        image_node_count += 1
-        dependency, issue = _image_dependency(node)
-        if issue is not None:
-            issues.append(issue)
-            continue
-        assert dependency is not None
-        key = (
-            dependency.image_name,
-            dependency.source,
-            dependency.filepath,
-            dependency.frame_duration,
-        )
-        dependencies_by_key[key] = dependency
-
-    dependencies = tuple(
-        dependency
-        for _, dependency in sorted(
-            dependencies_by_key.items(),
-            key=lambda item: item[0],
-        )
-    )
-
-    if image_node_count and len(dependencies) != image_node_count:
-        kind = MaterialKind.UNSUPPORTED
-    elif dependencies and procedural:
-        kind = MaterialKind.MIXED
-    elif dependencies:
-        kind = MaterialKind.IMAGE
-    elif procedural:
-        kind = MaterialKind.PROCEDURAL
-    else:
-        kind = MaterialKind.SOLID_COLOR
-
+    target = _resolve_render_target(render_target)
     graph = None
+    graph_nodes: tuple[Any, ...] | None = None
+    graph_issues: list[str] = []
     try:
-        graph = analyse_material_graph(material)
-        issues.extend(graph.issues)
+        detailed = analyse_material_graph_detailed(
+            material,
+            render_target=target,
+        )
+        graph = detailed.snapshot
+        graph_issues.extend(graph.issues)
         if graph.active_output_node_id is None and not graph.semantic_channels:
-            # Preserve the historical no-output behavior. The recursive snapshot remains
-            # useful as a diagnostic, but an empty graph channel set must not suppress the
-            # legacy node-type fallback used by synthetic files and damaged materials.
+            # Preserve historical no-output behavior for synthetic or damaged materials.
+            # The diagnostic graph is still useful in issues, but classification must use
+            # the old root-node fallback instead of treating orphaned group content as an
+            # active material program.
             graph = None
+        else:
+            graph_nodes = detailed.reachable_nodes
     except MaterialGraphAnalysisError as exc:
-        # Graph analysis is richer than the legacy kind classifier, but a failure to
-        # produce it must be visible. Do not silently invent semantics.
-        issues.append(f"Shader graph analysis failed: {exc}")
+        graph_issues.append(f"Shader graph analysis failed: {exc}")
         logger.warning(
             "Shader graph analysis failed for material '%s'",
             material_name,
             exc_info=True,
         )
+
+    classification_nodes = (
+        graph_nodes
+        if graph_nodes is not None
+        else tuple(
+            node for node in root_nodes if not _is_temporary_bake_node(node)
+        )
+    )
+    kind, node_types, dependencies, classification_issues = _classify_nodes(
+        classification_nodes
+    )
+    issues = tuple(
+        dict.fromkeys(tuple(classification_issues) + tuple(graph_issues))
+    )
 
     return MaterialAnalysis(
         slot_index=slot_index,
@@ -202,7 +296,7 @@ def analyse_material_slot(slot_index: int, material: Any | None) -> MaterialAnal
         kind=kind,
         node_types=node_types,
         image_dependencies=dependencies,
-        issues=tuple(issues),
+        issues=issues,
         graph=graph,
     )
 
@@ -211,6 +305,7 @@ def analyse_object_materials(
     obj: Any,
     *,
     source_object_id: str | None = None,
+    render_target: str | None = None,
 ) -> ObjectMaterialAnalysis:
     """Analyze all material slots of one Blender mesh object in stable order."""
 
@@ -226,11 +321,16 @@ def analyse_object_materials(
     if not object_name:
         raise MaterialAnalysisError("object name is empty")
     resolved_source_object_id = source_object_id or object_name
+    target = _resolve_render_target(render_target)
 
     try:
         material_slots = tuple(getattr(obj, "material_slots", ()))
         analyses = tuple(
-            analyse_material_slot(slot_index, getattr(slot, "material", None))
+            analyse_material_slot(
+                slot_index,
+                getattr(slot, "material", None),
+                render_target=target,
+            )
             for slot_index, slot in enumerate(material_slots)
         )
         result = ObjectMaterialAnalysis(
@@ -238,9 +338,10 @@ def analyse_object_materials(
             slots=analyses,
         )
         logger.debug(
-            "Analyzed %d material slots for '%s': kinds=%s channels=%s",
+            "Analyzed %d material slots for '%s' target=%s: kinds=%s channels=%s",
             len(result.slots),
             object_name,
+            target,
             tuple(slot.kind.value for slot in result.slots),
             tuple(
                 tuple(channel.value for channel in slot.semantic_channels)
@@ -255,3 +356,11 @@ def analyse_object_materials(
         raise MaterialAnalysisError(
             f"Failed to analyze materials for '{object_name}': {exc}"
         ) from exc
+
+
+__all__ = [
+    "MaterialAnalysisError",
+    "analyse_material_slot",
+    "analyse_object_materials",
+    "render_target_from_engine",
+]
