@@ -6,15 +6,22 @@ from dataclasses import replace
 from typing import Any, Tuple
 
 from ..domain.baking import (
+    BakePlanError,
+    BakeSettings,
     MaterialCapabilityAudit,
     MaterialGraphSnapshot,
     MaterialSemanticChannel,
+    ObjectBakeContext,
     ObjectMaterialAnalysis,
+    SceneBakeContext,
     ShaderBakeCapability,
     ShaderCapabilityFinding,
+    TexturePlan,
+    build_camera_projection_plan,
+    build_texture_plan,
     strongest_shader_capability,
 )
-from .render_engine_contract import render_engine_contract
+from .render_engine_contract import RenderEngineContract, render_engine_contract
 from .shader_capability_audit import audit_material_graph_capabilities
 from .shader_graph_analyzer import analyse_material_graph_detailed
 
@@ -188,3 +195,46 @@ def capability_failure_message(
         )
         details.append((audit.material_name, codes))
     return f"shader capability {capability.value} prevents safe export: {tuple(details)}"
+
+
+def build_capability_checked_texture_plan(
+    analysis: ObjectMaterialAnalysis,
+    settings: BakeSettings,
+    audits: Tuple[MaterialCapabilityAudit, ...],
+    renderer: RenderEngineContract,
+    *,
+    object_context: ObjectBakeContext,
+    scene_context: SceneBakeContext,
+) -> TexturePlan:
+    """Select B1-B4 or fail explicitly from the strongest audited capability."""
+
+    if not isinstance(analysis, ObjectMaterialAnalysis):
+        raise TypeError("analysis must be ObjectMaterialAnalysis")
+    if not isinstance(settings, BakeSettings):
+        raise TypeError("settings must be BakeSettings")
+    if not isinstance(renderer, RenderEngineContract):
+        raise TypeError("renderer must be RenderEngineContract")
+    if not isinstance(object_context, ObjectBakeContext):
+        raise TypeError("object_context must be ObjectBakeContext")
+    if not isinstance(scene_context, SceneBakeContext):
+        raise TypeError("scene_context must be SceneBakeContext")
+
+    capability = strongest_object_capability(audits)
+    if capability in {
+        ShaderBakeCapability.UNSUPPORTED,
+        ShaderBakeCapability.GROUP_RENDER_REQUIRED,
+    }:
+        raise BakePlanError(capability_failure_message(audits, capability))
+    if renderer.uses_eevee or capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED:
+        return build_camera_projection_plan(
+            analysis,
+            settings,
+            object_context=object_context,
+            scene_context=scene_context,
+        )
+    return build_texture_plan(
+        analysis,
+        settings,
+        object_context=object_context,
+        scene_context=scene_context,
+    )
