@@ -106,11 +106,13 @@ def _connect_enabled(obj: Any) -> bool:
 
 
 def _resolve_geometry_settings(scene: Any) -> A1GeometryPreparationSettings:
-    """Resolve the scene angular controls into a typed geometry contract.
+    """Resolve scene angular controls into a typed geometry contract.
 
     Older .blend files and tests do not contain the new RNA properties. Missing
     values therefore resolve to the exact legacy seed-cone behavior. The bridge
     rejects unknown mode strings before any object or Blender state is mutated.
+    The local limit is normalized to ``None`` in legacy mode so the internal
+    settings object remains identical to the pre-feature default.
     """
 
     raw_mode = str(
@@ -129,12 +131,15 @@ def _resolve_geometry_settings(scene: Any) -> A1GeometryPreparationSettings:
             f"Unsupported Spine2D angular mode {raw_mode!r}; supported={supported}"
         ) from exc
 
-    raw_local_limit = getattr(scene, "spine2d_local_angle_limit", None)
-    local_angle_limit = (
-        None
-        if raw_local_limit is None or raw_local_limit == ""
-        else float(raw_local_limit)
-    )
+    if angular_mode is A1AngularMode.LEGACY_SEED_CONE:
+        local_angle_limit = None
+    else:
+        raw_local_limit = getattr(scene, "spine2d_local_angle_limit", None)
+        local_angle_limit = (
+            None
+            if raw_local_limit is None or raw_local_limit == ""
+            else float(raw_local_limit)
+        )
     return A1GeometryPreparationSettings(
         angular_mode=angular_mode,
         local_angle_limit_degrees=local_angle_limit,
