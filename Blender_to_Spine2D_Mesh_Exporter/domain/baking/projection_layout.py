@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isfinite
 from typing import Iterable, Tuple
 
@@ -142,6 +142,39 @@ class CameraProjectionLayout:
         )
 
 
+def _validate_dimensions(width: int, height: int) -> None:
+    if not isinstance(width, int) or width <= 0:
+        raise ValueError("width must be a positive integer")
+    if not isinstance(height, int) or height <= 0:
+        raise ValueError("height must be a positive integer")
+
+
+def _validate_layout_policy(alpha_threshold: float, padding_pixels: int) -> None:
+    if (
+        not isinstance(alpha_threshold, (int, float))
+        or not isfinite(float(alpha_threshold))
+        or not 0.0 <= float(alpha_threshold) <= 1.0
+    ):
+        raise ValueError("alpha_threshold must be finite and in [0, 1]")
+    if not isinstance(padding_pixels, int) or padding_pixels < 0:
+        raise ValueError("padding_pixels must be a non-negative integer")
+
+
+def _validate_alpha_mask(
+    alpha_mask: bytes | bytearray,
+    *,
+    expected_size: int,
+    frame_index: int | None,
+) -> None:
+    label = "alpha_mask" if frame_index is None else f"alpha_masks[{frame_index}]"
+    if not isinstance(alpha_mask, (bytes, bytearray)):
+        raise TypeError(f"{label} must be bytes or bytearray")
+    if len(alpha_mask) != expected_size:
+        raise ValueError(
+            f"{label} has {len(alpha_mask)} entries; expected {expected_size}"
+        )
+
+
 def _cross(
     origin: ProjectionPixelPoint,
     first: ProjectionPixelPoint,
@@ -188,60 +221,19 @@ def convex_hull(
     return resolved
 
 
-def _validate_masks(
-    alpha_masks: Tuple[bytes | bytearray, ...],
-    width: int,
-    height: int,
-) -> None:
-    if not isinstance(width, int) or width <= 0:
-        raise ValueError("width must be a positive integer")
-    if not isinstance(height, int) or height <= 0:
-        raise ValueError("height must be a positive integer")
-    if not isinstance(alpha_masks, tuple) or not alpha_masks:
-        raise ValueError("alpha_masks must be a non-empty tuple")
-    expected = width * height
-    for index, mask in enumerate(alpha_masks):
-        if not isinstance(mask, (bytes, bytearray)):
-            raise TypeError(f"alpha_masks[{index}] must be bytes or bytearray")
-        if len(mask) != expected:
-            raise ValueError(
-                f"alpha_masks[{index}] has {len(mask)} entries; expected {expected}"
-            )
-
-
-def build_sequence_union_layout(
-    alpha_masks: Tuple[bytes | bytearray, ...],
+def _layout_from_union_mask(
+    union_mask: bytearray,
     *,
     width: int,
     height: int,
     alpha_threshold: float,
     padding_pixels: int,
+    frame_count: int,
+    visible_pixel_count: int,
 ) -> CameraProjectionLayout:
-    """Build one crop and convex alpha hull from all rendered sequence frames.
-
-    Masks contain 0 for transparent pixels and non-zero for pixels whose decoded alpha met
-    ``alpha_threshold``. The union is computed before crop expansion, so every frame shares
-    exactly the same texture dimensions, attachment offset, UVs, hull and triangulation.
-    """
-
-    _validate_masks(alpha_masks, width, height)
-    if (
-        not isinstance(alpha_threshold, (int, float))
-        or not isfinite(float(alpha_threshold))
-        or not 0.0 <= float(alpha_threshold) <= 1.0
-    ):
-        raise ValueError("alpha_threshold must be finite and in [0, 1]")
-    if not isinstance(padding_pixels, int) or padding_pixels < 0:
-        raise ValueError("padding_pixels must be a non-negative integer")
-
-    union = bytearray(width * height)
-    for mask in alpha_masks:
-        for index, value in enumerate(mask):
-            if value:
-                union[index] = 1
-
-    visible_count = sum(union)
-    if visible_count == 0:
+    if frame_count <= 0:
+        raise ValueError("at least one alpha mask must be accumulated")
+    if visible_pixel_count == 0:
         raise CameraProjectionLayoutError(
             "camera projection sequence contains no pixels above the alpha threshold"
         )
@@ -253,14 +245,21 @@ def build_sequence_union_layout(
     boundary_points: list[ProjectionPixelPoint] = []
     for y in range(height):
         row_start = y * width
-        visible_x = tuple(x for x in range(width) if union[row_start + x])
-        if not visible_x:
+        left: int | None = None
+        right: int | None = None
+        for x in range(width):
+            if not union_mask[row_start + x]:
+                continue
+            if left is None:
+                left = x
+            right = x
+        if left is None or right is None:
             continue
-        left = visible_x[0]
-        right_exclusive = visible_x[-1] + 1
+
+        right_exclusive = right + 1
         minimum_x = min(minimum_x, left)
         minimum_y = min(minimum_y, y)
-        maximum_x = max(maximum_x, right_exclusive - 1)
+        maximum_x = max(maximum_x, right)
         maximum_y = max(maximum_y, y)
         boundary_points.extend(
             (
@@ -277,17 +276,117 @@ def build_sequence_union_layout(
         maximum_x=min(width, maximum_x + 1 + padding_pixels),
         maximum_y=min(height, maximum_y + 1 + padding_pixels),
     )
-    hull = convex_hull(boundary_points)
     return CameraProjectionLayout(
         full_width=width,
         full_height=height,
         crop=crop,
-        hull=hull,
+        hull=convex_hull(boundary_points),
         alpha_threshold=float(alpha_threshold),
         padding_pixels=padding_pixels,
-        frame_count=len(alpha_masks),
-        visible_pixel_count=visible_count,
+        frame_count=frame_count,
+        visible_pixel_count=visible_pixel_count,
     )
+
+
+@dataclass(slots=True)
+class ProjectionAlphaUnionAccumulator:
+    """Incrementally OR frame alpha masks into one fixed-size union buffer."""
+
+    width: int
+    height: int
+    alpha_threshold: float
+    padding_pixels: int
+    _union_mask: bytearray = field(init=False, repr=False)
+    _frame_count: int = field(init=False, default=0, repr=False)
+    _visible_pixel_count: int = field(init=False, default=0, repr=False)
+
+    def __post_init__(self) -> None:
+        _validate_dimensions(self.width, self.height)
+        _validate_layout_policy(self.alpha_threshold, self.padding_pixels)
+        self.alpha_threshold = float(self.alpha_threshold)
+        self._union_mask = bytearray(self.width * self.height)
+
+    @property
+    def frame_count(self) -> int:
+        return self._frame_count
+
+    @property
+    def visible_pixel_count(self) -> int:
+        return self._visible_pixel_count
+
+    @property
+    def allocated_mask_bytes(self) -> int:
+        """Return the fixed union-buffer size, independent of accumulated frame count."""
+
+        return len(self._union_mask)
+
+    def add_mask(
+        self,
+        alpha_mask: bytes | bytearray,
+        *,
+        frame_index: int | None = None,
+    ) -> int:
+        """Merge one frame and return the number of newly visible union pixels."""
+
+        if frame_index is not None and (
+            not isinstance(frame_index, int) or frame_index < 0
+        ):
+            raise ValueError("frame_index must be a non-negative integer or None")
+        _validate_alpha_mask(
+            alpha_mask,
+            expected_size=self.width * self.height,
+            frame_index=frame_index,
+        )
+
+        newly_visible = 0
+        union_mask = self._union_mask
+        for index, value in enumerate(alpha_mask):
+            if value and not union_mask[index]:
+                union_mask[index] = 1
+                newly_visible += 1
+        self._frame_count += 1
+        self._visible_pixel_count += newly_visible
+        return newly_visible
+
+    def build_layout(self) -> CameraProjectionLayout:
+        """Finalize the stable crop and hull without copying the union mask."""
+
+        return _layout_from_union_mask(
+            self._union_mask,
+            width=self.width,
+            height=self.height,
+            alpha_threshold=self.alpha_threshold,
+            padding_pixels=self.padding_pixels,
+            frame_count=self._frame_count,
+            visible_pixel_count=self._visible_pixel_count,
+        )
+
+
+def build_sequence_union_layout(
+    alpha_masks: Tuple[bytes | bytearray, ...],
+    *,
+    width: int,
+    height: int,
+    alpha_threshold: float,
+    padding_pixels: int,
+) -> CameraProjectionLayout:
+    """Compatibility wrapper that builds a layout from an existing mask tuple.
+
+    New render executors should feed ``ProjectionAlphaUnionAccumulator`` one frame at a time,
+    so memory remains ``O(width * height)`` instead of ``O(frame_count * width * height)``.
+    """
+
+    if not isinstance(alpha_masks, tuple) or not alpha_masks:
+        raise ValueError("alpha_masks must be a non-empty tuple")
+    accumulator = ProjectionAlphaUnionAccumulator(
+        width=width,
+        height=height,
+        alpha_threshold=alpha_threshold,
+        padding_pixels=padding_pixels,
+    )
+    for frame_index, alpha_mask in enumerate(alpha_masks):
+        accumulator.add_mask(alpha_mask, frame_index=frame_index)
+    return accumulator.build_layout()
 
 
 def build_full_frame_layout(
