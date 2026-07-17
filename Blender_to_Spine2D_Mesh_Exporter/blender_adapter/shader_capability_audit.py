@@ -1,7 +1,7 @@
 """Audit reachable Blender shader graphs without changing production routing.
 
-The audit is deliberately diagnostic. It identifies graphs that the current temporary
-UV-bake target cannot reproduce safely and records the minimum future execution boundary.
+The audit identifies graphs that the current temporary UV-bake target cannot reproduce
+safely and records the minimum execution boundary required by production planning.
 """
 
 from __future__ import annotations
@@ -41,9 +41,9 @@ _SCENE_DEPENDENCIES = frozenset(
     }
 )
 
-# Nodes whose reachable values are stable on the reconstructed UV-bake target when no
-# stronger graph dependency is present. The list is intentionally explicit: an unknown
-# node must be audited before production routing may claim it is safe.
+# These nodes remain stable on the reconstructed UV target when no stronger dependency is
+# present. Source sampling UV and bake target UV are separate, so tangent-space nodes may
+# use the preserved source render UV while Cycles writes into SpineBakeUV.
 _LOCAL_SAFE_NODE_TYPES = frozenset(
     {
         "ADD_SHADER",
@@ -52,6 +52,7 @@ _LOCAL_SAFE_NODE_TYPES = frozenset(
         "BSDF_DIFFUSE",
         "BSDF_PRINCIPLED",
         "BSDF_TRANSPARENT",
+        "BUMP",
         "CHECKER",
         "CLAMP",
         "COMBHSV",
@@ -62,6 +63,7 @@ _LOCAL_SAFE_NODE_TYPES = frozenset(
         "CURVE_VEC",
         "DISPLACEMENT",
         "EMISSION",
+        "FLOAT_CURVE",
         "GAMMA",
         "GROUP",
         "GROUP_INPUT",
@@ -75,6 +77,7 @@ _LOCAL_SAFE_NODE_TYPES = frozenset(
         "MIX_RGB",
         "MIX_SHADER",
         "NORMAL",
+        "NORMAL_MAP",
         "OUTPUT_MATERIAL",
         "PRINCIPLED_VOLUME",
         "RGB",
@@ -84,6 +87,7 @@ _LOCAL_SAFE_NODE_TYPES = frozenset(
         "SEPHSV",
         "SEPRGB",
         "SEPXYZ",
+        "TANGENT",
         "TEX_BRICK",
         "TEX_CHECKER",
         "TEX_GABOR",
@@ -102,26 +106,34 @@ _LOCAL_SAFE_NODE_TYPES = frozenset(
         "VALTORGB",
         "VECT_MATH",
         "VECTOR_DISPLACEMENT",
+        "VECTOR_ROTATE",
+        "VOLUME_ABSORPTION",
         "VOLUME_INFO",
+        "VOLUME_SCATTER",
         "WAVELENGTH",
     }
 )
 _SCENE_NODE_TYPES = frozenset(
     {
         "AMBIENT_OCCLUSION",
-        "BSDF_HAIR",
-        "BSDF_HAIR_PRINCIPLED",
         "BSDF_TOON",
         "BSDF_TRANSLUCENT",
+        "LIGHT_FALLOFF",
         "SUBSURFACE_SCATTERING",
     }
 )
 _CAMERA_NODE_TYPES = frozenset(
     {
+        "BACKGROUND",
         "BEVEL",
+        "BSDF_ANISOTROPIC",
         "BSDF_GLASS",
         "BSDF_GLOSSY",
+        "BSDF_HAIR",
+        "BSDF_HAIR_PRINCIPLED",
         "BSDF_REFRACTION",
+        "BSDF_SHEEN",
+        "BSDF_VELVET",
         "CAMERA",
         "FRESNEL",
         "HOLDOUT",
@@ -129,6 +141,8 @@ _CAMERA_NODE_TYPES = frozenset(
         "LIGHT_PATH",
         "OBJECT_INFO",
         "TEX_ENVIRONMENT",
+        "VECT_TRANSFORM",
+        "VECTOR_TRANSFORM",
     }
 )
 _GROUP_NODE_TYPES = frozenset(
@@ -226,7 +240,7 @@ def _texture_coordinate_findings(
             reason = f"Texture Coordinate output '{output}' has no audited bake policy"
         elif capability is ShaderBakeCapability.LOCAL_UV_SAFE:
             code = "TEXTURE_COORD_UV_LOCAL"
-            reason = "Texture Coordinate UV can be evaluated on the reconstructed UV target"
+            reason = "Texture Coordinate UV uses the preserved source render UV layer"
         elif capability is ShaderBakeCapability.GROUP_RENDER_REQUIRED:
             code = "TEXTURE_COORD_INSTANCER_CONTEXT"
             reason = "Texture Coordinate From Instancer requires the original instance context"
@@ -362,7 +376,7 @@ def audit_material_graph_capabilities(
     *,
     render_target: str,
 ) -> MaterialCapabilityAudit:
-    """Return a deterministic capability report without changing strategy selection."""
+    """Return a deterministic capability report for one renderer-specific graph."""
 
     if not isinstance(graph, MaterialGraphSnapshot):
         raise TypeError("graph must be MaterialGraphSnapshot")
