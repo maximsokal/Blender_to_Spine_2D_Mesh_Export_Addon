@@ -94,6 +94,15 @@ def test_strategy_and_projection_domains_remain_blender_independent():
         assert "numpy" not in imported_roots
 
 
+def test_camera_projection_core_streams_one_union_buffer():
+    path = ROOT / "blender_adapter" / "camera_projection_executor_core.py"
+    source = path.read_text(encoding="utf-8")
+
+    assert "ProjectionAlphaUnionAccumulator" in source
+    assert "build_sequence_union_layout" not in source
+    assert "masks: list" not in source
+
+
 def test_object_bake_operator_is_confined_to_core_helper():
     path = ROOT / "blender_adapter" / "bake_executor_core.py"
     source = path.read_text(encoding="utf-8")
