@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 import logging
+from math import isfinite
 from typing import Any, Iterable, Iterator, Tuple
 from uuid import uuid4
 
@@ -91,6 +92,77 @@ def _create_placeholder_material(bpy_module: Any, slot_index: int, token: str) -
     return material
 
 
+def _material_diffuse_rgba(material: Any, slot_index: int) -> tuple[float, float, float, float]:
+    value = getattr(material, "diffuse_color", (0.8, 0.8, 0.8, 1.0))
+    try:
+        resolved = tuple(float(value[index]) for index in range(4))
+    except Exception as exc:
+        raise BakeMaterialError(
+            f"Unable to read diffuse_color from non-node material slot {slot_index}"
+        ) from exc
+    if not all(isfinite(component) for component in resolved):
+        raise BakeMaterialError(
+            f"Non-node material slot {slot_index} has non-finite diffuse_color"
+        )
+    return resolved
+
+
+def _input_socket(node: Any, name: str) -> Any | None:
+    inputs = getattr(node, "inputs", None)
+    getter = getattr(inputs, "get", None)
+    if callable(getter):
+        try:
+            return getter(name)
+        except Exception:
+            return None
+    return None
+
+
+def _configure_non_node_fallback(
+    copied: Any,
+    source_material: Any,
+    slot_index: int,
+) -> None:
+    """Represent an opaque legacy diffuse_color on the owned material copy."""
+
+    rgba = _material_diffuse_rgba(source_material, slot_index)
+    if rgba[3] < 0.999999:
+        raise BakeMaterialError(
+            f"Non-node material slot {slot_index} uses diffuse alpha {rgba[3]:.6f}; "
+            "enable material nodes so opacity can be analyzed and baked explicitly"
+        )
+    try:
+        copied.use_nodes = True
+        node_tree = copied.node_tree
+        if node_tree is None:
+            raise RuntimeError("node_tree was not created")
+        node_tree.nodes.clear()
+        output = node_tree.nodes.new(type="ShaderNodeOutputMaterial")
+        output.name = "Material Output"
+        principled = node_tree.nodes.new(type="ShaderNodeBsdfPrincipled")
+        principled.name = "Legacy Diffuse Color"
+        base_color = _input_socket(principled, "Base Color")
+        roughness = _input_socket(principled, "Roughness")
+        metallic = _input_socket(principled, "Metallic")
+        alpha = _input_socket(principled, "Alpha")
+        if base_color is None:
+            raise RuntimeError("Principled Base Color input is unavailable")
+        base_color.default_value = rgba
+        if roughness is not None:
+            roughness.default_value = 1.0
+        if metallic is not None:
+            metallic.default_value = 0.0
+        if alpha is not None:
+            alpha.default_value = 1.0
+        node_tree.links.new(principled.outputs["BSDF"], output.inputs["Surface"])
+    except BakeMaterialError:
+        raise
+    except Exception as exc:
+        raise BakeMaterialError(
+            f"Unable to materialize diffuse_color fallback for slot {slot_index}"
+        ) from exc
+
+
 def _copy_material(
     bpy_module: Any,
     source_material: Any,
@@ -99,6 +171,7 @@ def _copy_material(
 ) -> Any:
     if source_material is None:
         return _create_placeholder_material(bpy_module, slot_index, token)
+    source_uses_nodes = bool(getattr(source_material, "use_nodes", False))
     try:
         copied = source_material.copy()
     except Exception as exc:
@@ -106,6 +179,16 @@ def _copy_material(
             f"Unable to copy source material in slot {slot_index}"
         ) from exc
     copied.name = f"__Spine2D_Bake_{slot_index}_{token}"
+    if not source_uses_nodes:
+        try:
+            _configure_non_node_fallback(copied, source_material, slot_index)
+        except Exception:
+            try:
+                if getattr(copied, "users", 0) == 0:
+                    bpy_module.data.materials.remove(copied)
+            except Exception:
+                logger.exception("Failed to remove invalid non-node material copy")
+            raise
     return copied
 
 
