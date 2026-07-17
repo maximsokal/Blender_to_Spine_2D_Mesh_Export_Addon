@@ -3,6 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from Blender_to_Spine2D_Mesh_Exporter.application import (
+    A1GeometryPreparationSettings,
+)
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_bridge import (
     _build_sources,
     _common_object_settings,
@@ -49,8 +52,20 @@ def _settings(obj, scene, tmp_path: Path):
 def test_missing_scene_angular_properties_preserve_legacy_default(tmp_path):
     settings = _settings(_object("Legacy"), _scene(), tmp_path)
 
-    assert settings.geometry.angular_mode is A1AngularMode.LEGACY_SEED_CONE
-    assert settings.geometry.local_angle_limit_degrees is None
+    assert settings.geometry == A1GeometryPreparationSettings()
+
+
+def test_registered_legacy_scene_ignores_dormant_local_limit():
+    settings = _resolve_geometry_settings(
+        _scene(
+            spine2d_angular_mode="LEGACY_SEED_CONE",
+            spine2d_local_angle_limit=87.0,
+        )
+    )
+
+    assert settings == A1GeometryPreparationSettings()
+    assert settings.angular_mode is A1AngularMode.LEGACY_SEED_CONE
+    assert settings.local_angle_limit_degrees is None
 
 
 def test_hybrid_scene_properties_reach_single_object_geometry(tmp_path):
