@@ -16,7 +16,6 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
         sys.path.insert(0, str(path))
 
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
-    BakeExecutionError,
     export_a1_single_object,
 )
 from run_bake_integration import (  # noqa: E402
@@ -43,6 +42,7 @@ def test_opaque_non_node_diffuse_color_is_baked_from_copy() -> None:
             source,
             _settings(Path(directory), "LegacyDiffuse"),
         )
+        _assert(result.success, f"opaque legacy material export failed: {result.issues}")
         pixels = _read_pixels(result.image_paths[0])
         covered = [
             (
@@ -54,7 +54,10 @@ def test_opaque_non_node_diffuse_color_is_baked_from_copy() -> None:
             if float(pixels[offset + 3]) > 0.5
         ]
         _assert(len(covered) > 20, "legacy diffuse bake has too few covered pixels")
-        mean = tuple(sum(value[index] for value in covered) / len(covered) for index in range(3))
+        mean = tuple(
+            sum(value[index] for value in covered) / len(covered)
+            for index in range(3)
+        )
         _assert(mean[1] > 0.65, f"legacy green diffuse color was lost: {mean}")
         _assert(mean[1] > mean[0] * 4.0, f"legacy color became red/gray: {mean}")
         _assert(mean[1] > mean[2] * 3.0, f"legacy color became blue/gray: {mean}")
@@ -76,18 +79,20 @@ def test_transparent_non_node_material_fails_explicitly() -> None:
         material.diffuse_color = (0.3, 0.7, 0.1, 0.35)
         source.data.materials.append(material)
 
-        try:
-            export_a1_single_object(
-                source,
-                _settings(Path(directory), "LegacyAlpha"),
-            )
-        except BakeExecutionError as exc:
-            _assert(
-                "enable material nodes so opacity can be analyzed" in str(exc),
-                f"transparent legacy error is not actionable: {exc}",
-            )
-        else:
-            raise AssertionError("transparent non-node material lost alpha silently")
+        result = export_a1_single_object(
+            source,
+            _settings(Path(directory), "LegacyAlpha"),
+        )
+        _assert(not result.success, "transparent non-node material lost alpha silently")
+        errors = tuple(issue for issue in result.issues if issue.severity.value == "ERROR")
+        _assert(errors, f"failed legacy export has no error issue: {result.issues}")
+        _assert(
+            any(
+                "enable material nodes so opacity can be analyzed" in issue.message
+                for issue in errors
+            ),
+            f"transparent legacy error is not actionable: {errors}",
+        )
         _assert(not material.use_nodes, "failed export mutated source legacy material")
         _assert(not _temporary_datablock_names(), "failed legacy export leaked temporary data")
 
