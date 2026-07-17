@@ -39,13 +39,7 @@ from ..application import (
     resolve_a1_names,
     resolve_a1_output_paths,
 )
-from ..domain.baking import (
-    BakePlan,
-    CameraProjectionPlan,
-    ObjectMaterialAnalysis,
-    build_camera_projection_plan,
-    build_texture_plan,
-)
+from ..domain.baking import BakePlan, CameraProjectionPlan, ObjectMaterialAnalysis
 from ..domain.geometry import LineageSeverity, MeshSnapshot
 from ..domain.spine import (
     LegacyRigBuildRequest,
@@ -57,6 +51,11 @@ from ..domain.uv import UvUnwrapResult
 from .evaluated_mesh_reader import read_evaluated_mesh_snapshot
 from .material_analyzer import analyse_object_materials
 from .mesh_reader import read_source_mesh_snapshot
+from .production_shader_capabilities import (
+    audit_object_material_capabilities,
+    build_capability_checked_texture_plan,
+    strongest_object_capability,
+)
 from .render_engine_contract import render_engine_contract_from_execution
 from .scene_bake_analyzer import analyse_bake_contexts
 from .uv_unwrap import unwrap_snapshot_uv
@@ -372,21 +371,22 @@ def prepare_a1_object(
             context=context,
         )
         renderer.validate_scene(scene_bake_context)
-        bake_settings = build_a1_bake_settings(object_id, settings)
-        if renderer.uses_eevee:
-            bake_plan = build_camera_projection_plan(
-                material_analysis,
-                bake_settings,
-                object_context=object_bake_context,
-                scene_context=scene_bake_context,
-            )
-        else:
-            bake_plan = build_texture_plan(
-                material_analysis,
-                bake_settings,
-                object_context=object_bake_context,
-                scene_context=scene_bake_context,
-            )
+        capability_audits = audit_object_material_capabilities(
+            source_obj,
+            material_analysis,
+            render_target=renderer.shader_target,
+        )
+        required_capability = strongest_object_capability(capability_audits)
+        statistics["shader_capability"] = required_capability.value
+        statistics["shader_capability_audit_count"] = len(capability_audits)
+        bake_plan = build_capability_checked_texture_plan(
+            material_analysis,
+            build_a1_bake_settings(object_id, settings),
+            capability_audits,
+            renderer,
+            object_context=object_bake_context,
+            scene_context=scene_bake_context,
+        )
         camera_projection = isinstance(bake_plan, CameraProjectionPlan)
         statistics.update(
             {
