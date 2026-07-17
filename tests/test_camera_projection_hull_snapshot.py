@@ -139,6 +139,7 @@ def _rig():
 
 def test_irregular_projection_snapshot_uses_layout_triangle_contract(tmp_path: Path):
     plan = _projection_plan(tmp_path)
+    rig = _rig()
     hull = convex_hull(
         (
             ProjectionPixelPoint(10, 10),
@@ -162,7 +163,7 @@ def test_irregular_projection_snapshot_uses_layout_triangle_contract(tmp_path: P
 
     snapshot = build_camera_projection_mesh_snapshot(
         plan,
-        _rig(),
+        rig,
         uv_layer_name="SpineBakeUV",
         layout=layout,
     )
@@ -179,8 +180,8 @@ def test_irregular_projection_snapshot_uses_layout_triangle_contract(tmp_path: P
     assert len(snapshot.edges) == len(layout.hull) + len(layout.hull) - 3
     assert tuple(vertex.position[:2] for vertex in snapshot.vertices) == tuple(
         (
-            layout.spine_position_pixels(point)[0] / _rig().info.uniform_scale,
-            layout.spine_position_pixels(point)[1] / _rig().info.uniform_scale,
+            layout.spine_position_pixels(point)[0] / rig.info.uniform_scale,
+            layout.spine_position_pixels(point)[1] / rig.info.uniform_scale,
         )
         for point in layout.hull
     )
