@@ -1,9 +1,11 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.production_shader_capabilities import (
     _with_proxy_boundary,
+    _with_source_uv_boundary,
     build_capability_checked_texture_plan,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.render_engine_contract import (
@@ -26,6 +28,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     SceneBakeContext,
     ShaderBakeCapability,
     ShaderCapabilityFinding,
+    ShaderLinkSnapshot,
     ShaderNodeSnapshot,
 )
 
@@ -40,7 +43,6 @@ IDENTITY = (
     0.0,
     0.0,
     0.0,
-    0.0,
     1.0,
     0.0,
     0.0,
@@ -50,7 +52,21 @@ IDENTITY = (
 )
 
 
-def _graph(*, alpha=False, node_type="BSDF_PRINCIPLED", muted=False):
+class FakeUvLayers(list):
+    def __init__(self, values=(), active=None):
+        super().__init__(values)
+        self.active = active
+
+
+class FakeInputs(list):
+    def get(self, name):
+        for item in self:
+            if item.name == name:
+                return item
+        return None
+
+
+def _graph(*, alpha=False, node_type="BSDF_PRINCIPLED", muted=False, links=()):
     node = ShaderNodeSnapshot(
         node_id="Shader",
         node_type=node_type,
@@ -69,7 +85,7 @@ def _graph(*, alpha=False, node_type="BSDF_PRINCIPLED", muted=False):
         material_name="Material",
         active_output_node_id=output.node_id,
         reachable_nodes=(node, output),
-        reachable_links=(),
+        reachable_links=tuple(links),
         semantic_channels=tuple(channels),
         dependencies=(),
     )
@@ -148,6 +164,22 @@ def _scene_context():
     )
 
 
+def _fake_object(render_uv=True):
+    if render_uv:
+        layer = SimpleNamespace(name="SourceUV", active_render=True)
+        uv_layers = FakeUvLayers((layer,), active=layer)
+    else:
+        uv_layers = FakeUvLayers()
+    return SimpleNamespace(data=SimpleNamespace(uv_layers=uv_layers))
+
+
+def _fake_live_image_node(vector_linked=False):
+    vector = SimpleNamespace(name="Vector", is_linked=vector_linked)
+    node = SimpleNamespace(inputs=FakeInputs((vector,)))
+    output = SimpleNamespace(inputs=FakeInputs())
+    return node, output
+
+
 def test_local_capability_keeps_object_bake(tmp_path: Path):
     graph = _graph()
     plan = build_capability_checked_texture_plan(
@@ -218,5 +250,62 @@ def test_alpha_muted_bypass_is_promoted_to_camera_render():
 
     assert resolved.required_capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED
     assert "ALPHA_PROXY_MUTED_BYPASS" in {
+        finding.code for finding in resolved.findings
+    }
+
+
+def test_unlinked_image_without_source_render_uv_is_promoted_to_b4():
+    graph = _graph(node_type="TEX_IMAGE")
+    base = _audit(ShaderBakeCapability.LOCAL_UV_SAFE)
+    live_nodes = _fake_live_image_node(vector_linked=False)
+
+    resolved = _with_source_uv_boundary(
+        base,
+        graph,
+        live_nodes,
+        _fake_object(render_uv=False),
+    )
+
+    assert resolved.required_capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED
+    assert "SOURCE_RENDER_UV_MISSING" in {
+        finding.code for finding in resolved.findings
+    }
+
+
+def test_unlinked_image_with_source_render_uv_remains_local_safe():
+    graph = _graph(node_type="TEX_IMAGE")
+    base = _audit(ShaderBakeCapability.LOCAL_UV_SAFE)
+    live_nodes = _fake_live_image_node(vector_linked=False)
+
+    resolved = _with_source_uv_boundary(
+        base,
+        graph,
+        live_nodes,
+        _fake_object(render_uv=True),
+    )
+
+    assert resolved.required_capability is ShaderBakeCapability.LOCAL_UV_SAFE
+
+
+def test_texture_coordinate_uv_without_source_uv_is_promoted_to_b4():
+    link = ShaderLinkSnapshot(
+        from_node_id="Shader",
+        from_socket="UV",
+        to_node_id="Material Output",
+        to_socket="Surface",
+    )
+    graph = _graph(node_type="TEX_COORD", links=(link,))
+    base = _audit(ShaderBakeCapability.LOCAL_UV_SAFE)
+    live_nodes = (SimpleNamespace(inputs=FakeInputs()), SimpleNamespace(inputs=FakeInputs()))
+
+    resolved = _with_source_uv_boundary(
+        base,
+        graph,
+        live_nodes,
+        _fake_object(render_uv=False),
+    )
+
+    assert resolved.required_capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED
+    assert "SOURCE_RENDER_UV_MISSING" in {
         finding.code for finding in resolved.findings
     }
