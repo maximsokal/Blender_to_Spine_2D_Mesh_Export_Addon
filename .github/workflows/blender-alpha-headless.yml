@@ -82,6 +82,17 @@ jobs:
             --python tests/blender_headless/run_uv_sampling_role_integration.py \
             2>&1 | tee test-results/blender-alpha-uv-sampling-role.log
 
+      - name: Run non-node material fallback tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_non_node_material_fallback_integration.py \
+            2>&1 | tee test-results/blender-alpha-non-node-material.log
+
       - name: Run alpha sequence nested and rollback tests
         shell: bash
         run: |
