@@ -152,6 +152,8 @@ def _label_components(
     width: int,
     height: int,
 ) -> Tuple[Tuple[int, ...], ...]:
+    """Label foreground with 8-connectivity so diagonal antialias strokes survive."""
+
     visited = bytearray(len(mask))
     components: list[Tuple[int, ...]] = []
     for start, value in enumerate(mask):
@@ -163,7 +165,7 @@ def _label_components(
         while queue:
             current = queue.popleft()
             indices.append(current)
-            for neighbor in _neighbors4(current, width, height):
+            for neighbor in _neighbors8(current, width, height):
                 if mask[neighbor] and not visited[neighbor]:
                     visited[neighbor] = 1
                     queue.append(neighbor)
@@ -319,7 +321,7 @@ def build_projection_coverage_mask(
             height=height,
         )
 
-    cleaned, before_count, after_count, removed_pixels = _remove_small_components(
+    cleaned, before_count, _, removed_pixels = _remove_small_components(
         candidate,
         width=width,
         height=height,
