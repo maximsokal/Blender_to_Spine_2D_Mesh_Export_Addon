@@ -27,6 +27,14 @@ from .projection_coverage import (
 )
 
 
+_COMPATIBILITY_COVERAGE_POLICY = ProjectionCoveragePolicy(
+    mode=ProjectionCoverageMode.BINARY_THRESHOLD,
+    core_alpha_threshold=0.0,
+    minimum_component_pixels=1,
+    maximum_hole_pixels=0,
+)
+
+
 class CameraProjectionLayoutError(ValueError):
     """Raised when rendered alpha cannot produce a stable projection layout."""
 
@@ -363,9 +371,9 @@ def _layout_from_union_mask(
         simplify_tolerance_pixels=float(simplify_tolerance_pixels),
         contour_fallback_reason=contour.fallback_reason,
         coverage_mode=coverage_result.mode,
-        coverage_core_alpha_threshold=float(policy.core_alpha_threshold)
-        if (policy := coverage_policy)
-        else 0.0,
+        coverage_core_alpha_threshold=float(
+            coverage_policy.core_alpha_threshold
+        ),
         coverage_raw_nonzero_pixel_count=coverage_result.raw_nonzero_pixel_count,
         coverage_strong_pixel_count=coverage_result.strong_pixel_count,
         coverage_component_count_before_cleanup=(
@@ -394,7 +402,7 @@ class ProjectionAlphaUnionAccumulator:
     padding_pixels: int
     contour_mode: ProjectionContourMode = ProjectionContourMode.SIMPLIFIED_CONCAVE
     simplify_tolerance_pixels: float = 1.0
-    coverage_policy: ProjectionCoveragePolicy = ProjectionCoveragePolicy()
+    coverage_policy: ProjectionCoveragePolicy = _COMPATIBILITY_COVERAGE_POLICY
     _union_mask: bytearray = field(init=False, repr=False)
     _frame_count: int = field(init=False, default=0, repr=False)
     _visible_pixel_count: int = field(init=False, default=0, repr=False)
@@ -496,7 +504,7 @@ def build_sequence_union_layout(
     padding_pixels: int,
     contour_mode: ProjectionContourMode = ProjectionContourMode.SIMPLIFIED_CONCAVE,
     simplify_tolerance_pixels: float = 1.0,
-    coverage_policy: ProjectionCoveragePolicy = ProjectionCoveragePolicy(),
+    coverage_policy: ProjectionCoveragePolicy = _COMPATIBILITY_COVERAGE_POLICY,
 ) -> CameraProjectionLayout:
     """Build one stable layout from binary masks or 8-bit alpha coverage frames."""
 
