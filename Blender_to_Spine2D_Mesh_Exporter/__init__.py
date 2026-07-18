@@ -1,18 +1,9 @@
-# __init__.py
 # pylint: disable=import-error
-
-"""Main entry point for the Blender to Spine2D Mesh Exporter add-on.
-
-The package also contains Blender-independent domain/application code and command-line
-parity tools. Importing those modules with normal Python must not eagerly import every
-legacy ``bpy`` module. Blender lifecycle classes are therefore defined only when a
-real Blender Python API is available; the in-Blender registration path is unchanged.
-"""
+"""Main entry point for the Blender to Spine2D Mesh Exporter add-on."""
 
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 
@@ -27,16 +18,14 @@ bl_info = {
     "category": "3D View",
 }
 
-logger = logging.getLogger("Blender_to_Spine2D_Mesh_Exporter")
+
+logger = logging.getLogger(__package__ or __name__)
 
 try:
     import bpy as _bpy  # type: ignore
 except ModuleNotFoundError:
     _bpy = None
 
-# Some normal Python environments contain a placeholder package named ``bpy`` that
-# is not Blender's runtime API. Importing legacy modules against it fails later with
-# misleading AttributeError exceptions. Require the core lifecycle surfaces instead.
 if _bpy is not None and all(
     hasattr(_bpy, attribute) for attribute in ("types", "props", "utils", "context")
 ):
@@ -45,40 +34,12 @@ else:
     bpy = None
 
 
-MODULE_NAMES_FOR_LOGGING = [
-    "Blender_to_Spine2D_Mesh_Exporter",
-    "config",
-    "ui",
-    "single_object_operator",
-    "main",
-    "plane_cut",
-    "uv_operations",
-    "utils",
-    "json_export",
-    "json_merger",
-    "texture_baker",
-    "texture_baker_integration",
-    "seam_marker",
-    "multi_object_export",
-]
+def initialize_logging_preferences(prefs: Any) -> tuple[str, ...]:
+    """Discover every Python module and preserve existing per-file log levels."""
 
-
-def initialize_logging_preferences(prefs: Any) -> None:
-    if not hasattr(prefs, "logging_settings"):
-        return
-
-    if not prefs.logging_settings.log_file_path:
-        default_path = os.path.join(
-            os.path.expanduser("~"),
-            "Blender_to_Spine2D_Mesh_Exporter.log",
-        )
-        prefs.logging_settings.log_file_path = default_path
-
-    if not prefs.logging_settings.modules:
-        for name in MODULE_NAMES_FOR_LOGGING:
-            module = prefs.logging_settings.modules.add()
-            module.name = name
-            module.level = "ERROR"
+    if bpy is None or not hasattr(prefs, "logging_settings"):
+        return ()
+    return config.synchronize_logging_preferences(prefs)
 
 
 if bpy is not None:
@@ -99,9 +60,9 @@ if bpy is not None:
         multi_object_export,
     )
 
-    # ``main`` remains available as the legacy implementation/reference. Its
-    # register hooks are skipped because ``single_object_operator`` owns the same
-    # public ``object.save_uv_as_json`` operator ID.
+    # Legacy modules remain importable only because the explicit Legacy backend still uses
+    # them. ``main`` does not own runtime registration; the Rewrite-aware operator owns the
+    # public ``object.save_uv_as_json`` identifier.
     MODULES = (
         config,
         ui,
@@ -118,31 +79,50 @@ if bpy is not None:
         multi_object_export,
     )
 
+    class SPINE2D_OT_RefreshLoggingModules(bpy.types.Operator):
+        """Rescan addon Python files while preserving configured levels."""
+
+        bl_idname = "spine2d.refresh_logging_modules"
+        bl_label = "Refresh Module List"
+        bl_description = "Rescan every addon Python file used by per-module logging"
+
+        def execute(self, context):
+            try:
+                prefs = context.preferences.addons[__name__].preferences
+                modules = initialize_logging_preferences(prefs)
+                config.setup_logging()
+                self.report({"INFO"}, f"Logging modules refreshed: {len(modules)}")
+                return {"FINISHED"}
+            except Exception as exc:
+                logger.exception("Unable to refresh logging module list")
+                self.report({"ERROR"}, f"Logging refresh failed: {exc}")
+                return {"CANCELLED"}
+
     class WM_OT_UninstallAddon(bpy.types.Operator):
         bl_idname = "b2s.uninstall_addon"
         bl_label = "Uninstall Addon"
         module: bpy.props.StringProperty(default=__package__ or __name__)
 
         def execute(self, context):
-            mod = getattr(self, "module", None)
-            if not mod:
+            module_name = getattr(self, "module", None)
+            if not module_name:
                 base = (__package__ or __name__).split(".")[-1]
-                mods = bpy.context.preferences.addons.keys()
-                candidates = [key for key in mods if key.endswith(base)]
-                mod = candidates[0] if candidates else (__package__ or __name__)
+                installed = bpy.context.preferences.addons.keys()
+                candidates = [key for key in installed if key.endswith(base)]
+                module_name = candidates[0] if candidates else (__package__ or __name__)
 
-            logger.debug("Starting addon uninstallation for: %s", mod)
+            logger.debug("Starting addon uninstallation for %s", module_name)
             try:
-                bpy.ops.preferences.addon_disable(module=mod)
-            except Exception as disable_error:
-                logger.error("Error disabling addon %s: %s", mod, disable_error)
+                bpy.ops.preferences.addon_disable(module=module_name)
+            except Exception:
+                logger.exception("Unable to disable addon %s before removal", module_name)
             try:
-                bpy.ops.preferences.addon_remove(module=mod)
+                bpy.ops.preferences.addon_remove(module=module_name)
                 self.report({"INFO"}, "Addon uninstalled successfully.")
                 return {"FINISHED"}
-            except Exception as remove_error:
-                logger.error("Error removing addon %s: %s", mod, remove_error)
-                self.report({"ERROR"}, f"Uninstall failed: {remove_error}")
+            except Exception as exc:
+                logger.exception("Unable to remove addon %s", module_name)
+                self.report({"ERROR"}, f"Uninstall failed: {exc}")
                 return {"CANCELLED"}
 
     class ModelToSpine2DAddonPreferences(bpy.types.AddonPreferences):
@@ -153,54 +133,82 @@ if bpy is not None:
         def update_logging_config(self):
             config.setup_logging()
 
-        def draw(self, context):
+        def draw(self, _context):
             layout = self.layout
 
-            box = layout.box()
-            box.label(text="Info & Help")
-            box.operator(
+            info_box = layout.box()
+            info_box.label(text="Info & Help")
+            info_box.operator(
                 "wm.url_open",
                 text="Project Website",
                 icon="URL",
             ).url = "https://github.com/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon"
 
-            box = layout.box()
-            box.label(text="Logging Settings")
+            diagnostics_box = layout.box()
+            diagnostics_box.label(text="Export diagnostics")
             if not hasattr(self, "logging_settings"):
-                box.label(
-                    text="Error initializing logging settings. See console.",
+                diagnostics_box.label(
+                    text="Error initializing diagnostics settings. See console.",
                     icon="ERROR",
                 )
                 return
 
-            log_prefs = self.logging_settings
-            box.prop(log_prefs, "enable_file_logging")
-            if log_prefs.enable_file_logging:
-                box.prop(log_prefs, "log_file_path")
-
-            box.separator()
-            column = box.column(align=True)
-            column.label(text="Module Log Levels:")
-            if hasattr(log_prefs, "modules"):
-                for module_setting in log_prefs.modules:
-                    row = column.row()
-                    row.label(text=module_setting.name)
-                    row.prop(module_setting, "level", text="")
+            settings = self.logging_settings
+            diagnostics_box.prop(settings, "preserve_failed_work_files")
+            diagnostics_box.prop(settings, "recover_stale_work_files")
+            if settings.preserve_failed_work_files:
+                diagnostics_box.label(
+                    text="Failed .spine2d-stage-* files will be kept",
+                    icon="INFO",
+                )
             else:
-                column.label(text="Error: Modules not registered.", icon="ERROR")
+                diagnostics_box.label(
+                    text="Failed working files are removed automatically",
+                    icon="CHECKMARK",
+                )
+
+            logging_box = layout.box()
+            header = logging_box.row(align=True)
+            header.label(text="Per-file logging")
+            header.operator(
+                "spine2d.refresh_logging_modules",
+                text="Refresh",
+                icon="FILE_REFRESH",
+            )
+            logging_box.prop(settings, "enable_file_logging")
+            if settings.enable_file_logging:
+                logging_box.prop(settings, "log_file_path")
+            logging_box.prop(settings, "module_filter", icon="VIEWZOOM")
+
+            filter_text = str(settings.module_filter or "").strip().casefold()
+            visible = 0
+            modules_column = logging_box.column(align=True)
+            for module_setting in settings.modules:
+                module_name = str(module_setting.name)
+                if filter_text and filter_text not in module_name.casefold():
+                    continue
+                row = modules_column.row(align=True)
+                row.label(text=module_name)
+                row.prop(module_setting, "level", text="")
+                visible += 1
+            logging_box.label(
+                text=f"Visible modules: {visible} / {len(settings.modules)}",
+                icon="INFO",
+            )
 
             layout.separator()
             layout.label(text="Uninstall this add-on:")
             try:
                 operator = layout.operator("b2s.uninstall_addon", text="Uninstall")
                 operator.module = __package__ or __name__
-            except Exception as exc:
-                logger.error("Error adding Uninstall button: %s", exc)
+            except Exception:
+                logger.exception("Unable to draw uninstall operator")
                 layout.label(text="Uninstall not available", icon="ERROR")
 
     CLASSES_TO_REGISTER = (
         LoggingModuleSettings,
         AddonLoggingSettings,
+        SPINE2D_OT_RefreshLoggingModules,
         ModelToSpine2DAddonPreferences,
         WM_OT_UninstallAddon,
     )
@@ -210,53 +218,68 @@ if bpy is not None:
 
     def register() -> None:
         config._setup_default_logging()
-        logger.debug("Registering Blender_to_Spine2D_Mesh_Exporter Add-on")
+        logger.debug("Registering Blender_to_Spine2D_Mesh_Exporter")
 
-        for cls in CLASSES_TO_REGISTER:
-            try:
-                bpy.utils.register_class(cls)
-            except Exception:
-                logger.exception("Failed to register class %s", cls.__name__)
-
-        for module in MODULES:
-            try:
-                if _module_owns_runtime_registration(module) and hasattr(
-                    module,
-                    "register",
-                ):
-                    module.register()
-            except Exception:
-                logger.exception("Failed to register module %s", module.__name__)
+        registered_classes: list[type] = []
+        registered_modules: list[Any] = []
         try:
+            for cls in CLASSES_TO_REGISTER:
+                bpy.utils.register_class(cls)
+                registered_classes.append(cls)
+
+            for module in MODULES:
+                if _module_owns_runtime_registration(module) and hasattr(module, "register"):
+                    module.register()
+                    registered_modules.append(module)
+
             prefs = bpy.context.preferences.addons[__name__].preferences
             initialize_logging_preferences(prefs)
             config.setup_logging()
-            logger.info("User preferences for logging applied.")
-        except Exception as exc:
-            logger.error("Could not initialize user preferences for logging: %s", exc)
+            logger.info("User logging and diagnostics preferences applied")
+        except Exception:
+            logger.exception("Addon registration failed")
+            for module in reversed(registered_modules):
+                try:
+                    if hasattr(module, "unregister"):
+                        module.unregister()
+                except Exception:
+                    logger.exception(
+                        "Registration rollback failed for module %s",
+                        module.__name__,
+                    )
+            for cls in reversed(registered_classes):
+                try:
+                    bpy.utils.unregister_class(cls)
+                except Exception:
+                    logger.exception("Registration rollback failed for %s", cls.__name__)
+            raise
 
     def unregister() -> None:
-        logger.debug("Unregistering Blender_to_Spine2D_Mesh_Exporter Add-on")
+        logger.debug("Unregistering Blender_to_Spine2D_Mesh_Exporter")
+        errors: list[Exception] = []
         for module in reversed(MODULES):
             try:
-                if _module_owns_runtime_registration(module) and hasattr(
-                    module,
-                    "unregister",
-                ):
+                if _module_owns_runtime_registration(module) and hasattr(module, "unregister"):
                     module.unregister()
-            except Exception:
+            except Exception as exc:
+                errors.append(exc)
                 logger.exception("Failed to unregister module %s", module.__name__)
         for cls in reversed(CLASSES_TO_REGISTER):
             try:
                 bpy.utils.unregister_class(cls)
-            except Exception:
+            except Exception as exc:
+                errors.append(exc)
                 logger.exception("Failed to unregister class %s", cls.__name__)
+        if errors:
+            raise RuntimeError(
+                f"Addon unregistration failed {len(errors)} time(s)"
+            ) from errors[0]
 
 else:
     MODULES: tuple[Any, ...] = ()
     CLASSES_TO_REGISTER: tuple[Any, ...] = ()
 
-    def _module_owns_runtime_registration(module: Any) -> bool:
+    def _module_owns_runtime_registration(_module: Any) -> bool:
         return False
 
     def register() -> None:
