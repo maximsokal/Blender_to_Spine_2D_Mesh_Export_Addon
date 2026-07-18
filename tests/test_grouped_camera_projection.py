@@ -299,7 +299,12 @@ def test_grouped_sequence_overlay_uses_sequence_base_path_and_metadata(tmp_path)
     attachment = skin.attachments["group_slot"]["group_attachment"]
 
     assert attachment.path == "images/Combined_grouped_camera_Baked_"
-    assert attachment.sequence == {"count": 3, "start": 3, "digits": 4}
+    assert attachment.sequence == {
+        "count": 3,
+        "start": 3,
+        "digits": 4,
+        "setup": 1,
+    }
 
 
 def test_group_visibility_keeps_sources_visible_and_only_hides_other_camera_rays():
