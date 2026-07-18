@@ -40,7 +40,6 @@ from .camera_projection_state import (
 )
 
 logger = logging.getLogger(__name__)
-_ALPHA_THRESHOLD = 1.0 / 255.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,11 +75,12 @@ def _render_to_reservations(
         scene=scene,
     )
     resolved = require_reservations(plan, reservations)
+    alpha_threshold = float(execution_settings.projection_alpha_threshold)
     union_accumulator = (
         ProjectionAlphaUnionAccumulator(
             width=plan.settings.width,
             height=plan.settings.height,
-            alpha_threshold=_ALPHA_THRESHOLD,
+            alpha_threshold=alpha_threshold,
             padding_pixels=plan.settings.margin_pixels,
         )
         if apply_crop
@@ -122,7 +122,7 @@ def _render_to_reservations(
                     reservation.staged_path,
                     width=plan.settings.width,
                     height=plan.settings.height,
-                    threshold=_ALPHA_THRESHOLD,
+                    threshold=alpha_threshold,
                 )
                 newly_visible = union_accumulator.add_mask(
                     mask,
@@ -130,10 +130,12 @@ def _render_to_reservations(
                 )
                 del mask
                 logger.debug(
-                    "Merged B4 projection frame %d into alpha union: new=%d total=%d",
+                    "Merged B4 projection frame %d into alpha union: new=%d total=%d "
+                    "threshold=%.8f",
                     task.task_index,
                     newly_visible,
                     union_accumulator.visible_pixel_count,
+                    alpha_threshold,
                 )
 
         if union_accumulator is None:
@@ -150,7 +152,7 @@ def _render_to_reservations(
             rewrite_staged_image_with_crop(bpy_module, plan, reservation, layout)
         logger.info(
             "B4 union layout '%s': full=%dx%d crop=(%d,%d)-(%d,%d) "
-            "size=%dx%d hull=%d frames=%d union_bytes=%d",
+            "size=%dx%d hull=%d frames=%d union_bytes=%d alpha_threshold=%.8f",
             plan.source_object_id,
             layout.full_width,
             layout.full_height,
@@ -163,6 +165,7 @@ def _render_to_reservations(
             len(layout.hull),
             union_accumulator.frame_count,
             union_accumulator.allocated_mask_bytes,
+            layout.alpha_threshold,
         )
         return layout
 
