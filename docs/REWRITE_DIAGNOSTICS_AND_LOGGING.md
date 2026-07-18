@@ -22,7 +22,7 @@ infrastructure.export_events
 
 The actual runtime logger name is resolved from the package's real `__package__` value. This supports both normal package imports and Blender extension names such as `bl_ext.user_default...`.
 
-Each module level is independent. Changing the package/root level no longer overwrites every file. Existing levels survive a source-tree rescan.
+Each module level is independent. Changing the package/root level no longer overwrites every file. Existing levels survive a source-tree rescan. Changing one level reapplies the current logger configuration without rebuilding the Blender collection; rescanning happens only during addon registration or through `Refresh Module List`.
 
 Addon Preferences provide:
 
@@ -50,9 +50,18 @@ On the next reservation in an output directory, stale work recovery:
 1. restores a backup when its final output is missing;
 2. removes a stale backup when the final output already exists;
 3. removes abandoned stage files unless preservation is enabled;
-4. reports every cleanup failure instead of silently suppressing it.
+4. skips work files owned by a currently running Blender/Python process;
+5. reports every cleanup failure instead of silently suppressing it.
+
+Transaction work tokens contain the process ID plus a random transaction identifier. This prevents one Blender process from deleting the in-progress files of another live process that targets the same directory.
 
 A Python cleanup cannot run after an operating-system or Blender hard crash. The next-export recovery step covers that case.
+
+## Commit and backup safety
+
+Installation failures remain fail-closed: partially installed outputs are removed, previous outputs are restored from backups, and staged files are removed unless debug preservation is enabled.
+
+Backup deletion happens only after every final output has been installed successfully. A failure while deleting an obsolete backup does **not** invalidate the newly installed export and does not attempt an unsafe rollback after some backups may already have been removed. Instead it emits `CLEANUP_FAILED`; the leftover backup is removed by the next recovery pass because the final output already exists.
 
 ## Event dispatcher
 
@@ -90,5 +99,9 @@ Focused pure tests cover:
 - normal failed-stage deletion;
 - debug preservation;
 - stale backup restoration;
+- live-process work-file protection;
+- backup-cleanup failure after successful installation;
 - lifecycle event order;
 - architecture guards against hardcoded module lists and silent cleanup handlers.
+
+A manual-only Blender 4.4 workflow runs `tests/blender_headless/run_logging_diagnostics_integration.py` against real addon preferences and logger instances.
