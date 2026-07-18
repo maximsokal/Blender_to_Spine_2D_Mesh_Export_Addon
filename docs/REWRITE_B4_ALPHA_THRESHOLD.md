@@ -43,12 +43,22 @@ Using one immutable value for the complete sequence prevents frame-dependent cro
 An all-transparent result after applying the selected threshold still fails before atomic
 commit.
 
-## API boundary
+## Production bridge
 
 The existing `BakeExecutionSettings` object already flows through single-object,
-standalone multi-object, connected multi-object, and mixed exports. No per-material UI
-mode is introduced. A future global advanced UI field may construct the same immutable
-setting without changing B4 execution or layout contracts.
+standalone multi-object, connected multi-object, and mixed exports. The A1 Blender bridge
+uses the compatibility default when no additional property exists.
+
+Automation may provide either an RNA attribute or a Blender ID custom property named:
+
+```text
+spine2d_projection_alpha_threshold
+```
+
+The bridge normalizes numeric values and rejects booleans or non-numeric values before
+constructing the immutable execution settings. No per-material UI mode is introduced. A
+future global advanced UI field may use the same property without changing B4 execution
+or layout contracts.
 
 ## Regression coverage
 
@@ -59,4 +69,6 @@ Focused tests verify:
 - rejection of invalid values;
 - removal of the former executor constant;
 - use of one execution threshold for staged-image mask extraction and union-layout
-  metadata.
+  metadata;
+- single-object and every multi-object source receiving the same scene-level policy;
+- missing scene properties preserving the old result.
