@@ -8,6 +8,7 @@ from typing import Any, Mapping, Tuple
 
 from ..application import (
     A1MultiObjectExportSettings,
+    A1MultiObjectMode,
     A1MultiObjectStage,
     ExportIssue,
     ExportResult,
@@ -27,13 +28,14 @@ from ..infrastructure import (
     write_staged_utf8_text,
 )
 from .a1_mixed_object_export import (
-    _connected_settings,
+    build_connected_subgroup_settings,
     prepare_a1_mixed_object,
 )
+from .a1_multi_object_composition import compose_a1_multi_object_document
 from .a1_multi_object_export import (
     A1MultiObjectPreparationError,
     A1MultiObjectSource,
-    _compose_document,
+    record_object_statistics,
 )
 from .a1_object_preparation import StatisticsValue
 from .a1_projection_finalization import finalize_prepared_camera_projection
@@ -87,41 +89,22 @@ def _failure_result(
     )
 
 
-def _compose_standalone_group(
-    sources: Tuple[A1MultiObjectSource, ...],
-    objects,
+def _standalone_settings(
     settings: A1MultiObjectExportSettings,
-):
-    components = tuple(
-        SpineDocumentComponent(
-            component_id=source.component_id,
-            document=item.document,
-            animation_namespace=source.animation_namespace or source.component_id,
-        )
-        for source, item in zip(sources, objects)
-    )
-    return compose_spine_documents(
-        components,
-        SpineCompositionSettings(
-            shared_bone_names=("root",),
-            constraint_order_policy=ConstraintOrderPolicy.REBASE_CONTIGUOUS,
-            namespace_animations=settings.namespace_animations,
-            animation_separator=settings.animation_separator,
-        ),
+) -> A1MultiObjectExportSettings:
+    return replace(
+        settings,
+        mode=A1MultiObjectMode.STANDALONE,
+        output_stem=f"{settings.resolved_output_stem}__standalone",
+        anchor_component_id=None,
     )
 
 
 def _compose_mixed_document_from_groups(
     connected_document,
-    standalone_sources: Tuple[A1MultiObjectSource, ...],
-    standalone_objects,
+    standalone_document,
     settings: A1MultiObjectExportSettings,
 ):
-    standalone = _compose_standalone_group(
-        standalone_sources,
-        tuple(standalone_objects),
-        settings,
-    )
     return compose_spine_documents(
         (
             SpineDocumentComponent(
@@ -130,7 +113,7 @@ def _compose_mixed_document_from_groups(
             ),
             SpineDocumentComponent(
                 component_id="standalone_group",
-                document=standalone.document,
+                document=standalone_document,
             ),
         ),
         SpineCompositionSettings(
@@ -150,7 +133,7 @@ def export_a1_mixed_object(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> ExportResult:
-    """Stage mixed textures, grouped connected B4, and one atomic final document."""
+    """Finalize both groups, compose each once, then atomically commit one document."""
 
     try:
         prepared = prepare_a1_mixed_object(
@@ -172,7 +155,7 @@ def export_a1_mixed_object(
         )
     except Exception as exc:
         return _failure_result(
-            stage=A1MultiObjectStage.COMPOSE_DOCUMENT,
+            stage=A1MultiObjectStage.VALIDATE_REQUEST,
             exc=exc,
             statistics={},
             warnings=(),
@@ -201,17 +184,22 @@ def export_a1_mixed_object(
                     staged.projection_layout,
                 )
                 finalized.append(resolved)
-                for key, value in resolved.statistics.items():
-                    statistics[f"component.{source.component_id}.{key}"] = value
+                record_object_statistics(
+                    statistics,
+                    source.component_id,
+                    resolved.statistics,
+                )
 
             connected_count = len(connected_sources)
             connected_objects = tuple(finalized[:connected_count])
             standalone_objects = tuple(finalized[connected_count:])
+            if len(connected_objects) != len(connected_sources):
+                raise ValueError("finalized connected partition does not match sources")
             if len(standalone_objects) != len(standalone_sources):
-                raise ValueError("finalized mixed object partition does not match sources")
+                raise ValueError("finalized standalone partition does not match sources")
 
             anchor = settings.anchor_component_id or connected_sources[0].component_id
-            connected_settings = _connected_settings(settings, anchor)
+            connected_settings = build_connected_subgroup_settings(settings, anchor)
             grouped_request = resolve_grouped_camera_projection_request(
                 connected_objects,
                 connected_settings,
@@ -229,7 +217,7 @@ def export_a1_mixed_object(
                 reservations.extend(grouped_stage.reservations)
 
             stage = A1MultiObjectStage.COMPOSE_DOCUMENT
-            connected_composition = _compose_document(
+            connected_composition = compose_a1_multi_object_document(
                 connected_sources,
                 connected_objects,
                 connected_settings,
@@ -256,10 +244,14 @@ def export_a1_mixed_object(
                     document=overlay.document,
                 )
 
-            composition = _compose_mixed_document_from_groups(
-                connected_composition.document,
+            standalone_composition = compose_a1_multi_object_document(
                 standalone_sources,
                 standalone_objects,
+                _standalone_settings(settings),
+            )
+            composition = _compose_mixed_document_from_groups(
+                connected_composition.document,
+                standalone_composition.document,
                 settings,
             )
             document = composition.document
@@ -268,6 +260,9 @@ def export_a1_mixed_object(
                     "final_bone_count": len(document.bones),
                     "final_slot_count": len(document.slots),
                     "final_skin_count": len(document.skins),
+                    "final_constraint_count": (
+                        len(document.ik) + len(document.transform)
+                    ),
                     "projection_cropped_component_count": sum(
                         1
                         for item in finalized
