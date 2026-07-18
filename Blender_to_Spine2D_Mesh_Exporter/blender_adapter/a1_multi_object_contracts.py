@@ -13,7 +13,7 @@ from ..application import (
     A1SingleObjectExportSettings,
     ExportIssue,
 )
-from .a1_object_preparation import PreparedA1Object, StatisticsValue
+from .a1_preparation_contracts import PreparedA1Object, StatisticsValue
 
 
 @dataclass(frozen=True, slots=True)

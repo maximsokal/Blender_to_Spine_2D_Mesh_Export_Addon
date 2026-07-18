@@ -23,6 +23,7 @@ from ..domain.spine import LegacyRigBuildRequest, LegacyRigBuildResult, build_le
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
     StatisticsValue,
+    build_skeleton_metadata,
     freeze_statistics,
 )
 from .a1_texture_planning import A1TexturePlanningResult
@@ -56,20 +57,6 @@ class A1DocumentPreparationResult:
             raise TypeError("warnings must be a tuple of ExportIssue values")
         if not isinstance(self.statistics, Mapping):
             raise TypeError("statistics must be a mapping")
-
-
-def _skeleton_metadata(texture: A1TexturePlanningResult) -> dict[str, object]:
-    settings = texture.uv.source.settings
-    return {
-        "hash": "hash_value_placeholder",
-        "spine": settings.export.spine_version,
-        "x": 0,
-        "y": 0,
-        "width": settings.export.texture_width,
-        "height": settings.export.texture_height,
-        "images": "",
-        "audio": "./audio",
-    }
 
 
 def prepare_a1_document(
@@ -124,6 +111,7 @@ def prepare_a1_document(
             include_control_icons=source.settings.include_control_icons,
             include_preview_animation=source.settings.include_preview_animation,
         )
+        skeleton_metadata = build_skeleton_metadata(source.settings)
         if camera_projection:
             if not isinstance(texture.bake_plan, CameraProjectionPlan):
                 raise TypeError("camera projection plan type was lost")
@@ -132,7 +120,7 @@ def prepare_a1_document(
                 source.z_groups,
                 texture.bake_plan,
                 assembly_settings,
-                skeleton_metadata=_skeleton_metadata(texture),
+                skeleton_metadata=skeleton_metadata,
             )
         else:
             document_assembly = assemble_a1_document(
@@ -140,7 +128,7 @@ def prepare_a1_document(
                 source.z_groups,
                 uv.uv_regions.snapshots,
                 assembly_settings,
-                skeleton_metadata=_skeleton_metadata(texture),
+                skeleton_metadata=skeleton_metadata,
             )
         document = document_assembly.document
         statistics = freeze_statistics(
