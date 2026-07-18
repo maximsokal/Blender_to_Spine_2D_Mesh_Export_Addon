@@ -110,12 +110,18 @@ def test_output_services_finalize_before_composition_and_serialize_after_composi
         assert max(composition) < min(serialization)
 
 
-def test_output_services_share_one_public_composition_entrypoint():
+def test_output_services_share_public_composition_and_failure_entrypoints():
     for filename in ("a1_multi_object_output.py", "a1_mixed_object_output.py"):
         source = _source(filename)
+        functions = _top_level_functions(_tree(filename))
         assert (
             "from .a1_multi_object_composition import "
             "compose_a1_multi_object_document"
         ) in source
+        assert (
+            "from .a1_multi_object_result import "
+            "build_multi_object_failure_result"
+        ) in source
         assert "_compose_document" not in source
         assert "_record_object_statistics" not in source
+        assert "_failure_result" not in functions
