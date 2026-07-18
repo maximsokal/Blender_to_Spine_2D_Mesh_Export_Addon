@@ -43,7 +43,8 @@ def test_ui_bridge_is_a_small_compatibility_facade():
 
 def test_ui_responsibilities_are_split_without_new_monolithic_functions():
     limits = {
-        "a1_ui_rna.py": 60,
+        "a1_ui_selection.py": 60,
+        "a1_ui_scene_capture.py": 60,
         "a1_ui_settings.py": 60,
         "a1_ui_router.py": 100,
     }
@@ -52,14 +53,24 @@ def test_ui_responsibilities_are_split_without_new_monolithic_functions():
         assert lengths
         assert max(lengths.values()) < maximum, (filename, lengths)
 
+    rna_tree = _tree("a1_ui_rna.py")
+    assert not any(
+        isinstance(node, (ast.FunctionDef, ast.ClassDef))
+        for node in rna_tree.body
+    )
 
-def test_rna_and_settings_modules_do_not_call_output_services():
+
+def test_capture_and_settings_modules_do_not_call_output_services():
     forbidden = {
         "export_a1_single_object",
         "export_a1_multi_object",
         "export_a1_mixed_object",
     }
-    for filename in ("a1_ui_rna.py", "a1_ui_settings.py"):
+    for filename in (
+        "a1_ui_selection.py",
+        "a1_ui_scene_capture.py",
+        "a1_ui_settings.py",
+    ):
         tree = _tree(filename)
         called = {
             node.func.id
@@ -67,6 +78,18 @@ def test_rna_and_settings_modules_do_not_call_output_services():
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
         }
         assert not called.intersection(forbidden), filename
+
+
+def test_runtime_ui_modules_do_not_import_the_rna_compatibility_facade():
+    for filename in ("a1_ui_settings.py", "a1_ui_router.py"):
+        imported_modules = {
+            node.module.rsplit(".", 1)[-1]
+            for node in _tree(filename).body
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        assert "a1_ui_rna" not in imported_modules
+        assert "a1_ui_selection" in imported_modules
+        assert "a1_ui_scene_capture" in imported_modules
 
 
 def test_legacy_private_bridge_helpers_remain_reexported():
