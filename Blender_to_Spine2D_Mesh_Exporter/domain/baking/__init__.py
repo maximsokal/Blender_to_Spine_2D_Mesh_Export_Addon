@@ -53,6 +53,12 @@ from .camera_projection import (
     texture_plan_output_paths,
 )
 from .execution import BakeArtifact, BakeExecutionResult, BakeExecutionSettings
+from .grouped_camera_projection import (
+    GroupedCameraProjectionPlan,
+    GroupedCameraProjectionPlanError,
+    build_grouped_camera_projection_plan,
+    grouped_projection_output_paths,
+)
 from .projection_coverage import (
     ProjectionCoverageError,
     ProjectionCoverageMode,
@@ -111,6 +117,8 @@ __all__ = [
     "CameraProjectionPlan",
     "ColorManagementSnapshot",
     "EmissionBakeStrategy",
+    "GroupedCameraProjectionPlan",
+    "GroupedCameraProjectionPlanError",
     "ImageDependency",
     "LightBakeSnapshot",
     "MaterialAnalysis",
@@ -146,10 +154,12 @@ __all__ = [
     "build_camera_projection_plan",
     "build_default_bake_strategy_registry",
     "build_full_frame_layout",
+    "build_grouped_camera_projection_plan",
     "build_projection_coverage_mask",
     "build_sequence_union_layout",
     "build_texture_plan",
     "convex_hull",
+    "grouped_projection_output_paths",
     "requires_camera_projection",
     "resolve_bake_strategy_plan",
     "sanitize_filename_stem",
