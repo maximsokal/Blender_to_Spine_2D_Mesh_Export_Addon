@@ -97,7 +97,7 @@ def _expected_calls(scenario: str, backend: str) -> tuple[tuple[str, str], ...]:
     )
     if scenario == "single":
         return (
-            ("blender_adapter.a1_ui_bridge", "export_active_object_a1"),
+            ("blender_adapter.a1_ui_router", "export_active_object_a1"),
             ("blender_adapter.a1_single_object_export", "export_a1_single_object"),
             *shared,
         )
@@ -110,7 +110,7 @@ def _expected_calls(scenario: str, backend: str) -> tuple[tuple[str, str], ...]:
     )
     if scenario == "mixed":
         return (
-            ("blender_adapter.a1_ui_bridge", "export_selected_objects_a1"),
+            ("blender_adapter.a1_ui_router", "export_selected_objects_a1"),
             ("blender_adapter.a1_mixed_object_output", "export_a1_mixed_object"),
             ("blender_adapter.a1_mixed_object_export", "prepare_a1_mixed_object"),
             (
@@ -121,7 +121,7 @@ def _expected_calls(scenario: str, backend: str) -> tuple[tuple[str, str], ...]:
             *shared,
         )
     return (
-        ("blender_adapter.a1_ui_bridge", "export_selected_objects_a1"),
+        ("blender_adapter.a1_ui_router", "export_selected_objects_a1"),
         ("blender_adapter.a1_multi_object_output", "export_a1_multi_object"),
         ("blender_adapter.a1_multi_object_export", "prepare_a1_multi_object"),
         (
