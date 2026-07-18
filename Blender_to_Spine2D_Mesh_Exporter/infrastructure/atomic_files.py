@@ -77,9 +77,44 @@ def _emit(
     )
 
 
+def _work_file_token(path: Path) -> str | None:
+    name = path.name
+    if _STAGE_MARKER in name:
+        return name.split(_STAGE_MARKER, 1)[1].split(".", 1)[0]
+    if _BACKUP_MARKER in name:
+        return name.split(_BACKUP_MARKER, 1)[1]
+    return None
+
+
+def _process_is_alive(process_id: int) -> bool:
+    if process_id <= 0:
+        return False
+    if process_id == os.getpid():
+        return True
+    try:
+        os.kill(process_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _is_active_work_file(path: Path) -> bool:
+    token = _work_file_token(path)
+    if token is None:
+        return False
     with _ACTIVE_LOCK:
-        return any(token in path.name for token in _ACTIVE_TOKENS)
+        if token in _ACTIVE_TOKENS:
+            return True
+    process_text = token.split("-", 1)[0]
+    try:
+        process_id = int(process_text)
+    except ValueError:
+        return False
+    return _process_is_alive(process_id)
 
 
 def _backup_final_path(path: Path) -> Path | None:
@@ -211,7 +246,7 @@ class AtomicFileTransaction:
             if recover_stale_work_files is None
             else bool(recover_stale_work_files)
         )
-        self._token = uuid4().hex
+        self._token = f"{os.getpid()}-{uuid4().hex}"
         self._operation_id = f"{operation_name.strip()}:{self._token}"
         self._dispatcher = dispatcher
         self._entries: list[_TransactionEntry] = []
@@ -351,6 +386,25 @@ class AtomicFileTransaction:
             entry.installed = False
         return failures
 
+    def _remove_backups_after_commit(self) -> tuple[str, ...]:
+        failures: list[str] = []
+        for entry in self._entries:
+            backup = entry.backup_path
+            if backup is None:
+                continue
+            try:
+                if backup.exists():
+                    backup.unlink()
+                    self._event(
+                        ExportEventKind.WORK_FILE_REMOVED,
+                        "Removed commit backup",
+                        path=backup,
+                    )
+                entry.backup_path = None
+            except Exception as exc:
+                failures.append(f"remove backup {backup}: {exc}")
+        return tuple(failures)
+
     def commit(self) -> tuple[Path, ...]:
         if self._closed:
             raise RuntimeError("transaction is already closed")
@@ -362,10 +416,6 @@ class AtomicFileTransaction:
             self._validate_staged_files()
             self._backup_existing_outputs()
             self._install_staged_outputs()
-            for entry in self._entries:
-                if entry.backup_path is not None and entry.backup_path.exists():
-                    entry.backup_path.unlink()
-                    entry.backup_path = None
         except Exception as exc:
             self._event(
                 ExportEventKind.TRANSACTION_FAILED,
@@ -384,9 +434,18 @@ class AtomicFileTransaction:
 
         self._committed = True
         self._close()
+        cleanup_failures = self._remove_backups_after_commit()
+        if cleanup_failures:
+            self._event(
+                ExportEventKind.CLEANUP_FAILED,
+                "Committed outputs but could not remove every backup: "
+                + "; ".join(cleanup_failures),
+                context={"failure_count": len(cleanup_failures)},
+            )
         self._event(
             ExportEventKind.COMMIT_SUCCEEDED,
             f"Committed {len(self._entries)} outputs",
+            context={"backup_cleanup_failure_count": len(cleanup_failures)},
         )
         return tuple(entry.final_path for entry in self._entries)
 
