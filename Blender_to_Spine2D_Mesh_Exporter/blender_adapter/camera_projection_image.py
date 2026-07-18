@@ -1,9 +1,10 @@
-"""Decode staged B4 images, extract alpha masks, and rewrite stable crops."""
+"""Decode staged B4 images, extract alpha coverage, and rewrite stable crops."""
 
 from __future__ import annotations
 
 from array import array
 import logging
+from math import isfinite
 from typing import Any
 
 from ..domain.baking import CameraProjectionPlan, TextureFormat
@@ -37,23 +38,40 @@ def read_image_pixels(image: Any, width: int, height: int) -> array:
     return pixels
 
 
-def read_staged_alpha_mask(
+def _alpha_coverage_byte(value: float, *, pixel_index: int) -> int:
+    resolved = float(value)
+    if not isfinite(resolved):
+        raise CameraProjectionExecutionError(
+            f"Rendered alpha at pixel {pixel_index} is not finite: {resolved!r}"
+        )
+    return int(round(max(0.0, min(1.0, resolved)) * 255.0))
+
+
+def read_staged_alpha_coverage(
     bpy_module: Any,
     staged_path,
     *,
     width: int,
     height: int,
-    threshold: float,
 ) -> bytes:
+    """Decode one staged render into deterministic 8-bit alpha coverage.
+
+    Coverage is retained instead of immediately becoming a binary mask. The sequence
+    accumulator can therefore max-union antialias values and apply one global cleanup policy
+    only after every frame has rendered successfully.
+    """
+
     image = None
     try:
         image = bpy_module.data.images.load(str(staged_path), check_existing=False)
         pixels = read_image_pixels(image, width, height)
-        mask = bytearray(width * height)
+        coverage = bytearray(width * height)
         for pixel_index in range(width * height):
-            if float(pixels[pixel_index * 4 + 3]) >= threshold:
-                mask[pixel_index] = 1
-        return bytes(mask)
+            coverage[pixel_index] = _alpha_coverage_byte(
+                pixels[pixel_index * 4 + 3],
+                pixel_index=pixel_index,
+            )
+        return bytes(coverage)
     except CameraProjectionExecutionError:
         raise
     except Exception as exc:
@@ -62,6 +80,38 @@ def read_staged_alpha_mask(
         ) from exc
     finally:
         remove_image(bpy_module, image)
+
+
+def read_staged_alpha_mask(
+    bpy_module: Any,
+    staged_path,
+    *,
+    width: int,
+    height: int,
+    threshold: float,
+) -> bytes:
+    """Compatibility wrapper returning a binary mask from decoded coverage."""
+
+    if (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, (int, float))
+        or not isfinite(float(threshold))
+        or not 0.0 <= float(threshold) <= 1.0
+    ):
+        raise ValueError("threshold must be finite and in [0, 1]")
+    coverage = read_staged_alpha_coverage(
+        bpy_module,
+        staged_path,
+        width=width,
+        height=height,
+    )
+    resolved = float(threshold)
+    if resolved == 0.0:
+        return bytes([1]) * len(coverage)
+    return bytes(
+        1 if float(value) / 255.0 >= resolved else 0
+        for value in coverage
+    )
 
 
 def crop_pixel_buffer(
