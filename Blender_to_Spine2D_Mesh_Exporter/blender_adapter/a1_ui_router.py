@@ -19,11 +19,11 @@ from .a1_mixed_object_output import export_a1_mixed_object
 from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_multi_object_output import export_a1_multi_object
 from .a1_single_object_export import export_a1_single_object
-from .a1_ui_rna import (
+from .a1_ui_scene_capture import _capture_scene_profile
+from .a1_ui_selection import (
     _ObjectExportProfile,
     _active_mesh,
     _capture_object_profile,
-    _capture_scene_profile,
     _connect_enabled,
     _ordered_selected_meshes,
 )
@@ -69,8 +69,9 @@ def _single_connect_fallback_issue(
         stage=A1MultiObjectStage.VALIDATE_REQUEST.value,
         code="A1_SINGLE_CONNECT_FALLBACK",
         message=(
-            "Exactly one selected object has Connect enabled. Connected export requires "
-            "at least two objects, so all selected objects were exported standalone."
+            "Exactly one selected object has Connect enabled. Connected export "
+            "requires at least two objects, so all selected objects were "
+            "exported standalone."
         ),
         object_id=profile.object_name,
         context={
@@ -140,8 +141,12 @@ def export_active_object_a1(context: Any) -> ExportResult:
     scene_profile = _capture_scene_profile(scene)
     object_profile = _capture_object_profile(
         obj,
-        sequence_start_frame=int(getattr(scene, "spine2d_bake_frame_start", 0)),
-        sequence_frame_count=int(getattr(scene, "spine2d_frames_for_render", 0)),
+        sequence_start_frame=int(
+            getattr(scene, "spine2d_bake_frame_start", 0)
+        ),
+        sequence_frame_count=int(
+            getattr(scene, "spine2d_frames_for_render", 0)
+        ),
         connect_enabled=False,
     )
     settings = _settings_from_profiles(
@@ -180,8 +185,9 @@ def export_selected_objects_a1(context: Any) -> ExportResult:
             profile for profile in object_profiles if profile.connect_enabled
         )
         logger.warning(
-            "One selected object has Connect enabled; connected export requires at "
-            "least two objects, so all selected objects will be exported standalone"
+            "One selected object has Connect enabled; connected export requires "
+            "at least two objects, so all selected objects will be exported "
+            "standalone"
         )
         connected = ()
         standalone = sources
@@ -212,7 +218,9 @@ def export_selected_objects_a1(context: Any) -> ExportResult:
             output_directory=scene_profile.output_directory,
             output_stem=output_stem,
             mode=mode,
-            anchor_component_id=(connected[0].component_id if connected else None),
+            anchor_component_id=(
+                connected[0].component_id if connected else None
+            ),
         )
         result = export_a1_multi_object(
             connected or standalone,
