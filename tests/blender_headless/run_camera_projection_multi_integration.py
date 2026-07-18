@@ -19,6 +19,7 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
 from Blender_to_Spine2D_Mesh_Exporter.application import (  # noqa: E402
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
+    ConnectedB4RenderPolicy,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     A1MultiObjectSource,
@@ -92,7 +93,7 @@ def _assert_attachment_matches_image(
     _assert(len(attachment["uvs"]) == hull * 2, f"{stem} UV/hull mismatch")
     _assert(
         len(attachment["triangles"]) == (hull - 2) * 3,
-        f"{stem} triangle fan mismatch",
+        f"{stem} triangle count mismatch",
     )
     _assert(float(attachment["width"]) == float(image_size[0]), f"{stem} width mismatch")
     _assert(float(attachment["height"]) == float(image_size[1]), f"{stem} height mismatch")
@@ -168,6 +169,9 @@ def test_connected_multi_recomposes_cropped_projection_documents() -> None:
                 output_stem="ProjectionConnectedGroup",
                 mode=A1MultiObjectMode.CONNECTED,
                 anchor_component_id="connected_a",
+                connected_b4_render_policy=(
+                    ConnectedB4RenderPolicy.INDIVIDUAL_LAYERS
+                ),
             ),
         )
         _assert(result.success, f"connected B4 multi failed: {result.issues}")
@@ -218,6 +222,9 @@ def test_mixed_export_recomposes_all_cropped_projection_documents() -> None:
                 output_stem="ProjectionMixedGroup",
                 mode=A1MultiObjectMode.MIXED,
                 anchor_component_id="mixed_connected_a",
+                connected_b4_render_policy=(
+                    ConnectedB4RenderPolicy.INDIVIDUAL_LAYERS
+                ),
             ),
         )
         _assert(result.success, f"mixed B4 export failed: {result.issues}")
