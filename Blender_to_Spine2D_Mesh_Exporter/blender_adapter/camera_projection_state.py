@@ -8,7 +8,11 @@ import logging
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Tuple
 
-from ..domain.baking import BakeExecutionSettings, CameraProjectionPlan, TextureFormat
+from ..domain.baking import (
+    BakeExecutionSettings,
+    CameraProjectionPlan,
+    resolve_projection_output_policy,
+)
 from ..infrastructure import AtomicOutputReservation
 from .render_engine_contract import (
     render_engine_contract,
@@ -235,6 +239,10 @@ def configure_scene_for_camera_projection(
             f"planned={planned_renderer.blender_engine}, "
             f"execution={renderer.blender_engine}"
         )
+    output_policy = resolve_projection_output_policy(
+        execution_settings.projection_output_policy,
+        plan.settings.texture_format,
+    )
 
     scene.render.engine = renderer.blender_engine
     scene.render.resolution_x = plan.settings.width
@@ -247,9 +255,7 @@ def configure_scene_for_camera_projection(
     scene.render.use_sequencer = False
     scene.render.image_settings.file_format = plan.settings.texture_format.value
     scene.render.image_settings.color_mode = "RGBA"
-    scene.render.image_settings.color_depth = (
-        "32" if plan.settings.texture_format is TextureFormat.OPEN_EXR else "8"
-    )
+    scene.render.image_settings.color_depth = output_policy.color_depth
     _set_if_available(scene, "cycles.samples", execution_settings.samples)
     _set_if_available(scene, "cycles.film_transparent_glass", False)
 
