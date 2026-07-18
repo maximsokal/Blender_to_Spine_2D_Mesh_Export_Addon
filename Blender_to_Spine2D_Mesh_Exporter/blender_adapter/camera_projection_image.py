@@ -7,7 +7,11 @@ import logging
 from math import isfinite
 from typing import Any
 
-from ..domain.baking import CameraProjectionPlan, TextureFormat
+from ..domain.baking import (
+    CameraProjectionPlan,
+    ResolvedProjectionOutputPolicy,
+    convert_rgba_alpha_representation,
+)
 from ..domain.baking.projection_layout import CameraProjectionLayout
 from ..infrastructure import AtomicOutputReservation
 from .camera_projection_state import CameraProjectionExecutionError
@@ -54,12 +58,7 @@ def read_staged_alpha_coverage(
     width: int,
     height: int,
 ) -> bytes:
-    """Decode one staged render into deterministic 8-bit alpha coverage.
-
-    Coverage is retained instead of immediately becoming a binary mask. The sequence
-    accumulator can therefore max-union antialias values and apply one global cleanup policy
-    only after every frame has rendered successfully.
-    """
+    """Decode one staged render into deterministic 8-bit alpha coverage."""
 
     image = None
     try:
@@ -140,7 +139,17 @@ def rewrite_staged_image_with_crop(
     plan: CameraProjectionPlan,
     reservation: AtomicOutputReservation,
     layout: CameraProjectionLayout,
+    output_policy: ResolvedProjectionOutputPolicy,
 ) -> None:
+    """Crop and rewrite one staged frame using explicit HDR and alpha semantics."""
+
+    if not isinstance(output_policy, ResolvedProjectionOutputPolicy):
+        raise TypeError("output_policy must be ResolvedProjectionOutputPolicy")
+    if output_policy.texture_format is not plan.settings.texture_format:
+        raise CameraProjectionExecutionError(
+            "resolved output policy texture format does not match camera plan"
+        )
+
     loaded = None
     cropped = None
     try:
@@ -149,11 +158,17 @@ def rewrite_staged_image_with_crop(
             check_existing=False,
         )
         pixels = read_image_pixels(loaded, plan.settings.width, plan.settings.height)
+        source_alpha_mode = str(getattr(loaded, "alpha_mode", "STRAIGHT") or "STRAIGHT")
         cropped_pixels = crop_pixel_buffer(
             pixels,
             full_width=plan.settings.width,
             full_height=plan.settings.height,
             layout=layout,
+        )
+        cropped_pixels = convert_rgba_alpha_representation(
+            cropped_pixels,
+            source_alpha_mode=source_alpha_mode,
+            target=output_policy.alpha_representation,
         )
         color_space = None
         try:
@@ -168,13 +183,20 @@ def rewrite_staged_image_with_crop(
             width=layout.cropped_width,
             height=layout.cropped_height,
             alpha=True,
-            float_buffer=plan.settings.texture_format is TextureFormat.OPEN_EXR,
+            float_buffer=output_policy.float_buffer,
         )
         if color_space:
             try:
                 cropped.colorspace_settings.name = color_space
             except Exception:
                 logger.debug("Unable to restore cropped image color space", exc_info=True)
+        try:
+            cropped.alpha_mode = output_policy.blender_alpha_mode
+        except Exception as exc:
+            raise CameraProjectionExecutionError(
+                "Unable to apply resolved Blender alpha mode "
+                f"'{output_policy.blender_alpha_mode}'"
+            ) from exc
         cropped.pixels.foreach_set(cropped_pixels)
         cropped.update()
         cropped.file_format = plan.settings.texture_format.value
