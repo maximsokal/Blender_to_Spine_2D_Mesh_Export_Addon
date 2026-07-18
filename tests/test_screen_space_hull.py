@@ -5,10 +5,12 @@ from Blender_to_Spine2D_Mesh_Exporter.application.a1_camera_projection import (
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking.projection_layout import (
     CameraProjectionLayout,
+    ProjectionContourMode,
     ProjectionCropBounds,
     ProjectionPixelPoint,
     build_sequence_union_layout,
     triangulate_convex_hull,
+    triangulate_simple_contour,
 )
 
 
@@ -46,21 +48,29 @@ def _layout(points):
     )
 
 
-def test_manual_concave_hull_is_rejected():
-    with pytest.raises(ValueError, match="strictly convex"):
-        _layout(
-            (
-                ProjectionPixelPoint(0, 0),
-                ProjectionPixelPoint(8, 0),
-                ProjectionPixelPoint(8, 8),
-                ProjectionPixelPoint(0, 8),
-                ProjectionPixelPoint(4, 3),
-            )
+def test_manual_concave_contour_is_accepted_and_exactly_triangulated():
+    layout = _layout(
+        (
+            ProjectionPixelPoint(0, 0),
+            ProjectionPixelPoint(8, 0),
+            ProjectionPixelPoint(8, 8),
+            ProjectionPixelPoint(4, 3),
+            ProjectionPixelPoint(0, 8),
         )
+    )
+
+    triangles = layout.triangle_indices
+
+    assert layout.concave
+    assert len(triangles) == len(layout.hull) - 2
+    assert all(_triangle_area2(layout.hull, triangle) > 0 for triangle in triangles)
+    assert sum(
+        _triangle_area2(layout.hull, triangle) for triangle in triangles
+    ) == _polygon_area2(layout.hull)
 
 
-def test_manual_collinear_hull_is_rejected():
-    with pytest.raises(ValueError, match="strictly convex"):
+def test_manual_collinear_contour_is_rejected():
+    with pytest.raises(ValueError, match="collinear"):
         _layout(
             (
                 ProjectionPixelPoint(0, 0),
@@ -72,7 +82,7 @@ def test_manual_collinear_hull_is_rejected():
         )
 
 
-def test_clockwise_hull_is_rejected():
+def test_clockwise_contour_is_rejected():
     with pytest.raises(ValueError, match="counter-clockwise"):
         _layout(
             (
@@ -84,7 +94,7 @@ def test_clockwise_hull_is_rejected():
         )
 
 
-def test_self_intersecting_star_hull_is_rejected():
+def test_self_intersecting_star_contour_is_rejected():
     with pytest.raises(ValueError, match="self-intersecting"):
         _layout(
             (
@@ -97,7 +107,7 @@ def test_self_intersecting_star_hull_is_rejected():
         )
 
 
-def test_generated_irregular_hull_has_exact_non_degenerate_fan():
+def test_disconnected_union_uses_lossless_convex_fallback():
     mask = _mask(12, 10, {(1, 1), (9, 1), (10, 5), (7, 8), (2, 7)})
     layout = build_sequence_union_layout(
         (mask,),
@@ -109,6 +119,9 @@ def test_generated_irregular_hull_has_exact_non_degenerate_fan():
 
     triangles = layout.triangle_indices
 
+    assert layout.contour_mode is ProjectionContourMode.CONVEX_HULL
+    assert layout.outer_component_count == 5
+    assert layout.contour_fallback_reason == "MULTIPLE_OUTER_COMPONENTS"
     assert len(triangles) == len(layout.hull) - 2
     assert all(_triangle_area2(layout.hull, triangle) > 0 for triangle in triangles)
     assert sum(
@@ -134,7 +147,7 @@ def test_single_visible_pixel_produces_valid_quad_fan():
     assert layout.triangle_indices == ((0, 1, 2), (0, 2, 3))
 
 
-def test_triangulation_preserves_valid_rotated_hull_order():
+def test_triangulation_preserves_valid_rotated_convex_order():
     points = (
         ProjectionPixelPoint(8, 0),
         ProjectionPixelPoint(8, 8),
@@ -143,22 +156,30 @@ def test_triangulation_preserves_valid_rotated_hull_order():
     )
 
     assert triangulate_convex_hull(points) == ((0, 1, 2), (0, 2, 3))
+    assert triangulate_simple_contour(points) == ((0, 1, 2), (0, 2, 3))
 
 
-def test_projection_edges_follow_validated_fan_topology():
-    triangles = ((0, 1, 2), (0, 2, 3), (0, 3, 4))
+def test_projection_edges_follow_concave_triangulation_topology():
+    triangles = (
+        (0, 1, 2),
+        (0, 2, 3),
+        (5, 0, 3),
+        (3, 4, 5),
+    )
 
-    assert _edge_pairs(5, triangles) == (
+    assert _edge_pairs(6, triangles) == (
         (0, 1),
         (1, 2),
         (2, 3),
         (3, 4),
-        (4, 0),
+        (4, 5),
+        (5, 0),
         (0, 2),
         (0, 3),
+        (3, 5),
     )
 
 
-def test_projection_edges_reject_incomplete_triangle_fan():
+def test_projection_edges_reject_incomplete_triangulation():
     with pytest.raises(ValueError, match="triangle count"):
         _edge_pairs(5, ((0, 1, 2),))
