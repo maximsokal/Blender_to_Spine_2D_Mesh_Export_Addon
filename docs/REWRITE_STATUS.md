@@ -2,9 +2,9 @@
 
 The active rewrite branch is `rewrite/a1-domain-foundation`; A1 compatibility targets
 Spine 4.2.43. Deterministic geometry, loop-level UV lineage, semantic local/alpha/scene
-baking, recursive Shader Node Group analysis, camera-render projection, stable sequence-union
-crop, screen-space convex hulls, typed Spine composition, connected `all_objects`, and both
-production operators are implemented.
+baking, recursive Shader Node Group analysis, camera-render projection, configurable B4 alpha
+cutoff, stable sequence-union crop, screen-space convex hulls, typed Spine composition,
+connected `all_objects`, and both production operators are implemented.
 
 ## Production operators
 
@@ -159,13 +159,19 @@ For every static or sequence frame B4:
 3. keeps only the source directly camera-visible while retaining other objects for reflection,
    transmission, diffuse, occlusion and shadow rays;
 4. renders a transparent full frame to the transaction's staged path;
-5. decodes the actual staged image and extracts alpha using threshold `1 / 255`;
+5. decodes the actual staged image and extracts alpha using
+   `BakeExecutionSettings.projection_alpha_threshold`;
 6. immediately ORs that frame into one fixed-size alpha union buffer;
 7. releases the per-frame mask before rendering the next frame;
 8. expands the union bounds by existing `bake_margin`;
 9. builds one counter-clockwise convex screen-space hull;
 10. rewrites every staged frame using the same crop dimensions;
 11. restores all Blender state in `finally`.
+
+The threshold default remains exactly `1 / 255`, preserving existing crop/hull output. One
+immutable threshold is shared by every sequence frame and is recorded in the final layout.
+Finite numeric values in `[0, 1]` are accepted; invalid types, booleans, NaN, infinities, and
+out-of-range values are rejected before rendering.
 
 The render executor therefore retains `O(width * height)` alpha-mask memory regardless of
 sequence length. The compatibility tuple API remains available for existing pure-domain callers.
@@ -190,7 +196,8 @@ UV values              = H * 2
 triangle index values  = (H - 2) * 3
 ```
 
-An all-transparent render or sequence fails before commit.
+An all-transparent render or sequence fails before commit. A translucent-only render may also
+be rejected when every decoded alpha value is below the configured threshold.
 
 ### Post-render typed recomposition
 
@@ -252,7 +259,9 @@ Dedicated B4 coverage includes:
 - full `Blender 4.4 Headless`: success on the last full matrix;
 - current recursive hardening focused tests: **21 passed**;
 - current incremental union focused tests: **14 passed**;
-- 1000 randomized old/new union-layout differential cases: identical.
+- 1000 randomized old/new union-layout differential cases: identical;
+- configurable alpha-policy files pass local `py_compile` and focused standalone contract
+  validation on the exact uploaded source text.
 
 Automatic workflow triggers remain disabled on the active rewrite branch, so the latest focused
 hardening commits have not consumed GitHub Actions minutes. Real Blender fixtures added after the
@@ -275,7 +284,8 @@ last complete matrix remain pending a deliberate manual validation run.
 13. JSON must be serialized after render-derived crop/hull finalization;
 14. multi/mixed output must recompose typed documents after component layouts are known;
 15. sequence B4 retained every full-frame alpha mask before allocating the union mask;
-16. renderer-specific Material Outputs and muted-node bypasses were not respected.
+16. renderer-specific Material Outputs and muted-node bypasses were not respected;
+17. a module constant prevented callers from selecting a deterministic B4 alpha cutoff.
 
 ## Explicit remaining boundaries
 
@@ -284,10 +294,11 @@ last complete matrix remain pending a deliberate manual validation run.
 The attachment uses a convex hull. Deep concavities and internal transparent holes remain
 inside the mesh and are represented by texture alpha.
 
-### Fixed alpha threshold
+### Alpha coverage policy
 
-Layout detection uses decoded alpha `>= 1 / 255`. A configurable threshold or
-coverage-weighted antialias policy remains output-policy work.
+The cutoff is configurable and deterministic. Coverage-weighted antialias reconstruction,
+contour simplification using fractional coverage, and morphology-based fringe cleanup remain
+separate output-policy work.
 
 ### Connected multi-object B4 depth
 
@@ -315,5 +326,5 @@ additional premultiplication policies remain output-policy work.
 5. controlled Legacy removal only after private parity acceptance;
 6. version bump and release packaging only after the parity gate is accepted.
 
-See also `docs/REWRITE_CAMERA_PROJECTION.md`, `docs/REWRITE_BAKE_STRATEGIES.md`, and
-`docs/REWRITE_A1_GOLDEN_PARITY.md`.
+See also `docs/REWRITE_CAMERA_PROJECTION.md`, `docs/REWRITE_B4_ALPHA_THRESHOLD.md`,
+`docs/REWRITE_BAKE_STRATEGIES.md`, and `docs/REWRITE_A1_GOLDEN_PARITY.md`.
