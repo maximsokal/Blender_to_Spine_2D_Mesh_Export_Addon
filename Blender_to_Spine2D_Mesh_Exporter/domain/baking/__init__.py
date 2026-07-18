@@ -53,6 +53,13 @@ from .camera_projection import (
     texture_plan_output_paths,
 )
 from .execution import BakeArtifact, BakeExecutionResult, BakeExecutionSettings
+from .projection_coverage import (
+    ProjectionCoverageError,
+    ProjectionCoverageMode,
+    ProjectionCoveragePolicy,
+    ProjectionCoverageResult,
+    build_projection_coverage_mask,
+)
 from .projection_layout import (
     CameraProjectionLayout,
     CameraProjectionLayoutError,
@@ -118,6 +125,10 @@ __all__ = [
     "ObjectMaterialAnalysis",
     "ProjectionAlphaUnionAccumulator",
     "ProjectionContourMode",
+    "ProjectionCoverageError",
+    "ProjectionCoverageMode",
+    "ProjectionCoveragePolicy",
+    "ProjectionCoverageResult",
     "ProjectionCropBounds",
     "ProjectionPixelPoint",
     "ProjectionTriangle",
@@ -135,6 +146,7 @@ __all__ = [
     "build_camera_projection_plan",
     "build_default_bake_strategy_registry",
     "build_full_frame_layout",
+    "build_projection_coverage_mask",
     "build_sequence_union_layout",
     "build_texture_plan",
     "convex_hull",
