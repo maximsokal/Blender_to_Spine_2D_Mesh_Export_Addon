@@ -36,7 +36,8 @@ class BakeExecutionSettings:
         if self.color_mode not in {"BW", "RGB", "RGBA"}:
             raise ValueError("color_mode must be BW, RGB, or RGBA")
         if (
-            not isinstance(self.projection_alpha_threshold, (int, float))
+            isinstance(self.projection_alpha_threshold, bool)
+            or not isinstance(self.projection_alpha_threshold, (int, float))
             or not isfinite(float(self.projection_alpha_threshold))
             or not 0.0 <= float(self.projection_alpha_threshold) <= 1.0
         ):
