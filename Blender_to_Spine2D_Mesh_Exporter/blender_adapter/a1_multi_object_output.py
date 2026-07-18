@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import logging
 from typing import Any, Mapping, Tuple
 
 from ..application import (
     A1MultiObjectExportSettings,
+    A1MultiObjectMode,
     A1MultiObjectStage,
     ExportIssue,
     ExportResult,
     IssueSeverity,
+    apply_grouped_camera_overlay,
 )
 from ..domain.spine import SpineSerializer
 from ..infrastructure import (
@@ -27,6 +30,12 @@ from .a1_multi_object_export import (
 )
 from .a1_object_preparation import StatisticsValue
 from .a1_projection_finalization import finalize_prepared_camera_projection
+from .grouped_camera_projection_executor import (
+    stage_grouped_camera_projection_outputs,
+)
+from .grouped_camera_projection_policy import (
+    resolve_grouped_camera_projection_request,
+)
 from .texture_executor import stage_texture_plan_outputs
 
 logger = logging.getLogger(__name__)
@@ -76,7 +85,7 @@ def export_a1_multi_object(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> ExportResult:
-    """Stage all textures, finalize B4 layouts, compose JSON, and commit together."""
+    """Stage textures, optional grouped B4, compose JSON, and commit atomically."""
 
     try:
         prepared = prepare_a1_multi_object(
@@ -132,12 +141,54 @@ def export_a1_multi_object(
                     finalized.statistics,
                 )
 
+            resolved_finalized = tuple(finalized_objects)
+            grouped_request = (
+                resolve_grouped_camera_projection_request(
+                    resolved_finalized,
+                    settings,
+                )
+                if settings.mode is A1MultiObjectMode.CONNECTED
+                else None
+            )
+            grouped_stage = None
+            if grouped_request is not None:
+                grouped_stage = stage_grouped_camera_projection_outputs(
+                    grouped_request.source_objects,
+                    grouped_request.plan,
+                    output_transaction,
+                    grouped_request.execution_settings,
+                    context=context,
+                    scene=scene,
+                )
+
             stage = A1MultiObjectStage.COMPOSE_DOCUMENT
             composition = _compose_document(
                 prepared.sources,
-                tuple(finalized_objects),
+                resolved_finalized,
                 settings,
             )
+            overlay = None
+            if grouped_request is not None:
+                if grouped_stage is None:
+                    raise RuntimeError(
+                        "grouped B4 request completed without a stage result"
+                    )
+                overlay = apply_grouped_camera_overlay(
+                    composition.document,
+                    grouped_request.plan,
+                    grouped_stage.layout,
+                    visual_slot_names=grouped_request.visual_slot_names,
+                    image_relative_directory=(
+                        grouped_request.image_relative_directory
+                    ),
+                    slot_name=grouped_request.slot_name,
+                    attachment_name=grouped_request.attachment_name,
+                )
+                composition = replace(
+                    composition,
+                    document=overlay.document,
+                )
+
             document = composition.document
             statistics.update(
                 {
@@ -146,11 +197,31 @@ def export_a1_multi_object(
                     "final_skin_count": len(document.skins),
                     "projection_cropped_component_count": sum(
                         1
-                        for item in finalized_objects
+                        for item in resolved_finalized
                         if "projection_crop_width" in item.statistics
                     ),
+                    "grouped_b4_enabled": int(grouped_request is not None),
                 }
             )
+            if grouped_request is not None and grouped_stage is not None:
+                statistics.update(
+                    {
+                        "grouped_b4_source_count": len(
+                            grouped_request.plan.source_object_ids
+                        ),
+                        "grouped_b4_frame_count": len(
+                            grouped_request.plan.frame_tasks
+                        ),
+                        "grouped_b4_crop_width": grouped_stage.layout.cropped_width,
+                        "grouped_b4_crop_height": grouped_stage.layout.cropped_height,
+                        "grouped_b4_contour_vertex_count": len(
+                            grouped_stage.layout.hull
+                        ),
+                        "grouped_b4_hidden_slot_count": len(
+                            overlay.hidden_slot_names if overlay is not None else ()
+                        ),
+                    }
+                )
 
             stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
             json_text = SpineSerializer().to_json(
@@ -166,9 +237,13 @@ def export_a1_multi_object(
             stage = A1MultiObjectStage.COMMIT_OUTPUTS
             committed_paths = output_transaction.commit()
 
+        grouped_reservations = (
+            () if grouped_stage is None else grouped_stage.reservations
+        )
         expected_paths = (
             json_reservation.final_path,
             *(reservation.final_path for reservation in texture_reservations),
+            *(reservation.final_path for reservation in grouped_reservations),
         )
         if tuple(committed_paths) != expected_paths:
             raise AtomicFileCommitError(
@@ -176,8 +251,9 @@ def export_a1_multi_object(
             )
         statistics["output_file_count"] = len(committed_paths)
         logger.info(
-            "A1 multi-object export completed (%s): %s",
+            "A1 multi-object export completed (%s, grouped_b4=%s): %s",
             settings.mode.value,
+            grouped_request is not None,
             tuple(str(path) for path in committed_paths),
         )
         return ExportResult(
