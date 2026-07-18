@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
-from typing import Tuple
+from typing import Any, Mapping, Tuple
 
 from ..domain.baking import CameraProjectionLayout, GroupedCameraProjectionPlan
 from ..domain.spine import (
@@ -171,6 +171,38 @@ def _build_grouped_attachment(
     )
 
 
+def _strip_hidden_slot_timelines(
+    animations: Mapping[str, Any],
+    hidden_slot_names: set[str],
+) -> dict[str, Any]:
+    """Remove only source-slot timelines that could reveal hidden grouped layers.
+
+    Bone, constraint, deform, draw-order and event timelines remain untouched. Grouped output
+    flattens visual source slots into the rendered sequence, so color or attachment timelines on
+    those slots must not be allowed to make the compatibility layers visible again.
+    """
+
+    result: dict[str, Any] = {}
+    for animation_name, animation_payload in animations.items():
+        if not isinstance(animation_payload, Mapping):
+            result[str(animation_name)] = animation_payload
+            continue
+        copied_payload = dict(animation_payload)
+        slot_timelines = copied_payload.get("slots")
+        if isinstance(slot_timelines, Mapping):
+            retained = {
+                str(slot_name): timeline
+                for slot_name, timeline in slot_timelines.items()
+                if str(slot_name) not in hidden_slot_names
+            }
+            if retained:
+                copied_payload["slots"] = retained
+            else:
+                copied_payload.pop("slots", None)
+        result[str(animation_name)] = copied_payload
+    return result
+
+
 def apply_grouped_camera_overlay(
     document: SpineDocument,
     plan: GroupedCameraProjectionPlan,
@@ -184,9 +216,11 @@ def apply_grouped_camera_overlay(
 ) -> GroupedCameraOverlayResult:
     """Hide individual B4 visuals and append one depth-correct root overlay.
 
-    Source slots and attachments remain in the typed document so bone, constraint and animation
-    references are not deleted. Their setup color becomes fully transparent. The grouped slot is
-    appended last inside the connected document and therefore becomes the only visible B4 layer.
+    Source bones, constraints, attachments and non-slot animation data remain in the typed
+    document. Source visual slots receive fully transparent setup color, and their slot color/
+    attachment timelines are removed so they cannot reappear over the grouped render. The
+    grouped slot is appended last inside the connected document and becomes the only visible B4
+    layer.
     """
 
     if not isinstance(document, SpineDocument):
@@ -284,6 +318,10 @@ def apply_grouped_camera_overlay(
         document,
         slots=slots,
         skins=tuple(skins),
+        animations=_strip_hidden_slot_timelines(
+            document.animations,
+            hidden_set,
+        ),
         extras={
             **dict(document.extras),
             "spine2dGroupedCamera": {
