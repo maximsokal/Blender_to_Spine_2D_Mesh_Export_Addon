@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import logging
 from typing import Any, Mapping, Tuple
 
@@ -11,6 +12,7 @@ from ..application import (
     ExportIssue,
     ExportResult,
     IssueSeverity,
+    apply_grouped_camera_overlay,
 )
 from ..domain.spine import (
     ConstraintOrderPolicy,
@@ -35,6 +37,12 @@ from .a1_multi_object_export import (
 )
 from .a1_object_preparation import StatisticsValue
 from .a1_projection_finalization import finalize_prepared_camera_projection
+from .grouped_camera_projection_executor import (
+    stage_grouped_camera_projection_outputs,
+)
+from .grouped_camera_projection_policy import (
+    resolve_grouped_camera_projection_request,
+)
 from .texture_executor import stage_texture_plan_outputs
 
 logger = logging.getLogger(__name__)
@@ -103,19 +111,12 @@ def _compose_standalone_group(
     )
 
 
-def _compose_mixed_document(
-    connected_sources: Tuple[A1MultiObjectSource, ...],
+def _compose_mixed_document_from_groups(
+    connected_document,
     standalone_sources: Tuple[A1MultiObjectSource, ...],
-    connected_objects,
     standalone_objects,
     settings: A1MultiObjectExportSettings,
 ):
-    anchor = settings.anchor_component_id or connected_sources[0].component_id
-    connected = _compose_document(
-        connected_sources,
-        tuple(connected_objects),
-        _connected_settings(settings, anchor),
-    )
     standalone = _compose_standalone_group(
         standalone_sources,
         tuple(standalone_objects),
@@ -125,7 +126,7 @@ def _compose_mixed_document(
         (
             SpineDocumentComponent(
                 component_id="connected_group",
-                document=connected.document,
+                document=connected_document,
             ),
             SpineDocumentComponent(
                 component_id="standalone_group",
@@ -149,7 +150,7 @@ def export_a1_mixed_object(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> ExportResult:
-    """Stage all mixed textures, rebuild B4 documents, and commit one transaction."""
+    """Stage mixed textures, grouped connected B4, and one atomic final document."""
 
     try:
         prepared = prepare_a1_mixed_object(
@@ -209,11 +210,55 @@ def export_a1_mixed_object(
             if len(standalone_objects) != len(standalone_sources):
                 raise ValueError("finalized mixed object partition does not match sources")
 
-            stage = A1MultiObjectStage.COMPOSE_DOCUMENT
-            composition = _compose_mixed_document(
-                connected_sources,
-                standalone_sources,
+            anchor = settings.anchor_component_id or connected_sources[0].component_id
+            connected_settings = _connected_settings(settings, anchor)
+            grouped_request = resolve_grouped_camera_projection_request(
                 connected_objects,
+                connected_settings,
+            )
+            grouped_stage = None
+            if grouped_request is not None:
+                grouped_stage = stage_grouped_camera_projection_outputs(
+                    grouped_request.source_objects,
+                    grouped_request.plan,
+                    transaction,
+                    grouped_request.execution_settings,
+                    context=context,
+                    scene=scene,
+                )
+                reservations.extend(grouped_stage.reservations)
+
+            stage = A1MultiObjectStage.COMPOSE_DOCUMENT
+            connected_composition = _compose_document(
+                connected_sources,
+                connected_objects,
+                connected_settings,
+            )
+            overlay = None
+            if grouped_request is not None:
+                if grouped_stage is None:
+                    raise RuntimeError(
+                        "grouped mixed request completed without a stage result"
+                    )
+                overlay = apply_grouped_camera_overlay(
+                    connected_composition.document,
+                    grouped_request.plan,
+                    grouped_stage.layout,
+                    visual_slot_names=grouped_request.visual_slot_names,
+                    image_relative_directory=(
+                        grouped_request.image_relative_directory
+                    ),
+                    slot_name=grouped_request.slot_name,
+                    attachment_name=grouped_request.attachment_name,
+                )
+                connected_composition = replace(
+                    connected_composition,
+                    document=overlay.document,
+                )
+
+            composition = _compose_mixed_document_from_groups(
+                connected_composition.document,
+                standalone_sources,
                 standalone_objects,
                 settings,
             )
@@ -228,8 +273,28 @@ def export_a1_mixed_object(
                         for item in finalized
                         if "projection_crop_width" in item.statistics
                     ),
+                    "grouped_b4_enabled": int(grouped_request is not None),
                 }
             )
+            if grouped_request is not None and grouped_stage is not None:
+                statistics.update(
+                    {
+                        "grouped_b4_source_count": len(
+                            grouped_request.plan.source_object_ids
+                        ),
+                        "grouped_b4_frame_count": len(
+                            grouped_request.plan.frame_tasks
+                        ),
+                        "grouped_b4_crop_width": grouped_stage.layout.cropped_width,
+                        "grouped_b4_crop_height": grouped_stage.layout.cropped_height,
+                        "grouped_b4_contour_vertex_count": len(
+                            grouped_stage.layout.hull
+                        ),
+                        "grouped_b4_hidden_slot_count": len(
+                            overlay.hidden_slot_names if overlay is not None else ()
+                        ),
+                    }
+                )
 
             stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
             json_text = SpineSerializer().to_json(
@@ -254,6 +319,11 @@ def export_a1_mixed_object(
                 "Committed output order does not match mixed JSON and texture reservations"
             )
         statistics["output_file_count"] = len(committed_paths)
+        logger.info(
+            "A1 mixed export completed (grouped_b4=%s): %s",
+            grouped_request is not None,
+            tuple(str(path) for path in committed_paths),
+        )
         return ExportResult(
             success=True,
             output_files=tuple(committed_paths),
