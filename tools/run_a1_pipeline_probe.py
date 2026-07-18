@@ -219,7 +219,7 @@ def run_probe(namespace: argparse.Namespace) -> Mapping[str, Any]:
             blender=blender,
             blend_file=source,
             payload_json=payload_json,
-            report_json=report_json),
+            report_json=report_json,
             backend=namespace.backend,
             focus_modules=namespace.focus_module,
             focus_files=namespace.focus_file,
@@ -244,7 +244,7 @@ def run_probe(namespace: argparse.Namespace) -> Mapping[str, Any]:
             "blender_log": str(blender_log),
             "runtime_report": str(report_json),
             "static_audit": str(static_json),
-            "runtime_summary": runtime_report.get("race", {}).get("summary"),
+            "runtime_summary": runtime_report.get("trace", {}).get("summary"),
             "static_summary": static_report.get("summary"),
             "missing_expected_calls": runtime_report.get("trace", {}).get(
                 "missing_expected_calls", []

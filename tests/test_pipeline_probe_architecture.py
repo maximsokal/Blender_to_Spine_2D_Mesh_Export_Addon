@@ -38,3 +38,5 @@ def test_probe_supports_module_and_file_focus():
     assert "--focus-file" in source
     assert "pipeline-static-audit.json" in source
     assert "pipeline-trace-report.json" in source
+    assert 'runtime_report.get("trace", {})' in source
+    assert 'runtime_report.get("race", {})' not in source
