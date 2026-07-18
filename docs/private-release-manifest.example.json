@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "suite_id": "private-production-v1",
+  "blender_version": "4.4.0",
+  "release_gate": {
+    "minimum_fixture_count": 2,
+    "required_capabilities": [
+      "single",
+      "connected",
+      "b4_cycles",
+      "b4_eevee",
+      "grouped_b4",
+      "custom_compositor",
+      "hdr_exr",
+      "animated"
+    ],
+    "require_strict_edges": true,
+    "require_animation_parity_for_animated": true,
+    "allow_unaccepted_warnings": false
+  },
+  "fixtures": [
+    {
+      "id": "production-character-cycles",
+      "source_blend": "production-character-cycles/source.blend",
+      "legacy_json": "production-character-cycles/legacy-v0.23.json",
+      "actual_json": "Character_merged.json",
+      "operator": "object.save_uv_as_json",
+      "active_object": "Character",
+      "selected_objects": ["Character"],
+      "capabilities": ["single", "b4_cycles", "animated"],
+      "scene_attributes": {
+        "render.engine": "CYCLES"
+      },
+      "scene_custom_properties": {
+        "spine2d_output_directory": "${OUTPUT_DIR}"
+      },
+      "object_attributes": {},
+      "object_custom_properties": {},
+      "operator_kwargs": {},
+      "actual_json": "Character_merged.json",
+      "image_pairs": [
+        {
+          "expected": "production-character-cycles/legacy-images/Character_Baked.png",
+          "actual": "images/Character_Baked.png",
+          "maximum_absolute_error": 0.02,
+          "mean_absolute_error": 0.003,
+          "alpha_maximum_absolute_error": 0.01
+        }
+      ],
+      "ignored_paths": [],
+      "accepted_warning_codes": [],
+      "strict_edges": true,
+      "compare_animations": true,
+      "animated": true
+    },
+    {
+      "id": "production-connected-eevee",
+      "source_blend": "production-connected-eevee/source.blend",
+      "legacy_json": "production-connected-eevee/legacy-v0.23.json",
+      "actual_json": "Connected_merged.json",
+      "operator": "object.spine2d_multi_export",
+      "active_object": "Body",
+      "selected_objects": ["Body", "Armor"],
+      "capabilities": [
+        "connected",
+        "b4_eevee",
+        "grouped_b4",
+        "custom_compositor",
+        "hdr_exr"
+      ],
+      "scene_attributes": {
+        "render.engine": "BLENDER_EEVEE_NEXT"
+      },
+      "scene_custom_properties": {
+        "spine2d_output_directory": "${OUTPUT_DIR}"
+      },
+      "object_attributes": {},
+      "object_custom_properties": {
+        "Body": {
+          "Connect": true
+        },
+        "Armor": {
+          "Connect": true
+        }
+      },
+      "operator_kwargs": {},
+      "image_pairs": [
+        {
+          "expected": "production-connected-eevee/legacy-images/Connected_grouped_camera_Baked.exr",
+          "actual": "images/Connected_grouped_camera_Baked.exr",
+          "maximum_absolute_error": 0.03,
+          "mean_absolute_error": 0.005,
+          "alpha_maximum_absolute_error": 0.01
+        }
+      ],
+      "ignored_paths": [],
+      "accepted_warning_codes": [],
+      "strict_edges": true,
+      "compare_animations": false,
+      "animated": false
+    }
+  ]
+}
