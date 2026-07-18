@@ -37,7 +37,6 @@
       "object_attributes": {},
       "object_custom_properties": {},
       "operator_kwargs": {},
-      "actual_json": "Character_merged.json",
       "image_pairs": [
         {
           "expected": "production-character-cycles/legacy-images/Character_Baked.png",
