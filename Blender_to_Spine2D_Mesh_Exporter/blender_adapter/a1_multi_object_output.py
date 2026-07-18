@@ -15,18 +15,18 @@ from ..application import (
     IssueSeverity,
     apply_grouped_camera_overlay,
 )
-from ..domain.spine import SpineSerializer
+from ..domain.spine import ConnectedGroupBuildResult, SpineSerializer
 from ..infrastructure import (
     AtomicFileCommitError,
     atomic_file_transaction,
     write_staged_utf8_text,
 )
+from .a1_multi_object_composition import compose_a1_multi_object_document
 from .a1_multi_object_export import (
     A1MultiObjectPreparationError,
     A1MultiObjectSource,
-    _compose_document,
-    _record_object_statistics,
     prepare_a1_multi_object,
+    record_object_statistics,
 )
 from .a1_object_preparation import StatisticsValue
 from .a1_projection_finalization import finalize_prepared_camera_projection
@@ -85,7 +85,7 @@ def export_a1_multi_object(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> ExportResult:
-    """Stage textures, optional grouped B4, compose JSON, and commit atomically."""
+    """Finalize textures, compose once, serialize once, and commit atomically."""
 
     try:
         prepared = prepare_a1_multi_object(
@@ -135,7 +135,7 @@ def export_a1_multi_object(
                     texture_stage.projection_layout,
                 )
                 finalized_objects.append(finalized)
-                _record_object_statistics(
+                record_object_statistics(
                     statistics,
                     source.component_id,
                     finalized.statistics,
@@ -162,7 +162,7 @@ def export_a1_multi_object(
                 )
 
             stage = A1MultiObjectStage.COMPOSE_DOCUMENT
-            composition = _compose_document(
+            composition = compose_a1_multi_object_document(
                 prepared.sources,
                 resolved_finalized,
                 settings,
@@ -195,6 +195,9 @@ def export_a1_multi_object(
                     "final_bone_count": len(document.bones),
                     "final_slot_count": len(document.slots),
                     "final_skin_count": len(document.skins),
+                    "final_constraint_count": (
+                        len(document.ik) + len(document.transform)
+                    ),
                     "projection_cropped_component_count": sum(
                         1
                         for item in resolved_finalized
@@ -203,6 +206,8 @@ def export_a1_multi_object(
                     "grouped_b4_enabled": int(grouped_request is not None),
                 }
             )
+            if isinstance(composition, ConnectedGroupBuildResult):
+                statistics["connected_layer_count"] = len(composition.layers)
             if grouped_request is not None and grouped_stage is not None:
                 statistics.update(
                     {
