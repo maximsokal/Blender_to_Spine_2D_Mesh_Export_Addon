@@ -113,6 +113,7 @@ def _expected_calls(scenario: str, backend: str) -> tuple[tuple[str, str], ...]:
             ("blender_adapter.a1_ui_router", "export_selected_objects_a1"),
             ("blender_adapter.a1_mixed_object_output", "export_a1_mixed_object"),
             ("blender_adapter.a1_mixed_object_export", "prepare_a1_mixed_object"),
+            ("blender_adapter.a1_mixed_composition", "compose_a1_mixed_document"),
             (
                 "blender_adapter.a1_multi_object_composition",
                 "compose_a1_multi_object_document",

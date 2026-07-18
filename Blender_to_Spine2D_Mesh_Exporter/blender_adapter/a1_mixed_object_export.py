@@ -1,13 +1,7 @@
-"""Prepare mixed connected/standalone A1 sources without producing output.
-
-At least two connected objects form one future connected subgroup. Remaining selected
-objects are prepared as standalone components. This module performs no document
-composition, rendering, serialization, or file writes.
-"""
+"""Prepare mixed connected/standalone A1 sources without producing output."""
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Tuple
@@ -18,13 +12,14 @@ from ..application import (
     A1MultiObjectStage,
     ExportIssue,
 )
-from .a1_multi_object_export import (
+from .a1_mixed_settings import build_connected_subgroup_settings
+from .a1_multi_object_contracts import (
     A1MultiObjectPreparationError,
     A1MultiObjectSource,
     PreparedA1MultiObject,
-    prepare_a1_multi_object,
     record_object_statistics,
 )
+from .a1_multi_object_export import prepare_a1_multi_object
 from .a1_object_preparation import (
     A1ObjectPreparationError,
     PreparedA1Object,
@@ -57,9 +52,7 @@ def _validate_mixed_sources(
     if settings.anchor_component_id is not None and (
         settings.anchor_component_id not in connected_ids
     ):
-        raise ValueError(
-            "anchor_component_id must identify an object in connected_sources"
-        )
+        raise ValueError("anchor_component_id must identify an object in connected_sources")
 
     output_root = settings.output_directory.expanduser().resolve(strict=False)
     for source in all_sources:
@@ -71,26 +64,6 @@ def _validate_mixed_sources(
                 f"Component '{source.component_id}' uses output root '{source_root}', "
                 f"but mixed export uses '{output_root}'"
             )
-
-
-def build_connected_subgroup_settings(
-    settings: A1MultiObjectExportSettings,
-    anchor_component_id: str,
-) -> A1MultiObjectExportSettings:
-    """Derive the internal connected settings used by mixed preparation/output."""
-
-    if not isinstance(settings, A1MultiObjectExportSettings):
-        raise TypeError("settings must be A1MultiObjectExportSettings")
-    if settings.mode is not A1MultiObjectMode.MIXED:
-        raise ValueError("connected subgroup settings require MIXED parent settings")
-    if not isinstance(anchor_component_id, str) or not anchor_component_id.strip():
-        raise ValueError("anchor_component_id must be a non-empty string")
-    return replace(
-        settings,
-        mode=A1MultiObjectMode.CONNECTED,
-        output_stem=f"{settings.resolved_output_stem}__connected",
-        anchor_component_id=anchor_component_id,
-    )
 
 
 def _prepare_standalone_objects(
@@ -109,7 +82,6 @@ def _prepare_standalone_objects(
         "object_count": len(sources),
         "mode": A1MultiObjectMode.STANDALONE.value,
     }
-
     for source in sources:
         try:
             prepared = prepare_a1_object(
@@ -131,12 +103,7 @@ def _prepare_standalone_objects(
             ) from exc
         prepared_objects.append(prepared)
         warnings.extend(prepared.warnings)
-        record_object_statistics(
-            statistics,
-            source.component_id,
-            prepared.statistics,
-        )
-
+        record_object_statistics(statistics, source.component_id, prepared.statistics)
     return (
         tuple(prepared_objects),
         tuple(warnings),
@@ -204,24 +171,16 @@ def prepare_a1_mixed_object(
         context=context,
         scene=scene,
     )
-    (
-        standalone_objects,
-        standalone_warnings,
-        standalone_statistics,
-    ) = _prepare_standalone_objects(
+    standalone_objects, standalone_warnings, _ = _prepare_standalone_objects(
         standalone_sources,
         context=context,
         scene=scene,
     )
-
-    connected_paths = connected.texture_output_paths
-    standalone_paths = _texture_paths(standalone_objects)
     texture_paths = _validate_final_paths(
         settings,
-        connected_paths,
-        standalone_paths,
+        connected.texture_output_paths,
+        _texture_paths(standalone_objects),
     )
-
     statistics: dict[str, StatisticsValue] = {
         "object_count": len(connected_sources) + len(standalone_sources),
         "connected_object_count": len(connected_sources),
@@ -239,7 +198,4 @@ def prepare_a1_mixed_object(
     )
 
 
-__all__ = [
-    "build_connected_subgroup_settings",
-    "prepare_a1_mixed_object",
-]
+__all__ = ["build_connected_subgroup_settings", "prepare_a1_mixed_object"]

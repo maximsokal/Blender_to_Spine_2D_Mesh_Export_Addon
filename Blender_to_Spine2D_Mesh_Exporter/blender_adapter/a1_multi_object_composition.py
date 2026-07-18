@@ -21,7 +21,7 @@ from ..domain.spine import (
     build_connected_group_document,
     compose_spine_documents,
 )
-from .a1_multi_object_export import A1MultiObjectSource
+from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_object_preparation import PreparedA1Object
 
 
@@ -82,7 +82,7 @@ def compose_a1_multi_object_document(
                     source.animation_namespace or source.component_id
                 ),
             )
-            for source, item in zip(sources, prepared)
+            for source, item in zip(sources, prepared, strict=True)
         )
         return compose_spine_documents(
             components,
@@ -116,7 +116,7 @@ def compose_a1_multi_object_document(
                 source.animation_namespace or source.component_id
             ),
         )
-        for source, item in zip(sources, prepared)
+        for source, item in zip(sources, prepared, strict=True)
     )
     return build_connected_group_document(
         connected_objects,

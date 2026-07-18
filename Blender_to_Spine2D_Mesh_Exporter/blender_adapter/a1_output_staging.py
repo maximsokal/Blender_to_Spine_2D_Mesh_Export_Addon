@@ -8,7 +8,10 @@ from types import MappingProxyType
 from typing import Any, Mapping, Tuple
 
 from ..infrastructure import AtomicFileTransaction, AtomicOutputReservation
-from .a1_multi_object_export import PreparedA1MultiObject, record_object_statistics
+from .a1_multi_object_contracts import (
+    PreparedA1MultiObject,
+    record_object_statistics,
+)
 from .a1_object_preparation import PreparedA1Object, StatisticsValue
 from .a1_projection_finalization import finalize_prepared_camera_projection
 from .texture_executor import stage_texture_plan_outputs

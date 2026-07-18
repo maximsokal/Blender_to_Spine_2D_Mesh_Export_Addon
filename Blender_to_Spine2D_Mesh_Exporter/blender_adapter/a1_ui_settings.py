@@ -12,7 +12,7 @@ from ..application import (
 )
 from ..domain.baking import sanitize_filename_stem
 from ..domain.uv import UvUnwrapSettings
-from .a1_multi_object_export import A1MultiObjectSource
+from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_ui_rna import (
     _ObjectExportProfile,
     _SceneExportProfile,
