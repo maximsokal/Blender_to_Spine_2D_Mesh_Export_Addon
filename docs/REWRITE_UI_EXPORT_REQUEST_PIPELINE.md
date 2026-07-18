@@ -2,11 +2,9 @@
 
 ## Purpose
 
-This document records how mutable Blender UI state becomes one deterministic Rewrite export
-request. It also defines the ownership boundary between preparation and output services.
+This document records how mutable Blender UI state becomes one deterministic Rewrite export request. It also defines the ownership boundary between selection, Scene capture, preparation and output services.
 
-The legacy `main.py` pipeline remains available only through the explicit Legacy backend. It is
-not the Rewrite request assembler.
+The legacy `main.py` pipeline remains available only through the explicit lazy-loaded Legacy backend. It is not the Rewrite request assembler.
 
 ## Previous legacy shape
 
@@ -22,8 +20,7 @@ The legacy single-object path combined the following responsibilities in `main.p
 - merging serialized JSON;
 - final output and cleanup.
 
-This made data ownership implicit. A value could be held simultaneously by Blender datablocks,
-module globals, temporary objects, Python lists and intermediate JSON files.
+This made data ownership implicit. A value could be held simultaneously by Blender datablocks, module globals, temporary objects, Python lists and intermediate JSON files.
 
 ## Current Rewrite boundary
 
@@ -41,19 +38,40 @@ single_object_operator / ui operator
     -> blender_adapter.a1_ui_bridge
 ```
 
-`a1_ui_bridge` is the only production boundary that reads Rewrite Scene/Object RNA.
+`a1_ui_bridge` is a stable compatibility facade. Physical ownership is split as follows:
 
-It captures:
+```text
+a1_ui_selection.py
+    -> object name and stable in-process Blender RNA identity
+    -> active Mesh validation
+    -> deterministic active-first selected Mesh ordering
+    -> per-object sequence and Connect capture
+    -> immutable _ObjectExportProfile
 
-- one immutable `_SceneExportProfile` for the complete transaction;
-- one `_ObjectExportProfile` for every selected object;
-- deterministic active-first object order;
-- stable Blender RNA identity using `as_pointer()` when available;
-- shared Scene geometry/bake settings;
-- per-object sequence start/count and Connect flag.
+a1_ui_scene_capture.py
+    -> output directory and images path
+    -> texture, seam, angular and projection settings
+    -> render-engine capture
+    -> immutable _SceneExportProfile
 
-The bridge does not pass raw dictionaries, parallel arrays or serialized JSON to the Rewrite
-pipeline.
+a1_ui_settings.py
+    -> A1SingleObjectExportSettings
+    -> deterministic A1MultiObjectSource values
+
+a1_ui_router.py
+    -> single/standalone/connected/mixed route selection
+    -> production output-service invocation
+
+a1_ui_rna.py
+    -> compatibility re-exports only
+
+a1_ui_bridge.py
+    -> stable imports for operators, focused tests and existing callers
+```
+
+One immutable `_SceneExportProfile` is captured for the complete transaction and one `_ObjectExportProfile` for every selected object. Stable Blender RNA identity uses `as_pointer()` when available to match transient wrappers inside the running Blender process; it is not persisted as a cross-session object ID.
+
+The bridge does not pass raw dictionaries, parallel arrays or serialized JSON to the Rewrite pipeline.
 
 ## Single-object payload
 
@@ -64,15 +82,13 @@ _ObjectExportProfile
     -> export_a1_single_object()
     -> prepare_a1_object()
     -> PreparedA1Object
-    -> texture staging
+    -> typed texture dispatch
     -> optional B4 layout finalization
     -> typed SpineDocument serialization
     -> one atomic commit
 ```
 
-`PreparedA1Object` owns immutable geometry, UV, material-analysis, bake-plan, rig and typed Spine
-values. Its only live Blender reference is `source_object`, retained at the adapter boundary for
-actual bake/render execution.
+`PreparedA1Object` owns immutable geometry, UV, material-analysis, bake-plan, rig and typed Spine values. Its only live Blender reference is `source_object`, retained at the adapter boundary for actual bake/render execution.
 
 ## Multi-object payload
 
@@ -83,7 +99,7 @@ Selected Mesh objects are ordered as:
 
 Transient Blender RNA wrappers are matched through stable RNA identity rather than Python `is`.
 
-For every object the bridge creates:
+For every object the settings layer creates:
 
 ```text
 A1MultiObjectSource(
@@ -100,7 +116,7 @@ The sources are partitioned once from captured Connect flags:
 no connected subgroup   -> STANDALONE
 all connected           -> CONNECTED
 connected + standalone  -> MIXED
-exactly one Connect flag -> deterministic STANDALONE fallback with warning log
+exactly one Connect flag -> deterministic STANDALONE fallback with ExportIssue
 ```
 
 ## Preparation ownership
@@ -119,8 +135,38 @@ a1_mixed_object_export.py
     -> prepare_a1_mixed_object()
 ```
 
-They read/evaluate Blender objects, create immutable snapshots and compose typed draft documents.
-They must not be selected by the UI as final output services.
+They read/evaluate Blender objects, create immutable snapshots and compose typed draft documents. They must not be selected by the UI as final output services.
+
+## Texture execution ownership
+
+Before any object-bake or B4 dispatch, `texture_executor.py` creates:
+
+```text
+TextureExecutionRequest(
+    source_object,
+    target_snapshot: MeshSnapshot,
+    plan: BakePlan,
+    execution_settings: BakeExecutionSettings,
+)
+```
+
+The request validates types and requires `target_snapshot.source_object_id == plan.source_object_id` before Blender mutation.
+
+For semantic object bake, physical responsibilities are:
+
+```text
+semantic_bake_validation.py -> complete pre-mutation runtime validation
+semantic_bake_execution.py  -> reversible Blender execution into existing reservations
+semantic_bake_output.py     -> reservation, atomic commit and typed result
+semantic_bake_executor.py   -> compatibility facade
+```
+
+Validation completes before reservation. Caller-owned staging does not commit. Direct execution performs one atomic commit and verifies exact frame-task path order.
+
+B4 keeps two intentional contracts:
+
+- detailed production staging returns crop/contour layout for post-render document finalization;
+- reservations-only compatibility staging keeps full-frame output for callers that serialized JSON before staging.
 
 ## Output ownership
 
@@ -145,64 +191,29 @@ Multi and mixed output services:
 7. serialize the final document once;
 8. commit JSON and every texture atomically.
 
-The UI bridge imports these output modules directly. A regression test verifies their module
-identity, and the real Blender multi-operator fixture requires grouped B4 output through the
-registered button.
-
-## Defect fixed during request-pipeline review
-
-The bridge previously imported `export_a1_multi_object` and `export_a1_mixed_object` from the
-preparation modules. Those modules still contained older output implementations that serialized
-JSON before B4 render-derived finalization and used reservations-only staging.
-
-Consequences included:
-
-- stale full-frame B4 attachments paired with cropped textures;
-- grouped connected B4 output being bypassed by the registered UI operator;
-- duplicated output implementations with the same public function names;
-- tests passing for local Emission materials while missing the B4 operator defect.
-
-The bridge now imports only the post-render output services.
+The UI router imports these output modules directly. Compatibility facades do not own output implementation.
 
 ## Remaining architecture debt
 
 ### Duplicate historical export functions
 
-`a1_multi_object_export.py` and `a1_mixed_object_export.py` still contain historical functions
-named `export_a1_multi_object` and `export_a1_mixed_object`. They are no longer production UI
-entry points, but the names are misleading and remain a future misuse risk.
+`a1_multi_object_export.py` and `a1_mixed_object_export.py` still contain historical functions named `export_a1_multi_object` and `export_a1_mixed_object`. They are no longer production UI entry points, but the names remain a future misuse risk.
 
-Safe cleanup requires splitting preparation-only code into explicit modules or replacing those
-historical functions with compatibility facades that delegate to the output services.
+Safe cleanup requires splitting preparation-only code into explicit modules or replacing those historical functions with compatibility facades that delegate to the output services.
 
 ### Draft composition before B4 finalization
 
-`prepare_a1_multi_object()` returns a complete draft document because it is also a public
-preparation API. Production output must compose again after B4 finalization. This is correct but
-performs duplicate composition and makes `PreparedA1MultiObject.document` potentially stale for
-camera projection until output finalization.
+`prepare_a1_multi_object()` returns a complete draft document because it is also a public preparation API. Production output must compose again after B4 finalization. This is correct but performs duplicate composition and makes `PreparedA1MultiObject.document` potentially stale for camera projection until output finalization.
 
-A future cleanup can introduce a component-preparation result that contains objects and output
-validation only, with composition performed exactly once by callers that require final output.
+A future cleanup can introduce a component-preparation result that contains objects and output validation only, with composition performed exactly once by callers that require final output.
 
 ### Generic `ExportRequest`
 
-The generic application `ExportRequest` contract is validated and tested but the production A1
-operators use A1-specific settings/source contracts instead. Its intended ownership should be
-clarified: either make it the actual top-level request envelope or remove it from the A1 design.
+The generic application `ExportRequest` contract is validated and tested but the production A1 operators use A1-specific settings/source contracts instead. Its intended ownership should be clarified: either make it the actual top-level request envelope or remove it from the A1 design.
 
-### Legacy eager imports and global settings
+### Duplicate low-level bake orchestration
 
-The explicit Legacy single-object path still synchronizes texture dimensions through module-level
-globals in `main`, `config` and `json_export`. Legacy modules are also imported during add-on
-startup. This does not contaminate the Rewrite request payload, but it remains isolated technical
-debt until Legacy removal.
-
-### One-object Connect fallback
-
-One selected Connect flag is logged and exported as standalone because a connected group requires
-at least two objects. The behavior is deterministic, but the warning is not yet returned as an
-`ExportIssue` to the UI.
+`bake_executor_core.py` still retains historical orchestration helpers in addition to the primitives used by the split semantic executor. Their usages must be audited before removal because the public failure-injection hooks and Blender fixtures depend on stable operator boundaries.
 
 ## Regression coverage
 
@@ -212,5 +223,11 @@ at least two objects. The behavior is deterministic, but the warning is not yet 
 - deterministic component IDs and animation namespaces;
 - registered Rewrite multi operator;
 - registered connected B4 multi operator producing grouped texture and JSON metadata;
-- explicit Legacy backend;
-- no automatic Legacy fallback after Rewrite failure.
+- explicit lazy-loaded Legacy backend;
+- no automatic Legacy fallback after Rewrite failure;
+- facade-only `a1_ui_rna` and `semantic_bake_executor`;
+- physical UI selection/Scene capture ownership;
+- semantic validation before transaction creation and reservation;
+- no commit capability in semantic execution;
+- strict committed-path order;
+- typed texture dispatch before Blender mutation.
