@@ -13,11 +13,13 @@ from ..application import (
 from ..domain.baking import sanitize_filename_stem
 from ..domain.uv import UvUnwrapSettings
 from .a1_multi_object_contracts import A1MultiObjectSource
-from .a1_ui_rna import (
-    _ObjectExportProfile,
+from .a1_ui_scene_capture import (
     _SceneExportProfile,
-    _capture_object_profile,
     _capture_scene_profile,
+)
+from .a1_ui_selection import (
+    _ObjectExportProfile,
+    _capture_object_profile,
     _connect_enabled,
     _object_name,
 )
@@ -128,8 +130,12 @@ def _build_single_object_settings(
         output_directory=output_directory,
         texture_size=texture_size,
         images_relative_path=images_relative_path,
-        sequence_start_frame=int(getattr(scene, "spine2d_bake_frame_start", 0)),
-        sequence_frame_count=int(getattr(scene, "spine2d_frames_for_render", 0)),
+        sequence_start_frame=int(
+            getattr(scene, "spine2d_bake_frame_start", 0)
+        ),
+        sequence_frame_count=int(
+            getattr(scene, "spine2d_frames_for_render", 0)
+        ),
         json_output_stem=f"{sanitize_filename_stem(object_name)}_merged",
     )
 
