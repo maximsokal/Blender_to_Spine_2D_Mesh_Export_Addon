@@ -125,10 +125,15 @@ For every static or sequence frame the executor:
 6. enables transparent film while retaining World lighting and reflection contribution;
 7. renders the full frame to an atomic staged path;
 8. validates and decodes the staged image Blender actually wrote;
-9. extracts a binary alpha mask using threshold `1 / 255`;
+9. extracts a binary alpha mask using
+   `BakeExecutionSettings.projection_alpha_threshold`;
 10. after every frame succeeds, derives one sequence-union layout;
 11. rewrites every staged frame with the same crop dimensions;
 12. restores every captured Blender value in `finally`.
+
+The compatibility default is exactly `1 / 255`, so existing exports preserve their previous
+crop and hull. One immutable threshold is used for every frame and is retained in
+`CameraProjectionLayout.alpha_threshold`.
 
 Blender 4.4 background mode exposes `Render Result` as a zero-sized image after a completed
 render. The implementation therefore derives alpha from the staged image bytes, not from the
@@ -169,6 +174,19 @@ The crop is the union alpha bounding box expanded by `BakeSettings.margin_pixels
 is the existing export `bake_margin`, so no new per-material or B4-only UI switch was added.
 The bounds are clamped to the original render dimensions.
 
+The alpha cutoff is a global execution/output policy:
+
+```python
+BakeExecutionSettings(
+    projection_alpha_threshold=1.0 / 255.0,
+)
+```
+
+Finite values in `[0, 1]` are accepted. Booleans, NaN, infinities, non-numeric values, and
+out-of-range values are rejected before rendering. Automation may also provide the optional
+Scene attribute or Blender custom property `spine2d_projection_alpha_threshold`; missing
+properties retain the compatibility default.
+
 Every sequence frame receives exactly the same:
 
 - cropped width and height;
@@ -182,6 +200,8 @@ A frame cannot change attachment geometry or move the crop independently. Later 
 therefore not clipped by a crop derived from the representative frame alone.
 
 An all-transparent static render or sequence is rejected with a structured execution error.
+A translucent-only render can also become empty when the selected threshold is higher than all
+of its decoded alpha values.
 
 ## Screen-space convex hull
 
@@ -295,7 +315,8 @@ image checks for:
 - absence of temporary Blender datablocks.
 
 Pure tests cover planner routing, recursive group traversal, group cycles, union masks, padding,
-convex hull construction, UV conversion, all-transparent rejection and architecture boundaries.
+convex hull construction, UV conversion, all-transparent rejection, configurable alpha-policy
+validation, single/multi bridge propagation, and architecture boundaries.
 
 ## Current boundaries
 
@@ -305,10 +326,11 @@ The screen-space attachment is a convex hull. Deep concavities and internal tran
 remain inside the mesh and are represented by texture alpha. This is deliberate: a simple
 convex polygon is deterministic and safe for Spine triangulation.
 
-### Fixed alpha threshold
+### Alpha threshold versus antialias coverage
 
-Layout detection currently uses decoded alpha `>= 1 / 255`. A configurable threshold or
-coverage-weighted antialias policy would be an output policy, not a material strategy switch.
+The cutoff is now configurable and deterministic. Coverage-weighted antialias reconstruction,
+contour simplification based on fractional coverage, and morphology-based fringe cleanup remain
+separate output-policy work.
 
 ### Connected multi-object depth
 
