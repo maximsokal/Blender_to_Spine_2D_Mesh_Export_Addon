@@ -43,11 +43,12 @@ def test_projection_alpha_threshold_rejects_invalid_values(value):
         BakeExecutionSettings(projection_alpha_threshold=value)
 
 
-def test_b4_executor_uses_one_execution_threshold_for_mask_and_layout():
+def test_b4_executor_uses_one_execution_threshold_for_coverage_layout():
     source = inspect.getsource(executor_core._render_to_reservations)
     module_source = inspect.getsource(executor_core)
 
     assert "_ALPHA_THRESHOLD" not in module_source
     assert "execution_settings.projection_alpha_threshold" in source
     assert "alpha_threshold=alpha_threshold" in source
-    assert "threshold=alpha_threshold" in source
+    assert "read_staged_alpha_coverage" in source
+    assert "coverage_policy=execution_settings.projection_coverage_policy" in source
