@@ -1,31 +1,28 @@
-"""Pure sequence-union crop and screen-space hull planning for B4 renders."""
+"""Pure sequence-union crop and screen-space contour planning for B4 renders."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from math import isfinite
-from typing import Iterable, Tuple
+from typing import Tuple
 
-
-ProjectionTriangle = Tuple[int, int, int]
+from .projection_contour import (
+    ProjectionContourError,
+    ProjectionContourMode,
+    ProjectionPixelPoint,
+    ProjectionTriangle,
+    build_contour_from_mask,
+    convex_hull,
+    cross,
+    simplify_concave_contour,
+    triangulate_convex_hull,
+    triangulate_simple_contour,
+    validate_simple_contour,
+)
 
 
 class CameraProjectionLayoutError(ValueError):
     """Raised when rendered alpha cannot produce a stable projection layout."""
-
-
-@dataclass(frozen=True, order=True, slots=True)
-class ProjectionPixelPoint:
-    """One full-frame pixel-boundary coordinate with a bottom-left origin."""
-
-    x: int
-    y: int
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.x, int) or not isinstance(self.y, int):
-            raise TypeError("ProjectionPixelPoint coordinates must be int")
-        if self.x < 0 or self.y < 0:
-            raise ValueError("ProjectionPixelPoint coordinates cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +54,11 @@ class ProjectionCropBounds:
 
 @dataclass(frozen=True, slots=True)
 class CameraProjectionLayout:
-    """One stable crop and strictly convex hull shared by every projection frame."""
+    """One stable crop and simple outer contour shared by every projection frame.
+
+    ``hull`` remains the compatibility field name. It can now contain a simple concave
+    contour; internal holes continue to be represented by texture alpha.
+    """
 
     full_width: int
     full_height: int
@@ -67,6 +68,11 @@ class CameraProjectionLayout:
     padding_pixels: int
     frame_count: int
     visible_pixel_count: int
+    contour_mode: ProjectionContourMode = ProjectionContourMode.CONVEX_HULL
+    source_contour_vertex_count: int = 0
+    outer_component_count: int = 1
+    simplify_tolerance_pixels: float = 0.0
+    contour_fallback_reason: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("full_width", "full_height", "frame_count"):
@@ -77,15 +83,19 @@ class CameraProjectionLayout:
             raise TypeError("crop must be ProjectionCropBounds")
         if self.crop.maximum_x > self.full_width or self.crop.maximum_y > self.full_height:
             raise ValueError("crop bounds exceed the full render dimensions")
-        _validate_strict_convex_hull(self.hull)
+        try:
+            validate_simple_contour(self.hull)
+        except ProjectionContourError as exc:
+            raise ValueError(str(exc)) from exc
         for point in self.hull:
             if not (
                 self.crop.minimum_x <= point.x <= self.crop.maximum_x
                 and self.crop.minimum_y <= point.y <= self.crop.maximum_y
             ):
-                raise ValueError("hull point lies outside crop bounds")
+                raise ValueError("contour point lies outside crop bounds")
         if (
-            not isinstance(self.alpha_threshold, (int, float))
+            isinstance(self.alpha_threshold, bool)
+            or not isinstance(self.alpha_threshold, (int, float))
             or not isfinite(float(self.alpha_threshold))
             or not 0.0 <= float(self.alpha_threshold) <= 1.0
         ):
@@ -94,6 +104,40 @@ class CameraProjectionLayout:
             raise ValueError("padding_pixels must be a non-negative integer")
         if not isinstance(self.visible_pixel_count, int) or self.visible_pixel_count <= 0:
             raise ValueError("visible_pixel_count must be a positive integer")
+        if not isinstance(self.contour_mode, ProjectionContourMode):
+            raise TypeError("contour_mode must be ProjectionContourMode")
+        if not isinstance(self.source_contour_vertex_count, int):
+            raise TypeError("source_contour_vertex_count must be int")
+        if self.source_contour_vertex_count == 0:
+            object.__setattr__(
+                self,
+                "source_contour_vertex_count",
+                len(self.hull),
+            )
+        elif self.source_contour_vertex_count < len(self.hull):
+            raise ValueError(
+                "source_contour_vertex_count cannot be smaller than contour size"
+            )
+        if not isinstance(self.outer_component_count, int) or self.outer_component_count <= 0:
+            raise ValueError("outer_component_count must be a positive integer")
+        if (
+            isinstance(self.simplify_tolerance_pixels, bool)
+            or not isinstance(self.simplify_tolerance_pixels, (int, float))
+            or not isfinite(float(self.simplify_tolerance_pixels))
+            or float(self.simplify_tolerance_pixels) < 0.0
+        ):
+            raise ValueError(
+                "simplify_tolerance_pixels must be finite and non-negative"
+            )
+        if self.contour_fallback_reason is not None and (
+            not isinstance(self.contour_fallback_reason, str)
+            or not self.contour_fallback_reason.strip()
+        ):
+            raise ValueError("contour_fallback_reason must be non-empty str or None")
+
+    @property
+    def contour(self) -> Tuple[ProjectionPixelPoint, ...]:
+        return self.hull
 
     @property
     def cropped_width(self) -> int:
@@ -113,6 +157,18 @@ class CameraProjectionLayout:
         )
 
     @property
+    def concave(self) -> bool:
+        return any(
+            cross(
+                self.hull[index - 1],
+                point,
+                self.hull[(index + 1) % len(self.hull)],
+            )
+            < 0
+            for index, point in enumerate(self.hull)
+        )
+
+    @property
     def offset_pixels(self) -> tuple[float, float]:
         return (
             (self.crop.minimum_x + self.crop.maximum_x) / 2.0 - self.full_width / 2.0,
@@ -121,13 +177,14 @@ class CameraProjectionLayout:
 
     @property
     def triangle_indices(self) -> Tuple[ProjectionTriangle, ...]:
-        """Return the deterministic fan used by the Spine projection mesh."""
-
-        return triangulate_convex_hull(self.hull)
+        try:
+            return triangulate_simple_contour(self.hull)
+        except ProjectionContourError as exc:
+            raise CameraProjectionLayoutError(str(exc)) from exc
 
     def crop_local_point(self, point: ProjectionPixelPoint) -> tuple[int, int]:
         if point not in self.hull:
-            raise KeyError("point is not part of this layout hull")
+            raise KeyError("point is not part of this layout contour")
         return point.x - self.crop.minimum_x, point.y - self.crop.minimum_y
 
     def spine_uv(self, point: ProjectionPixelPoint) -> tuple[float, float]:
@@ -151,15 +208,32 @@ def _validate_dimensions(width: int, height: int) -> None:
         raise ValueError("height must be a positive integer")
 
 
-def _validate_layout_policy(alpha_threshold: float, padding_pixels: int) -> None:
+def _validate_layout_policy(
+    alpha_threshold: float,
+    padding_pixels: int,
+    contour_mode: ProjectionContourMode,
+    simplify_tolerance_pixels: float,
+) -> None:
     if (
-        not isinstance(alpha_threshold, (int, float))
+        isinstance(alpha_threshold, bool)
+        or not isinstance(alpha_threshold, (int, float))
         or not isfinite(float(alpha_threshold))
         or not 0.0 <= float(alpha_threshold) <= 1.0
     ):
         raise ValueError("alpha_threshold must be finite and in [0, 1]")
     if not isinstance(padding_pixels, int) or padding_pixels < 0:
         raise ValueError("padding_pixels must be a non-negative integer")
+    if not isinstance(contour_mode, ProjectionContourMode):
+        raise TypeError("contour_mode must be ProjectionContourMode")
+    if (
+        isinstance(simplify_tolerance_pixels, bool)
+        or not isinstance(simplify_tolerance_pixels, (int, float))
+        or not isfinite(float(simplify_tolerance_pixels))
+        or float(simplify_tolerance_pixels) < 0.0
+    ):
+        raise ValueError(
+            "simplify_tolerance_pixels must be finite and non-negative"
+        )
 
 
 def _validate_alpha_mask(
@@ -177,109 +251,6 @@ def _validate_alpha_mask(
         )
 
 
-def _cross(
-    origin: ProjectionPixelPoint,
-    first: ProjectionPixelPoint,
-    second: ProjectionPixelPoint,
-) -> int:
-    return (first.x - origin.x) * (second.y - origin.y) - (
-        first.y - origin.y
-    ) * (second.x - origin.x)
-
-
-def _signed_double_area(points: Tuple[ProjectionPixelPoint, ...]) -> int:
-    return sum(
-        first.x * second.y - second.x * first.y
-        for first, second in zip(points, points[1:] + points[:1])
-    )
-
-
-def _monotonic_convex_hull(
-    points: Iterable[ProjectionPixelPoint],
-) -> Tuple[ProjectionPixelPoint, ...]:
-    unique = tuple(sorted(set(points)))
-    if len(unique) < 3:
-        return unique
-
-    lower: list[ProjectionPixelPoint] = []
-    for point in unique:
-        while len(lower) >= 2 and _cross(lower[-2], lower[-1], point) <= 0:
-            lower.pop()
-        lower.append(point)
-
-    upper: list[ProjectionPixelPoint] = []
-    for point in reversed(unique):
-        while len(upper) >= 2 and _cross(upper[-2], upper[-1], point) <= 0:
-            upper.pop()
-        upper.append(point)
-    return tuple(lower[:-1] + upper[:-1])
-
-
-def _validate_strict_convex_hull(
-    points: Tuple[ProjectionPixelPoint, ...],
-) -> None:
-    if not isinstance(points, tuple) or len(points) < 3:
-        raise ValueError("hull must contain at least three points")
-    if not all(isinstance(point, ProjectionPixelPoint) for point in points):
-        raise TypeError("hull must contain ProjectionPixelPoint values")
-    if len(points) != len(set(points)):
-        raise ValueError("hull cannot contain duplicate points")
-    if _signed_double_area(points) <= 0:
-        raise ValueError("hull must be counter-clockwise and non-degenerate")
-
-    canonical = _monotonic_convex_hull(points)
-    if len(canonical) != len(points):
-        raise ValueError(
-            "hull must be strictly convex without collinear or interior vertices"
-        )
-    canonical_start = points.index(canonical[0])
-    rotated = points[canonical_start:] + points[:canonical_start]
-    if rotated != canonical:
-        raise ValueError(
-            "hull must follow one simple convex boundary without reflex or "
-            "self-intersecting edges"
-        )
-
-
-def triangulate_convex_hull(
-    points: Tuple[ProjectionPixelPoint, ...],
-) -> Tuple[ProjectionTriangle, ...]:
-    """Return a deterministic, non-degenerate fan for a strict CCW convex hull."""
-
-    _validate_strict_convex_hull(points)
-    triangles = tuple((0, index, index + 1) for index in range(1, len(points) - 1))
-    triangle_double_areas = tuple(
-        _cross(points[first], points[second], points[third])
-        for first, second, third in triangles
-    )
-    if any(area <= 0 for area in triangle_double_areas):
-        raise CameraProjectionLayoutError(
-            "convex hull fan contains a clockwise or degenerate triangle; "
-            f"triangle_areas2={triangle_double_areas}"
-        )
-    fan_double_area = sum(triangle_double_areas)
-    polygon_double_area = _signed_double_area(points)
-    if fan_double_area != polygon_double_area:
-        raise CameraProjectionLayoutError(
-            "convex hull fan does not cover the polygon exactly; "
-            f"polygon_area2={polygon_double_area}, fan_area2={fan_double_area}"
-        )
-    return triangles
-
-
-def convex_hull(
-    points: Iterable[ProjectionPixelPoint],
-) -> Tuple[ProjectionPixelPoint, ...]:
-    """Return a deterministic counter-clockwise convex hull without repeated endpoint."""
-
-    resolved = _monotonic_convex_hull(points)
-    if len(resolved) < 3 or _signed_double_area(resolved) <= 0:
-        raise CameraProjectionLayoutError(
-            "at least three non-collinear pixel-boundary points are required for a hull"
-        )
-    return resolved
-
-
 def _layout_from_union_mask(
     union_mask: bytearray,
     *,
@@ -289,6 +260,8 @@ def _layout_from_union_mask(
     padding_pixels: int,
     frame_count: int,
     visible_pixel_count: int,
+    contour_mode: ProjectionContourMode,
+    simplify_tolerance_pixels: float,
 ) -> CameraProjectionLayout:
     if frame_count <= 0:
         raise ValueError("at least one alpha mask must be accumulated")
@@ -301,33 +274,15 @@ def _layout_from_union_mask(
     minimum_y = height
     maximum_x = -1
     maximum_y = -1
-    boundary_points: list[ProjectionPixelPoint] = []
     for y in range(height):
         row_start = y * width
-        left: int | None = None
-        right: int | None = None
         for x in range(width):
             if not union_mask[row_start + x]:
                 continue
-            if left is None:
-                left = x
-            right = x
-        if left is None or right is None:
-            continue
-
-        right_exclusive = right + 1
-        minimum_x = min(minimum_x, left)
-        minimum_y = min(minimum_y, y)
-        maximum_x = max(maximum_x, right)
-        maximum_y = max(maximum_y, y)
-        boundary_points.extend(
-            (
-                ProjectionPixelPoint(left, y),
-                ProjectionPixelPoint(right_exclusive, y),
-                ProjectionPixelPoint(right_exclusive, y + 1),
-                ProjectionPixelPoint(left, y + 1),
-            )
-        )
+            minimum_x = min(minimum_x, x)
+            minimum_y = min(minimum_y, y)
+            maximum_x = max(maximum_x, x)
+            maximum_y = max(maximum_y, y)
 
     crop = ProjectionCropBounds(
         minimum_x=max(0, minimum_x - padding_pixels),
@@ -335,15 +290,30 @@ def _layout_from_union_mask(
         maximum_x=min(width, maximum_x + 1 + padding_pixels),
         maximum_y=min(height, maximum_y + 1 + padding_pixels),
     )
+    try:
+        contour = build_contour_from_mask(
+            union_mask,
+            width=width,
+            height=height,
+            mode=contour_mode,
+            simplify_tolerance_pixels=simplify_tolerance_pixels,
+        )
+    except ProjectionContourError as exc:
+        raise CameraProjectionLayoutError(str(exc)) from exc
     return CameraProjectionLayout(
         full_width=width,
         full_height=height,
         crop=crop,
-        hull=convex_hull(boundary_points),
+        hull=contour.points,
         alpha_threshold=float(alpha_threshold),
         padding_pixels=padding_pixels,
         frame_count=frame_count,
         visible_pixel_count=visible_pixel_count,
+        contour_mode=contour.mode,
+        source_contour_vertex_count=contour.source_vertex_count,
+        outer_component_count=contour.outer_component_count,
+        simplify_tolerance_pixels=float(simplify_tolerance_pixels),
+        contour_fallback_reason=contour.fallback_reason,
     )
 
 
@@ -355,14 +325,22 @@ class ProjectionAlphaUnionAccumulator:
     height: int
     alpha_threshold: float
     padding_pixels: int
+    contour_mode: ProjectionContourMode = ProjectionContourMode.SIMPLIFIED_CONCAVE
+    simplify_tolerance_pixels: float = 1.0
     _union_mask: bytearray = field(init=False, repr=False)
     _frame_count: int = field(init=False, default=0, repr=False)
     _visible_pixel_count: int = field(init=False, default=0, repr=False)
 
     def __post_init__(self) -> None:
         _validate_dimensions(self.width, self.height)
-        _validate_layout_policy(self.alpha_threshold, self.padding_pixels)
+        _validate_layout_policy(
+            self.alpha_threshold,
+            self.padding_pixels,
+            self.contour_mode,
+            self.simplify_tolerance_pixels,
+        )
         self.alpha_threshold = float(self.alpha_threshold)
+        self.simplify_tolerance_pixels = float(self.simplify_tolerance_pixels)
         self._union_mask = bytearray(self.width * self.height)
 
     @property
@@ -375,8 +353,6 @@ class ProjectionAlphaUnionAccumulator:
 
     @property
     def allocated_mask_bytes(self) -> int:
-        """Return the fixed union-buffer size, independent of accumulated frame count."""
-
         return len(self._union_mask)
 
     def add_mask(
@@ -385,8 +361,6 @@ class ProjectionAlphaUnionAccumulator:
         *,
         frame_index: int | None = None,
     ) -> int:
-        """Merge one frame and return the number of newly visible union pixels."""
-
         if frame_index is not None and (
             not isinstance(frame_index, int) or frame_index < 0
         ):
@@ -396,20 +370,16 @@ class ProjectionAlphaUnionAccumulator:
             expected_size=self.width * self.height,
             frame_index=frame_index,
         )
-
         newly_visible = 0
-        union_mask = self._union_mask
         for index, value in enumerate(alpha_mask):
-            if value and not union_mask[index]:
-                union_mask[index] = 1
+            if value and not self._union_mask[index]:
+                self._union_mask[index] = 1
                 newly_visible += 1
         self._frame_count += 1
         self._visible_pixel_count += newly_visible
         return newly_visible
 
     def build_layout(self) -> CameraProjectionLayout:
-        """Finalize the stable crop and hull without copying the union mask."""
-
         return _layout_from_union_mask(
             self._union_mask,
             width=self.width,
@@ -418,6 +388,8 @@ class ProjectionAlphaUnionAccumulator:
             padding_pixels=self.padding_pixels,
             frame_count=self._frame_count,
             visible_pixel_count=self._visible_pixel_count,
+            contour_mode=self.contour_mode,
+            simplify_tolerance_pixels=self.simplify_tolerance_pixels,
         )
 
 
@@ -428,13 +400,9 @@ def build_sequence_union_layout(
     height: int,
     alpha_threshold: float,
     padding_pixels: int,
+    contour_mode: ProjectionContourMode = ProjectionContourMode.SIMPLIFIED_CONCAVE,
+    simplify_tolerance_pixels: float = 1.0,
 ) -> CameraProjectionLayout:
-    """Compatibility wrapper that builds a layout from an existing mask tuple.
-
-    New render executors should feed ``ProjectionAlphaUnionAccumulator`` one frame at a time,
-    so memory remains ``O(width * height)`` instead of ``O(frame_count * width * height)``.
-    """
-
     if not isinstance(alpha_masks, tuple) or not alpha_masks:
         raise ValueError("alpha_masks must be a non-empty tuple")
     accumulator = ProjectionAlphaUnionAccumulator(
@@ -442,6 +410,8 @@ def build_sequence_union_layout(
         height=height,
         alpha_threshold=alpha_threshold,
         padding_pixels=padding_pixels,
+        contour_mode=contour_mode,
+        simplify_tolerance_pixels=simplify_tolerance_pixels,
     )
     for frame_index, alpha_mask in enumerate(alpha_masks):
         accumulator.add_mask(alpha_mask, frame_index=frame_index)
@@ -454,13 +424,13 @@ def build_full_frame_layout(
     *,
     frame_count: int = 1,
 ) -> CameraProjectionLayout:
-    """Compatibility layout used before a render-derived union is available."""
-
-    crop = ProjectionCropBounds(0, 0, width, height)
+    _validate_dimensions(width, height)
+    if not isinstance(frame_count, int) or frame_count <= 0:
+        raise ValueError("frame_count must be a positive integer")
     return CameraProjectionLayout(
         full_width=width,
         full_height=height,
-        crop=crop,
+        crop=ProjectionCropBounds(0, 0, width, height),
         hull=(
             ProjectionPixelPoint(0, 0),
             ProjectionPixelPoint(width, 0),
@@ -471,4 +441,25 @@ def build_full_frame_layout(
         padding_pixels=0,
         frame_count=frame_count,
         visible_pixel_count=width * height,
+        contour_mode=ProjectionContourMode.CONVEX_HULL,
+        source_contour_vertex_count=4,
+        outer_component_count=1,
+        simplify_tolerance_pixels=0.0,
     )
+
+
+__all__ = [
+    "CameraProjectionLayout",
+    "CameraProjectionLayoutError",
+    "ProjectionAlphaUnionAccumulator",
+    "ProjectionContourMode",
+    "ProjectionCropBounds",
+    "ProjectionPixelPoint",
+    "ProjectionTriangle",
+    "build_full_frame_layout",
+    "build_sequence_union_layout",
+    "convex_hull",
+    "simplify_concave_contour",
+    "triangulate_convex_hull",
+    "triangulate_simple_contour",
+]
