@@ -17,7 +17,10 @@ class FakePixels:
         self._values = tuple(values)
 
     def foreach_get(self, target):
-        target[:] = self._values
+        if len(target) != len(self._values):
+            raise ValueError("target length does not match fake pixel buffer")
+        for index, value in enumerate(self._values):
+            target[index] = value
 
 
 class FakeImage:
