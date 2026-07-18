@@ -10,6 +10,7 @@ from typing import Tuple
 from .camera_projection import TexturePlan
 from .projection_coverage import ProjectionCoveragePolicy
 from .projection_layout import ProjectionContourMode
+from .projection_output import ProjectionOutputPolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,18 +26,21 @@ class BakeExecutionSettings:
     )
     projection_contour_simplify_tolerance_pixels: float = 1.0
     projection_coverage_policy: ProjectionCoveragePolicy = ProjectionCoveragePolicy()
+    projection_output_policy: ProjectionOutputPolicy = ProjectionOutputPolicy()
 
     def __post_init__(self) -> None:
         if not isinstance(self.render_engine, str) or not self.render_engine.strip():
             raise ValueError("render_engine must be a non-empty string")
-        if not isinstance(self.samples, int) or self.samples < 1:
+        if not isinstance(self.samples, int) or isinstance(self.samples, bool) or self.samples < 1:
             raise ValueError("samples must be a positive integer")
         if not isinstance(self.use_clear, bool):
             raise TypeError("use_clear must be bool")
         if not isinstance(self.generated_color, tuple) or len(self.generated_color) != 4:
             raise ValueError("generated_color must contain four values")
         if not all(
-            isinstance(value, (int, float)) and isfinite(float(value))
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and isfinite(float(value))
             for value in self.generated_color
         ):
             raise ValueError("generated_color must contain finite numeric values")
@@ -79,6 +83,10 @@ class BakeExecutionSettings:
         ):
             raise TypeError(
                 "projection_coverage_policy must be ProjectionCoveragePolicy"
+            )
+        if not isinstance(self.projection_output_policy, ProjectionOutputPolicy):
+            raise TypeError(
+                "projection_output_policy must be ProjectionOutputPolicy"
             )
 
 
