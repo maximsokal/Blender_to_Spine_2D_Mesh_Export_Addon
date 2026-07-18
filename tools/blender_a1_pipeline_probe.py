@@ -76,10 +76,23 @@ def _scenario(payload: Mapping[str, Any]) -> str:
 def _expected_calls(scenario: str, backend: str) -> tuple[tuple[str, str], ...]:
     if backend == "LEGACY":
         return ()
-    shared = (
+    object_preparation = (
         ("blender_adapter.a1_object_preparation", "prepare_a1_object"),
+        (
+            "blender_adapter.a1_source_geometry_preparation",
+            "prepare_a1_source_geometry",
+        ),
+        ("blender_adapter.a1_uv_preparation", "prepare_a1_uv"),
+        ("blender_adapter.a1_texture_planning", "prepare_a1_texture_plan"),
+        ("blender_adapter.a1_document_preparation", "prepare_a1_document"),
+    )
+    shared = (
+        *object_preparation,
         ("blender_adapter.texture_executor", "stage_texture_plan_outputs"),
-        ("blender_adapter.a1_projection_finalization", "finalize_prepared_camera_projection"),
+        (
+            "blender_adapter.a1_projection_finalization",
+            "finalize_prepared_camera_projection",
+        ),
         ("infrastructure.atomic_files", "AtomicFileTransaction.commit"),
     )
     if scenario == "single":
@@ -93,14 +106,20 @@ def _expected_calls(scenario: str, backend: str) -> tuple[tuple[str, str], ...]:
             ("blender_adapter.a1_ui_bridge", "export_selected_objects_a1"),
             ("blender_adapter.a1_mixed_object_output", "export_a1_mixed_object"),
             ("blender_adapter.a1_mixed_object_export", "prepare_a1_mixed_object"),
-            ("blender_adapter.a1_multi_object_composition", "compose_a1_multi_object_document"),
+            (
+                "blender_adapter.a1_multi_object_composition",
+                "compose_a1_multi_object_document",
+            ),
             *shared,
         )
     return (
         ("blender_adapter.a1_ui_bridge", "export_selected_objects_a1"),
         ("blender_adapter.a1_multi_object_output", "export_a1_multi_object"),
         ("blender_adapter.a1_multi_object_export", "prepare_a1_multi_object"),
-        ("blender_adapter.a1_multi_object_composition", "compose_a1_multi_object_document"),
+        (
+            "blender_adapter.a1_multi_object_composition",
+            "compose_a1_multi_object_document",
+        ),
         *shared,
     )
 
