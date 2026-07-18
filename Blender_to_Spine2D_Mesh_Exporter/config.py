@@ -1,237 +1,256 @@
-# config.py
 # pylint: disable=import-error
-"""
-Blender to Spine2D Mesh Exporter
-Copyright (c) 2025 Maxim Sokolenko
+"""Central Blender settings, per-module logging, and diagnostics configuration."""
 
-This file is part of Blender to Spine2D Mesh Exporter.
+from __future__ import annotations
 
-Blender to Spine2D Mesh Exporter is free software: you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation, either version 3 of the License,
-or (at your option) any later version.
-
-Blender to Spine2D Mesh Exporter is distributed in the hope that it will
-be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along
-with Blender to Spine2D Mesh Exporter. If not, see <https://www.gnu.org/licenses/>.
-This file serves as the central configuration module for the 'Blender_to_Spine2D_Mesh_Exporter' addon.
-It is responsible for several key functions:
-1.  Logging Setup: It configures a custom logging system for the entire addon, with specific levels for different modules, using a custom formatter to shorten logger names for readability.
-2.  Default Parameters: It defines global constants and default values for various addon operations, including scaling factors, texture dimensions, and texture baking settings (e.g., margin, format, UV map names).
-3.  Blender UI Properties: It defines a list of custom properties (bpy.props) and registers them with Blender's Scene object (bpy.types.Scene). This allows users to access and modify addon settings directly from the Blender UI.
-4.  Dynamic Configuration: It includes getter and setter functions to handle dynamic property updates, such as validating texture sizes and determining the default output directory based on the current .blend file's location.
-
-ATTENTION: - This file is a critical dependency for the entire addon. Any changes to the property names, global constants (like BAKE_MARGIN or BAKE_ACTIVE_UV_NAME), or the logging setup will have a direct impact on other modules, including UI, baking, and export logic. The register() and unregister() functions are essential for correctly integrating the addon's settings into Blender.
-Author: Maxim Sokolenko
-"""
-import os
-import bpy
 import logging
 import logging.config
+import os
+from pathlib import Path
+from typing import Any
+
+import bpy
+
+from .infrastructure.export_diagnostics import configure_export_diagnostics
+from .infrastructure.logging_registry import (
+    discover_python_modules,
+    merge_module_levels,
+    resolve_logger_name,
+)
+
+
+PACKAGE_LOGGER_ROOT = (__package__ or "Blender_to_Spine2D_Mesh_Exporter").strip()
+ADDON_DISPLAY_NAME = PACKAGE_LOGGER_ROOT.rsplit(".", 1)[-1]
+_PACKAGE_DIRECTORY = Path(__file__).resolve().parent
+_LOGGING_PREFERENCES_SYNCING = False
 
 
 class ShortNameFormatter(logging.Formatter):
-    def format(self, record):
-        record.name = record.name.split(".")[-1]
+    """Display a readable relative module path without mutating LogRecord.name."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        full_name = str(record.name)
+        prefix = PACKAGE_LOGGER_ROOT + "."
+        if full_name == PACKAGE_LOGGER_ROOT:
+            short_name = ADDON_DISPLAY_NAME
+        elif full_name.startswith(prefix):
+            short_name = full_name[len(prefix) :]
+        else:
+            short_name = full_name
+        record.short_name = short_name
         return super().format(record)
 
 
 logger = logging.getLogger(__name__)
 
 
-def _update_ui_for_paths(self, context):
+def _update_ui_for_paths(_self: Any, context: bpy.types.Context) -> None:
     """Force UI refresh for path-dependent labels."""
-    for window in context.window_manager.windows:
-        for area in window.screen.areas:
-            if area.type == "VIEW_3D":
+
+    window_manager = getattr(context, "window_manager", None)
+    for window in getattr(window_manager, "windows", ()):
+        screen = getattr(window, "screen", None)
+        for area in getattr(screen, "areas", ()):
+            if getattr(area, "type", None) == "VIEW_3D":
                 area.tag_redraw()
 
 
-def _update_logging_config(self, context):
-    """
-    Callback function when a log level is changed in the UI.
-    'self' refers to the LoggingModuleSettings instance that was modified.
-    """
+def _update_logging_config(_self: Any, _context: bpy.types.Context) -> None:
+    """Apply one preference change without overwriting other module levels."""
+
+    if _LOGGING_PREFERENCES_SYNCING:
+        return
     try:
-        # Get the addon's preferences to access all logging settings
-        prefs = context.preferences.addons[__package__].preferences
-        log_prefs = prefs.logging_settings
-
-        # Check if 'self' is valid before accessing its properties.
-        # If the main "Blender_to_Spine2D_Mesh_Exporter" logger was changed, apply its level to all other modules.
-        if self and self.name == "Blender_to_Spine2D_Mesh_Exporter":
-            new_level = self.level
-            # Iterate through all module settings and update their level.
-            for module_setting in log_prefs.modules:
-                if module_setting.name != "Blender_to_Spine2D_Mesh_Exporter":
-                    module_setting.level = new_level
-
-        # Always call the main update function to apply the new configuration.
-        # This will now be reached in all successful cases.
-        prefs.update_logging_config()
-
-    except (AttributeError, KeyError):
-        # This can happen during Blender's startup/shutdown, so we fail gracefully.
-        logger.warning("Could not find addon preferences to update logging config.")
+        setup_logging()
+    except Exception:
+        logger.exception("Unable to apply updated logging/diagnostics preferences")
 
 
 class LoggingModuleSettings(bpy.types.PropertyGroup):
-    """Logging settings for a single module"""
+    """Persisted logging level for one concrete Python module/file."""
 
     name: bpy.props.StringProperty(name="Module Name")
     level: bpy.props.EnumProperty(
         name="Log Level",
-        description="Logging level for this module",
-        items=[
-            ("ERROR", "Error", "Errors only (recommended)"),
+        description="Logging level for this exact Python module",
+        items=(
+            ("ERROR", "Error", "Errors only"),
             ("WARNING", "Warning", "Warnings and errors"),
             ("INFO", "Info", "Informational messages"),
-            ("DEBUG", "Debug", "All messages for debugging"),
-        ],
+            ("DEBUG", "Debug", "Detailed diagnostics for this module"),
+        ),
         default="ERROR",
         update=_update_logging_config,
     )
 
 
 class AddonLoggingSettings(bpy.types.PropertyGroup):
-    """Global addon logging settings"""
+    """Logging and failed-work diagnostics settings stored in addon preferences."""
 
     enable_file_logging: bpy.props.BoolProperty(
         name="Enable file logging",
-        description="Write all addon logs to the specified file",
+        description="Write addon logs to the configured file",
         default=False,
-        update=_update_logging_config,  # CHANGE: Using a named function
+        update=_update_logging_config,
     )
     log_file_path: bpy.props.StringProperty(
         name="Log file path",
-        description="File for saving logs. Will be created if it does not exist",
+        description="File used for addon logs",
         subtype="FILE_PATH",
         default="",
-        update=_update_logging_config,  # CHANGE: Using a named function
+        update=_update_logging_config,
+    )
+    module_filter: bpy.props.StringProperty(
+        name="Filter modules",
+        description="Show only module paths containing this text",
+        default="",
+    )
+    preserve_failed_work_files: bpy.props.BoolProperty(
+        name="Preserve failed work files",
+        description=(
+            "Keep .spine2d-stage-* files after a failed export for diagnostics. "
+            "Disabled by default so failed working files are removed automatically"
+        ),
+        default=False,
+        update=_update_logging_config,
+    )
+    recover_stale_work_files: bpy.props.BoolProperty(
+        name="Recover stale work files",
+        description=(
+            "On the next export, restore interrupted backups and remove abandoned "
+            "stage files unless preservation is enabled"
+        ),
+        default=True,
+        update=_update_logging_config,
     )
     modules: bpy.props.CollectionProperty(type=LoggingModuleSettings)
 
 
-# =============================================================================
+def discover_logging_modules() -> tuple[str, ...]:
+    """Discover every addon Python module, including nested Rewrite modules."""
+
+    return discover_python_modules(
+        _PACKAGE_DIRECTORY,
+        root_display_name=ADDON_DISPLAY_NAME,
+    )
 
 
-def _setup_default_logging():
+def synchronize_logging_preferences(prefs: Any) -> tuple[str, ...]:
+    """Reconcile persisted levels with the current source tree without losing choices."""
+
+    global _LOGGING_PREFERENCES_SYNCING
+    logging_settings = getattr(prefs, "logging_settings", None)
+    if logging_settings is None:
+        return ()
+
+    _LOGGING_PREFERENCES_SYNCING = True
+    try:
+        if not logging_settings.log_file_path:
+            logging_settings.log_file_path = os.path.join(
+                os.path.expanduser("~"),
+                f"{ADDON_DISPLAY_NAME}.log",
+            )
+
+        existing = {
+            str(item.name): str(item.level)
+            for item in getattr(logging_settings, "modules", ())
+            if str(getattr(item, "name", "")).strip()
+        }
+        discovered = discover_logging_modules()
+        merged = merge_module_levels(
+            discovered,
+            existing,
+            package_root=PACKAGE_LOGGER_ROOT,
+            root_display_name=ADDON_DISPLAY_NAME,
+        )
+        logging_settings.modules.clear()
+        for resolved in merged:
+            item = logging_settings.modules.add()
+            item.name = resolved.module_name
+            item.level = resolved.level
+    finally:
+        _LOGGING_PREFERENCES_SYNCING = False
+    return discovered
+
+
+def _logging_formatter_config() -> dict[str, object]:
+    return {
+        "()": ShortNameFormatter,
+        "format": "%(asctime)s - %(short_name)s - %(levelname)s - %(message)s",
+        "datefmt": "%H:%M:%S",
+    }
+
+
+def _setup_default_logging() -> None:
+    """Install an ERROR-only package logger before preferences become available."""
+
     logging_config = {
         "version": 1,
         "disable_existing_loggers": False,
-        "formatters": {
-            "standard": {
-                "()": ShortNameFormatter,
-                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-                "datefmt": "%H:%M:%S",
-            }
-        },
+        "formatters": {"standard": _logging_formatter_config()},
         "handlers": {
             "console": {
                 "class": "logging.StreamHandler",
                 "formatter": "standard",
-                "level": "ERROR",
+                "level": "DEBUG",
             }
         },
         "loggers": {
-            "Blender_to_Spine2D_Mesh_Exporter": {
+            PACKAGE_LOGGER_ROOT: {
                 "handlers": ["console"],
                 "level": "ERROR",
                 "propagate": False,
-            },
-            "bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.config": {
-                "handlers": ["console"],
-                "level": "ERROR",
-                "propagate": False,
-            },
-            "bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.json_export": {
-                "handlers": ["console"],
-                "level": "ERROR",
-                "propagate": False,
-            },
-            "bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.json_merger": {
-                "handlers": ["console"],
-                "level": "ERROR",
-                "propagate": False,
-            },
-            "bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.multi_object_export": {
-                "handlers": ["console"],
-                "level": "ERROR",
-                "propagate": False,
-            },
-            "bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.main": {
-                "handlers": ["console"],
-                "level": "ERROR",
-                "propagate": False,
-            },
-            "bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.plane_cut": {
-                "handlers": ["console"],
-                "level": "ERROR",
-                "propagate": False,
-            },
-            "bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.seam_marker": {
-                "handlers": ["console"],
-                "level": "ERROR",
-                "propagate": False,
-            },
-            "bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.texture_baker_integration": {
-                "handlers": ["console"],
-                "level": "ERROR",
-                "propagate": False,
-            },
-            "bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.texture_baker": {
-                "handlers": ["console"],
-                "level": "ERROR",
-                "propagate": False,
-            },
-            "bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.ui": {
-                "handlers": ["console"],
-                "level": "ERROR",
-                "propagate": False,
-            },
-            "bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.utils": {
-                "handlers": ["console"],
-                "level": "ERROR",
-                "propagate": False,
-            },
-            "bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.uv_operations": {
-                "handlers": ["console"],
-                "level": "ERROR",
-                "propagate": False,
-            },
+            }
         },
     }
     try:
         logging.config.dictConfig(logging_config)
-        logger.debug(
-            "Default logging configuration applied successfully from config.py."
-        )
-    except Exception as e:
-        print("Error setting up default logging in config.py:", e)
+    except Exception as exc:
+        print(f"Error setting up default addon logging: {exc}")
 
 
-def setup_logging():
+def _addon_preferences() -> Any | None:
     try:
-        prefs = bpy.context.preferences.addons[__package__].preferences
-        log_prefs = prefs.logging_settings
-    except (AttributeError, KeyError):
+        addons = bpy.context.preferences.addons
+    except (AttributeError, RuntimeError):
+        return None
+    candidates = (
+        PACKAGE_LOGGER_ROOT,
+        __package__,
+        ADDON_DISPLAY_NAME,
+    )
+    for key in candidates:
+        if key and key in addons:
+            return addons[key].preferences
+    for key in addons.keys():
+        if str(key).endswith(ADDON_DISPLAY_NAME):
+            return addons[key].preferences
+    return None
+
+
+def setup_logging() -> None:
+    """Apply exact per-file levels and the failed-work diagnostics policy."""
+
+    prefs = _addon_preferences()
+    if prefs is None or not hasattr(prefs, "logging_settings"):
+        configure_export_diagnostics(
+            preserve_failed_work_files=False,
+            recover_stale_work_files=True,
+        )
         _setup_default_logging()
         return
 
-    logging_config = {
+    synchronize_logging_preferences(prefs)
+    log_prefs = prefs.logging_settings
+    configure_export_diagnostics(
+        preserve_failed_work_files=bool(log_prefs.preserve_failed_work_files),
+        recover_stale_work_files=bool(log_prefs.recover_stale_work_files),
+    )
+
+    logging_config: dict[str, object] = {
         "version": 1,
         "disable_existing_loggers": False,
-        "formatters": {
-            "standard": {
-                "()": ShortNameFormatter,
-                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-                "datefmt": "%H:%M:%S",
-            }
-        },
+        "formatters": {"standard": _logging_formatter_config()},
         "handlers": {
             "console": {
                 "class": "logging.StreamHandler",
@@ -241,149 +260,120 @@ def setup_logging():
         },
         "loggers": {},
     }
-
     active_handlers = ["console"]
 
     if log_prefs.enable_file_logging and log_prefs.log_file_path:
         try:
-            filepath = bpy.path.abspath(log_prefs.log_file_path)
-            if filepath:
-                log_dir = os.path.dirname(filepath)
-                if not os.path.exists(log_dir):
-                    os.makedirs(log_dir, exist_ok=True)
-                logging_config["handlers"]["file"] = {
-                    "class": "logging.FileHandler",
-                    "filename": filepath,
-                    "formatter": "standard",
-                    "level": "DEBUG",
-                    "encoding": "utf-8",
-                }
-                active_handlers.append("file")
-        except Exception as e:
-            logger.error(f"Invalid log file path: {e}")
-
-    if hasattr(log_prefs, "modules"):
-        for module_setting in log_prefs.modules:
-            if module_setting.name == "Blender_to_Spine2D_Mesh_Exporter":
-                logger_name = "Blender_to_Spine2D_Mesh_Exporter"
-            else:
-                logger_name = f"bl_ext.user_default.Blender_to_Spine2D_Mesh_Exporter.{module_setting.name}"
-
-            logging_config["loggers"][logger_name] = {
-                "handlers": active_handlers,
-                "level": module_setting.level,
-                "propagate": False,
+            filepath = Path(bpy.path.abspath(log_prefs.log_file_path)).expanduser()
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            logging_config["handlers"]["file"] = {
+                "class": "logging.FileHandler",
+                "filename": str(filepath),
+                "formatter": "standard",
+                "level": "DEBUG",
+                "encoding": "utf-8",
             }
+            active_handlers.append("file")
+        except Exception:
+            logger.exception("Invalid log file path: %s", log_prefs.log_file_path)
 
+    logger_configs: dict[str, object] = logging_config["loggers"]
+    for module_setting in log_prefs.modules:
+        runtime_name = resolve_logger_name(
+            module_setting.name,
+            package_root=PACKAGE_LOGGER_ROOT,
+            root_display_name=ADDON_DISPLAY_NAME,
+        )
+        logger_configs[runtime_name] = {
+            "handlers": active_handlers,
+            "level": module_setting.level,
+            "propagate": False,
+        }
+
+    logger_configs.setdefault(
+        PACKAGE_LOGGER_ROOT,
+        {
+            "handlers": active_handlers,
+            "level": "ERROR",
+            "propagate": False,
+        },
+    )
     try:
         logging.config.dictConfig(logging_config)
-    except Exception as e:
-        print(f"Error applying user logging config: {e}")
+    except Exception as exc:
+        print(f"Error applying user logging config: {exc}")
         _setup_default_logging()
 
-
-logger.debug("[LOG] Loading config.py")
 
 SCALING_FACTOR_WIDTH = 1.0
 SCALING_FACTOR_LENGTH = 1.0
 SCALING_FACTOR_HEIGHT = 1.0
-
 UNIFORM_SCALE_MODE = "average"
-
-
-def calc_uniform_scale(
-    texture_width: float, texture_height: float, mode: str = UNIFORM_SCALE_MODE
-) -> float:
-    """
-    Returns a uniform scale factor based on the chosen strategy.
-    """
-    try:
-        w = float(texture_width)
-        h = float(texture_height)
-    except Exception:
-        w = h = 1.0
-    if mode == "max":
-        return max(w, h)
-    if mode == "min":
-        return min(w, h)
-    return (w + h) / 2.0
-
-
 REFERENCE_SCALE_MODE = "pre_unwrap"
 FIXED_PIXELS_PER_BU = 100
 TEXTURE_WIDTH = 1024
 TEXTURE_HEIGHT = 1024
 SEQUENCE_FRAME_DIGITS = 4
 SEQUENCE_FRAME_DELAY = 0.0333
-
-# Baking defaults. These values were previously hard‑coded in
-# texture_baker_integration.py.  Moving them to the configuration file
-# allows end‑users to adjust baking parameters without modifying code.
 BAKE_MARGIN: int = 4
 BAKE_TEXTURE_FORMAT: str = "PNG"
-# The name of the UV layer used when baking into a texture.  Should
-# correspond to the UV map prepared for texturing the target object.
 BAKE_ACTIVE_UV_NAME: str = "UVMap_for_texturing"
 
 
-# --- Property Definitions ---
+def calc_uniform_scale(
+    texture_width: float,
+    texture_height: float,
+    mode: str = UNIFORM_SCALE_MODE,
+) -> float:
+    try:
+        width = float(texture_width)
+        height = float(texture_height)
+    except (TypeError, ValueError):
+        width = height = 1.0
+    if mode == "max":
+        return max(width, height)
+    if mode == "min":
+        return min(width, height)
+    return (width + height) / 2.0
 
 
-def set_frames_for_render(self, value):
-    max_f = getattr(bpy.context.scene, "frame_end", 0)
-    iv = max(0, int(value))
-    self["spine2d_frames_for_render"] = min(iv, max_f)
+def set_frames_for_render(self: Any, value: int) -> None:
+    max_frame = int(getattr(bpy.context.scene, "frame_end", 0))
+    self["spine2d_frames_for_render"] = min(max(0, int(value)), max_frame)
 
 
-def get_frames_for_render(self):
+def get_frames_for_render(self: Any) -> int:
     return int(self.get("spine2d_frames_for_render", 0))
 
 
-def get_default_output_dir():
-    """
-    Returns the directory of the saved .blend file, or the user's home directory.
-    """
+def get_default_output_dir() -> str:
     try:
-        fp = getattr(bpy.data, "filepath", None)
-        if isinstance(fp, str) and fp:
-            return os.path.dirname(fp)
-    except Exception as e:
-        logger.error(f"[ERROR] Could not get bpy.data.filepath: {e}")
+        filepath = getattr(bpy.data, "filepath", None)
+        if isinstance(filepath, str) and filepath:
+            return os.path.dirname(filepath)
+    except Exception:
+        logger.exception("Could not resolve bpy.data.filepath")
     return os.path.expanduser("~")
 
 
-def set_texture_size(self, value):
-    """
-    Setter for Scene.spine2d_texture_size property.
-    """
+def set_texture_size(self: Any, value: int) -> None:
+    global TEXTURE_WIDTH, TEXTURE_HEIGHT
     try:
-        if value < 64:
-            value = 64
-        elif value > 4096:
-            value = 4096
-        if value % 2 != 0:
-            value = (
-                value - 1
-                if (value - (value - 1)) <= ((value + 1) - value)
-                else value + 1
-            )
-        self["spine2d_texture_size"] = value
-        global TEXTURE_WIDTH, TEXTURE_HEIGHT
-        TEXTURE_WIDTH = value
-        TEXTURE_HEIGHT = value
-        logger.debug(f"[set_texture_size] Texture size set to = {value}")
-    except Exception as e:
-        logger.error(f"[ERROR] set_texture_size: {e}")
+        resolved = min(4096, max(64, int(value)))
+        if resolved % 2:
+            resolved -= 1
+        self["spine2d_texture_size"] = resolved
+        TEXTURE_WIDTH = resolved
+        TEXTURE_HEIGHT = resolved
+        logger.debug("Texture size set to %s", resolved)
+    except (TypeError, ValueError):
+        logger.exception("Unable to set texture size from %r", value)
 
 
-def get_texture_size(self):
-    """
-    Getter for Scene.spine2d_texture_size property.
-    """
-    return self.get("spine2d_texture_size", 1024)
+def get_texture_size(self: Any) -> int:
+    return int(self.get("spine2d_texture_size", 1024))
 
 
-# List of properties to register/unregister
 PROPERTIES = [
     (
         "spine2d_angle_limit",
@@ -400,10 +390,10 @@ PROPERTIES = [
         bpy.props.EnumProperty(
             name="Seam Maker",
             description="Seam placement mode",
-            items=[
+            items=(
                 ("AUTO", "Auto", "Automatic placement"),
                 ("CUSTOM", "Custom", "Use user-defined seams"),
-            ],
+            ),
             default="AUTO",
         ),
     ),
@@ -421,7 +411,7 @@ PROPERTIES = [
         "spine2d_texture_size",
         bpy.props.IntProperty(
             name="Texture size",
-            description="Texture dimensions (power of 2, from 64 to 4096)",
+            description="Texture dimensions from 64 to 4096",
             get=get_texture_size,
             set=set_texture_size,
         ),
@@ -447,14 +437,25 @@ PROPERTIES = [
 ]
 
 
-def register():
-    logger.debug("[LOG] Registering config.py properties")
+def register() -> None:
+    logger.debug("Registering config.py properties")
     for name, prop in PROPERTIES:
         setattr(bpy.types.Scene, name, prop)
 
 
-def unregister():
-    logger.debug("[LOG] Unregistering config.py properties")
-    for name, _ in PROPERTIES:
+def unregister() -> None:
+    logger.debug("Unregistering config.py properties")
+    for name, _prop in PROPERTIES:
         if hasattr(bpy.types.Scene, name):
             delattr(bpy.types.Scene, name)
+
+
+__all__ = [
+    "ADDON_DISPLAY_NAME",
+    "AddonLoggingSettings",
+    "LoggingModuleSettings",
+    "PACKAGE_LOGGER_ROOT",
+    "discover_logging_modules",
+    "setup_logging",
+    "synchronize_logging_preferences",
+]
