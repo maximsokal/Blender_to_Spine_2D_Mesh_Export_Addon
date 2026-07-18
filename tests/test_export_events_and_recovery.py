@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -62,6 +63,54 @@ def test_recovery_removes_stale_stage_and_restores_missing_final_backup(tmp_path
     assert (tmp_path / "result.json").read_text(encoding="utf-8") == "previous"
     assert not stale_stage.exists()
     assert not backup.exists()
+
+
+def test_recovery_does_not_delete_work_file_owned_by_a_live_process(tmp_path: Path):
+    live_stage = tmp_path / (
+        f".result.spine2d-stage-{os.getpid()}-anothertransaction.json"
+    )
+    live_stage.write_text("active", encoding="utf-8")
+
+    report = recover_stale_atomic_work_files(
+        tmp_path,
+        preserve_failed_work_files=False,
+    )
+
+    assert live_stage.exists()
+    assert live_stage not in report.removed_paths
+
+
+def test_backup_cleanup_failure_does_not_invalidate_installed_outputs(
+    tmp_path: Path,
+    monkeypatch,
+):
+    dispatcher = ExportEventDispatcher()
+    events = []
+    dispatcher.subscribe(events.append)
+    final_path = tmp_path / "result.json"
+    final_path.write_text("old", encoding="utf-8")
+    transaction = AtomicFileTransaction(
+        preserve_failed_work_files=False,
+        recover_stale_work_files=False,
+        dispatcher=dispatcher,
+    )
+    reservation = transaction.reserve(final_path)
+    reservation.staged_path.write_text("new", encoding="utf-8")
+
+    real_unlink = Path.unlink
+
+    def fail_backup_unlink(path: Path, *args, **kwargs):
+        if ".spine2d-backup-" in path.name:
+            raise OSError("forced backup cleanup failure")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_backup_unlink)
+    committed = transaction.commit()
+
+    assert committed == (final_path.resolve(),)
+    assert final_path.read_text(encoding="utf-8") == "new"
+    assert transaction.committed
+    assert ExportEventKind.CLEANUP_FAILED in tuple(event.kind for event in events)
 
 
 def test_dispatcher_reports_transaction_events(tmp_path: Path):
