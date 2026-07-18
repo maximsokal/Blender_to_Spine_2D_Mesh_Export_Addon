@@ -4,15 +4,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 import logging
-from typing import Any, Mapping, Tuple
+from typing import Any, Tuple
 
 from ..application import (
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
     A1MultiObjectStage,
-    ExportIssue,
     ExportResult,
-    IssueSeverity,
     apply_grouped_camera_overlay,
 )
 from ..domain.spine import (
@@ -37,7 +35,7 @@ from .a1_multi_object_export import (
     A1MultiObjectSource,
     record_object_statistics,
 )
-from .a1_object_preparation import StatisticsValue
+from .a1_multi_object_result import build_multi_object_failure_result
 from .a1_projection_finalization import finalize_prepared_camera_projection
 from .grouped_camera_projection_executor import (
     stage_grouped_camera_projection_outputs,
@@ -48,45 +46,6 @@ from .grouped_camera_projection_policy import (
 from .texture_executor import stage_texture_plan_outputs
 
 logger = logging.getLogger(__name__)
-
-
-def _failure_result(
-    *,
-    stage: A1MultiObjectStage,
-    exc: Exception,
-    statistics: Mapping[str, StatisticsValue],
-    warnings: Tuple[ExportIssue, ...],
-    component_id: str | None = None,
-    object_id: str | None = None,
-    object_stage: str | None = None,
-) -> ExportResult:
-    issue_context: dict[str, object] = {"exception_type": type(exc).__name__}
-    if component_id is not None:
-        issue_context["component_id"] = component_id
-    if object_stage is not None:
-        issue_context["object_stage"] = object_stage
-    logger.exception(
-        "A1 mixed output failed at %s (component=%s, object=%s)",
-        stage.value,
-        component_id,
-        object_id,
-    )
-    return ExportResult(
-        success=False,
-        issues=warnings
-        + (
-            ExportIssue(
-                severity=IssueSeverity.ERROR,
-                stage=stage.value,
-                code=stage.error_code,
-                message=str(exc) or type(exc).__name__,
-                object_id=object_id,
-                technical_details=f"{type(exc).__name__}: {exc}",
-                context=issue_context,
-            ),
-        ),
-        statistics=dict(statistics),
-    )
 
 
 def _standalone_settings(
@@ -144,7 +103,9 @@ def export_a1_mixed_object(
             scene=scene,
         )
     except A1MultiObjectPreparationError as exc:
-        return _failure_result(
+        return build_multi_object_failure_result(
+            logger=logger,
+            operation="A1 mixed-object output",
             stage=exc.stage,
             exc=exc.cause,
             statistics=exc.statistics,
@@ -154,7 +115,9 @@ def export_a1_mixed_object(
             object_stage=exc.object_stage,
         )
     except Exception as exc:
-        return _failure_result(
+        return build_multi_object_failure_result(
+            logger=logger,
+            operation="A1 mixed-object output",
             stage=A1MultiObjectStage.VALIDATE_REQUEST,
             exc=exc,
             statistics={},
@@ -326,7 +289,9 @@ def export_a1_mixed_object(
             statistics=statistics,
         )
     except Exception as exc:
-        return _failure_result(
+        return build_multi_object_failure_result(
+            logger=logger,
+            operation="A1 mixed-object output",
             stage=stage,
             exc=exc,
             statistics=statistics,
