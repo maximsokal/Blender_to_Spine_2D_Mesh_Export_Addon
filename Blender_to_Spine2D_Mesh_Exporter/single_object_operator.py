@@ -7,12 +7,13 @@ from typing import Set
 
 import bpy
 
-from . import config, json_export, main as legacy_main
+from . import config
 from .blender_adapter.a1_ui_bridge import export_active_object_a1
 from .config import get_texture_size
+from .legacy_loader import load_legacy_single_backend
+
 
 logger = logging.getLogger(__name__)
-
 SINGLE_BACKEND_PROPERTY = "spine2d_single_export_backend"
 
 
@@ -62,17 +63,17 @@ class OBJECT_OT_SaveUVAsJSON(bpy.types.Operator):
     def _execute_legacy(self, context: bpy.types.Context) -> Set[str]:
         obj = self._active_mesh(context)
         width, height = self._normalized_texture_size(context.scene)
+        backend = load_legacy_single_backend()
 
-        # Preserve the old operator's synchronized global constants. The legacy
-        # pipeline imports these values in several modules during add-on startup.
-        legacy_main.TEXTURE_WIDTH = width
-        legacy_main.TEXTURE_HEIGHT = height
+        # Preserve the old synchronized globals only after explicit Legacy selection.
+        backend.main.TEXTURE_WIDTH = width
+        backend.main.TEXTURE_HEIGHT = height
         config.TEXTURE_WIDTH = width
         config.TEXTURE_HEIGHT = height
-        json_export.TEXTURE_WIDTH = width
-        json_export.TEXTURE_HEIGHT = height
+        backend.json_export.TEXTURE_WIDTH = width
+        backend.json_export.TEXTURE_HEIGHT = height
 
-        output_path = legacy_main.save_uv_as_json(
+        output_path = backend.main.save_uv_as_json(
             obj,
             width,
             height,
