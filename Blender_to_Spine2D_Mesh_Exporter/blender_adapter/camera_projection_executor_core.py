@@ -12,6 +12,7 @@ from ..domain.baking import (
     BakeExecutionResult,
     BakeExecutionSettings,
     CameraProjectionPlan,
+    resolve_projection_output_policy,
 )
 from ..domain.baking.projection_layout import (
     CameraProjectionLayout,
@@ -75,6 +76,10 @@ def _render_to_reservations(
         scene=scene,
     )
     resolved = require_reservations(plan, reservations)
+    output_policy = resolve_projection_output_policy(
+        execution_settings.projection_output_policy,
+        plan.settings.texture_format,
+    )
     alpha_threshold = float(execution_settings.projection_alpha_threshold)
     union_accumulator = (
         ProjectionAlphaUnionAccumulator(
@@ -107,11 +112,15 @@ def _render_to_reservations(
                 reservation.staged_path,
             )
             logger.info(
-                "Rendering B4 projection '%s' frame %d/%d camera='%s'",
+                "Rendering B4 projection '%s' frame %d/%d camera='%s' "
+                "dynamic_range=%s tone_mapping=%s alpha=%s",
                 plan.source_object_id,
                 task.task_index + 1,
                 len(plan.frame_tasks),
                 plan.camera_object_id,
+                output_policy.dynamic_range.value,
+                output_policy.tone_mapping.value,
+                output_policy.alpha_representation.value,
             )
             call_public_render_operator(bpy_module)
             if (
@@ -152,14 +161,21 @@ def _render_to_reservations(
         except CameraProjectionLayoutError as exc:
             raise CameraProjectionExecutionError(str(exc)) from exc
         for reservation in resolved:
-            rewrite_staged_image_with_crop(bpy_module, plan, reservation, layout)
+            rewrite_staged_image_with_crop(
+                bpy_module,
+                plan,
+                reservation,
+                layout,
+                output_policy,
+            )
         logger.info(
             "B4 union layout '%s': full=%dx%d crop=(%d,%d)-(%d,%d) "
             "size=%dx%d contour=%s vertices=%d source_vertices=%d "
             "outer_components=%d contour_fallback=%r coverage=%s "
             "raw_nonzero=%d strong=%d final_visible=%d components=%d->%d "
             "removed=%d filled_holes=%d weak_only=%s frames=%d union_bytes=%d "
-            "fringe_threshold=%.8f core_threshold=%.8f simplify_tolerance=%.4f",
+            "fringe_threshold=%.8f core_threshold=%.8f simplify_tolerance=%.4f "
+            "dynamic_range=%s tone_mapping=%s alpha=%s color_depth=%s",
             plan.source_object_id,
             layout.full_width,
             layout.full_height,
@@ -188,6 +204,10 @@ def _render_to_reservations(
             layout.alpha_threshold,
             layout.coverage_core_alpha_threshold,
             layout.simplify_tolerance_pixels,
+            output_policy.dynamic_range.value,
+            output_policy.tone_mapping.value,
+            output_policy.alpha_representation.value,
+            output_policy.color_depth,
         )
         return layout
 
