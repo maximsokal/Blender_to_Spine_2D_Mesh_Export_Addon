@@ -119,7 +119,16 @@ def _projection_alpha_threshold(scene: Any) -> float:
             raw_value = getter(property_name, _DEFAULT_PROJECTION_ALPHA_THRESHOLD)
     if raw_value is None:
         raw_value = _DEFAULT_PROJECTION_ALPHA_THRESHOLD
-    return float(raw_value)
+    if isinstance(raw_value, bool):
+        raise ValueError(
+            "spine2d_projection_alpha_threshold must be numeric, not bool"
+        )
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "spine2d_projection_alpha_threshold must be numeric"
+        ) from exc
 
 
 def _connect_enabled(obj: Any) -> bool:
