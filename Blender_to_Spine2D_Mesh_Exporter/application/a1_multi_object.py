@@ -17,6 +17,14 @@ class A1MultiObjectMode(str, Enum):
     MIXED = "MIXED"
 
 
+class ConnectedB4RenderPolicy(str, Enum):
+    """How connected camera-dependent objects become visible Spine layers."""
+
+    INDIVIDUAL_LAYERS = "INDIVIDUAL_LAYERS"
+    AUTO_GROUPED_CAMERA = "AUTO_GROUPED_CAMERA"
+    GROUPED_CAMERA_REQUIRED = "GROUPED_CAMERA_REQUIRED"
+
+
 class A1MultiObjectStage(str, Enum):
     VALIDATE_REQUEST = "VALIDATE_REQUEST"
     PREPARE_OBJECTS = "PREPARE_OBJECTS"
@@ -43,6 +51,9 @@ class A1MultiObjectExportSettings:
     anchor_component_id: str | None = None
     z_tolerance: float = 1e-4
     connected_scale_mode: UniformScaleMode = UniformScaleMode.AVERAGE
+    connected_b4_render_policy: ConnectedB4RenderPolicy = (
+        ConnectedB4RenderPolicy.AUTO_GROUPED_CAMERA
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.output_directory, Path):
@@ -78,6 +89,13 @@ class A1MultiObjectExportSettings:
             raise ValueError("z_tolerance cannot be negative")
         if not isinstance(self.connected_scale_mode, UniformScaleMode):
             raise TypeError("connected_scale_mode must be UniformScaleMode")
+        if not isinstance(
+            self.connected_b4_render_policy,
+            ConnectedB4RenderPolicy,
+        ):
+            raise TypeError(
+                "connected_b4_render_policy must be ConnectedB4RenderPolicy"
+            )
 
     @property
     def resolved_output_stem(self) -> str:
@@ -87,3 +105,11 @@ class A1MultiObjectExportSettings:
     def json_path(self) -> Path:
         root = self.output_directory.expanduser().resolve(strict=False)
         return root / f"{self.resolved_output_stem}.json"
+
+
+__all__ = [
+    "A1MultiObjectExportSettings",
+    "A1MultiObjectMode",
+    "A1MultiObjectStage",
+    "ConnectedB4RenderPolicy",
+]
