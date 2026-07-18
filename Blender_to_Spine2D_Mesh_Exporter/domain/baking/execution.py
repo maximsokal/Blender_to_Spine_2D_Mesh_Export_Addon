@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Tuple
 
 from .camera_projection import TexturePlan
+from .projection_layout import ProjectionContourMode
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +19,10 @@ class BakeExecutionSettings:
     generated_color: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     color_mode: str = "RGBA"
     projection_alpha_threshold: float = 1.0 / 255.0
+    projection_contour_mode: ProjectionContourMode = (
+        ProjectionContourMode.SIMPLIFIED_CONCAVE
+    )
+    projection_contour_simplify_tolerance_pixels: float = 1.0
 
     def __post_init__(self) -> None:
         if not isinstance(self.render_engine, str) or not self.render_engine.strip():
@@ -43,6 +48,28 @@ class BakeExecutionSettings:
         ):
             raise ValueError(
                 "projection_alpha_threshold must be finite and in [0, 1]"
+            )
+        if not isinstance(self.projection_contour_mode, ProjectionContourMode):
+            raise TypeError(
+                "projection_contour_mode must be ProjectionContourMode"
+            )
+        if (
+            isinstance(
+                self.projection_contour_simplify_tolerance_pixels,
+                bool,
+            )
+            or not isinstance(
+                self.projection_contour_simplify_tolerance_pixels,
+                (int, float),
+            )
+            or not isfinite(
+                float(self.projection_contour_simplify_tolerance_pixels)
+            )
+            or float(self.projection_contour_simplify_tolerance_pixels) < 0.0
+        ):
+            raise ValueError(
+                "projection_contour_simplify_tolerance_pixels must be finite "
+                "and non-negative"
             )
 
 
