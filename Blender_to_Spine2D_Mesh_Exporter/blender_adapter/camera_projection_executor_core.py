@@ -1,4 +1,4 @@
-"""Atomic B4 rendering, sequence-union layout derivation, and crop orchestration."""
+"""Atomic B4 rendering, coverage union, contour layout, and crop orchestration."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from ..infrastructure import (
     atomic_file_transaction,
 )
 from .camera_projection_image import (
-    read_staged_alpha_mask,
+    read_staged_alpha_coverage,
     rewrite_staged_image_with_crop,
 )
 from .camera_projection_state import (
@@ -86,6 +86,7 @@ def _render_to_reservations(
             simplify_tolerance_pixels=float(
                 execution_settings.projection_contour_simplify_tolerance_pixels
             ),
+            coverage_policy=execution_settings.projection_coverage_policy,
         )
         if apply_crop
         else None
@@ -121,25 +122,23 @@ def _render_to_reservations(
                     f"Projection staged output is missing or empty: {reservation.staged_path}"
                 )
             if union_accumulator is not None:
-                mask = read_staged_alpha_mask(
+                coverage = read_staged_alpha_coverage(
                     bpy_module,
                     reservation.staged_path,
                     width=plan.settings.width,
                     height=plan.settings.height,
-                    threshold=alpha_threshold,
                 )
-                newly_visible = union_accumulator.add_mask(
-                    mask,
+                newly_visible = union_accumulator.add_coverage(
+                    coverage,
                     frame_index=task.task_index,
                 )
-                del mask
+                del coverage
                 logger.debug(
-                    "Merged B4 projection frame %d into alpha union: new=%d total=%d "
-                    "threshold=%.8f",
+                    "Merged B4 projection frame %d into alpha coverage union: "
+                    "new_nonzero=%d raw_nonzero_total=%d",
                     task.task_index,
                     newly_visible,
                     union_accumulator.visible_pixel_count,
-                    alpha_threshold,
                 )
 
         if union_accumulator is None:
@@ -157,8 +156,10 @@ def _render_to_reservations(
         logger.info(
             "B4 union layout '%s': full=%dx%d crop=(%d,%d)-(%d,%d) "
             "size=%dx%d contour=%s vertices=%d source_vertices=%d "
-            "components=%d fallback=%r frames=%d union_bytes=%d "
-            "alpha_threshold=%.8f simplify_tolerance=%.4f",
+            "outer_components=%d contour_fallback=%r coverage=%s "
+            "raw_nonzero=%d strong=%d final_visible=%d components=%d->%d "
+            "removed=%d filled_holes=%d weak_only=%s frames=%d union_bytes=%d "
+            "fringe_threshold=%.8f core_threshold=%.8f simplify_tolerance=%.4f",
             plan.source_object_id,
             layout.full_width,
             layout.full_height,
@@ -173,9 +174,19 @@ def _render_to_reservations(
             layout.source_contour_vertex_count,
             layout.outer_component_count,
             layout.contour_fallback_reason,
+            layout.coverage_mode.value,
+            layout.coverage_raw_nonzero_pixel_count,
+            layout.coverage_strong_pixel_count,
+            layout.visible_pixel_count,
+            layout.coverage_component_count_before_cleanup,
+            layout.coverage_component_count_after_cleanup,
+            layout.coverage_removed_component_pixel_count,
+            layout.coverage_filled_hole_pixel_count,
+            layout.coverage_used_weak_only_fallback,
             union_accumulator.frame_count,
             union_accumulator.allocated_mask_bytes,
             layout.alpha_threshold,
+            layout.coverage_core_alpha_threshold,
             layout.simplify_tolerance_pixels,
         )
         return layout
