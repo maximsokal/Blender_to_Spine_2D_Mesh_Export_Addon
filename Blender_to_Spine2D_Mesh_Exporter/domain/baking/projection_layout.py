@@ -1,4 +1,4 @@
-"""Pure sequence-union crop and screen-space contour planning for B4 renders."""
+"""Pure sequence-union coverage, crop, and screen-space contour planning for B4."""
 
 from __future__ import annotations
 
@@ -18,6 +18,12 @@ from .projection_contour import (
     triangulate_convex_hull,
     triangulate_simple_contour,
     validate_simple_contour,
+)
+from .projection_coverage import (
+    ProjectionCoverageMode,
+    ProjectionCoveragePolicy,
+    ProjectionCoverageResult,
+    build_projection_coverage_mask,
 )
 
 
@@ -54,10 +60,11 @@ class ProjectionCropBounds:
 
 @dataclass(frozen=True, slots=True)
 class CameraProjectionLayout:
-    """One stable crop and simple outer contour shared by every projection frame.
+    """One stable cleaned-alpha crop and simple contour shared by every frame.
 
-    ``hull`` remains the compatibility field name. It can now contain a simple concave
-    contour; internal holes continue to be represented by texture alpha.
+    ``hull`` remains the compatibility field name. It can contain a simple concave
+    contour; internal holes continue to be represented by texture alpha unless the
+    configured morphology policy fills a sufficiently small enclosed pinhole.
     """
 
     full_width: int
@@ -73,11 +80,20 @@ class CameraProjectionLayout:
     outer_component_count: int = 1
     simplify_tolerance_pixels: float = 0.0
     contour_fallback_reason: str | None = None
+    coverage_mode: ProjectionCoverageMode = ProjectionCoverageMode.BINARY_THRESHOLD
+    coverage_core_alpha_threshold: float = 0.0
+    coverage_raw_nonzero_pixel_count: int = 0
+    coverage_strong_pixel_count: int = 0
+    coverage_component_count_before_cleanup: int = 0
+    coverage_component_count_after_cleanup: int = 0
+    coverage_removed_component_pixel_count: int = 0
+    coverage_filled_hole_pixel_count: int = 0
+    coverage_used_weak_only_fallback: bool = False
 
     def __post_init__(self) -> None:
         for field_name in ("full_width", "full_height", "frame_count"):
             value = getattr(self, field_name)
-            if not isinstance(value, int) or value <= 0:
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
                 raise ValueError(f"{field_name} must be a positive integer")
         if not isinstance(self.crop, ProjectionCropBounds):
             raise TypeError("crop must be ProjectionCropBounds")
@@ -109,11 +125,7 @@ class CameraProjectionLayout:
         if not isinstance(self.source_contour_vertex_count, int):
             raise TypeError("source_contour_vertex_count must be int")
         if self.source_contour_vertex_count == 0:
-            object.__setattr__(
-                self,
-                "source_contour_vertex_count",
-                len(self.hull),
-            )
+            object.__setattr__(self, "source_contour_vertex_count", len(self.hull))
         elif self.source_contour_vertex_count < len(self.hull):
             raise ValueError(
                 "source_contour_vertex_count cannot be smaller than contour size"
@@ -134,6 +146,37 @@ class CameraProjectionLayout:
             or not self.contour_fallback_reason.strip()
         ):
             raise ValueError("contour_fallback_reason must be non-empty str or None")
+        if not isinstance(self.coverage_mode, ProjectionCoverageMode):
+            raise TypeError("coverage_mode must be ProjectionCoverageMode")
+        if (
+            isinstance(self.coverage_core_alpha_threshold, bool)
+            or not isinstance(self.coverage_core_alpha_threshold, (int, float))
+            or not isfinite(float(self.coverage_core_alpha_threshold))
+            or not 0.0 <= float(self.coverage_core_alpha_threshold) <= 1.0
+        ):
+            raise ValueError(
+                "coverage_core_alpha_threshold must be finite and in [0, 1]"
+            )
+        coverage_integer_fields = (
+            "coverage_raw_nonzero_pixel_count",
+            "coverage_strong_pixel_count",
+            "coverage_component_count_before_cleanup",
+            "coverage_component_count_after_cleanup",
+            "coverage_removed_component_pixel_count",
+            "coverage_filled_hole_pixel_count",
+        )
+        for field_name in coverage_integer_fields:
+            value = getattr(self, field_name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"{field_name} must be a non-negative integer")
+        if self.coverage_raw_nonzero_pixel_count == 0:
+            object.__setattr__(
+                self,
+                "coverage_raw_nonzero_pixel_count",
+                self.visible_pixel_count,
+            )
+        if not isinstance(self.coverage_used_weak_only_fallback, bool):
+            raise TypeError("coverage_used_weak_only_fallback must be bool")
 
     @property
     def contour(self) -> Tuple[ProjectionPixelPoint, ...]:
@@ -202,9 +245,9 @@ class CameraProjectionLayout:
 
 
 def _validate_dimensions(width: int, height: int) -> None:
-    if not isinstance(width, int) or width <= 0:
+    if not isinstance(width, int) or isinstance(width, bool) or width <= 0:
         raise ValueError("width must be a positive integer")
-    if not isinstance(height, int) or height <= 0:
+    if not isinstance(height, int) or isinstance(height, bool) or height <= 0:
         raise ValueError("height must be a positive integer")
 
 
@@ -213,6 +256,7 @@ def _validate_layout_policy(
     padding_pixels: int,
     contour_mode: ProjectionContourMode,
     simplify_tolerance_pixels: float,
+    coverage_policy: ProjectionCoveragePolicy,
 ) -> None:
     if (
         isinstance(alpha_threshold, bool)
@@ -234,6 +278,8 @@ def _validate_layout_policy(
         raise ValueError(
             "simplify_tolerance_pixels must be finite and non-negative"
         )
+    if not isinstance(coverage_policy, ProjectionCoveragePolicy):
+        raise TypeError("coverage_policy must be ProjectionCoveragePolicy")
 
 
 def _validate_alpha_mask(
@@ -259,15 +305,17 @@ def _layout_from_union_mask(
     alpha_threshold: float,
     padding_pixels: int,
     frame_count: int,
-    visible_pixel_count: int,
+    coverage_result: ProjectionCoverageResult,
     contour_mode: ProjectionContourMode,
     simplify_tolerance_pixels: float,
+    coverage_policy: ProjectionCoveragePolicy,
 ) -> CameraProjectionLayout:
+    visible_pixel_count = coverage_result.visible_pixel_count
     if frame_count <= 0:
         raise ValueError("at least one alpha mask must be accumulated")
     if visible_pixel_count == 0:
         raise CameraProjectionLayoutError(
-            "camera projection sequence contains no pixels above the alpha threshold"
+            "camera projection sequence contains no pixels after alpha coverage cleanup"
         )
 
     minimum_x = width
@@ -314,12 +362,31 @@ def _layout_from_union_mask(
         outer_component_count=contour.outer_component_count,
         simplify_tolerance_pixels=float(simplify_tolerance_pixels),
         contour_fallback_reason=contour.fallback_reason,
+        coverage_mode=coverage_result.mode,
+        coverage_core_alpha_threshold=float(policy.core_alpha_threshold)
+        if (policy := coverage_policy)
+        else 0.0,
+        coverage_raw_nonzero_pixel_count=coverage_result.raw_nonzero_pixel_count,
+        coverage_strong_pixel_count=coverage_result.strong_pixel_count,
+        coverage_component_count_before_cleanup=(
+            coverage_result.component_count_before_cleanup
+        ),
+        coverage_component_count_after_cleanup=(
+            coverage_result.component_count_after_cleanup
+        ),
+        coverage_removed_component_pixel_count=(
+            coverage_result.removed_component_pixel_count
+        ),
+        coverage_filled_hole_pixel_count=coverage_result.filled_hole_pixel_count,
+        coverage_used_weak_only_fallback=(
+            coverage_result.used_weak_only_fallback
+        ),
     )
 
 
 @dataclass(slots=True)
 class ProjectionAlphaUnionAccumulator:
-    """Incrementally OR frame alpha masks into one fixed-size union buffer."""
+    """Max-union frame alpha coverage in one fixed-size byte buffer."""
 
     width: int
     height: int
@@ -327,6 +394,7 @@ class ProjectionAlphaUnionAccumulator:
     padding_pixels: int
     contour_mode: ProjectionContourMode = ProjectionContourMode.SIMPLIFIED_CONCAVE
     simplify_tolerance_pixels: float = 1.0
+    coverage_policy: ProjectionCoveragePolicy = ProjectionCoveragePolicy()
     _union_mask: bytearray = field(init=False, repr=False)
     _frame_count: int = field(init=False, default=0, repr=False)
     _visible_pixel_count: int = field(init=False, default=0, repr=False)
@@ -338,6 +406,7 @@ class ProjectionAlphaUnionAccumulator:
             self.padding_pixels,
             self.contour_mode,
             self.simplify_tolerance_pixels,
+            self.coverage_policy,
         )
         self.alpha_threshold = float(self.alpha_threshold)
         self.simplify_tolerance_pixels = float(self.simplify_tolerance_pixels)
@@ -349,11 +418,42 @@ class ProjectionAlphaUnionAccumulator:
 
     @property
     def visible_pixel_count(self) -> int:
+        """Return raw max-union non-zero coverage before final cleanup."""
+
         return self._visible_pixel_count
 
     @property
     def allocated_mask_bytes(self) -> int:
         return len(self._union_mask)
+
+    def add_coverage(
+        self,
+        alpha_coverage: bytes | bytearray,
+        *,
+        frame_index: int | None = None,
+    ) -> int:
+        """Max-union one 8-bit coverage frame and return newly non-zero pixels."""
+
+        if frame_index is not None and (
+            not isinstance(frame_index, int) or frame_index < 0
+        ):
+            raise ValueError("frame_index must be a non-negative integer or None")
+        _validate_alpha_mask(
+            alpha_coverage,
+            expected_size=self.width * self.height,
+            frame_index=frame_index,
+        )
+        newly_visible = 0
+        for index, value in enumerate(alpha_coverage):
+            resolved = int(value)
+            previous = self._union_mask[index]
+            if resolved > previous:
+                if previous == 0 and resolved > 0:
+                    newly_visible += 1
+                self._union_mask[index] = resolved
+        self._frame_count += 1
+        self._visible_pixel_count += newly_visible
+        return newly_visible
 
     def add_mask(
         self,
@@ -361,35 +461,29 @@ class ProjectionAlphaUnionAccumulator:
         *,
         frame_index: int | None = None,
     ) -> int:
-        if frame_index is not None and (
-            not isinstance(frame_index, int) or frame_index < 0
-        ):
-            raise ValueError("frame_index must be a non-negative integer or None")
-        _validate_alpha_mask(
-            alpha_mask,
-            expected_size=self.width * self.height,
-            frame_index=frame_index,
-        )
-        newly_visible = 0
-        for index, value in enumerate(alpha_mask):
-            if value and not self._union_mask[index]:
-                self._union_mask[index] = 1
-                newly_visible += 1
-        self._frame_count += 1
-        self._visible_pixel_count += newly_visible
-        return newly_visible
+        """Compatibility alias accepting binary or 8-bit coverage bytes."""
+
+        return self.add_coverage(alpha_mask, frame_index=frame_index)
 
     def build_layout(self) -> CameraProjectionLayout:
-        return _layout_from_union_mask(
+        coverage_result = build_projection_coverage_mask(
             self._union_mask,
+            width=self.width,
+            height=self.height,
+            fringe_alpha_threshold=self.alpha_threshold,
+            policy=self.coverage_policy,
+        )
+        return _layout_from_union_mask(
+            bytearray(coverage_result.mask),
             width=self.width,
             height=self.height,
             alpha_threshold=self.alpha_threshold,
             padding_pixels=self.padding_pixels,
             frame_count=self._frame_count,
-            visible_pixel_count=self._visible_pixel_count,
+            coverage_result=coverage_result,
             contour_mode=self.contour_mode,
             simplify_tolerance_pixels=self.simplify_tolerance_pixels,
+            coverage_policy=self.coverage_policy,
         )
 
 
@@ -402,7 +496,10 @@ def build_sequence_union_layout(
     padding_pixels: int,
     contour_mode: ProjectionContourMode = ProjectionContourMode.SIMPLIFIED_CONCAVE,
     simplify_tolerance_pixels: float = 1.0,
+    coverage_policy: ProjectionCoveragePolicy = ProjectionCoveragePolicy(),
 ) -> CameraProjectionLayout:
+    """Build one stable layout from binary masks or 8-bit alpha coverage frames."""
+
     if not isinstance(alpha_masks, tuple) or not alpha_masks:
         raise ValueError("alpha_masks must be a non-empty tuple")
     accumulator = ProjectionAlphaUnionAccumulator(
@@ -412,9 +509,10 @@ def build_sequence_union_layout(
         padding_pixels=padding_pixels,
         contour_mode=contour_mode,
         simplify_tolerance_pixels=simplify_tolerance_pixels,
+        coverage_policy=coverage_policy,
     )
     for frame_index, alpha_mask in enumerate(alpha_masks):
-        accumulator.add_mask(alpha_mask, frame_index=frame_index)
+        accumulator.add_coverage(alpha_mask, frame_index=frame_index)
     return accumulator.build_layout()
 
 
@@ -425,8 +523,9 @@ def build_full_frame_layout(
     frame_count: int = 1,
 ) -> CameraProjectionLayout:
     _validate_dimensions(width, height)
-    if not isinstance(frame_count, int) or frame_count <= 0:
+    if not isinstance(frame_count, int) or isinstance(frame_count, bool) or frame_count <= 0:
         raise ValueError("frame_count must be a positive integer")
+    visible_pixels = width * height
     return CameraProjectionLayout(
         full_width=width,
         full_height=height,
@@ -440,11 +539,17 @@ def build_full_frame_layout(
         alpha_threshold=0.0,
         padding_pixels=0,
         frame_count=frame_count,
-        visible_pixel_count=width * height,
+        visible_pixel_count=visible_pixels,
         contour_mode=ProjectionContourMode.CONVEX_HULL,
         source_contour_vertex_count=4,
         outer_component_count=1,
         simplify_tolerance_pixels=0.0,
+        coverage_mode=ProjectionCoverageMode.BINARY_THRESHOLD,
+        coverage_core_alpha_threshold=0.0,
+        coverage_raw_nonzero_pixel_count=visible_pixels,
+        coverage_strong_pixel_count=visible_pixels,
+        coverage_component_count_before_cleanup=1,
+        coverage_component_count_after_cleanup=1,
     )
 
 
@@ -453,6 +558,8 @@ __all__ = [
     "CameraProjectionLayoutError",
     "ProjectionAlphaUnionAccumulator",
     "ProjectionContourMode",
+    "ProjectionCoverageMode",
+    "ProjectionCoveragePolicy",
     "ProjectionCropBounds",
     "ProjectionPixelPoint",
     "ProjectionTriangle",
