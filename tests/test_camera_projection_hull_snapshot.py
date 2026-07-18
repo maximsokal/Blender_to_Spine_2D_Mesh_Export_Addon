@@ -16,6 +16,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     MaterialSemanticChannel,
     ObjectBakeContext,
     ObjectMaterialAnalysis,
+    ProjectionContourMode,
     ProjectionCropBounds,
     ProjectionPixelPoint,
     SceneBakeContext,
@@ -137,6 +138,30 @@ def _rig():
     )
 
 
+def _assert_snapshot_matches_layout(snapshot, layout, rig):
+    loop_map = snapshot.loop_by_id()
+    face_vertex_indices = tuple(
+        tuple(loop_map[loop_id].vertex_id.index for loop_id in face.loop_ids)
+        for face in snapshot.faces
+    )
+
+    assert face_vertex_indices == layout.triangle_indices
+    assert len(snapshot.vertices) == len(layout.hull)
+    assert len(snapshot.faces) == len(layout.hull) - 2
+    assert len(snapshot.loops) == (len(layout.hull) - 2) * 3
+    assert len(snapshot.edges) == len(layout.hull) + len(layout.hull) - 3
+    assert tuple(vertex.position[:2] for vertex in snapshot.vertices) == tuple(
+        (
+            layout.spine_position_pixels(point)[0] / rig.info.uniform_scale,
+            layout.spine_position_pixels(point)[1] / rig.info.uniform_scale,
+        )
+        for point in layout.hull
+    )
+    assert {
+        loop.uv("SpineBakeUV") for loop in snapshot.loops
+    } == {layout.spine_uv(point) for point in layout.hull}
+
+
 def test_irregular_projection_snapshot_uses_layout_triangle_contract(tmp_path: Path):
     plan = _projection_plan(tmp_path)
     rig = _rig()
@@ -159,6 +184,7 @@ def test_irregular_projection_snapshot_uses_layout_triangle_contract(tmp_path: P
         padding_pixels=2,
         frame_count=1,
         visible_pixel_count=700,
+        contour_mode=ProjectionContourMode.CONVEX_HULL,
     )
 
     snapshot = build_camera_projection_mesh_snapshot(
@@ -167,24 +193,41 @@ def test_irregular_projection_snapshot_uses_layout_triangle_contract(tmp_path: P
         uv_layer_name="SpineBakeUV",
         layout=layout,
     )
-    loop_map = snapshot.loop_by_id()
-    face_vertex_indices = tuple(
-        tuple(loop_map[loop_id].vertex_id.index for loop_id in face.loop_ids)
-        for face in snapshot.faces
+
+    _assert_snapshot_matches_layout(snapshot, layout, rig)
+
+
+def test_concave_projection_snapshot_uses_ear_clipped_topology(tmp_path: Path):
+    plan = _projection_plan(tmp_path)
+    rig = _rig()
+    contour = (
+        ProjectionPixelPoint(10, 8),
+        ProjectionPixelPoint(54, 8),
+        ProjectionPixelPoint(54, 20),
+        ProjectionPixelPoint(31, 20),
+        ProjectionPixelPoint(31, 41),
+        ProjectionPixelPoint(10, 41),
+    )
+    layout = CameraProjectionLayout(
+        full_width=80,
+        full_height=48,
+        crop=ProjectionCropBounds(8, 6, 57, 44),
+        hull=contour,
+        alpha_threshold=1.0 / 255.0,
+        padding_pixels=2,
+        frame_count=1,
+        visible_pixel_count=900,
+        contour_mode=ProjectionContourMode.SIMPLIFIED_CONCAVE,
+        source_contour_vertex_count=len(contour),
+        simplify_tolerance_pixels=1.0,
     )
 
-    assert face_vertex_indices == layout.triangle_indices
-    assert len(snapshot.vertices) == len(layout.hull)
-    assert len(snapshot.faces) == len(layout.hull) - 2
-    assert len(snapshot.loops) == (len(layout.hull) - 2) * 3
-    assert len(snapshot.edges) == len(layout.hull) + len(layout.hull) - 3
-    assert tuple(vertex.position[:2] for vertex in snapshot.vertices) == tuple(
-        (
-            layout.spine_position_pixels(point)[0] / rig.info.uniform_scale,
-            layout.spine_position_pixels(point)[1] / rig.info.uniform_scale,
-        )
-        for point in layout.hull
+    snapshot = build_camera_projection_mesh_snapshot(
+        plan,
+        rig,
+        uv_layer_name="SpineBakeUV",
+        layout=layout,
     )
-    assert {
-        loop.uv("SpineBakeUV") for loop in snapshot.loops
-    } == {layout.spine_uv(point) for point in layout.hull}
+
+    assert layout.concave
+    _assert_snapshot_matches_layout(snapshot, layout, rig)
