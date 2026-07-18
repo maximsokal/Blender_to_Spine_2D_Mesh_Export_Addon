@@ -22,6 +22,9 @@ from .a1_multi_object_export import A1MultiObjectSource, export_a1_multi_object
 from .a1_single_object_export import export_a1_single_object
 
 
+_DEFAULT_PROJECTION_ALPHA_THRESHOLD = 1.0 / 255.0
+
+
 def _load_bpy() -> Any:
     try:
         import bpy
@@ -98,6 +101,25 @@ def _texture_size(scene: Any) -> int:
     if value <= 0:
         raise ValueError(f"Texture size must be positive, got {value}")
     return value
+
+
+def _projection_alpha_threshold(scene: Any) -> float:
+    """Resolve the optional global B4 output policy without requiring new RNA.
+
+    Existing scenes and the current UI do not define this advanced property, so they
+    retain the historical ``1 / 255`` threshold. Automation and downstream callers may
+    provide an RNA attribute or Blender ID custom property with the same name.
+    """
+
+    property_name = "spine2d_projection_alpha_threshold"
+    raw_value = getattr(scene, property_name, None)
+    if raw_value is None:
+        getter = getattr(scene, "get", None)
+        if callable(getter):
+            raw_value = getter(property_name, _DEFAULT_PROJECTION_ALPHA_THRESHOLD)
+    if raw_value is None:
+        raw_value = _DEFAULT_PROJECTION_ALPHA_THRESHOLD
+    return float(raw_value)
 
 
 def _connect_enabled(obj: Any) -> bool:
@@ -181,7 +203,10 @@ def _common_object_settings(
         source_geometry_mode=A1SourceGeometryMode.ORIGINAL,
         geometry=_resolve_geometry_settings(scene),
         uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
-        bake_execution=BakeExecutionSettings(render_engine=render_engine),
+        bake_execution=BakeExecutionSettings(
+            render_engine=render_engine,
+            projection_alpha_threshold=_projection_alpha_threshold(scene),
+        ),
         include_control_icons=bool(
             getattr(scene, "spine2d_control_icons", True)
         ),
