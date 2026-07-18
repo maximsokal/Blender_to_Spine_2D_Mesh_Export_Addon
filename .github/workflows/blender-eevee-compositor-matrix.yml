@@ -1,0 +1,82 @@
+name: Blender 4.4 Eevee and Compositor Matrix
+
+# Manual-only while the rewrite branch is under active development.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blender-eevee-compositor-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BLENDER_VERSION: "4.4.0"
+  BLENDER_ARCHIVE: "blender-4.4.0-linux-x64.tar.xz"
+  BLENDER_DIRECTORY: ".blender/blender-4.4.0"
+
+jobs:
+  blender-eevee-compositor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scenario: eevee-b4
+            script: tests/blender_headless/run_eevee_camera_projection_matrix.py
+            log: blender-eevee-b4.log
+          - scenario: custom-compositor-isolation
+            script: tests/blender_headless/run_custom_compositor_isolation_matrix.py
+            log: blender-custom-compositor-isolation.log
+
+    name: ${{ matrix.scenario }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache Blender 4.4
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BLENDER_DIRECTORY }}
+          key: blender-${{ runner.os }}-${{ runner.arch }}-${{ env.BLENDER_VERSION }}
+
+      - name: Download official Blender archive
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .blender/download "${BLENDER_DIRECTORY}"
+          curl --fail --location --retry 5 --retry-delay 3 \
+            "https://download.blender.org/release/Blender4.4/${BLENDER_ARCHIVE}" \
+            --output ".blender/download/${BLENDER_ARCHIVE}"
+          tar \
+            --extract \
+            --file ".blender/download/${BLENDER_ARCHIVE}" \
+            --directory "${BLENDER_DIRECTORY}" \
+            --strip-components=1
+          test -x "${BLENDER_DIRECTORY}/blender"
+
+      - name: Run ${{ matrix.scenario }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python "${{ matrix.script }}" \
+            2>&1 | tee "test-results/${{ matrix.log }}"
+
+      - name: Upload matrix log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-4.4-${{ matrix.scenario }}-log
+          path: test-results/${{ matrix.log }}
+          if-no-files-found: warn
+          retention-days: 7
