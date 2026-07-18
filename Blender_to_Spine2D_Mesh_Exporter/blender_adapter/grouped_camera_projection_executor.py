@@ -12,6 +12,7 @@ from ..domain.baking import (
     CameraProjectionLayoutError,
     GroupedCameraProjectionPlan,
     ProjectionAlphaUnionAccumulator,
+    resolve_projection_output_policy,
 )
 from ..infrastructure import AtomicFileTransaction, AtomicOutputReservation
 from .camera_projection_image import (
@@ -69,8 +70,6 @@ def _object_name(obj: Any) -> str:
 
 
 def _rna_identity(value: Any) -> tuple[str, object]:
-    """Return a stable identity across transient Blender RNA wrapper instances."""
-
     pointer = getattr(value, "as_pointer", None)
     if callable(pointer):
         try:
@@ -228,6 +227,10 @@ def stage_grouped_camera_projection_outputs(
         scene=scene,
     )
     reservations = _reserve_group_outputs(plan, output_transaction)
+    output_policy = resolve_projection_output_policy(
+        execution_settings.projection_output_policy,
+        plan.settings.texture_format,
+    )
     accumulator = ProjectionAlphaUnionAccumulator(
         width=plan.settings.width,
         height=plan.settings.height,
@@ -256,12 +259,16 @@ def stage_grouped_camera_projection_outputs(
                     reservation.staged_path,
                 )
                 logger.info(
-                    "Rendering grouped B4 '%s' frame %d/%d camera='%s' sources=%s",
+                    "Rendering grouped B4 '%s' frame %d/%d camera='%s' sources=%s "
+                    "dynamic_range=%s tone_mapping=%s alpha=%s",
                     plan.group_id,
                     task.task_index + 1,
                     len(plan.frame_tasks),
                     plan.camera_object_id,
                     plan.source_object_ids,
+                    output_policy.dynamic_range.value,
+                    output_policy.tone_mapping.value,
+                    output_policy.alpha_representation.value,
                 )
                 call_public_render_operator(bpy_module)
                 if (
@@ -294,6 +301,7 @@ def stage_grouped_camera_projection_outputs(
                     plan,
                     reservation,
                     layout,
+                    output_policy,
                 )
     except CameraProjectionExecutionError:
         raise
@@ -305,7 +313,8 @@ def stage_grouped_camera_projection_outputs(
 
     logger.info(
         "Grouped B4 layout '%s': sources=%d crop=%dx%d contour=%s vertices=%d "
-        "components=%d coverage=%s final_visible=%d",
+        "components=%d coverage=%s final_visible=%d dynamic_range=%s "
+        "tone_mapping=%s alpha=%s",
         plan.group_id,
         len(plan.source_object_ids),
         layout.cropped_width,
@@ -315,6 +324,9 @@ def stage_grouped_camera_projection_outputs(
         layout.outer_component_count,
         layout.coverage_mode.value,
         layout.visible_pixel_count,
+        output_policy.dynamic_range.value,
+        output_policy.tone_mapping.value,
+        output_policy.alpha_representation.value,
     )
     return GroupedCameraProjectionStageResult(
         reservations=reservations,
