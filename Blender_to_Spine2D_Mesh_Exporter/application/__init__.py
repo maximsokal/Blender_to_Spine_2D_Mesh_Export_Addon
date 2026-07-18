@@ -30,6 +30,7 @@ from .a1_multi_object import (
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
     A1MultiObjectStage,
+    ConnectedB4RenderPolicy,
 )
 from .a1_single_object import (
     A1MeshBounds,
@@ -97,6 +98,7 @@ __all__ = [
     "A1ZGroupAssignmentError",
     "A1ZGroupAssignmentPlan",
     "A1ZGroupHeightOverride",
+    "ConnectedB4RenderPolicy",
     "ExportIssue",
     "ExportRequest",
     "ExportResult",
