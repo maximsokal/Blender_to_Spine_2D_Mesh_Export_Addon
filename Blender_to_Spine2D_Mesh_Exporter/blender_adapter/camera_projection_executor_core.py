@@ -82,6 +82,10 @@ def _render_to_reservations(
             height=plan.settings.height,
             alpha_threshold=alpha_threshold,
             padding_pixels=plan.settings.margin_pixels,
+            contour_mode=execution_settings.projection_contour_mode,
+            simplify_tolerance_pixels=float(
+                execution_settings.projection_contour_simplify_tolerance_pixels
+            ),
         )
         if apply_crop
         else None
@@ -152,7 +156,9 @@ def _render_to_reservations(
             rewrite_staged_image_with_crop(bpy_module, plan, reservation, layout)
         logger.info(
             "B4 union layout '%s': full=%dx%d crop=(%d,%d)-(%d,%d) "
-            "size=%dx%d hull=%d frames=%d union_bytes=%d alpha_threshold=%.8f",
+            "size=%dx%d contour=%s vertices=%d source_vertices=%d "
+            "components=%d fallback=%r frames=%d union_bytes=%d "
+            "alpha_threshold=%.8f simplify_tolerance=%.4f",
             plan.source_object_id,
             layout.full_width,
             layout.full_height,
@@ -162,10 +168,15 @@ def _render_to_reservations(
             layout.crop.maximum_y,
             layout.cropped_width,
             layout.cropped_height,
+            layout.contour_mode.value,
             len(layout.hull),
+            layout.source_contour_vertex_count,
+            layout.outer_component_count,
+            layout.contour_fallback_reason,
             union_accumulator.frame_count,
             union_accumulator.allocated_mask_bytes,
             layout.alpha_threshold,
+            layout.simplify_tolerance_pixels,
         )
         return layout
 
