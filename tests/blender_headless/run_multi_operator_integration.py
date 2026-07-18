@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -25,6 +26,10 @@ from run_bake_integration import (  # noqa: E402
     _create_emission_material,
     _create_quad,
     _temporary_datablock_names,
+)
+from run_camera_projection_integration import (  # noqa: E402
+    _create_layer_weight_material,
+    _prepare_scene_with_sentinel,
 )
 
 
@@ -79,6 +84,55 @@ def test_registered_operator_uses_rewrite_backend() -> None:
             "operator changed selection",
         )
         _assert(not _temporary_datablock_names(), "operator leaked temporary data")
+
+
+def test_registered_operator_routes_connected_b4_through_output_service() -> None:
+    _prepare_scene_with_sentinel()
+    with tempfile.TemporaryDirectory(prefix="spine2d-operator-grouped-b4-") as directory:
+        output_directory = Path(directory)
+        first = _create_quad("OperatorB4A")
+        second = _create_quad("OperatorB4B")
+        first.location.x = -0.4
+        second.location.x = 0.4
+        first.data.materials.append(
+            _create_layer_weight_material("OperatorB4MaterialA")
+        )
+        second.data.materials.append(
+            _create_layer_weight_material("OperatorB4MaterialB")
+        )
+        _select_pair(first, second)
+        first.spine2d_connect_settings.enabled = True
+        second.spine2d_connect_settings.enabled = True
+        _configure_scene(output_directory, "REWRITE")
+
+        result = bpy.ops.object.spine2d_multi_export()
+
+        _assert("FINISHED" in result, f"connected B4 operator failed: {result}")
+        final_json = output_directory / "OperatorB4A_plus_1_objects.json"
+        grouped_texture = (
+            output_directory
+            / "images"
+            / "OperatorB4A_plus_1_objects_grouped_camera_Baked.png"
+        )
+        _assert(final_json.is_file(), "connected B4 operator did not create JSON")
+        _assert(grouped_texture.is_file(), "UI route skipped grouped B4 output service")
+        _assert(
+            grouped_texture.read_bytes()[:8] == PNG_SIGNATURE,
+            "grouped B4 PNG is invalid",
+        )
+        document = json.loads(final_json.read_text(encoding="utf-8"))
+        grouped_metadata = document.get("spine2dGroupedCamera")
+        _assert(
+            isinstance(grouped_metadata, dict),
+            "connected B4 JSON has no grouped camera metadata",
+        )
+        grouped_slots = tuple(
+            slot
+            for slot in document.get("slots", [])
+            if slot.get("spine2dGroupedCamera") is True
+        )
+        _assert(len(grouped_slots) == 1, f"unexpected grouped slots: {grouped_slots}")
+        _assert(not _temporary_datablock_names(), "grouped operator leaked temporary data")
 
 
 def test_legacy_backend_is_explicit() -> None:
@@ -148,6 +202,7 @@ def main() -> None:
     try:
         tests = (
             test_registered_operator_uses_rewrite_backend,
+            test_registered_operator_routes_connected_b4_through_output_service,
             test_legacy_backend_is_explicit,
             test_rewrite_failure_does_not_fall_back_to_legacy,
         )
