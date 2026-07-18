@@ -88,6 +88,31 @@ def finalize_prepared_camera_projection(
             "projection_union_visible_pixels": layout.visible_pixel_count,
             "projection_alpha_threshold": layout.alpha_threshold,
             "projection_padding_pixels": layout.padding_pixels,
+            "projection_coverage_mode": layout.coverage_mode.value,
+            "projection_coverage_core_alpha_threshold": (
+                layout.coverage_core_alpha_threshold
+            ),
+            "projection_coverage_raw_nonzero_pixels": (
+                layout.coverage_raw_nonzero_pixel_count
+            ),
+            "projection_coverage_strong_pixels": (
+                layout.coverage_strong_pixel_count
+            ),
+            "projection_coverage_components_before_cleanup": (
+                layout.coverage_component_count_before_cleanup
+            ),
+            "projection_coverage_components_after_cleanup": (
+                layout.coverage_component_count_after_cleanup
+            ),
+            "projection_coverage_removed_component_pixels": (
+                layout.coverage_removed_component_pixel_count
+            ),
+            "projection_coverage_filled_hole_pixels": (
+                layout.coverage_filled_hole_pixel_count
+            ),
+            "projection_coverage_used_weak_only_fallback": (
+                layout.coverage_used_weak_only_fallback
+            ),
             "final_bone_count": len(document.bones),
             "slot_count": len(document.slots),
             "attachment_count": sum(
