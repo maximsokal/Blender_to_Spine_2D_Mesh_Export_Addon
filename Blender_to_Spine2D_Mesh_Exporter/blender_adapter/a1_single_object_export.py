@@ -9,14 +9,12 @@ files still share one caller-owned atomic transaction.
 from __future__ import annotations
 
 import logging
-from typing import Any, Mapping, Tuple
+from typing import Any
 
 from ..application import (
     A1SingleObjectExportSettings,
     A1SingleObjectStage,
-    ExportIssue,
     ExportResult,
-    IssueSeverity,
 )
 from ..domain.spine import SpineSerializer
 from ..infrastructure import (
@@ -24,54 +22,14 @@ from ..infrastructure import (
     atomic_file_transaction,
     write_staged_utf8_text,
 )
-from .a1_object_preparation import (
-    A1ObjectPreparationError,
-    StatisticsValue,
-    prepare_a1_object,
-)
+from .a1_export_result import build_a1_failure_result
+from .a1_object_preparation import A1ObjectPreparationError, prepare_a1_object
 from .a1_projection_finalization import finalize_prepared_camera_projection
 from .texture_executor import stage_texture_plan_outputs
 
+
 logger = logging.getLogger(__name__)
-
-
-def _failure_result(
-    *,
-    stage: A1SingleObjectStage,
-    exc: Exception,
-    object_id: str | None,
-    statistics: Mapping[str, StatisticsValue],
-    warnings: Tuple[ExportIssue, ...] = (),
-) -> ExportResult:
-    if not isinstance(stage, A1SingleObjectStage):
-        raise TypeError("stage must be A1SingleObjectStage")
-    if not isinstance(exc, Exception):
-        raise TypeError("exc must be Exception")
-    if not isinstance(warnings, tuple) or not all(
-        isinstance(issue, ExportIssue) for issue in warnings
-    ):
-        raise TypeError("warnings must be a tuple of ExportIssue values")
-
-    technical_details = f"{type(exc).__name__}: {exc}"
-    logger.exception(
-        "A1 single-object export failed at stage %s for '%s'",
-        stage.value,
-        object_id,
-    )
-    error = ExportIssue(
-        severity=IssueSeverity.ERROR,
-        stage=stage.value,
-        code=stage.error_code,
-        message=str(exc) or type(exc).__name__,
-        object_id=object_id,
-        technical_details=technical_details,
-        context={"exception_type": type(exc).__name__},
-    )
-    return ExportResult(
-        success=False,
-        issues=warnings + (error,),
-        statistics=dict(statistics),
-    )
+_OPERATION = "A1 single-object output"
 
 
 def export_a1_single_object(
@@ -97,7 +55,9 @@ def export_a1_single_object(
             scene=scene,
         )
     except A1ObjectPreparationError as exc:
-        return _failure_result(
+        return build_a1_failure_result(
+            logger=logger,
+            operation=_OPERATION,
             stage=exc.stage,
             exc=exc.cause,
             object_id=exc.object_id,
@@ -105,7 +65,9 @@ def export_a1_single_object(
             warnings=exc.warnings,
         )
     except Exception as exc:
-        return _failure_result(
+        return build_a1_failure_result(
+            logger=logger,
+            operation=_OPERATION,
             stage=A1SingleObjectStage.VALIDATE_REQUEST,
             exc=exc,
             object_id=None,
@@ -115,7 +77,7 @@ def export_a1_single_object(
     stage = A1SingleObjectStage.STAGE_OUTPUTS
     statistics = dict(prepared.statistics)
     try:
-        with atomic_file_transaction() as output_transaction:
+        with atomic_file_transaction(operation_name="a1-single-object") as output_transaction:
             json_reservation = output_transaction.reserve(
                 prepared.output_paths.json_path
             )
@@ -169,10 +131,15 @@ def export_a1_single_object(
             statistics=statistics,
         )
     except Exception as exc:
-        return _failure_result(
+        return build_a1_failure_result(
+            logger=logger,
+            operation=_OPERATION,
             stage=stage,
             exc=exc,
             object_id=prepared.object_id,
             statistics=statistics,
             warnings=prepared.warnings,
         )
+
+
+__all__ = ["export_a1_single_object"]
