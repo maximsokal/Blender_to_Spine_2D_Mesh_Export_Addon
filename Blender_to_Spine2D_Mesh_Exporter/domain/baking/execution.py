@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Tuple
 
 from .camera_projection import TexturePlan
+from .projection_coverage import ProjectionCoveragePolicy
 from .projection_layout import ProjectionContourMode
 
 
@@ -23,6 +24,7 @@ class BakeExecutionSettings:
         ProjectionContourMode.SIMPLIFIED_CONCAVE
     )
     projection_contour_simplify_tolerance_pixels: float = 1.0
+    projection_coverage_policy: ProjectionCoveragePolicy = ProjectionCoveragePolicy()
 
     def __post_init__(self) -> None:
         if not isinstance(self.render_engine, str) or not self.render_engine.strip():
@@ -70,6 +72,13 @@ class BakeExecutionSettings:
             raise ValueError(
                 "projection_contour_simplify_tolerance_pixels must be finite "
                 "and non-negative"
+            )
+        if not isinstance(
+            self.projection_coverage_policy,
+            ProjectionCoveragePolicy,
+        ):
+            raise TypeError(
+                "projection_coverage_policy must be ProjectionCoveragePolicy"
             )
 
 
