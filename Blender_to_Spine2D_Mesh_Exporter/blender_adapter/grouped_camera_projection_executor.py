@@ -68,6 +68,27 @@ def _object_name(obj: Any) -> str:
     return value
 
 
+def _rna_identity(value: Any) -> tuple[str, object]:
+    """Return a stable identity across transient Blender RNA wrapper instances."""
+
+    pointer = getattr(value, "as_pointer", None)
+    if callable(pointer):
+        try:
+            resolved = int(pointer())
+            if resolved:
+                return ("RNA_POINTER", resolved)
+        except Exception:
+            logger.debug("Unable to read Blender RNA pointer", exc_info=True)
+    name = str(
+        getattr(value, "name_full", None)
+        or getattr(value, "name", None)
+        or ""
+    ).strip()
+    if name:
+        return ("RNA_NAME", name)
+    return ("PYTHON_ID", id(value))
+
+
 def _validate_group_runtime(
     source_objects: Tuple[Any, ...],
     plan: GroupedCameraProjectionPlan,
@@ -83,29 +104,33 @@ def _validate_group_runtime(
         or len(source_objects) < 2
     ):
         raise ValueError("source_objects must match grouped source plans")
-    if len({id(obj) for obj in source_objects}) != len(source_objects):
+    source_identities = tuple(_rna_identity(obj) for obj in source_objects)
+    if len(source_identities) != len(set(source_identities)):
         raise CameraProjectionExecutionError(
             "grouped B4 source_objects contain duplicate Blender objects"
         )
 
     resolved_bpy = None
-    resolved_context = None
-    resolved_scene = None
+    resolved_context = context
+    resolved_scene = scene
+    expected_scene_identity = None
     names: list[str] = []
     for source_obj, source_plan in zip(source_objects, plan.source_plans):
         bpy_module, current_context, current_scene = validate_projection_runtime(
             source_obj,
             source_plan,
-            context=context,
-            scene=scene,
+            context=resolved_context,
+            scene=resolved_scene,
         )
+        current_scene_identity = _rna_identity(current_scene)
         if resolved_bpy is None:
             resolved_bpy = bpy_module
             resolved_context = current_context
             resolved_scene = current_scene
-        elif current_context is not resolved_context or current_scene is not resolved_scene:
+            expected_scene_identity = current_scene_identity
+        elif current_scene_identity != expected_scene_identity:
             raise CameraProjectionExecutionError(
-                "grouped B4 sources resolved to different Blender contexts or scenes"
+                "grouped B4 sources resolved to different Blender scenes"
             )
         names.append(_object_name(source_obj))
 
@@ -131,8 +156,13 @@ def _configure_group_camera_visibility(
             "Unable to inspect scene objects for grouped B4 visibility"
         ) from exc
 
-    source_ids = {id(obj) for obj in source_objects}
-    missing = tuple(obj for obj in source_objects if obj not in scene_objects)
+    source_identities = {_rna_identity(obj) for obj in source_objects}
+    scene_identities = {_rna_identity(obj) for obj in scene_objects}
+    missing = tuple(
+        obj
+        for obj in source_objects
+        if _rna_identity(obj) not in scene_identities
+    )
     if missing:
         raise CameraProjectionExecutionError(
             "grouped B4 source objects are not linked to the render scene: "
@@ -140,7 +170,7 @@ def _configure_group_camera_visibility(
         )
 
     for obj in scene_objects:
-        if id(obj) in source_ids:
+        if _rna_identity(obj) in source_identities:
             try:
                 obj.hide_render = False
                 if hasattr(obj, "visible_camera"):
