@@ -229,13 +229,6 @@ def prepare_a1_mixed_object(
         "mode": A1MultiObjectMode.MIXED.value,
         "texture_output_count": len(texture_paths),
     }
-    for prefix, values in (
-        ("connected", connected.statistics),
-        ("standalone", standalone_statistics),
-    ):
-        for key, value in values.items():
-            statistics[f"{prefix}.{key}"] = value
-
     return PreparedA1MultiObject(
         settings=settings,
         sources=connected.sources + standalone_sources,
