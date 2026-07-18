@@ -1,9 +1,9 @@
 """Dispatch immutable texture plans to object baking or camera projection.
 
-This module owns no Blender operator access. The detailed API returns render-derived layout
-metadata for orchestration that finalizes JSON after staging. The historical reservations-only
-API keeps B4 full-frame so existing multi-object code cannot commit cropped images beside a
-pre-serialized full-frame document.
+This module owns no Blender operator access. Every public entry point first builds one typed
+``TextureExecutionRequest`` so invalid domain values fail before filesystem reservations or
+Blender scene/context mutation. The detailed API returns render-derived layout metadata for
+post-render document finalization. The compatibility API intentionally keeps B4 full-frame.
 """
 
 from __future__ import annotations
@@ -11,9 +11,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Tuple
 
-from ..domain.baking import CameraProjectionPlan
+from ..domain.baking import (
+    BakeExecutionResult,
+    BakeExecutionSettings,
+    BakePlan,
+    CameraProjectionPlan,
+)
 from ..domain.baking.projection_layout import CameraProjectionLayout
-from ..infrastructure import AtomicOutputReservation
+from ..domain.geometry import MeshSnapshot
+from ..infrastructure import (
+    AtomicFileTransaction,
+    AtomicOutputReservation,
+)
 from .camera_projection_executor import (
     execute_camera_projection_plan,
     stage_camera_projection_outputs,
@@ -26,6 +35,50 @@ from .semantic_bake_executor import (
 
 
 @dataclass(frozen=True, slots=True)
+class TextureExecutionRequest:
+    """One validated texture execution request shared by all dispatch routes."""
+
+    source_object: Any
+    target_snapshot: MeshSnapshot
+    plan: BakePlan
+    execution_settings: BakeExecutionSettings
+
+    def __post_init__(self) -> None:
+        if self.source_object is None:
+            raise ValueError("source_object cannot be None")
+        if not isinstance(self.target_snapshot, MeshSnapshot):
+            raise TypeError("target_snapshot must be MeshSnapshot")
+        if not isinstance(self.plan, BakePlan):
+            raise TypeError("plan must be BakePlan")
+        if not isinstance(self.execution_settings, BakeExecutionSettings):
+            raise TypeError("execution_settings must be BakeExecutionSettings")
+        if self.target_snapshot.source_object_id != self.plan.source_object_id:
+            raise ValueError(
+                "target_snapshot.source_object_id must match plan.source_object_id"
+            )
+
+    @classmethod
+    def capture(
+        cls,
+        source_object: Any,
+        target_snapshot: MeshSnapshot,
+        plan: BakePlan,
+        execution_settings: BakeExecutionSettings | None = None,
+    ) -> "TextureExecutionRequest":
+        resolved_settings = (
+            BakeExecutionSettings()
+            if execution_settings is None
+            else execution_settings
+        )
+        return cls(
+            source_object=source_object,
+            target_snapshot=target_snapshot,
+            plan=plan,
+            execution_settings=resolved_settings,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class TextureStageResult:
     reservations: Tuple[AtomicOutputReservation, ...]
     projection_layout: CameraProjectionLayout | None = None
@@ -33,48 +86,70 @@ class TextureStageResult:
     def __post_init__(self) -> None:
         if not isinstance(self.reservations, tuple) or not self.reservations:
             raise ValueError("reservations must be a non-empty tuple")
-        if not all(isinstance(item, AtomicOutputReservation) for item in self.reservations):
-            raise TypeError("reservations must contain AtomicOutputReservation values")
+        if not all(
+            isinstance(item, AtomicOutputReservation)
+            for item in self.reservations
+        ):
+            raise TypeError(
+                "reservations must contain AtomicOutputReservation values"
+            )
         if self.projection_layout is not None and not isinstance(
             self.projection_layout,
             CameraProjectionLayout,
         ):
-            raise TypeError("projection_layout must be CameraProjectionLayout or None")
+            raise TypeError(
+                "projection_layout must be CameraProjectionLayout or None"
+            )
         if (
             self.projection_layout is not None
             and self.projection_layout.frame_count != len(self.reservations)
         ):
-            raise ValueError("projection layout frame count must match reservations")
+            raise ValueError(
+                "projection layout frame count must match reservations"
+            )
+
+
+def _require_transaction(value: Any) -> AtomicFileTransaction:
+    if not isinstance(value, AtomicFileTransaction):
+        raise TypeError("output_transaction must be AtomicFileTransaction")
+    return value
 
 
 def stage_texture_plan_outputs(
     source_obj: Any,
-    target_snapshot: Any,
-    plan: Any,
-    output_transaction: Any,
-    execution_settings: Any = None,
+    target_snapshot: MeshSnapshot,
+    plan: BakePlan,
+    output_transaction: AtomicFileTransaction,
+    execution_settings: BakeExecutionSettings | None = None,
     *,
     context: Any | None = None,
     scene: Any | None = None,
 ) -> TextureStageResult:
     """Stage one plan and retain the exact B4 crop/hull layout when applicable."""
 
-    if isinstance(plan, CameraProjectionPlan):
+    request = TextureExecutionRequest.capture(
+        source_obj,
+        target_snapshot,
+        plan,
+        execution_settings,
+    )
+    transaction = _require_transaction(output_transaction)
+    if isinstance(request.plan, CameraProjectionPlan):
         staged = stage_camera_projection_outputs_detailed(
-            source_obj,
-            plan,
-            output_transaction,
-            execution_settings,
+            request.source_object,
+            request.plan,
+            transaction,
+            request.execution_settings,
             context=context,
             scene=scene,
         )
         return TextureStageResult(staged.reservations, staged.layout)
     reservations = stage_object_bake_outputs(
-        source_obj,
-        target_snapshot,
-        plan,
-        output_transaction,
-        execution_settings,
+        request.source_object,
+        request.target_snapshot,
+        request.plan,
+        transaction,
+        request.execution_settings,
         context=context,
         scene=scene,
     )
@@ -83,66 +158,84 @@ def stage_texture_plan_outputs(
 
 def stage_bake_plan_outputs(
     source_obj: Any,
-    target_snapshot: Any,
-    plan: Any,
-    output_transaction: Any,
-    execution_settings: Any = None,
+    target_snapshot: MeshSnapshot,
+    plan: BakePlan,
+    output_transaction: AtomicFileTransaction,
+    execution_settings: BakeExecutionSettings | None = None,
     *,
     context: Any | None = None,
     scene: Any | None = None,
-):
+) -> Tuple[AtomicOutputReservation, ...]:
     """Compatibility staging for callers that do not post-finalize projection JSON."""
 
-    if isinstance(plan, CameraProjectionPlan):
-        return stage_camera_projection_outputs(
-            source_obj,
-            plan,
-            output_transaction,
-            execution_settings,
-            context=context,
-            scene=scene,
-        )
-    return stage_object_bake_outputs(
+    request = TextureExecutionRequest.capture(
         source_obj,
         target_snapshot,
         plan,
-        output_transaction,
         execution_settings,
-        context=context,
-        scene=scene,
+    )
+    transaction = _require_transaction(output_transaction)
+    if isinstance(request.plan, CameraProjectionPlan):
+        return tuple(
+            stage_camera_projection_outputs(
+                request.source_object,
+                request.plan,
+                transaction,
+                request.execution_settings,
+                context=context,
+                scene=scene,
+            )
+        )
+    return tuple(
+        stage_object_bake_outputs(
+            request.source_object,
+            request.target_snapshot,
+            request.plan,
+            transaction,
+            request.execution_settings,
+            context=context,
+            scene=scene,
+        )
     )
 
 
 def execute_bake_plan(
     source_obj: Any,
-    target_snapshot: Any,
-    plan: Any,
-    execution_settings: Any = None,
+    target_snapshot: MeshSnapshot,
+    plan: BakePlan,
+    execution_settings: BakeExecutionSettings | None = None,
     *,
     context: Any | None = None,
     scene: Any | None = None,
-):
-    """Execute one texture plan and atomically commit its outputs."""
+) -> BakeExecutionResult:
+    """Execute one validated texture plan and atomically commit its outputs."""
 
-    if isinstance(plan, CameraProjectionPlan):
-        return execute_camera_projection_plan(
-            source_obj,
-            plan,
-            execution_settings,
-            context=context,
-            scene=scene,
-        )
-    return execute_object_bake_plan(
+    request = TextureExecutionRequest.capture(
         source_obj,
         target_snapshot,
         plan,
         execution_settings,
+    )
+    if isinstance(request.plan, CameraProjectionPlan):
+        return execute_camera_projection_plan(
+            request.source_object,
+            request.plan,
+            request.execution_settings,
+            context=context,
+            scene=scene,
+        )
+    return execute_object_bake_plan(
+        request.source_object,
+        request.target_snapshot,
+        request.plan,
+        request.execution_settings,
         context=context,
         scene=scene,
     )
 
 
 __all__ = [
+    "TextureExecutionRequest",
     "TextureStageResult",
     "execute_bake_plan",
     "stage_bake_plan_outputs",
