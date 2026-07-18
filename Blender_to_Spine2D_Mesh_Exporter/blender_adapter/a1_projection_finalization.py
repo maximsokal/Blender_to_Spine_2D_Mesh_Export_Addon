@@ -72,6 +72,19 @@ def finalize_prepared_camera_projection(
             "projection_offset_x": offset_x,
             "projection_offset_y": offset_y,
             "projection_hull_vertex_count": len(layout.hull),
+            "projection_contour_vertex_count": len(layout.hull),
+            "projection_source_contour_vertex_count": (
+                layout.source_contour_vertex_count
+            ),
+            "projection_contour_mode": layout.contour_mode.value,
+            "projection_contour_concave": layout.concave,
+            "projection_outer_component_count": layout.outer_component_count,
+            "projection_contour_fallback_reason": (
+                layout.contour_fallback_reason or ""
+            ),
+            "projection_contour_simplify_tolerance_pixels": (
+                layout.simplify_tolerance_pixels
+            ),
             "projection_union_visible_pixels": layout.visible_pixel_count,
             "projection_alpha_threshold": layout.alpha_threshold,
             "projection_padding_pixels": layout.padding_pixels,
