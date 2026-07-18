@@ -1,0 +1,96 @@
+name: Private Production A1 Release Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Absolute path to the private fixture manifest on the protected runner
+        required: true
+        type: string
+      report:
+        description: Absolute path for the retained private release report
+        required: true
+        type: string
+      blender_executable:
+        description: Blender 4.4 executable available on the protected runner
+        required: false
+        default: blender
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-production-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  private-production-release-gate:
+    name: Private production parity
+    runs-on: [self-hosted, blender-4.4, a1-private-fixtures]
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate protected fixture paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "${{ inputs.manifest }}"
+          mkdir -p "$(dirname "${{ inputs.report }}")"
+          test "$(realpath "${{ inputs.manifest }}")" != "$(realpath -m "${{ github.workspace }}/private-manifest.json")" || {
+            echo "Private fixture manifest must not live in the public checkout" >&2
+            exit 2
+          }
+
+      - name: Run private production Blender gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${{ inputs.blender_executable }}" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_private_production_release_gate.py \
+            -- \
+            --manifest "${{ inputs.manifest }}" \
+            --report "${{ inputs.report }}" \
+            --rewrite-sha "${GITHUB_SHA}"
+
+      - name: Verify retained release evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - "${{ inputs.report }}" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          if payload.get("passed") is not True:
+              raise SystemExit("private release report is not passing")
+          if payload.get("rewrite_sha") != "${{ github.sha }}":
+              raise SystemExit("private release report SHA does not match candidate")
+          print(
+              f"Private release gate passed: {payload['fixture_count']} fixtures, "
+              f"suite={payload['suite_id']}, sha={payload['rewrite_sha']}"
+          )
+          PY
+
+      - name: Record protected summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Private production release gate"
+            echo
+            echo "- Candidate: \`${GITHUB_SHA}\`"
+            echo "- Runner: protected self-hosted"
+            echo "- Report retained at the user-supplied protected path"
+            echo "- Private fixtures and reports are intentionally not uploaded as public artifacts"
+          } >> "${GITHUB_STEP_SUMMARY}"
