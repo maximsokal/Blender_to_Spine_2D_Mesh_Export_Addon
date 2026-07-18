@@ -52,6 +52,17 @@ def _validate_composition_inputs(
     if not all(isinstance(item, PreparedA1Object) for item in prepared):
         raise TypeError("prepared must contain PreparedA1Object values")
 
+    component_ids = tuple(source.component_id for source in sources)
+    if len(component_ids) != len(set(component_ids)):
+        raise ValueError("component_id values must be unique during composition")
+    if settings.mode is A1MultiObjectMode.CONNECTED:
+        if len(sources) < 2:
+            raise ValueError("CONNECTED composition requires at least two objects")
+        if settings.anchor_component_id is not None and (
+            settings.anchor_component_id not in set(component_ids)
+        ):
+            raise ValueError("anchor_component_id is not present in composition sources")
+
 
 def compose_a1_multi_object_document(
     sources: Tuple[A1MultiObjectSource, ...],
