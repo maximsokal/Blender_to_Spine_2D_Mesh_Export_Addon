@@ -11,7 +11,6 @@ from ..application import (
     A1MultiObjectMode,
     A1MultiObjectStage,
     ExportResult,
-    apply_grouped_camera_overlay,
 )
 from ..domain.spine import ConnectedGroupBuildResult, SpineSerializer
 from ..infrastructure import (
@@ -19,24 +18,30 @@ from ..infrastructure import (
     atomic_file_transaction,
     write_staged_utf8_text,
 )
+from .a1_grouped_output import apply_staged_grouped_camera_overlay
 from .a1_multi_object_composition import compose_a1_multi_object_document
 from .a1_multi_object_export import (
     A1MultiObjectPreparationError,
     A1MultiObjectSource,
     prepare_a1_multi_object,
-    record_object_statistics,
 )
 from .a1_multi_object_result import build_multi_object_failure_result
-from .a1_projection_finalization import finalize_prepared_camera_projection
+from .a1_output_staging import stage_and_finalize_a1_objects
+from .a1_output_statistics import (
+    record_final_document_statistics,
+    record_grouped_camera_statistics,
+)
 from .grouped_camera_projection_executor import (
     stage_grouped_camera_projection_outputs,
 )
 from .grouped_camera_projection_policy import (
     resolve_grouped_camera_projection_request,
 )
-from .texture_executor import stage_texture_plan_outputs
+
 
 logger = logging.getLogger(__name__)
+_OPERATION = "A1 multi-object output"
+_TRANSACTION_NAME = "a1-multi-object"
 
 
 def export_a1_multi_object(
@@ -58,7 +63,7 @@ def export_a1_multi_object(
     except A1MultiObjectPreparationError as exc:
         return build_multi_object_failure_result(
             logger=logger,
-            operation="A1 multi-object output",
+            operation=_OPERATION,
             stage=exc.stage,
             exc=exc.cause,
             statistics=exc.statistics,
@@ -70,7 +75,7 @@ def export_a1_multi_object(
     except Exception as exc:
         return build_multi_object_failure_result(
             logger=logger,
-            operation="A1 multi-object output",
+            operation=_OPERATION,
             stage=A1MultiObjectStage.VALIDATE_REQUEST,
             exc=exc,
             statistics={},
@@ -80,36 +85,23 @@ def export_a1_multi_object(
     stage = A1MultiObjectStage.STAGE_OUTPUTS
     statistics = dict(prepared.statistics)
     try:
-        with atomic_file_transaction() as output_transaction:
+        with atomic_file_transaction(
+            operation_name=_TRANSACTION_NAME,
+        ) as output_transaction:
             json_reservation = output_transaction.reserve(prepared.json_path)
-            texture_reservations = []
-            finalized_objects = []
-            for source, item in zip(prepared.sources, prepared.objects):
-                texture_stage = stage_texture_plan_outputs(
-                    item.source_object,
-                    item.bake_target_snapshot,
-                    item.bake_plan,
-                    output_transaction,
-                    item.settings.bake_execution,
-                    context=context,
-                    scene=scene,
-                )
-                texture_reservations.extend(texture_stage.reservations)
-                finalized = finalize_prepared_camera_projection(
-                    item,
-                    texture_stage.projection_layout,
-                )
-                finalized_objects.append(finalized)
-                record_object_statistics(
-                    statistics,
-                    source.component_id,
-                    finalized.statistics,
-                )
+            staged_objects = stage_and_finalize_a1_objects(
+                prepared,
+                output_transaction,
+                statistics,
+                context=context,
+                scene=scene,
+            )
+            statistics = dict(staged_objects.statistics)
+            finalized_objects = staged_objects.objects
 
-            resolved_finalized = tuple(finalized_objects)
             grouped_request = (
                 resolve_grouped_camera_projection_request(
-                    resolved_finalized,
+                    finalized_objects,
                     settings,
                 )
                 if settings.mode is A1MultiObjectMode.CONNECTED
@@ -129,7 +121,7 @@ def export_a1_multi_object(
             stage = A1MultiObjectStage.COMPOSE_DOCUMENT
             composition = compose_a1_multi_object_document(
                 prepared.sources,
-                resolved_finalized,
+                finalized_objects,
                 settings,
             )
             overlay = None
@@ -138,59 +130,32 @@ def export_a1_multi_object(
                     raise RuntimeError(
                         "grouped B4 request completed without a stage result"
                     )
-                overlay = apply_grouped_camera_overlay(
+                overlay = apply_staged_grouped_camera_overlay(
                     composition.document,
-                    grouped_request.plan,
-                    grouped_stage.layout,
-                    visual_slot_names=grouped_request.visual_slot_names,
-                    image_relative_directory=(
-                        grouped_request.image_relative_directory
-                    ),
-                    slot_name=grouped_request.slot_name,
-                    attachment_name=grouped_request.attachment_name,
+                    grouped_request,
+                    grouped_stage,
                 )
-                composition = replace(
-                    composition,
-                    document=overlay.document,
-                )
+                composition = replace(composition, document=overlay.document)
 
             document = composition.document
-            statistics.update(
-                {
-                    "final_bone_count": len(document.bones),
-                    "final_slot_count": len(document.slots),
-                    "final_skin_count": len(document.skins),
-                    "final_constraint_count": (
-                        len(document.ik) + len(document.transform)
-                    ),
-                    "projection_cropped_component_count": sum(
-                        1
-                        for item in resolved_finalized
-                        if "projection_crop_width" in item.statistics
-                    ),
-                    "grouped_b4_enabled": int(grouped_request is not None),
-                }
+            record_final_document_statistics(
+                statistics,
+                document,
+                finalized_objects,
+                grouped_enabled=grouped_request is not None,
             )
             if isinstance(composition, ConnectedGroupBuildResult):
                 statistics["connected_layer_count"] = len(composition.layers)
-            if grouped_request is not None and grouped_stage is not None:
-                statistics.update(
-                    {
-                        "grouped_b4_source_count": len(
-                            grouped_request.plan.source_object_ids
-                        ),
-                        "grouped_b4_frame_count": len(
-                            grouped_request.plan.frame_tasks
-                        ),
-                        "grouped_b4_crop_width": grouped_stage.layout.cropped_width,
-                        "grouped_b4_crop_height": grouped_stage.layout.cropped_height,
-                        "grouped_b4_contour_vertex_count": len(
-                            grouped_stage.layout.hull
-                        ),
-                        "grouped_b4_hidden_slot_count": len(
-                            overlay.hidden_slot_names if overlay is not None else ()
-                        ),
-                    }
+            if (
+                grouped_request is not None
+                and grouped_stage is not None
+                and overlay is not None
+            ):
+                record_grouped_camera_statistics(
+                    statistics,
+                    grouped_request,
+                    grouped_stage,
+                    overlay,
                 )
 
             stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
@@ -212,8 +177,8 @@ def export_a1_multi_object(
         )
         expected_paths = (
             json_reservation.final_path,
-            *(reservation.final_path for reservation in texture_reservations),
-            *(reservation.final_path for reservation in grouped_reservations),
+            *(item.final_path for item in staged_objects.reservations),
+            *(item.final_path for item in grouped_reservations),
         )
         if tuple(committed_paths) != expected_paths:
             raise AtomicFileCommitError(
@@ -235,7 +200,7 @@ def export_a1_multi_object(
     except Exception as exc:
         return build_multi_object_failure_result(
             logger=logger,
-            operation="A1 multi-object output",
+            operation=_OPERATION,
             stage=stage,
             exc=exc,
             statistics=statistics,
