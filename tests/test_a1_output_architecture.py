@@ -4,7 +4,7 @@ from pathlib import Path
 
 ADAPTER = (
     Path(__file__).resolve().parents[1]
-    / "Blender_to_Spine2D_Mesh_Export_Addon"
+    / "Blender_to_Spine2D_Mesh_Exporter"
     / "blender_adapter"
 )
 
