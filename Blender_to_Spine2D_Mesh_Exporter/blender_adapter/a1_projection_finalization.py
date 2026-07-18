@@ -6,7 +6,10 @@ from dataclasses import replace
 from types import MappingProxyType
 
 from ..application import assemble_a1_camera_projection_document
-from ..domain.baking import CameraProjectionPlan
+from ..domain.baking import (
+    CameraProjectionPlan,
+    resolve_projection_output_policy,
+)
 from ..domain.baking.projection_layout import CameraProjectionLayout
 from .a1_object_preparation import PreparedA1Object
 
@@ -29,12 +32,7 @@ def finalize_prepared_camera_projection(
     prepared: PreparedA1Object,
     layout: CameraProjectionLayout | None,
 ) -> PreparedA1Object:
-    """Return a prepared object whose document matches the staged cropped render.
-
-    Object-bake preparations pass through unchanged and must not receive a layout. Camera
-    preparations require the exact layout returned by the render executor. Reassembly is pure
-    application work: no Blender datablocks, operators or source material state are touched.
-    """
+    """Return a prepared object whose document matches the staged cropped render."""
 
     if not isinstance(prepared, PreparedA1Object):
         raise TypeError("prepared must be PreparedA1Object")
@@ -48,6 +46,10 @@ def finalize_prepared_camera_projection(
 
     plan = prepared.bake_plan
     assert isinstance(plan, CameraProjectionPlan)
+    output_policy = resolve_projection_output_policy(
+        prepared.settings.bake_execution.projection_output_policy,
+        plan.settings.texture_format,
+    )
     document_assembly = assemble_a1_camera_projection_document(
         prepared.rig,
         prepared.z_groups,
@@ -113,6 +115,14 @@ def finalize_prepared_camera_projection(
             "projection_coverage_used_weak_only_fallback": (
                 layout.coverage_used_weak_only_fallback
             ),
+            "projection_output_texture_format": output_policy.texture_format.value,
+            "projection_output_dynamic_range": output_policy.dynamic_range.value,
+            "projection_output_tone_mapping": output_policy.tone_mapping.value,
+            "projection_output_alpha_representation": (
+                output_policy.alpha_representation.value
+            ),
+            "projection_output_color_depth": output_policy.color_depth,
+            "projection_output_float_buffer": output_policy.float_buffer,
             "final_bone_count": len(document.bones),
             "slot_count": len(document.slots),
             "attachment_count": sum(
