@@ -1,7 +1,15 @@
-"""Translate the existing Blender UI properties into rewritten A1 export requests."""
+"""Translate Blender UI state into immutable A1 export contracts.
+
+The bridge is the only production boundary that reads Scene/Object RNA for Rewrite exports.
+It captures mutable Blender properties once, builds typed application settings, and routes the
+request to the post-render output services. Preparation modules are never used as output
+entry-points here.
+"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import logging
 from pathlib import Path
 from typing import Any, Tuple
 
@@ -17,12 +25,74 @@ from ..application import (
 from ..domain.baking import BakeExecutionSettings, sanitize_filename_stem
 from ..domain.geometry import A1AngularMode
 from ..domain.uv import UvUnwrapSettings
-from .a1_mixed_object_export import export_a1_mixed_object
-from .a1_multi_object_export import A1MultiObjectSource, export_a1_multi_object
+from .a1_mixed_object_output import export_a1_mixed_object
+from .a1_multi_object_export import A1MultiObjectSource
+from .a1_multi_object_output import export_a1_multi_object
 from .a1_single_object_export import export_a1_single_object
 
+logger = logging.getLogger(__name__)
 
 _DEFAULT_PROJECTION_ALPHA_THRESHOLD = 1.0 / 255.0
+_DEFAULT_BAKE_MARGIN = 4
+_DEFAULT_UV_LAYER_NAME = "SpineBakeUV"
+
+
+@dataclass(frozen=True, slots=True)
+class _SceneExportProfile:
+    """One immutable snapshot of all Scene-level Rewrite export settings."""
+
+    output_directory: Path
+    images_relative_path: str
+    texture_size: int
+    seam_mode: str
+    angle_limit_degrees: float
+    geometry: A1GeometryPreparationSettings
+    bake_execution: BakeExecutionSettings
+    include_control_icons: bool
+    include_preview_animation: bool
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.output_directory, Path):
+            raise TypeError("output_directory must be pathlib.Path")
+        if not isinstance(self.images_relative_path, str) or not self.images_relative_path:
+            raise ValueError("images_relative_path must be a non-empty string")
+        if not isinstance(self.texture_size, int) or self.texture_size <= 0:
+            raise ValueError("texture_size must be a positive integer")
+        if self.seam_mode not in {"AUTO", "CUSTOM"}:
+            raise ValueError("seam_mode must be AUTO or CUSTOM")
+        if not isinstance(self.angle_limit_degrees, (int, float)):
+            raise TypeError("angle_limit_degrees must be numeric")
+        if not isinstance(self.geometry, A1GeometryPreparationSettings):
+            raise TypeError("geometry must be A1GeometryPreparationSettings")
+        if not isinstance(self.bake_execution, BakeExecutionSettings):
+            raise TypeError("bake_execution must be BakeExecutionSettings")
+        if not isinstance(self.include_control_icons, bool):
+            raise TypeError("include_control_icons must be bool")
+        if not isinstance(self.include_preview_animation, bool):
+            raise TypeError("include_preview_animation must be bool")
+
+
+@dataclass(frozen=True, slots=True)
+class _ObjectExportProfile:
+    """Live Blender object handle plus values captured before preparation starts."""
+
+    source_object: Any
+    object_name: str
+    sequence_start_frame: int
+    sequence_frame_count: int
+    connect_enabled: bool
+
+    def __post_init__(self) -> None:
+        if self.source_object is None:
+            raise ValueError("source_object cannot be None")
+        if not isinstance(self.object_name, str) or not self.object_name.strip():
+            raise ValueError("object_name must be a non-empty string")
+        if not isinstance(self.sequence_start_frame, int) or self.sequence_start_frame < 0:
+            raise ValueError("sequence_start_frame must be a non-negative integer")
+        if not isinstance(self.sequence_frame_count, int) or self.sequence_frame_count < 0:
+            raise ValueError("sequence_frame_count must be a non-negative integer")
+        if not isinstance(self.connect_enabled, bool):
+            raise TypeError("connect_enabled must be bool")
 
 
 def _load_bpy() -> Any:
@@ -44,6 +114,27 @@ def _object_name(obj: Any) -> str:
     return value
 
 
+def _rna_identity(value: Any) -> tuple[str, object]:
+    """Return stable identity across transient Blender RNA wrapper instances."""
+
+    pointer = getattr(value, "as_pointer", None)
+    if callable(pointer):
+        try:
+            resolved = int(pointer())
+            if resolved:
+                return ("RNA_POINTER", resolved)
+        except Exception:
+            logger.debug("Unable to read Blender RNA pointer", exc_info=True)
+    name = str(
+        getattr(value, "name_full", None)
+        or getattr(value, "name", None)
+        or ""
+    ).strip()
+    if name:
+        return ("RNA_NAME", name)
+    return ("PYTHON_ID", id(value))
+
+
 def _active_mesh(context: Any) -> Any:
     obj = getattr(context, "active_object", None)
     if obj is None:
@@ -56,19 +147,38 @@ def _active_mesh(context: Any) -> Any:
 
 
 def _ordered_selected_meshes(context: Any) -> Tuple[Any, ...]:
-    selected = tuple(
-        obj for obj in getattr(context, "selected_objects", ()) if obj.type == "MESH"
+    """Return active Mesh first and all remaining Mesh objects in deterministic order."""
+
+    raw_selected = tuple(
+        obj
+        for obj in getattr(context, "selected_objects", ())
+        if getattr(obj, "type", None) == "MESH"
     )
+    unique_by_identity: dict[tuple[str, object], Any] = {}
+    for obj in raw_selected:
+        unique_by_identity.setdefault(_rna_identity(obj), obj)
+    selected = tuple(unique_by_identity.values())
     if len(selected) < 2:
         raise ValueError("Select at least two Mesh objects for multi-export")
+
     active = getattr(context, "active_object", None)
+    active_identity = None if active is None else _rna_identity(active)
+    active_match = next(
+        (obj for obj in selected if _rna_identity(obj) == active_identity),
+        None,
+    )
     ordered: list[Any] = []
-    if active is not None and active in selected and active.type == "MESH":
-        ordered.append(active)
+    if active_match is not None:
+        ordered.append(active_match)
     ordered.extend(
         sorted(
-            (obj for obj in selected if obj is not active),
-            key=lambda obj: _object_name(obj).casefold(),
+            (
+                obj
+                for obj in selected
+                if active_match is None
+                or _rna_identity(obj) != _rna_identity(active_match)
+            ),
+            key=lambda obj: (_object_name(obj).casefold(), _object_name(obj)),
         )
     )
     return tuple(ordered)
@@ -104,13 +214,6 @@ def _texture_size(scene: Any) -> int:
 
 
 def _projection_alpha_threshold(scene: Any) -> float:
-    """Resolve the optional global B4 output policy without requiring new RNA.
-
-    Existing scenes and the current UI do not define this advanced property, so they
-    retain the historical ``1 / 255`` threshold. Automation and downstream callers may
-    provide an RNA attribute or Blender ID custom property with the same name.
-    """
-
     property_name = "spine2d_projection_alpha_threshold"
     raw_value = getattr(scene, property_name, None)
     if raw_value is None:
@@ -137,15 +240,6 @@ def _connect_enabled(obj: Any) -> bool:
 
 
 def _resolve_geometry_settings(scene: Any) -> A1GeometryPreparationSettings:
-    """Resolve scene angular controls into a typed geometry contract.
-
-    Older .blend files and tests do not contain the new RNA properties. Missing
-    values therefore resolve to the exact legacy seed-cone behavior. The bridge
-    rejects unknown mode strings before any object or Blender state is mutated.
-    The local limit is normalized to ``None`` in legacy mode so the internal
-    settings object remains identical to the pre-feature default.
-    """
-
     raw_mode = str(
         getattr(
             scene,
@@ -177,6 +271,98 @@ def _resolve_geometry_settings(scene: Any) -> A1GeometryPreparationSettings:
     )
 
 
+def _capture_scene_profile(
+    scene: Any,
+    *,
+    output_directory: Path | None = None,
+    texture_size: int | None = None,
+    images_relative_path: str | None = None,
+) -> _SceneExportProfile:
+    """Capture every mutable Scene setting exactly once for one export request."""
+
+    seam_mode = str(
+        getattr(scene, "spine2d_seam_maker_mode", "AUTO") or "AUTO"
+    ).strip().upper()
+    angle_limit = float(getattr(scene, "spine2d_angle_limit", 30.0))
+    render_engine = str(
+        getattr(getattr(scene, "render", None), "engine", "CYCLES") or "CYCLES"
+    )
+    return _SceneExportProfile(
+        output_directory=(
+            output_directory
+            if output_directory is not None
+            else _resolve_output_directory(scene)
+        ),
+        images_relative_path=(
+            images_relative_path
+            if images_relative_path is not None
+            else _resolve_images_relative_path(scene)
+        ),
+        texture_size=(
+            texture_size if texture_size is not None else _texture_size(scene)
+        ),
+        seam_mode=seam_mode,
+        angle_limit_degrees=angle_limit,
+        geometry=_resolve_geometry_settings(scene),
+        bake_execution=BakeExecutionSettings(
+            render_engine=render_engine,
+            projection_alpha_threshold=_projection_alpha_threshold(scene),
+        ),
+        include_control_icons=bool(
+            getattr(scene, "spine2d_control_icons", True)
+        ),
+        include_preview_animation=bool(
+            getattr(scene, "spine2d_export_preview_animation", True)
+        ),
+    )
+
+
+def _capture_object_profile(
+    obj: Any,
+    *,
+    sequence_start_frame: int,
+    sequence_frame_count: int,
+    connect_enabled: bool,
+) -> _ObjectExportProfile:
+    return _ObjectExportProfile(
+        source_object=obj,
+        object_name=_object_name(obj),
+        sequence_start_frame=max(0, int(sequence_start_frame)),
+        sequence_frame_count=max(0, int(sequence_frame_count)),
+        connect_enabled=bool(connect_enabled),
+    )
+
+
+def _settings_from_profiles(
+    obj: _ObjectExportProfile,
+    scene: _SceneExportProfile,
+    *,
+    json_output_stem: str | None = None,
+) -> A1SingleObjectExportSettings:
+    return A1SingleObjectExportSettings(
+        export=ExportSettings(
+            texture_width=scene.texture_size,
+            texture_height=scene.texture_size,
+            output_directory=scene.output_directory,
+            images_relative_path=scene.images_relative_path,
+            seam_mode=scene.seam_mode,
+            angle_limit_degrees=scene.angle_limit_degrees,
+            bake_margin=_DEFAULT_BAKE_MARGIN,
+            sequence_start_frame=obj.sequence_start_frame,
+            sequence_frame_count=obj.sequence_frame_count,
+        ),
+        prefix=obj.object_name,
+        output_stem=sanitize_filename_stem(obj.object_name),
+        json_output_stem=json_output_stem,
+        source_geometry_mode=A1SourceGeometryMode.ORIGINAL,
+        geometry=scene.geometry,
+        uv=UvUnwrapSettings(layer_name=_DEFAULT_UV_LAYER_NAME),
+        bake_execution=scene.bake_execution,
+        include_control_icons=scene.include_control_icons,
+        include_preview_animation=scene.include_preview_animation,
+    )
+
+
 def _common_object_settings(
     obj: Any,
     scene: Any,
@@ -188,40 +374,24 @@ def _common_object_settings(
     sequence_frame_count: int,
     json_output_stem: str | None = None,
 ) -> A1SingleObjectExportSettings:
-    object_name = _object_name(obj)
-    seam_mode = str(getattr(scene, "spine2d_seam_maker_mode", "AUTO"))
-    angle_limit = float(getattr(scene, "spine2d_angle_limit", 30.0))
-    render_engine = str(
-        getattr(getattr(scene, "render", None), "engine", "CYCLES") or "CYCLES"
+    """Compatibility helper retained for focused bridge tests and external callers."""
+
+    scene_profile = _capture_scene_profile(
+        scene,
+        output_directory=output_directory,
+        texture_size=texture_size,
+        images_relative_path=images_relative_path,
     )
-    return A1SingleObjectExportSettings(
-        export=ExportSettings(
-            texture_width=texture_size,
-            texture_height=texture_size,
-            output_directory=output_directory,
-            images_relative_path=images_relative_path,
-            seam_mode=seam_mode,
-            angle_limit_degrees=angle_limit,
-            bake_margin=4,
-            sequence_start_frame=max(0, int(sequence_start_frame)),
-            sequence_frame_count=max(0, int(sequence_frame_count)),
-        ),
-        prefix=object_name,
-        output_stem=sanitize_filename_stem(object_name),
+    object_profile = _capture_object_profile(
+        obj,
+        sequence_start_frame=sequence_start_frame,
+        sequence_frame_count=sequence_frame_count,
+        connect_enabled=_connect_enabled(obj),
+    )
+    return _settings_from_profiles(
+        object_profile,
+        scene_profile,
         json_output_stem=json_output_stem,
-        source_geometry_mode=A1SourceGeometryMode.ORIGINAL,
-        geometry=_resolve_geometry_settings(scene),
-        uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
-        bake_execution=BakeExecutionSettings(
-            render_engine=render_engine,
-            projection_alpha_threshold=_projection_alpha_threshold(scene),
-        ),
-        include_control_icons=bool(
-            getattr(scene, "spine2d_control_icons", True)
-        ),
-        include_preview_animation=bool(
-            getattr(scene, "spine2d_export_preview_animation", True)
-        ),
     )
 
 
@@ -266,6 +436,23 @@ def _build_single_object_settings(
     )
 
 
+def _build_sources_from_profiles(
+    objects: Tuple[_ObjectExportProfile, ...],
+    scene: _SceneExportProfile,
+) -> Tuple[A1MultiObjectSource, ...]:
+    result: list[A1MultiObjectSource] = []
+    for index, obj in enumerate(objects, start=1):
+        result.append(
+            A1MultiObjectSource(
+                source_object=obj.source_object,
+                component_id=f"object_{index}:{obj.object_name}",
+                animation_namespace=f"object_{index}",
+                settings=_settings_from_profiles(obj, scene),
+            )
+        )
+    return tuple(result)
+
+
 def _build_sources(
     objects: Tuple[Any, ...],
     scene: Any,
@@ -274,28 +461,32 @@ def _build_sources(
     texture_size: int,
     images_relative_path: str,
 ) -> Tuple[A1MultiObjectSource, ...]:
-    result: list[A1MultiObjectSource] = []
-    for index, obj in enumerate(objects, start=1):
-        object_name = _object_name(obj)
-        result.append(
-            A1MultiObjectSource(
-                source_object=obj,
-                component_id=f"object_{index}:{object_name}",
-                animation_namespace=f"object_{index}",
-                settings=_build_multi_object_settings(
-                    obj,
-                    scene,
-                    output_directory=output_directory,
-                    texture_size=texture_size,
-                    images_relative_path=images_relative_path,
-                ),
-            )
+    """Compatibility helper that captures one Scene snapshot for every source."""
+
+    scene_profile = _capture_scene_profile(
+        scene,
+        output_directory=output_directory,
+        texture_size=texture_size,
+        images_relative_path=images_relative_path,
+    )
+    profiles = tuple(
+        _capture_object_profile(
+            obj,
+            sequence_start_frame=int(
+                getattr(getattr(obj, "spine2d_bake_settings", None), "bake_frame_start", 0)
+            ),
+            sequence_frame_count=int(
+                getattr(getattr(obj, "spine2d_bake_settings", None), "frames_for_render", 0)
+            ),
+            connect_enabled=_connect_enabled(obj),
         )
-    return tuple(result)
+        for obj in objects
+    )
+    return _build_sources_from_profiles(profiles, scene_profile)
 
 
 def export_active_object_a1(context: Any) -> ExportResult:
-    """Export the active Mesh through the complete single-object A1 service."""
+    """Export the active Mesh through the complete single-object A1 output service."""
 
     if context is None:
         raise ValueError("context cannot be None")
@@ -303,13 +494,19 @@ def export_active_object_a1(context: Any) -> ExportResult:
     if scene is None:
         raise ValueError("context.scene is missing")
     obj = _active_mesh(context)
-    output_directory = _resolve_output_directory(scene)
-    settings = _build_single_object_settings(
+    scene_profile = _capture_scene_profile(scene)
+    object_profile = _capture_object_profile(
         obj,
-        scene,
-        output_directory=output_directory,
-        texture_size=_texture_size(scene),
-        images_relative_path=_resolve_images_relative_path(scene),
+        sequence_start_frame=int(getattr(scene, "spine2d_bake_frame_start", 0)),
+        sequence_frame_count=int(getattr(scene, "spine2d_frames_for_render", 0)),
+        connect_enabled=False,
+    )
+    settings = _settings_from_profiles(
+        object_profile,
+        scene_profile,
+        json_output_stem=(
+            f"{sanitize_filename_stem(object_profile.object_name)}_merged"
+        ),
     )
     return export_a1_single_object(
         obj,
@@ -320,40 +517,55 @@ def export_active_object_a1(context: Any) -> ExportResult:
 
 
 def export_selected_objects_a1(context: Any) -> ExportResult:
-    """Export selected meshes through standalone, connected, or mixed A1."""
+    """Export selected meshes through standalone, connected, or mixed A1 output."""
 
     if context is None:
         raise ValueError("context cannot be None")
     scene = getattr(context, "scene", None)
     if scene is None:
         raise ValueError("context.scene is missing")
-    objects = _ordered_selected_meshes(context)
-    output_directory = _resolve_output_directory(scene)
-    texture_size = _texture_size(scene)
-    images_relative_path = _resolve_images_relative_path(scene)
-    sources = _build_sources(
-        objects,
-        scene,
-        output_directory=output_directory,
-        texture_size=texture_size,
-        images_relative_path=images_relative_path,
+
+    ordered_objects = _ordered_selected_meshes(context)
+    scene_profile = _capture_scene_profile(scene)
+    object_profiles = tuple(
+        _capture_object_profile(
+            obj,
+            sequence_start_frame=int(
+                getattr(getattr(obj, "spine2d_bake_settings", None), "bake_frame_start", 0)
+            ),
+            sequence_frame_count=int(
+                getattr(getattr(obj, "spine2d_bake_settings", None), "frames_for_render", 0)
+            ),
+            connect_enabled=_connect_enabled(obj),
+        )
+        for obj in ordered_objects
     )
+    sources = _build_sources_from_profiles(object_profiles, scene_profile)
+
     connected = tuple(
-        source for source, obj in zip(sources, objects) if _connect_enabled(obj)
+        source
+        for source, profile in zip(sources, object_profiles)
+        if profile.connect_enabled
     )
     standalone = tuple(
-        source for source, obj in zip(sources, objects) if not _connect_enabled(obj)
+        source
+        for source, profile in zip(sources, object_profiles)
+        if not profile.connect_enabled
     )
 
-    if len(connected) < 2:
+    if len(connected) == 1:
+        logger.warning(
+            "One selected object has Connect enabled; connected export requires at "
+            "least two objects, so all selected objects will be exported standalone"
+        )
         connected = ()
         standalone = sources
 
-    base_name = sanitize_filename_stem(_object_name(objects[0]))
-    output_stem = f"{base_name}_plus_{len(objects) - 1}_objects"
+    base_name = sanitize_filename_stem(object_profiles[0].object_name)
+    output_stem = f"{base_name}_plus_{len(object_profiles) - 1}_objects"
     if connected and standalone:
         settings = A1MultiObjectExportSettings(
-            output_directory=output_directory,
+            output_directory=scene_profile.output_directory,
             output_stem=output_stem,
             mode=A1MultiObjectMode.MIXED,
             anchor_component_id=connected[0].component_id,
@@ -368,7 +580,7 @@ def export_selected_objects_a1(context: Any) -> ExportResult:
 
     mode = A1MultiObjectMode.CONNECTED if connected else A1MultiObjectMode.STANDALONE
     settings = A1MultiObjectExportSettings(
-        output_directory=output_directory,
+        output_directory=scene_profile.output_directory,
         output_stem=output_stem,
         mode=mode,
         anchor_component_id=(connected[0].component_id if connected else None),
@@ -379,3 +591,9 @@ def export_selected_objects_a1(context: Any) -> ExportResult:
         context=context,
         scene=scene,
     )
+
+
+__all__ = [
+    "export_active_object_a1",
+    "export_selected_objects_a1",
+]
