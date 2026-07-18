@@ -41,3 +41,9 @@ def test_multi_probe_requires_shared_output_services():
         "blender_adapter.a1_output_statistics",
         "record_final_document_statistics",
     }.issubset(strings)
+
+
+def test_probe_tracks_ui_router_implementation_not_compatibility_facade():
+    strings = _expected_call_strings()
+    assert "blender_adapter.a1_ui_router" in strings
+    assert "blender_adapter.a1_ui_bridge" not in strings
