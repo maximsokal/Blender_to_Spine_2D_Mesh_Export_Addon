@@ -17,6 +17,7 @@ class ProjectionCoverageMode(str, Enum):
     """Policy used to convert sequence-union alpha coverage into geometry coverage."""
 
     BINARY_THRESHOLD = "BINARY_THRESHOLD"
+    COVERAGE_THRESHOLD = "COVERAGE_THRESHOLD"
     HYSTERESIS_MORPHOLOGY = "HYSTERESIS_MORPHOLOGY"
 
 
@@ -274,11 +275,12 @@ def build_projection_coverage_mask(
 ) -> ProjectionCoverageResult:
     """Convert max-unioned 8-bit alpha coverage into a cleaned binary geometry mask.
 
-    Hysteresis keeps weak antialias pixels only when they are connected to a strong alpha
-    core. If a translucent-only object has no strong core, weak coverage is retained rather
-    than incorrectly rejecting the object. Component cleanup always keeps the largest
-    component, so a valid one-pixel object cannot disappear. Hole cleanup fills only enclosed
-    regions and never bridges disconnected objects.
+    `BINARY_THRESHOLD` consumes an already-binary compatibility mask and treats every
+    non-zero byte as visible. `COVERAGE_THRESHOLD` applies the configured fringe threshold
+    directly to 8-bit coverage. `HYSTERESIS_MORPHOLOGY` retains weak antialias coverage only
+    when connected to a strong core, with a weak-only fallback for translucent objects.
+    Component cleanup always keeps the largest component, and hole cleanup fills only enclosed
+    regions without bridging disconnected objects.
     """
 
     _validate_dimensions(width, height)
@@ -296,6 +298,10 @@ def build_projection_coverage_mask(
     raw_nonzero_count = sum(1 for value in coverage if value)
 
     if policy.mode is ProjectionCoverageMode.BINARY_THRESHOLD:
+        candidate = bytearray(1 if value else 0 for value in coverage)
+        strong_count = sum(candidate)
+        used_weak_only_fallback = False
+    elif policy.mode is ProjectionCoverageMode.COVERAGE_THRESHOLD:
         if fringe_threshold == 0:
             candidate = bytearray(b"\x01" * len(coverage))
         else:
