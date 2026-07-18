@@ -101,6 +101,13 @@ def _expected_calls(scenario: str, backend: str) -> tuple[tuple[str, str], ...]:
             ("blender_adapter.a1_single_object_export", "export_a1_single_object"),
             *shared,
         )
+    multi_output = (
+        ("blender_adapter.a1_output_staging", "stage_and_finalize_a1_objects"),
+        (
+            "blender_adapter.a1_output_statistics",
+            "record_final_document_statistics",
+        ),
+    )
     if scenario == "mixed":
         return (
             ("blender_adapter.a1_ui_bridge", "export_selected_objects_a1"),
@@ -110,6 +117,7 @@ def _expected_calls(scenario: str, backend: str) -> tuple[tuple[str, str], ...]:
                 "blender_adapter.a1_multi_object_composition",
                 "compose_a1_multi_object_document",
             ),
+            *multi_output,
             *shared,
         )
     return (
@@ -120,6 +128,7 @@ def _expected_calls(scenario: str, backend: str) -> tuple[tuple[str, str], ...]:
             "blender_adapter.a1_multi_object_composition",
             "compose_a1_multi_object_document",
         ),
+        *multi_output,
         *shared,
     )
 
