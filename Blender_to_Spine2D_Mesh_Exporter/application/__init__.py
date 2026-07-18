@@ -26,6 +26,11 @@ from .a1_geometry_preparation import (
     A1PreparedRegion,
     prepare_a1_geometry_regions,
 )
+from .a1_grouped_camera_projection import (
+    GroupedCameraOverlayError,
+    GroupedCameraOverlayResult,
+    apply_grouped_camera_overlay,
+)
 from .a1_multi_object import (
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
@@ -103,7 +108,10 @@ __all__ = [
     "ExportRequest",
     "ExportResult",
     "ExportSettings",
+    "GroupedCameraOverlayError",
+    "GroupedCameraOverlayResult",
     "IssueSeverity",
+    "apply_grouped_camera_overlay",
     "assemble_a1_camera_projection_document",
     "assemble_a1_document",
     "build_a1_attachment_path",
