@@ -240,8 +240,10 @@ def setup_logging() -> None:
         _setup_default_logging()
         return
 
-    synchronize_logging_preferences(prefs)
     log_prefs = prefs.logging_settings
+    if not getattr(log_prefs, "modules", None) or len(log_prefs.modules) == 0:
+        synchronize_logging_preferences(prefs)
+        log_prefs = prefs.logging_settings
     configure_export_diagnostics(
         preserve_failed_work_files=bool(log_prefs.preserve_failed_work_files),
         recover_stale_work_files=bool(log_prefs.recover_stale_work_files),
