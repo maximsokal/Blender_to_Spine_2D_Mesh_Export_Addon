@@ -1,0 +1,69 @@
+name: Blender 4.4 Diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blender-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BLENDER_VERSION: "4.4.0"
+  BLENDER_ARCHIVE: "blender-4.4.0-linux-x64.tar.xz"
+  BLENDER_DIRECTORY: ".blender/blender-4.4.0"
+
+jobs:
+  diagnostics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache Blender 4.4
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BLENDER_DIRECTORY }}
+          key: blender-${{ runner.os }}-${{ runner.arch }}-${{ env.BLENDER_VERSION }}
+
+      - name: Download official Blender archive
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .blender/download "${BLENDER_DIRECTORY}"
+          curl --fail --location --retry 5 --retry-delay 3 \
+            "https://download.blender.org/release/Blender4.4/${BLENDER_ARCHIVE}" \
+            --output ".blender/download/${BLENDER_ARCHIVE}"
+          tar \
+            --extract \
+            --file ".blender/download/${BLENDER_ARCHIVE}" \
+            --directory "${BLENDER_DIRECTORY}" \
+            --strip-components=1
+          test -x "${BLENDER_DIRECTORY}/blender"
+
+      - name: Run per-file logging and cleanup integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_logging_diagnostics_integration.py \
+            2>&1 | tee test-results/blender-diagnostics.log
+
+      - name: Upload diagnostics log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-4.4-diagnostics-log
+          path: test-results/blender-diagnostics.log
+          if-no-files-found: warn
+          retention-days: 7
