@@ -19,7 +19,7 @@ env:
 jobs:
   blender-camera-projection:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -59,6 +59,17 @@ jobs:
             --python-exit-code 1 \
             --python tests/blender_headless/run_camera_projection_integration.py \
             2>&1 | tee test-results/blender-camera-projection.log
+
+      - name: Run grouped connected camera fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_grouped_camera_projection_integration.py \
+            2>&1 | tee test-results/blender-grouped-camera-projection.log
 
       - name: Run recursive node group fixtures
         shell: bash
