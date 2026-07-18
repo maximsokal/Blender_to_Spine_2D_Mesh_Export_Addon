@@ -17,6 +17,7 @@ class BakeExecutionSettings:
     use_clear: bool = True
     generated_color: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     color_mode: str = "RGBA"
+    projection_alpha_threshold: float = 1.0 / 255.0
 
     def __post_init__(self) -> None:
         if not isinstance(self.render_engine, str) or not self.render_engine.strip():
@@ -34,6 +35,14 @@ class BakeExecutionSettings:
             raise ValueError("generated_color must contain finite numeric values")
         if self.color_mode not in {"BW", "RGB", "RGBA"}:
             raise ValueError("color_mode must be BW, RGB, or RGBA")
+        if (
+            not isinstance(self.projection_alpha_threshold, (int, float))
+            or not isfinite(float(self.projection_alpha_threshold))
+            or not 0.0 <= float(self.projection_alpha_threshold) <= 1.0
+        ):
+            raise ValueError(
+                "projection_alpha_threshold must be finite and in [0, 1]"
+            )
 
 
 @dataclass(frozen=True, slots=True)
