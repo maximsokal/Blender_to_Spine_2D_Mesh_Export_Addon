@@ -80,10 +80,8 @@ from .scene_bake_analyzer import (
     validate_runtime_scene_context,
 )
 from .shader_capability_audit import audit_material_graph_capabilities
-from .shader_graph_analyzer import (
-    MaterialGraphAnalysisError,
-    analyse_material_graph,
-)
+from .shader_graph_analysis import analyse_material_graph
+from .shader_graph_error import MaterialGraphAnalysisError
 from .uv_unwrap import (
     UvOperatorPlan,
     UvUnwrapError,
