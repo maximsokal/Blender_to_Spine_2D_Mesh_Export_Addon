@@ -5,7 +5,7 @@ import inspect
 
 import pytest
 
-import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_executor_core as executor_core
+import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_postprocess as postprocess
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import BakeExecutionSettings
 
 
@@ -43,12 +43,19 @@ def test_projection_alpha_threshold_rejects_invalid_values(value):
         BakeExecutionSettings(projection_alpha_threshold=value)
 
 
-def test_b4_executor_uses_one_execution_threshold_for_coverage_layout():
-    source = inspect.getsource(executor_core._render_to_reservations)
-    module_source = inspect.getsource(executor_core)
+def test_b4_postprocess_uses_one_execution_threshold_for_coverage_layout():
+    builder_source = inspect.getsource(
+        postprocess.build_projection_union_accumulator
+    )
+    processor_source = inspect.getsource(
+        postprocess.process_camera_projection_outputs
+    )
+    module_source = inspect.getsource(postprocess)
 
     assert "_ALPHA_THRESHOLD" not in module_source
-    assert "execution_settings.projection_alpha_threshold" in source
-    assert "alpha_threshold=alpha_threshold" in source
-    assert "read_staged_alpha_coverage" in source
-    assert "coverage_policy=execution_settings.projection_coverage_policy" in source
+    assert (
+        "execution_settings.projection_alpha_threshold"
+        in builder_source
+    )
+    assert "alpha_threshold=alpha_threshold" in builder_source
+    assert "read_staged_alpha_coverage" in processor_source
