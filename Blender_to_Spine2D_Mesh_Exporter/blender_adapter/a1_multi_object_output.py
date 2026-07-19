@@ -31,7 +31,7 @@ from .a1_output_statistics import (
     record_final_document_statistics,
     record_grouped_camera_statistics,
 )
-from .grouped_camera_projection_executor import (
+from .grouped_camera_projection_output import (
     stage_grouped_camera_projection_outputs,
 )
 from .grouped_camera_projection_policy import (
