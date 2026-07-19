@@ -5,7 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Tuple
 
-from ..application import A1MultiObjectExportSettings, A1MultiObjectStage, ExportResult
+from ..application import (
+    A1MultiObjectExportSettings,
+    A1MultiObjectStage,
+    ExportResult,
+)
 from ..domain.spine import SpineSerializer
 from ..infrastructure import (
     AtomicFileCommitError,
@@ -28,8 +32,12 @@ from .a1_output_statistics import (
     record_final_document_statistics,
     record_grouped_camera_statistics,
 )
-from .grouped_camera_projection_executor import stage_grouped_camera_projection_outputs
-from .grouped_camera_projection_policy import resolve_grouped_camera_projection_request
+from .grouped_camera_projection_output import (
+    stage_grouped_camera_projection_outputs,
+)
+from .grouped_camera_projection_policy import (
+    resolve_grouped_camera_projection_request,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -80,7 +88,9 @@ def export_a1_mixed_object(
     stage = A1MultiObjectStage.STAGE_OUTPUTS
     statistics = dict(prepared.statistics)
     try:
-        with atomic_file_transaction(operation_name=_TRANSACTION_NAME) as transaction:
+        with atomic_file_transaction(
+            operation_name=_TRANSACTION_NAME
+        ) as transaction:
             json_reservation = transaction.reserve(prepared.json_path)
             staged_objects = stage_and_finalize_a1_objects(
                 prepared,
@@ -96,8 +106,14 @@ def export_a1_mixed_object(
                 standalone_sources,
             )
 
-            anchor = settings.anchor_component_id or connected_sources[0].component_id
-            connected_settings = build_connected_subgroup_settings(settings, anchor)
+            anchor = (
+                settings.anchor_component_id
+                or connected_sources[0].component_id
+            )
+            connected_settings = build_connected_subgroup_settings(
+                settings,
+                anchor,
+            )
             grouped_request = resolve_grouped_camera_projection_request(
                 partition.connected,
                 connected_settings,
@@ -155,7 +171,9 @@ def export_a1_mixed_object(
             stage = A1MultiObjectStage.COMMIT_OUTPUTS
             committed_paths = transaction.commit()
 
-        grouped_reservations = () if grouped_stage is None else grouped_stage.reservations
+        grouped_reservations = (
+            () if grouped_stage is None else grouped_stage.reservations
+        )
         expected_paths = (
             json_reservation.final_path,
             *(item.final_path for item in staged_objects.reservations),
