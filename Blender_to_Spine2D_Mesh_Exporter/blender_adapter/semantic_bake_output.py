@@ -18,8 +18,8 @@ from ..infrastructure import (
     AtomicOutputReservation,
     atomic_file_transaction,
 )
-from . import bake_executor_core as core
 from .bake_compositor import BakeCompositeError
+from .bake_execution_error import BakeExecutionError
 from .bake_material_preparation import BakeMaterialPreparationError
 from .bake_materials import BakeMaterialError
 from .bake_scene_state import BakeSceneStateError
@@ -35,7 +35,6 @@ from .semantic_bake_validation import (
 
 
 logger = logging.getLogger(__name__)
-BakeExecutionError = core.BakeExecutionError
 
 
 def _plan_identifier(plan: object) -> str:
