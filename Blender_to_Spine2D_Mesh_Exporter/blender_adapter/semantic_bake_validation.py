@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Tuple
+from pathlib import Path
+from typing import Any, Iterable, Tuple
 
 from ..domain.baking import BakeExecutionSettings, BakePlan
-from ..domain.geometry import MeshSnapshot
-from . import bake_executor_core as core
+from ..domain.geometry import MeshSnapshot, MeshSnapshotValidator
+from ..infrastructure import AtomicOutputReservation
+from .bake_execution_error import BakeExecutionError
 from .render_engine_contract import (
     RenderEngineContract,
     render_engine_contract_from_execution,
@@ -15,7 +17,103 @@ from .render_engine_contract import (
 from .scene_bake_analyzer import validate_runtime_scene_context
 
 
-BakeExecutionError = core.BakeExecutionError
+def _load_bpy() -> Any:
+    """Import Blender lazily so the package remains importable outside Blender."""
+
+    try:
+        import bpy
+    except Exception as exc:
+        raise BakeExecutionError("Blender bpy module is unavailable") from exc
+    return bpy
+
+
+def _validate_execution_input(
+    source_obj: Any,
+    target_snapshot: MeshSnapshot,
+    plan: BakePlan,
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Validate Blender/domain inputs and return used slots plus face bindings."""
+
+    if source_obj is None or getattr(source_obj, "type", None) != "MESH":
+        raise BakeExecutionError("source_obj must be a Blender MESH object")
+    if not isinstance(target_snapshot, MeshSnapshot):
+        raise TypeError("target_snapshot must be MeshSnapshot")
+    if not isinstance(plan, BakePlan):
+        raise TypeError("plan must be BakePlan")
+
+    MeshSnapshotValidator().validate_or_raise(target_snapshot)
+    if target_snapshot.source_object_id != plan.source_object_id:
+        raise BakeExecutionError(
+            "target_snapshot.source_object_id does not match BakePlan.source_object_id"
+        )
+    if plan.settings.uv_layer_name not in target_snapshot.uv_layer_names:
+        raise BakeExecutionError(
+            f"Target snapshot is missing bake UV layer '{plan.settings.uv_layer_name}'"
+        )
+
+    source_slots = tuple(getattr(source_obj, "material_slots", ()))
+    if len(source_slots) != len(plan.material_analysis.slots):
+        raise BakeExecutionError(
+            f"Source object has {len(source_slots)} material slots but BakePlan was "
+            f"built from {len(plan.material_analysis.slots)} slots"
+        )
+
+    face_material_indices = tuple(
+        int(face.material_index) for face in target_snapshot.faces
+    )
+    used_material_indices = tuple(sorted(set(face_material_indices)))
+    if not used_material_indices:
+        raise BakeExecutionError("Target snapshot contains no material references")
+    if max(used_material_indices) >= len(source_slots):
+        raise BakeExecutionError(
+            f"Target snapshot references material slot {max(used_material_indices)}, "
+            f"but source object has only {len(source_slots)} slots"
+        )
+
+    planned_slots = {
+        slot_index
+        for pass_plan in plan.passes
+        for slot_index in pass_plan.material_slot_indices
+    }
+    missing_plans = tuple(
+        index for index in used_material_indices if index not in planned_slots
+    )
+    if missing_plans:
+        raise BakeExecutionError(
+            "BakePlan does not cover used material slots: " + str(missing_plans)
+        )
+    return used_material_indices, face_material_indices
+
+
+def validate_semantic_bake_reservations(
+    plan: BakePlan,
+    reservations: Iterable[AtomicOutputReservation],
+) -> Tuple[AtomicOutputReservation, ...]:
+    """Require one correctly ordered reservation for every planned frame task."""
+
+    if not isinstance(plan, BakePlan):
+        raise TypeError("plan must be BakePlan")
+
+    resolved = tuple(reservations)
+    if len(resolved) != len(plan.frame_tasks):
+        raise BakeExecutionError(
+            f"Expected {len(plan.frame_tasks)} bake output reservations, "
+            f"received {len(resolved)}"
+        )
+
+    for task, reservation in zip(plan.frame_tasks, resolved, strict=True):
+        if not isinstance(reservation, AtomicOutputReservation):
+            raise TypeError(
+                "reservations must contain AtomicOutputReservation values"
+            )
+        expected_path = task.output_path.expanduser().resolve(strict=False)
+        actual_path = Path(reservation.final_path).expanduser().resolve(strict=False)
+        if actual_path != expected_path:
+            raise BakeExecutionError(
+                f"Bake task {task.task_index} expected output '{expected_path}', "
+                f"reservation targets '{actual_path}'"
+            )
+    return resolved
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +167,7 @@ def validate_semantic_bake_request(
         raise TypeError("target_snapshot must be MeshSnapshot")
     if not isinstance(plan, BakePlan):
         raise TypeError("plan must be BakePlan")
+
     resolved_settings = (
         BakeExecutionSettings()
         if execution_settings is None
@@ -77,7 +176,7 @@ def validate_semantic_bake_request(
     if not isinstance(resolved_settings, BakeExecutionSettings):
         raise TypeError("execution_settings must be BakeExecutionSettings or None")
 
-    used_material_indices, face_material_indices = core._validate_execution_input(
+    used_material_indices, face_material_indices = _validate_execution_input(
         source_obj,
         target_snapshot,
         plan,
@@ -89,7 +188,7 @@ def validate_semantic_bake_request(
             "use camera-render projection"
         )
 
-    bpy_module = core._load_bpy()
+    bpy_module = _load_bpy()
     resolved_context = context if context is not None else bpy_module.context
     resolved_scene = (
         scene
@@ -126,4 +225,5 @@ __all__ = [
     "BakeExecutionError",
     "SemanticBakeRuntime",
     "validate_semantic_bake_request",
+    "validate_semantic_bake_reservations",
 ]
