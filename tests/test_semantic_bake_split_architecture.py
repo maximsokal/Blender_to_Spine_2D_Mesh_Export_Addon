@@ -37,13 +37,29 @@ def test_semantic_executor_is_a_small_compatibility_facade():
     assert "semantic_bake_output" in _source("semantic_bake_executor.py")
 
 
-def test_validation_module_owns_no_reservation_or_mutation_scope():
+def test_validation_module_owns_no_transaction_or_mutation_scope():
     source = _source("semantic_bake_validation.py")
     assert "AtomicFileTransaction" not in source
     assert "atomic_file_transaction" not in source
     assert ".reserve(" not in source
     assert "temporary_mesh_object" not in source
     assert "temporary_bake_materials" not in source
+    assert "def validate_semantic_bake_reservations" in source
+
+
+def test_image_io_owns_only_image_uv_and_timeline_primitives():
+    source = _source("semantic_bake_image_io.py")
+    for function_name in (
+        "_activate_uv_layer",
+        "_create_bake_image",
+        "_remove_image",
+        "_save_bake_image",
+        "_set_timeline_frame",
+    ):
+        assert f"def {function_name}" in source
+    assert "atomic_file_transaction" not in source
+    assert ".commit(" not in source
+    assert ".ops." not in source
 
 
 def test_execution_module_cannot_commit_or_create_transactions():
@@ -52,6 +68,8 @@ def test_execution_module_cannot_commit_or_create_transactions():
     assert "atomic_file_transaction" not in source
     assert ".commit(" not in source
     assert "def run_semantic_bake" in source
+    assert "semantic_bake_image_io" in source
+    assert "bake_executor_core" not in source
 
 
 def test_stage_validates_before_any_reservation():
