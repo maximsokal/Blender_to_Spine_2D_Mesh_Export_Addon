@@ -80,7 +80,13 @@ def test_bake_helpers_use_no_operator_attributes():
         "semantic_bake_image_io.py",
         "semantic_bake_output.py",
         "semantic_bake_validation.py",
+        "shader_graph_analysis.py",
         "shader_graph_analyzer.py",
+        "shader_graph_error.py",
+        "shader_graph_rna.py",
+        "shader_graph_semantics.py",
+        "shader_graph_snapshot.py",
+        "shader_graph_traversal.py",
         "texture_executor.py",
     ):
         path = ROOT / "blender_adapter" / filename
