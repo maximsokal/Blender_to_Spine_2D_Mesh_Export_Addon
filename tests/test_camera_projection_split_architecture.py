@@ -172,13 +172,15 @@ def test_image_layer_uses_shared_error_module():
     assert "camera_projection_state" not in source
 
 
-def test_grouped_b4_imports_new_physical_modules():
+def test_grouped_executor_is_now_compatibility_facade():
+    tree = _tree("grouped_camera_projection_executor.py")
+    assert not any(
+        isinstance(node, (ast.FunctionDef, ast.ClassDef))
+        for node in tree.body
+    )
     source = _source("grouped_camera_projection_executor.py")
-    assert "camera_projection_error" in source
-    assert "camera_projection_execution" in source
-    assert "camera_projection_validation" in source
-    assert "from .camera_projection_state import" in source
-    assert "call_public_render_operator" not in source.split(
-        "from .camera_projection_state import",
-        1,
-    )[1].split(")", 1)[0]
+    assert "grouped_camera_projection_output" in source
+    assert "grouped_camera_projection_validation" in source
+    assert "grouped_camera_projection_visibility" in source
+    assert "camera_projection_execution" not in source
+    assert "camera_projection_state" not in source
