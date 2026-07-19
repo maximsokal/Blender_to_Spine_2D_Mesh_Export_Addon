@@ -70,9 +70,48 @@ shader_graph_analyzer.py
   -> compatibility re-exports only
 ```
 
-`material_analyzer.py`, `production_shader_capabilities.py` and public adapter
-exports use physical owners. Snapshot and live Blender nodes remain exactly
-parallel so live mute and source-UV preflight retain their existing contract.
+`material_analyzer.py` and public adapter exports use physical owners. Snapshot
+and live Blender nodes remain exactly parallel so live mute and source-UV
+preflight retain their existing contract.
+
+## Production shader capability ownership
+
+The live production capability gate is physically decomposed:
+
+```text
+production_shader_capability_runtime.py
+  -> renderer-specific live graph re-analysis
+  -> full immutable graph parity
+  -> live-node alignment and mute enrichment
+
+production_shader_capability_merge.py
+  -> shared finding ordering and audit extension
+
+production_shader_capability_proxy.py
+  -> Alpha Group/Reroute/muted bypass boundaries
+
+production_shader_capability_uv.py
+  -> source UV layers, active_render and named UV findings
+
+production_shader_capability_object_audit.py
+  -> object/material-slot orchestration
+
+production_shader_capability_routing.py
+  -> strongest capability, failure messages and B1-B4 selection
+
+production_shader_capabilities.py
+  -> compatibility re-exports only
+```
+
+`a1_texture_planning.py` imports the physical object-audit and routing owners.
+The runtime parity gate compares renderer output, qualified node identity,
+node type/name/group path, links, channels, dependencies and analysis issues
+before live mute or UV data is applied.
+
+Reused group instances with identical internal node names cannot silently swap
+between analysis and planning. Production audit enrichment shares the immutable
+audit finding-order implementation instead of maintaining a second key/sort
+algorithm.
 
 ## Semantic object-bake ownership
 
@@ -122,7 +161,7 @@ reservation/frame-task order.
 
 ## Grouped B4 ownership
 
-Grouped connected B4 is now physically decomposed:
+Grouped connected B4 is physically decomposed:
 
 ```text
 grouped_camera_projection_validation.py
@@ -278,17 +317,20 @@ The last complete automatic matrix before workflows became manual-only passed:
 - Blender 4.4 Camera Projection: success;
 - full Blender 4.4 Headless: success.
 
-For the newest shader-graph decomposition:
+For the newest production capability decomposition:
 
 - all new/replaced production modules compile;
-- eight focused physical ownership tests pass;
-- a behavioral parity harness covers renderer-specific outputs, nested and
-  reused groups, unused group inputs, muted bypass, image/time dependencies,
-  recursive cycles and missing-output fallback;
-- snapshot/live-node ordering remains exact;
-- production callers use physical analysis owners;
+- nineteen focused local tests pass across the split mirror;
+- the physical import graph is acyclic;
+- equal-name reused-group instance swaps fail closed;
+- node type, link, channel, dependency and issue changes fail closed;
+- live-node count/alignment is validated before source-UV inspection;
+- immutable and production audit enrichment share one finding-order contract;
+- Alpha proxy and named UV finding codes remain unchanged;
+- multiple active render UV layers fail explicitly;
+- `a1_texture_planning.py` imports physical owners;
 - compatibility public/private aliases remain;
-- existing single/grouped B4 boundaries remain unchanged;
+- operator-boundary checks include every split module;
 - GitHub Actions remain disabled/manual-only.
 
 The complete pytest suite and real Blender matrices have not been rerun on the
