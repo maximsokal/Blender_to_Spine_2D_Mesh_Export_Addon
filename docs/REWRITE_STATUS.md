@@ -23,8 +23,7 @@ Implemented:
 - `LEGACY_SEED_CONE` compatibility behavior;
 - `SEED_CONE_AND_LOCAL_DIHEDRAL` shared-edge guard;
 - one immutable `DiskTopologyIndex` per mesh snapshot;
-- incremental `DiskRegionState` growth;
-- incremental frontier and merge adjacency updates;
+- incremental `DiskRegionState`, frontier and merge adjacency;
 - complete topology analysis only as input/final invariants.
 
 ## Automatic material pipeline
@@ -38,14 +37,13 @@ renderer-effective shader graph
     |
     +-- LOCAL / AUXILIARY / SCENE
     |     -> DIFFUSE / EMIT / COMBINED object bake
-    |     -> straight-RGBA composition
     |
     +-- CAMERA / VOLUME / render displacement
           -> B4 camera projection
 ```
 
-Recursive group analysis supports renderer-specific outputs, muted bypasses,
-nested groups, instance-qualified IDs, cycles, bounded depth and no source-node
+Recursive analysis supports renderer-specific outputs, muted bypasses, nested
+groups, instance-qualified IDs, cycles, bounded depth and no source-node
 mutation.
 
 ## Semantic object-bake ownership
@@ -64,13 +62,10 @@ semantic_bake_output.py
   -> atomic reservation, commit, rollback and typed results
 ```
 
-`bake_executor_core.py` no longer contains a duplicate transaction or frame/pass
-pipeline. It owns only the direct `bpy.ops.object.bake` hook and compatibility
-private re-exports.
+`bake_executor_core.py` owns only the direct `bpy.ops.object.bake` hook and
+compatibility private re-exports.
 
-## B4 execution ownership
-
-The single-object B4 runtime now has one physical pipeline:
+## Single B4 ownership
 
 ```text
 camera_projection_validation.py
@@ -84,53 +79,101 @@ camera_projection_execution.py
   -> full-frame rendering only
 
 camera_projection_postprocess.py
-  -> coverage union, cleanup, layout and crop rewrite
+  -> shared single/grouped coverage, layout and crop engine
 
 camera_projection_output.py
-  -> reservation, atomic commit and typed results
+  -> single reservation, direct commit and typed results
 ```
 
 `camera_projection_executor_core.py` is compatibility-only.
 `camera_projection_executor.py` remains the stable public facade.
 
-B4 request validation completes before reservation. Direct execution validates
+Single B4 validation completes before reservation. Direct execution validates
 before transaction creation, commits exactly once and requires exact
-reservation/frame-task path order.
+reservation/frame-task order.
 
-Coverage decode, contour construction and crop rewrite begin only after the
-reversible Blender render scope has restored Scene, frame and visibility state.
+## Grouped B4 ownership
 
-The historical compatibility staging API still writes full-frame textures and
-does not decode coverage or crop images.
+Grouped connected B4 is now physically decomposed:
 
-## B4 production pipeline
+```text
+grouped_camera_projection_validation.py
+  -> GroupedCameraProjectionRuntime
+  -> source/RNA identity, common Scene/renderer/output policy
+  -> strict grouped reservation validation
 
-Every detailed B4 static or sequence export:
+grouped_camera_projection_visibility.py
+  -> grouped source visibility and direct-camera isolation
 
-1. validates object, Scene, World, camera, light, renderer and output policy;
-2. reserves outputs in immutable frame-task order;
-3. captures frame, render and camera-visibility state;
-4. isolates only direct camera visibility while preserving dependency rays;
-5. disables Scene Compositor and Sequencer execution without mutating data;
-6. renders every transparent full-frame staged image;
-7. restores Blender state;
-8. decodes deterministic 8-bit alpha coverage;
-9. max-unions coverage across the sequence;
-10. applies hysteresis and conservative morphology;
-11. derives one stable padded crop;
-12. traces a simplified concave contour or safe convex fallback;
-13. triangulates the simple contour exactly;
-14. applies HDR/tone-mapping/alpha policy during crop rewrite;
-15. rebuilds typed Spine attachments/documents;
-16. commits JSON and textures together.
+grouped_camera_projection_execution.py
+  -> grouped full-frame rendering inside reversible state only
+
+grouped_camera_projection_postprocess.py
+  -> grouped adapter and diagnostics for the shared postprocess engine
+
+grouped_camera_projection_output.py
+  -> validation-before-reservation and caller-owned staging
+  -> no transaction creation and no commit
+
+grouped_camera_projection_executor.py
+  -> compatibility re-exports only
+```
+
+Multi and mixed output import the physical grouped output owner. Their outer
+transaction remains the sole owner of JSON, individual texture and grouped
+texture commit order.
+
+## B4 production ordering
+
+Every detailed single or grouped B4 static/sequence export:
+
+1. validates object(s), Scene, World, camera, lights and View Layer;
+2. resolves renderer and output policy before reservation;
+3. reserves outputs in immutable frame-task order;
+4. captures frame, render and camera-visibility state;
+5. isolates only direct camera visibility while preserving dependency rays;
+6. disables Compositor and Sequencer execution without mutating data;
+7. renders every transparent full-frame staged image;
+8. restores Blender state;
+9. decodes deterministic 8-bit alpha coverage;
+10. max-unions coverage across the sequence;
+11. applies hysteresis and conservative morphology;
+12. derives one stable padded crop;
+13. traces a simplified concave contour or safe convex fallback;
+14. triangulates exactly;
+15. applies HDR/tone-mapping/alpha policy during crop rewrite;
+16. rebuilds typed Spine attachments/documents;
+17. commits JSON and textures through the owning output transaction.
+
+Coverage, contour and crop failures occur after original Blender state has been
+restored.
+
+## Shared B4 postprocess
+
+`ProjectionPostprocessRequest` and `process_projection_outputs()` are shared by
+single and grouped B4.
+
+The shared engine owns one `O(width * height)` sequence accumulator and one
+implementation of:
+
+- alpha decode;
+- coverage cleanup;
+- stable crop;
+- simplified concave contour;
+- disconnected-component convex fallback;
+- exact triangulation;
+- straight/premultiplied and SDR/HDR image rewrite.
+
+The crop writer explicitly accepts both `CameraProjectionPlan` and
+`GroupedCameraProjectionPlan`.
 
 ## Simplified concave screen-space contour
 
 Production defaults to `ProjectionContourMode.SIMPLIFIED_CONCAVE`.
 
 - one outer component becomes a simple concave contour;
-- internal holes remain texture alpha;
-- disconnected outer components use deterministic convex fallback;
+- holes remain texture alpha;
+- disconnected components use deterministic convex fallback;
 - exact collinear vertices are removed;
 - only shallow reflex notches may be filled;
 - convex corners are never removed;
@@ -150,7 +193,7 @@ Production uses `HYSTERESIS_MORPHOLOGY`:
 - only bounded enclosed pinholes are filled;
 - no generic closing can bridge separate objects.
 
-## Grouped connected B4
+## Grouped connected B4 policy
 
 `ConnectedB4RenderPolicy` supports:
 
@@ -159,9 +202,13 @@ Production uses `HYSTERESIS_MORPHOLOGY`:
 - `GROUPED_CAMERA_REQUIRED`.
 
 A compatible connected set may be rendered together for real per-pixel depth.
-The grouped executor now imports shared B4 error, validation, render-hook and
-state helpers from their physical modules. Its grouped visibility, coverage and
-output orchestration remains a separate future decomposition slice.
+Grouped source slots become transparent and one root-bound grouped attachment
+becomes visible. Mixed local/B4 connected sets remain individual layers unless a
+future policy solves depth across both coordinate spaces.
+
+Grouped staging never creates or commits a transaction. Multi/mixed output
+commits JSON, individual textures and grouped textures once and verifies exact
+combined reservation order.
 
 ## HDR, tone mapping and alpha
 
@@ -173,9 +220,9 @@ OPEN_EXR   -> scene-linear HDR -> no tone mapping
             -> premultiplied alpha -> 32-bit float
 ```
 
-Invalid combinations fail before render. Crop rewrite performs explicit
-straight/premultiplied conversion, normalizes zero-alpha RGB and does not clamp
-finite HDR RGB.
+Invalid combinations fail before reservation and render. Crop rewrite performs
+explicit alpha conversion, normalizes zero-alpha RGB and does not clamp finite
+HDR RGB.
 
 ## Private production parity and release gate
 
@@ -203,18 +250,20 @@ The last complete automatic matrix before workflows became manual-only passed:
 - Blender 4.4 Camera Projection: success;
 - full Blender 4.4 Headless: success.
 
-For the newest B4 decomposition:
+For the newest grouped B4 decomposition:
 
-- ten new or replaced production modules compile;
-- focused source architecture tests pass;
-- validation/execution/postprocess/output boundaries are checked;
-- render state restoration precedes postprocessing;
-- validation precedes reservation and transaction creation;
-- direct B4 execution contains exactly one commit;
-- compatibility aliases remain;
+- all new/replaced production modules compile;
+- grouped source ownership/order tests pass;
+- import graph loads with Blender/domain stubs;
+- compatibility facade aliases resolve to physical owners;
+- validation and output policy precede reservation;
+- reversible render completes before postprocessing;
+- grouped output contains no transaction creation or commit;
+- production callers use the physical grouped output owner;
+- single-B4 threshold, coverage and contour inspection contracts remain;
 - GitHub Actions remain disabled/manual-only.
 
-The complete pytest suite and Blender matrices have not been rerun on the
+The complete pytest suite and real Blender matrices have not been rerun on the
 current HEAD.
 
 ## Remaining release blockers
