@@ -53,6 +53,7 @@ def test_bake_helpers_use_no_operator_attributes():
         "a1_projection_finalization.py",
         "a1_single_object_export.py",
         "bake_compositor.py",
+        "bake_execution_error.py",
         "bake_material_preparation.py",
         "bake_materials.py",
         "bake_scene_state.py",
@@ -61,7 +62,11 @@ def test_bake_helpers_use_no_operator_attributes():
         "camera_projection_image.py",
         "camera_projection_state.py",
         "material_analyzer.py",
+        "semantic_bake_execution.py",
         "semantic_bake_executor.py",
+        "semantic_bake_image_io.py",
+        "semantic_bake_output.py",
+        "semantic_bake_validation.py",
         "shader_graph_analyzer.py",
         "texture_executor.py",
     ):
@@ -150,6 +155,7 @@ def test_public_executor_is_a_small_facade():
     assert _function_names(path) == {"_call_bake_operator", "_call_render_operator"}
     assert "texture_executor" in source
     assert "bake_executor_core" in source
+    assert "bake_execution_error" in source
 
 
 def test_camera_projection_executor_is_a_small_facade():
