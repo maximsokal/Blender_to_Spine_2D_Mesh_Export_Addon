@@ -8,10 +8,10 @@ The shader capability layer answers one question before a texture pipeline is se
 Can the current reconstructed UV-bake target reproduce every reachable Blender value?
 ```
 
-`blender_adapter/shader_capability_audit.py` classifies immutable renderer-specific graph
-snapshots. `blender_adapter/production_shader_capabilities.py` enriches that report with live
-Blender facts that are intentionally absent from the domain model, including node mute state,
-source UV availability, named UV references, and copied-material proxy boundaries.
+`blender_adapter/shader_capability_analysis.py` classifies immutable renderer-specific graph
+snapshots. The physical production capability modules enrich that report with live Blender facts
+that are intentionally absent from the domain model, including node mute state, source UV
+availability, named UV references, copied-material proxy boundaries and graph parity.
 
 Each used node material receives one strongest capability:
 
@@ -74,18 +74,68 @@ shader_graph_analyzer.py
 `snapshot.reachable_nodes`. The production capability gate relies on this invariant when it
 combines immutable snapshots with live `mute`, UV-map and socket state.
 
-`material_analyzer.py`, `production_shader_capabilities.py` and the public adapter package import
-the physical analysis/error/RNA owners directly. Historical public and private imports remain
-available from `shader_graph_analyzer.py` without retaining a second implementation.
+`material_analyzer.py` and the public adapter package import the physical analysis/error/RNA
+owners directly. Historical public and private imports remain available from
+`shader_graph_analyzer.py` without retaining a second implementation.
+
+## Physical production capability ownership
+
+The former `production_shader_capabilities.py` mixed live graph validation, audit merging,
+Alpha-proxy boundaries, source-UV inspection, object-slot orchestration and B1-B4 routing.
+Physical ownership is now:
+
+```text
+production_shader_capability_error.py
+  -> ProductionShaderCapabilityError
+
+production_shader_capability_merge.py
+  -> shared deterministic audit extension
+
+production_shader_capability_runtime.py
+  -> live renderer-specific graph re-analysis
+  -> immutable snapshot parity
+  -> snapshot/live-node alignment
+  -> live mute enrichment
+
+production_shader_capability_proxy.py
+  -> Alpha proxy findings
+
+production_shader_capability_uv.py
+  -> source UV inspection and UV-related findings
+
+production_shader_capability_object_audit.py
+  -> material-slot orchestration
+
+production_shader_capability_routing.py
+  -> strongest object capability
+  -> deterministic failure messages
+  -> B1-B4 plan selection
+
+production_shader_capabilities.py
+  -> compatibility re-exports only
+```
+
+`a1_texture_planning.py` imports the physical object-audit and routing owners. Production runtime
+code no longer depends on the compatibility facade.
+
+Before live mute or UV state is applied, production re-analysis compares material name,
+renderer-specific output, qualified node identity, node type/name/group path, links, semantic
+channels, dependencies and analysis issues. Reused groups with identical internal node names
+therefore cannot silently swap instances between analysis and planning.
+
+Production audit extension uses `shader_capability_findings.order_unique_findings()` rather than a
+second sorting implementation. The historical finding key and first-reason retention remain
+unchanged.
 
 ## Production routing
 
-The production gate is now authoritative during `prepare_a1_object()`:
+The production gate is authoritative during `prepare_a1_object()` through the texture-planning
+stage:
 
 ```text
 renderer-specific reachable graph
         -> capability audit
-        -> live source/proxy preflight
+        -> live graph/proxy/source-UV preflight
         |
         +-- LOCAL_UV_SAFE ----------> B1/B2 object UV bake
         +-- SCENE_UV_SAFE ----------> B3 scene-aware Cycles UV bake
@@ -94,8 +144,9 @@ renderer-specific reachable graph
         +-- UNSUPPORTED ------------> explicit PLAN_BAKE failure
 ```
 
-The domain strategy registry remains Blender-independent. Live `bpy` inspection and capability
-routing stay at the Blender adapter boundary.
+The domain strategy registry remains Blender-independent. Live Blender inspection and capability
+routing stay at the Blender adapter boundary, while the routing owner itself reads only validated
+immutable audits, renderer contracts and bake contexts.
 
 ## Renderer contract
 
@@ -145,7 +196,7 @@ camera-bound.
 
 ## Separate source and bake UV roles
 
-`MeshSnapshot` now stores two independent roles:
+`MeshSnapshot` stores two independent roles:
 
 ```text
 active_uv_layer -> Cycles bake destination, normally SpineBakeUV
@@ -161,8 +212,9 @@ When a graph requires Blender's default render UV but the source mesh has no sou
 the whole object is routed to B4. The newly generated `SpineBakeUV` is never silently reused as
 source texture coordinates.
 
-Named UV Map, Normal Map, and Tangent references are also checked against live source UV layers.
-Missing named layers require B4 instead of producing an incorrect object bake.
+Named UV Map, Normal Map, and Tangent references are checked against live source UV layers.
+Missing named layers require B4 instead of producing an incorrect object bake. More than one
+`active_render` source layer is an explicit production preflight error.
 
 ## Alpha proxy boundaries
 
@@ -193,7 +245,7 @@ families are routed to B4.
 
 ## B4 render isolation
 
-B4 captures and restores Blender render state. During every source-only projection it now:
+B4 captures and restores Blender render state. During every source-only projection it:
 
 - validates execution engine against the analyzed renderer;
 - disables `render.use_compositing`;
@@ -218,9 +270,9 @@ must not be silently discarded.
 
 Pure tests cover capability precedence, common node families, source UV roles, renderer
 selection, copied-material output restoration, production routing, postprocess state, non-node
-fallback, View Layer rules and physical shader-graph ownership.
+fallback, View Layer rules and physical ownership.
 
-The split-specific checks cover:
+Shader-graph split checks cover:
 
 - compatibility facade ownership;
 - immutable traversal handoff;
@@ -231,6 +283,19 @@ The split-specific checks cover:
 - recursive-cycle termination;
 - deterministic snapshot/live-node parallel ordering;
 - missing-output material-classification fallback.
+
+Production capability split checks cover:
+
+- compatibility facade ownership;
+- physical caller imports;
+- equal-name recursive group instance swaps;
+- node type, link, channel, dependency and issue parity;
+- live-node count and alignment;
+- shared finding ordering and first-reason retention;
+- Alpha proxy finding codes;
+- named Normal Map, Tangent and UV Map findings;
+- multiple active render UV rejection;
+- no `bpy.ops` access in any split module.
 
 Manual-only Blender 4.4 fixtures cover:
 
