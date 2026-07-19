@@ -52,7 +52,7 @@ def test_postprocess_decodes_coverage_and_passes_typed_policy_to_union():
         postprocess.build_projection_union_accumulator
     )
     processor_source = inspect.getsource(
-        postprocess.process_camera_projection_outputs
+        postprocess.process_projection_outputs
     )
 
     assert "read_staged_alpha_coverage" in processor_source
