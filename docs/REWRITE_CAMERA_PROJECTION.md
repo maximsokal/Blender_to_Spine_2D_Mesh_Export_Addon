@@ -7,9 +7,9 @@ preserve appearance that depends on the active camera or ray type, including
 Fresnel, Layer Weight, Light Path, refraction, transmission, volume and
 render-evaluated displacement.
 
-B4 therefore performs a real render from the active Blender camera and projects
-the decoded screen-space result into Spine. The synthetic `CAMERA_COMBINED`
-pass in `CameraProjectionPlan` is metadata only and is never sent to
+B4 performs a real render from the active Blender camera and projects the
+decoded screen-space result into Spine. The synthetic `CAMERA_COMBINED` pass in
+`CameraProjectionPlan` is metadata only and is never sent to
 `bpy.ops.object.bake`.
 
 ## Automatic routing
@@ -27,125 +27,124 @@ renderer-effective material graph
 ```
 
 `CameraProjectionPlan` remains a frozen `BakePlan` subtype. Existing consumers
-retain the normal source ID, settings, frame tasks, output paths and
-`BakeExecutionResult` contracts.
+retain source ID, settings, frame tasks, output paths and
+`BakeExecutionResult`.
 
 The real render operator is called only through
 `blender_adapter/bake_executor.py::_call_render_operator`, preserving one
 failure-injection boundary.
 
-## Physical execution ownership
-
-The former `camera_projection_executor_core.py` mixed runtime validation,
-reversible Scene mutation, rendering, coverage processing, crop rewrite,
-reservation, commit and result construction.
-
-Physical ownership is now:
+## Physical single-B4 ownership
 
 ```text
 camera_projection_error.py
   -> shared CameraProjectionExecutionError
 
 camera_projection_validation.py
-  -> immutable request validation
+  -> complete request and reservation validation
   -> renderer and output-policy resolution
-  -> bpy / Context / Scene resolution
-  -> View Layer and Scene-context validation
-  -> reservation-order validation
+  -> bpy / Context / Scene / View Layer validation
   -> CameraProjectionRuntime
 
 camera_projection_state.py
-  -> capture and restore Scene/frame/visibility state
-  -> source-only camera visibility mutation
-  -> per-frame Scene render configuration
-  -> timeline evaluation
+  -> reversible Scene/frame/visibility state
+  -> source-only camera visibility
+  -> per-frame render configuration and timeline evaluation
 
 camera_projection_execution.py
-  -> consume CameraProjectionRuntime and existing reservations
-  -> enter one reversible state scope
-  -> render every full-frame task
-  -> validate each staged file
-  -> no coverage, crop, reservation or commit
+  -> full-frame rendering inside one reversible state scope
+  -> staged-file verification
+  -> no coverage, crop, reserve or commit
 
 camera_projection_image.py
-  -> staged image decode
-  -> deterministic 8-bit alpha extraction
-  -> pixel-buffer crop
-  -> straight/premultiplied conversion
-  -> staged image rewrite
+  -> staged decode and deterministic 8-bit alpha extraction
+  -> pixel crop and straight/premultiplied conversion
+  -> single/grouped staged image rewrite
 
 camera_projection_postprocess.py
-  -> fixed-size sequence coverage union
-  -> morphology, crop, contour and triangulation layout
-  -> rewrite all staged frames with one stable crop
-  -> no Scene mutation, operator access, reservation or commit
+  -> ProjectionPostprocessRequest
+  -> shared single/grouped sequence coverage engine
+  -> morphology, crop, contour and triangulation
+  -> rewrite all staged frames after render state restoration
 
 camera_projection_output.py
-  -> caller-owned reservation
-  -> detailed and full-frame staging
-  -> atomic transaction and exactly one commit
-  -> strict committed-path order validation
-  -> typed BakeExecutionResult
+  -> caller-owned reservation and staging
+  -> direct named transaction and exactly one commit
+  -> strict committed-path validation
+  -> BakeExecutionResult
 
 camera_projection_executor_core.py
-  -> compatibility re-exports only
+  -> historical private compatibility re-exports only
 
 camera_projection_executor.py
   -> stable public facade
 ```
 
-The compatibility core no longer owns an implementation. Historical private
-names such as `_render_to_reservations`, `_reserve` and
-`_build_execution_result` resolve to functions in `camera_projection_output.py`.
+The compatibility core no longer owns a second implementation. Historical
+private names such as `_render_to_reservations`, `_reserve` and
+`_build_execution_result` resolve to physical output functions.
 
-## Validation-before-mutation contract
+## Shared single/grouped postprocess
 
-A complete B4 request is validated before `AtomicFileTransaction.reserve()` and
-before any Blender Scene mutation:
+`camera_projection_postprocess.py` now owns one immutable
+`ProjectionPostprocessRequest` and one `process_projection_outputs()` engine.
+Single B4 adapts `CameraProjectionRuntime`; grouped B4 adapts
+`GroupedCameraProjectionRuntime`.
+
+Both paths therefore use the same:
+
+- alpha threshold;
+- fixed-size sequence max-union;
+- coverage cleanup;
+- crop;
+- contour and fallback policy;
+- exact triangle validation;
+- HDR/tone-mapping/alpha rewrite.
+
+`rewrite_staged_image_with_crop()` explicitly accepts
+`CameraProjectionPlan | GroupedCameraProjectionPlan`. This matches the existing
+real use without changing pixel output.
+
+## Single-B4 validation-before-mutation
+
+A complete single B4 request is validated before
+`AtomicFileTransaction.reserve()` and before Scene mutation:
 
 1. source must be a Blender Mesh;
 2. plan must be `CameraProjectionPlan`;
-3. source identity must match `plan.source_object_id`;
-4. execution settings must be `BakeExecutionSettings` or `None`;
-5. execution renderer must match the analyzed Scene renderer;
-6. output format, dynamic range, tone mapping and alpha representation must be
-   compatible;
-7. frame tasks must be non-empty, contiguous and have unique output paths;
+3. source identity must match the plan;
+4. execution settings must be typed or `None`;
+5. execution renderer must match the analyzed renderer;
+6. output format, dynamic range, tone mapping and alpha must be compatible;
+7. frame tasks must be non-empty, contiguous and path-unique;
 8. Context, Scene and active camera must exist;
 9. source must be available in the required View Layer;
-10. Object, Scene, World, camera and light snapshots must still match the plan.
+10. Object, Scene, World, camera and light snapshots must still match.
 
-`None` is handled explicitly. Falsy values are never silently replaced with
-default settings, Context or Scene values.
+`None` is handled explicitly. Falsy objects are not silently replaced.
 
-Direct execution validates before creating the atomic transaction. Caller-owned
+Direct execution validates before creating its atomic transaction. Caller-owned
 staging validates before the first reservation.
 
 ## Reversible render execution
 
 For every static or sequence frame:
 
-1. capture render settings, current frame, `hide_render` and
-   `visible_camera`;
+1. capture render settings, current frame, `hide_render` and `visible_camera`;
 2. expose the source to direct camera rays;
 3. disable only direct camera visibility for other renderable objects;
-4. preserve their diffuse, glossy, transmission and shadow participation;
-5. disable Scene Compositor and Sequencer execution without mutating their
-   node/data structures;
-6. set the planned timeline frame and update the View Layer;
-7. configure renderer, dimensions, transparent film, output path and image
-   format;
+4. preserve dependency ray participation;
+5. disable Compositor and Sequencer execution without mutating their data;
+6. set the planned frame and update the View Layer;
+7. configure renderer, dimensions, film, path and image format;
 8. call the public render hook;
-9. require the staged file to exist and be non-empty;
-10. restore every captured Blender value in `finally`.
+9. require a non-empty staged file;
+10. restore all captured Blender values in `finally`.
 
-Blender background rendering can expose a zero-sized `Render Result` after a
-successful render. The staged file is therefore the source of truth.
+Blender background rendering may expose a zero-sized `Render Result` after a
+successful render. The staged file remains the source of truth.
 
-## Postprocessing occurs after state restoration
-
-Coverage decode and crop rewrite no longer run while temporary Scene state is
-active:
+## Postprocessing after state restoration
 
 ```text
 render every full-frame task
@@ -155,12 +154,12 @@ render every full-frame task
 -> rewrite staged frames
 ```
 
-This shortens the mutable Blender scope and guarantees that failures in contour
-construction or image rewriting cannot leave temporary render settings active.
+Failures in coverage cleanup, contour construction, triangulation or image
+rewrite occur after original Scene, frame and visibility state has returned.
 
 ## Stable sequence-union crop
 
-Detailed production staging uses one fixed-size accumulator:
+Detailed staging uses one fixed-size accumulator:
 
 ```text
 frame 1 coverage --+
@@ -172,20 +171,12 @@ frame N coverage --+
 Memory remains `O(width * height)`. Each decoded frame buffer is released after
 `add_coverage()`.
 
-The shared layout records:
+The immutable layout records full dimensions, crop, screen offset, coverage
+statistics, contour, triangle indices and frame count. Every sequence frame is
+rewritten with identical dimensions and placement.
 
-- full dimensions and crop bounds;
-- cropped dimensions and full-frame screen offset;
-- alpha threshold and coverage cleanup statistics;
-- simplified concave contour or deterministic convex fallback;
-- exact triangle indices;
-- frame count.
-
-Every sequence frame is rewritten with identical dimensions and placement.
-
-The historical reservations-only staging API intentionally keeps full-frame
-images. It renders and restores state but performs no coverage decode and no
-crop rewrite.
+The historical reservations-only single-B4 API intentionally keeps full-frame
+images and performs no coverage decode or crop rewrite.
 
 ## Coverage, contour and triangulation
 
@@ -199,15 +190,15 @@ BakeExecutionSettings(
 )
 ```
 
-Coverage uses `HYSTERESIS_MORPHOLOGY` by default. Weak antialias coverage is
-retained only when connected to a strong core; translucent-only objects use the
-explicit weak-only fallback. Small detached components and bounded pinholes are
-handled conservatively without generic closing that could bridge objects.
+Coverage uses `HYSTERESIS_MORPHOLOGY`. Weak antialias coverage is retained only
+when connected to a strong core; translucent-only objects use the explicit
+weak-only fallback. Small detached components and bounded pinholes are handled
+without generic closing that could bridge objects.
 
 One outer component may produce a simplified concave contour. Holes remain
-texture alpha. Disconnected outer components use a deterministic convex
-fallback. Concave contours use deterministic ear clipping and must satisfy
-positive orientation, `n - 2` triangles and exact total signed area.
+texture alpha. Disconnected outer components use deterministic convex fallback.
+Concave contours use deterministic ear clipping and must satisfy positive
+orientation, `n - 2` triangles and exact total signed area.
 
 `CameraProjectionLayout.hull` remains the compatibility field name.
 
@@ -221,74 +212,78 @@ OPEN_EXR   -> scene-linear HDR -> no tone mapping
             -> premultiplied alpha -> 32-bit float
 ```
 
-Invalid combinations fail before rendering. Crop rewrite reads Blender's
-source `Image.alpha_mode`, performs explicit straight/premultiplied conversion,
-normalizes zero-alpha RGB and does not clamp finite HDR RGB values.
+Invalid combinations fail before reservation and rendering. Crop rewrite reads
+the staged `Image.alpha_mode`, performs explicit alpha conversion, normalizes
+zero-alpha RGB and does not clamp finite HDR RGB.
 
-## Atomic output lifecycle
+## Atomic ownership
 
-Detailed staging:
-
-```text
-validate request
--> reserve caller-owned outputs
--> render all frames
--> restore Blender state
--> build layout and rewrite crops
--> return reservations + CameraProjectionLayout
-```
-
-Direct execution:
+Single direct execution:
 
 ```text
 validate request
 -> create named atomic transaction
 -> reserve
--> render
--> restore
+-> render and restore
 -> postprocess
 -> commit exactly once
--> require committed paths == reservation order
--> require committed paths == frame-task order
+-> require committed paths == reservation order == frame-task order
 -> build BakeExecutionResult
 ```
 
+Grouped execution is caller-owned:
+
+```text
+validate grouped request
+-> use existing multi/mixed transaction
+-> reserve grouped frames
+-> render and restore
+-> shared postprocess
+-> return grouped reservations + layout
+```
+
+Grouped staging never creates or commits a transaction. Multi/mixed output owns
+the one JSON plus individual plus grouped texture commit.
+
 Any render, decode, layout, crop, document-finalization or commit failure rolls
-back the caller's complete JSON plus texture transaction. Existing outputs are
-restored byte-for-byte and temporary work files are removed according to the
-diagnostics policy.
+back the complete caller transaction. Existing outputs are restored according to
+the atomic diagnostics policy.
 
-## Post-render document finalization
+## Grouped B4 physical ownership
 
-The final layout exists only after every frame succeeds. A1 output services use
-the detailed staging API, rebuild the B4 attachment from that layout, compose
-typed Spine documents, serialize staged JSON and commit JSON plus textures
-together.
+```text
+grouped_camera_projection_validation.py
+  -> GroupedCameraProjectionRuntime and reservation validation
 
-Serialized JSON is never patched in place.
+grouped_camera_projection_visibility.py
+  -> grouped camera visibility mutation
 
-## Grouped B4 boundary
+grouped_camera_projection_execution.py
+  -> reversible grouped rendering only
 
-`grouped_camera_projection_executor.py` now imports the shared error,
-validation, render hook and state helpers from their physical modules. Its
-grouped visibility, coverage and caller-owned output pipeline remain unchanged
-in this slice.
+grouped_camera_projection_postprocess.py
+  -> adapter to the shared postprocess engine and grouped diagnostics
 
-A later independent slice may decompose grouped B4 without changing the
-single-object B4 contract.
+grouped_camera_projection_output.py
+  -> caller-owned reserve/render/postprocess staging
+
+grouped_camera_projection_executor.py
+  -> compatibility re-exports only
+```
+
+See `docs/REWRITE_B4_GROUPED_CONNECTED.md`.
 
 ## Validation state
 
-For this decomposition slice:
+The latest decomposition validation includes:
 
-- all new and replaced production modules compile;
-- source architecture tests verify validation/execution/postprocess/output
-  boundaries;
-- tests verify render state ends before postprocessing;
-- tests verify validation precedes reservation and transaction creation;
-- tests verify direct execution contains exactly one commit;
-- tests verify compatibility private aliases remain;
-- automatic GitHub Actions were not triggered.
+- compilation of all new/replaced production modules;
+- import-graph loading with Blender/domain stubs;
+- focused ownership and ordering architecture tests;
+- compatibility alias checks;
+- validation-before-reservation checks;
+- state-restoration-before-postprocess checks;
+- proof that grouped output contains no transaction creation or commit.
 
-The complete pytest suite and real Blender 4.4 matrices remain manual release
-gates for the final candidate.
+Automatic GitHub Actions were not triggered. The complete pytest suite and real
+Blender 4.4 matrices remain manual release gates.
