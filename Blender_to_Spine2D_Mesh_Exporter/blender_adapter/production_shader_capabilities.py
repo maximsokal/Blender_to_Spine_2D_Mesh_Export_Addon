@@ -23,7 +23,7 @@ from ..domain.baking import (
 )
 from .render_engine_contract import RenderEngineContract, render_engine_contract
 from .shader_capability_audit import audit_material_graph_capabilities
-from .shader_graph_analyzer import analyse_material_graph_detailed
+from .shader_graph_analysis import analyse_material_graph_detailed
 
 
 class ProductionShaderCapabilityError(RuntimeError):
