@@ -10,8 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import bake_executor_core as _core
-
-BakeExecutionError = _core.BakeExecutionError
+from .bake_execution_error import BakeExecutionError
 
 
 def _call_bake_operator(bpy_module: Any, bake_type: str) -> None:
