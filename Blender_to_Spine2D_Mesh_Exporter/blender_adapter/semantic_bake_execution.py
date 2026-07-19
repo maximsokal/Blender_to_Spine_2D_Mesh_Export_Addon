@@ -7,23 +7,32 @@ from typing import Any, Tuple
 
 from ..domain.baking import TextureFormat
 from ..infrastructure import AtomicOutputReservation
-from . import bake_executor_core as core
 from .bake_compositor import (
     BakePixelBuffer,
     compose_bake_passes,
     read_bake_image_pixels,
     write_bake_image_pixels,
 )
+from .bake_execution_error import BakeExecutionError
 from .bake_materials import temporary_bake_materials
 from .bake_scene_state import configure_scene_for_bake, preserve_bake_scene_state
 from .context_state import activate_object_for_operator
 from .mesh_writer import temporary_mesh_object
 from .scene_bake_execution import temporarily_exclude_source_from_render
-from .semantic_bake_validation import SemanticBakeRuntime
+from .semantic_bake_image_io import (
+    _activate_uv_layer,
+    _create_bake_image,
+    _remove_image,
+    _save_bake_image,
+    _set_timeline_frame,
+)
+from .semantic_bake_validation import (
+    SemanticBakeRuntime,
+    validate_semantic_bake_reservations,
+)
 
 
 logger = logging.getLogger(__name__)
-BakeExecutionError = core.BakeExecutionError
 
 
 def _call_public_bake_operator(bpy_module: Any, bake_type: str) -> None:
@@ -49,7 +58,7 @@ def _bake_pass_to_buffer(
             runtime.execution_settings,
             bake_mode=pass_plan.bake_mode,
         )
-        image = core._create_bake_image(
+        image = _create_bake_image(
             runtime.bpy_module,
             runtime.plan,
             runtime.execution_settings,
@@ -80,7 +89,7 @@ def _bake_pass_to_buffer(
             )
             return read_bake_image_pixels(image)
     finally:
-        core._remove_image(runtime.bpy_module, image)
+        _remove_image(runtime.bpy_module, image)
 
 
 def _bake_single_frame(
@@ -99,7 +108,7 @@ def _bake_single_frame(
             runtime.execution_settings,
             bake_mode=pass_plan.bake_mode,
         )
-        image = core._create_bake_image(
+        image = _create_bake_image(
             runtime.bpy_module,
             runtime.plan,
             runtime.execution_settings,
@@ -111,9 +120,9 @@ def _bake_single_frame(
                 runtime.bpy_module,
                 pass_plan.bake_mode.value,
             )
-            core._save_bake_image(image, reservation, runtime.plan)
+            _save_bake_image(image, reservation, runtime.plan)
     finally:
-        core._remove_image(runtime.bpy_module, image)
+        _remove_image(runtime.bpy_module, image)
 
 
 def _bake_composed_frame(
@@ -136,7 +145,7 @@ def _bake_composed_frame(
 
     final_image = None
     try:
-        final_image = core._create_bake_image(
+        final_image = _create_bake_image(
             runtime.bpy_module,
             runtime.plan,
             runtime.execution_settings,
@@ -150,9 +159,9 @@ def _bake_composed_frame(
         except Exception:
             logger.debug("Final image alpha_mode is not writable", exc_info=True)
         write_bake_image_pixels(final_image, composed)
-        core._save_bake_image(final_image, reservation, runtime.plan)
+        _save_bake_image(final_image, reservation, runtime.plan)
     finally:
-        core._remove_image(runtime.bpy_module, final_image)
+        _remove_image(runtime.bpy_module, final_image)
 
 
 def _bake_frame_task(
@@ -162,7 +171,7 @@ def _bake_frame_task(
     reservation: AtomicOutputReservation,
     prepared_materials: Any,
 ) -> None:
-    core._set_timeline_frame(
+    _set_timeline_frame(
         runtime.scene,
         runtime.context,
         task.timeline_frame,
@@ -191,7 +200,7 @@ def run_semantic_bake(
 
     if not isinstance(runtime, SemanticBakeRuntime):
         raise TypeError("runtime must be SemanticBakeRuntime")
-    resolved_reservations = core._require_reservations(
+    resolved_reservations = validate_semantic_bake_reservations(
         runtime.plan,
         reservations,
     )
@@ -202,7 +211,7 @@ def run_semantic_bake(
             scene=runtime.scene,
             name_prefix="__Spine2D_BakeTarget",
         ) as temporary:
-            core._activate_uv_layer(
+            _activate_uv_layer(
                 temporary.mesh,
                 runtime.plan.settings.uv_layer_name,
             )
