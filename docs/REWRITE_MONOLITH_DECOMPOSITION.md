@@ -218,6 +218,65 @@ The shared engine owns:
 
 It has no Scene mutation, render operator, reservation, transaction or commit.
 
+## 8. Recursive shader-graph analysis
+
+The former `shader_graph_analyzer.py` mixed Blender compatibility details,
+recursive traversal, semantic policy and snapshot assembly.
+
+```text
+shader_graph_error.py
+  -> MaterialGraphAnalysisError
+
+shader_graph_rna.py
+  -> RNA identity, names and temporary-node filtering
+  -> safe node/link/socket iteration
+  -> renderer-target and Material Output resolution
+  -> group-interface socket compatibility
+
+shader_graph_traversal.py
+  -> RecursiveShaderGraphWalker
+  -> nested groups, muted bypasses, cycles and instance-qualified IDs
+  -> frozen ShaderGraphTraversalResult
+
+shader_graph_semantics.py
+  -> semantic channels and material dependencies
+  -> no node/link traversal ownership
+
+shader_graph_snapshot.py
+  -> deterministic node/link ordering
+  -> immutable snapshots and parallel live-node order
+
+shader_graph_analysis.py
+  -> renderer-specific orchestration
+  -> MaterialGraphAnalysisResult
+
+shader_graph_analyzer.py
+  -> compatibility re-exports only
+```
+
+Physical flow:
+
+```text
+resolve material and renderer target
+-> select effective Material Output
+-> traverse reachable sockets/groups
+-> freeze traversal result
+-> derive semantic channels/dependencies
+-> build deterministic snapshot + parallel live-node tuple
+```
+
+`material_analyzer.py`, `production_shader_capabilities.py` and the public
+adapter package import physical owners directly. Historical public and private
+names remain available from the compatibility facade.
+
+The production capability gate continues to require:
+
+```text
+snapshot.reachable_nodes[i].node_name == live_nodes[i].name
+```
+
+so live mute and UV preflight cannot be applied to a different snapshot node.
+
 ## Single Connect fallback
 
 Exactly one selected object with `Connect` enabled still falls back to
@@ -230,8 +289,10 @@ The Blender pipeline probe follows physical production ownership rather than
 compatibility facades. It requires object-preparation stages, shared multi/mixed
 staging, final statistics, UI router ownership and typed texture dispatch.
 
-Grouped B4 tracing should follow validation, visibility, execution, shared
+Grouped B4 tracing follows validation, visibility, execution, shared
 postprocess and physical grouped output rather than the compatibility executor.
+Shader-graph planning follows physical analysis/traversal owners rather than
+`shader_graph_analyzer.py`.
 
 ## Validation performed outside CI
 
@@ -239,16 +300,17 @@ No GitHub Actions workflow was triggered.
 
 Validation for the latest decomposition includes:
 
-- Python compilation of every new/replaced grouped production module;
-- source import-graph loading with Blender/domain stubs;
-- focused grouped ownership and ordering tests;
-- compatibility alias identity checks;
-- output-policy and request validation before reservation;
-- postprocessing after reversible render restoration;
-- proof that grouped output creates no transaction and calls no commit;
-- production import checks for the physical grouped output owner;
-- preservation of single-B4 threshold, coverage and contour inspection
-  contracts.
+- Python compilation of every new/replaced shader-graph production module;
+- source import-graph loading with domain stubs;
+- focused physical ownership tests;
+- compatibility facade alias checks;
+- renderer-specific Cycles/Eevee output parity;
+- nested, reused and unused-input group behavior;
+- muted `internal_links` bypass behavior;
+- recursive-cycle termination;
+- missing-output material-classification fallback;
+- exact snapshot/live-node parallel ordering;
+- preservation of grouped and single B4 architecture checks.
 
 The complete repository pytest suite and real Blender 4.4 integration matrices
 remain separate manual release gates.
