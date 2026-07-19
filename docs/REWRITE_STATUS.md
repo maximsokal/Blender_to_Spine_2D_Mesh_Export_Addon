@@ -46,6 +46,34 @@ Recursive analysis supports renderer-specific outputs, muted bypasses, nested
 groups, instance-qualified IDs, cycles, bounded depth and no source-node
 mutation.
 
+## Shader-graph analysis ownership
+
+The recursive material analyzer is physically decomposed:
+
+```text
+shader_graph_rna.py
+  -> Blender RNA/socket compatibility and Material Output selection
+
+shader_graph_traversal.py
+  -> recursive reachable graph and frozen ShaderGraphTraversalResult
+
+shader_graph_semantics.py
+  -> semantic channels and dependencies
+
+shader_graph_snapshot.py
+  -> deterministic immutable snapshot and live-node ordering
+
+shader_graph_analysis.py
+  -> orchestration and MaterialGraphAnalysisResult
+
+shader_graph_analyzer.py
+  -> compatibility re-exports only
+```
+
+`material_analyzer.py`, `production_shader_capabilities.py` and public adapter
+exports use physical owners. Snapshot and live Blender nodes remain exactly
+parallel so live mute and source-UV preflight retain their existing contract.
+
 ## Semantic object-bake ownership
 
 ```text
@@ -250,17 +278,17 @@ The last complete automatic matrix before workflows became manual-only passed:
 - Blender 4.4 Camera Projection: success;
 - full Blender 4.4 Headless: success.
 
-For the newest grouped B4 decomposition:
+For the newest shader-graph decomposition:
 
 - all new/replaced production modules compile;
-- grouped source ownership/order tests pass;
-- import graph loads with Blender/domain stubs;
-- compatibility facade aliases resolve to physical owners;
-- validation and output policy precede reservation;
-- reversible render completes before postprocessing;
-- grouped output contains no transaction creation or commit;
-- production callers use the physical grouped output owner;
-- single-B4 threshold, coverage and contour inspection contracts remain;
+- eight focused physical ownership tests pass;
+- a behavioral parity harness covers renderer-specific outputs, nested and
+  reused groups, unused group inputs, muted bypass, image/time dependencies,
+  recursive cycles and missing-output fallback;
+- snapshot/live-node ordering remains exact;
+- production callers use physical analysis owners;
+- compatibility public/private aliases remain;
+- existing single/grouped B4 boundaries remain unchanged;
 - GitHub Actions remain disabled/manual-only.
 
 The complete pytest suite and real Blender matrices have not been rerun on the
