@@ -46,6 +46,30 @@ reachable renderer-effective shader graph
 Recursive group analysis supports renderer-specific outputs, muted bypasses, nested groups,
 instance-qualified IDs, cycles, bounded depth and no source-node mutation.
 
+## Semantic object-bake ownership
+
+The object-bake runtime has one physical implementation:
+
+```text
+semantic_bake_validation.py
+  -> request, Blender context and reservation validation
+
+semantic_bake_image_io.py
+  -> UV, image datablock, frame and staged-image primitives
+
+semantic_bake_execution.py
+  -> reversible Scene/Mesh/material execution and pass composition
+
+semantic_bake_output.py
+  -> atomic reservation, commit, rollback and typed results
+```
+
+`bake_executor_core.py` no longer contains a duplicate transaction or frame/pass pipeline. It owns
+only the direct `bpy.ops.object.bake` failure-injection boundary and compatibility re-exports for
+historical private helper paths. Validation still completes before output reservation or Blender
+mutation, caller-owned staging never commits, and direct execution accepts only exact committed
+path order.
+
 ## B4 production pipeline
 
 Every B4 static or sequence export:
@@ -183,12 +207,11 @@ The last complete automatic matrix before workflows became manual-only passed:
 - Blender 4.4 Camera Projection: success;
 - full Blender 4.4 Headless: success.
 
-The current HEAD adds focused tests and manual Blender fixtures for all slices above. The complete
-pytest suite and Blender matrices have not been rerun on the current HEAD. Automatic workflow
-triggers remain disabled; all new Blender workflows use `workflow_dispatch`.
-
-A local clone/compile attempt from this environment could not run because outbound access to
-GitHub was unavailable. This does not count as validation.
+The current HEAD adds focused architecture coverage for UI capture, semantic bake ownership and
+retirement of the duplicate object-bake core. The newest changed production modules compile and the
+focused static architecture tests pass in the available local environment. The complete pytest
+suite and Blender matrices have not been rerun on the current HEAD. Automatic workflow triggers
+remain disabled; all new Blender workflows use `workflow_dispatch`.
 
 ## Remaining release blockers
 
