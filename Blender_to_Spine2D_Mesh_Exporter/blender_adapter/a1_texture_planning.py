@@ -20,8 +20,10 @@ from .a1_preparation_contracts import (
 )
 from .a1_uv_preparation import A1UvPreparationResult
 from .material_analyzer import analyse_object_materials
-from .production_shader_capabilities import (
+from .production_shader_capability_object_audit import (
     audit_object_material_capabilities,
+)
+from .production_shader_capability_routing import (
     build_capability_checked_texture_plan,
     strongest_object_capability,
 )
