@@ -15,23 +15,43 @@ def test_capability_gate_remains_at_the_blender_adapter_boundary():
     camera_projection = _source(
         "Blender_to_Spine2D_Mesh_Exporter/domain/baking/camera_projection.py"
     )
-    preparation = _source(
-        "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/a1_object_preparation.py"
+    texture_planning = _source(
+        "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/a1_texture_planning.py"
     )
-    production_gate = _source(
+    object_audit = _source(
+        "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/"
+        "production_shader_capability_object_audit.py"
+    )
+    routing = _source(
+        "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/"
+        "production_shader_capability_routing.py"
+    )
+    facade = _source(
         "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/"
         "production_shader_capabilities.py"
     )
 
     assert "shader_capability_audit" not in strategies
-    assert "production_shader_capabilities" not in strategies
+    assert "production_shader_capabil" not in strategies
     assert "shader_capability_audit" not in camera_projection
-    assert "production_shader_capabilities" not in camera_projection
-    assert "audit_object_material_capabilities" in preparation
-    assert "build_capability_checked_texture_plan" in preparation
-    assert "analyse_material_graph_detailed" in production_gate
-    assert "GROUP_RENDER_REQUIRED" in production_gate
-    assert "UNSUPPORTED" in production_gate
+    assert "production_shader_capabil" not in camera_projection
+
+    assert "production_shader_capability_object_audit" in texture_planning
+    assert "production_shader_capability_routing" in texture_planning
+    assert "production_shader_capabilities" not in texture_planning
+
+    assert "analyse_production_material_graph" in object_audit
+    assert "audit_material_graph_capabilities" in object_audit
+    assert "build_texture_plan" not in object_audit
+    assert "build_camera_projection_plan" not in object_audit
+
+    assert "GROUP_RENDER_REQUIRED" in routing
+    assert "UNSUPPORTED" in routing
+    assert "build_texture_plan" in routing
+    assert "build_camera_projection_plan" in routing
+
+    assert "def " not in facade
+    assert "class " not in facade
 
 
 def test_blender_capability_fixtures_remain_manual_only():
