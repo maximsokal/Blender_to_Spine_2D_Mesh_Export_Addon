@@ -26,6 +26,58 @@ UNSUPPORTED
 Unknown reachable node types are deliberately `UNSUPPORTED`. New Blender nodes must receive an
 explicit policy before production routing may treat them as safe.
 
+## Physical shader-graph analysis ownership
+
+The former `shader_graph_analyzer.py` mixed Blender RNA compatibility, renderer-specific output
+selection, recursive group traversal, semantic classification and immutable snapshot assembly.
+Physical ownership is now:
+
+```text
+shader_graph_error.py
+  -> shared MaterialGraphAnalysisError
+
+shader_graph_rna.py
+  -> Blender RNA identity and names
+  -> temporary-node filtering
+  -> safe node/link/socket iteration
+  -> renderer-target normalization
+  -> renderer-specific Material Output selection
+  -> cross-version group-interface socket matching
+
+shader_graph_traversal.py
+  -> RecursiveShaderGraphWalker
+  -> muted internal_links bypass traversal
+  -> nested Group Input/Output mapping
+  -> instance-qualified node IDs
+  -> recursive-cycle and maximum-depth handling
+  -> frozen ShaderGraphTraversalResult
+
+shader_graph_semantics.py
+  -> semantic channels from frozen reachable nodes
+  -> material dependencies from frozen reachable nodes and node trees
+  -> Principled emission/alpha/reflection/transmission policies
+
+shader_graph_snapshot.py
+  -> deterministic node and link ordering
+  -> ShaderNodeSnapshot / ShaderLinkSnapshot construction
+  -> exact parallel ordering of snapshots and live Blender nodes
+
+shader_graph_analysis.py
+  -> renderer-specific analysis orchestration
+  -> MaterialGraphAnalysisResult
+
+shader_graph_analyzer.py
+  -> compatibility re-exports only
+```
+
+`MaterialGraphAnalysisResult.reachable_nodes` remains exactly parallel to
+`snapshot.reachable_nodes`. The production capability gate relies on this invariant when it
+combines immutable snapshots with live `mute`, UV-map and socket state.
+
+`material_analyzer.py`, `production_shader_capabilities.py` and the public adapter package import
+the physical analysis/error/RNA owners directly. Historical public and private imports remain
+available from `shader_graph_analyzer.py` without retaining a second implementation.
+
 ## Production routing
 
 The production gate is now authoritative during `prepare_a1_object()`:
@@ -166,7 +218,19 @@ must not be silently discarded.
 
 Pure tests cover capability precedence, common node families, source UV roles, renderer
 selection, copied-material output restoration, production routing, postprocess state, non-node
-fallback, and View Layer rules.
+fallback, View Layer rules and physical shader-graph ownership.
+
+The split-specific checks cover:
+
+- compatibility facade ownership;
+- immutable traversal handoff;
+- renderer-specific Material Output parity;
+- nested and reused group instances;
+- unused group-input isolation;
+- muted `internal_links` bypass;
+- recursive-cycle termination;
+- deterministic snapshot/live-node parallel ordering;
+- missing-output material-classification fallback.
 
 Manual-only Blender 4.4 fixtures cover:
 
