@@ -9,6 +9,7 @@ from typing import Any
 
 from ..domain.baking import (
     CameraProjectionPlan,
+    GroupedCameraProjectionPlan,
     ResolvedProjectionOutputPolicy,
     convert_rgba_alpha_representation,
 )
@@ -152,13 +153,24 @@ def crop_pixel_buffer(
 
 def rewrite_staged_image_with_crop(
     bpy_module: Any,
-    plan: CameraProjectionPlan,
+    plan: CameraProjectionPlan | GroupedCameraProjectionPlan,
     reservation: AtomicOutputReservation,
     layout: CameraProjectionLayout,
     output_policy: ResolvedProjectionOutputPolicy,
 ) -> None:
-    """Crop and rewrite one staged frame using explicit HDR and alpha semantics."""
+    """Crop one single/grouped staged frame with explicit HDR and alpha semantics."""
 
+    if not isinstance(
+        plan,
+        (CameraProjectionPlan, GroupedCameraProjectionPlan),
+    ):
+        raise TypeError(
+            "plan must be CameraProjectionPlan or GroupedCameraProjectionPlan"
+        )
+    if not isinstance(reservation, AtomicOutputReservation):
+        raise TypeError("reservation must be AtomicOutputReservation")
+    if not isinstance(layout, CameraProjectionLayout):
+        raise TypeError("layout must be CameraProjectionLayout")
     if not isinstance(
         output_policy,
         ResolvedProjectionOutputPolicy,
