@@ -265,17 +265,71 @@ resolve material and renderer target
 -> build deterministic snapshot + parallel live-node tuple
 ```
 
-`material_analyzer.py`, `production_shader_capabilities.py` and the public
-adapter package import physical owners directly. Historical public and private
-names remain available from the compatibility facade.
+`material_analyzer.py` and the public adapter package import physical owners
+directly. Historical public and private names remain available from the
+compatibility facade.
 
-The production capability gate continues to require:
+## 9. Production shader capability gate
+
+The former `production_shader_capabilities.py` mixed live graph re-analysis,
+audit rebuilding, Alpha proxy policy, source-UV inspection, material-slot
+orchestration and final B1-B4 routing.
 
 ```text
-snapshot.reachable_nodes[i].node_name == live_nodes[i].name
+production_shader_capability_error.py
+  -> ProductionShaderCapabilityError
+
+production_shader_capability_merge.py
+  -> audit extension through shared finding ordering
+
+production_shader_capability_runtime.py
+  -> live material graph re-analysis
+  -> immutable snapshot parity
+  -> live-node alignment and mute enrichment
+
+production_shader_capability_proxy.py
+  -> Alpha Group/Reroute/muted bypass findings
+
+production_shader_capability_uv.py
+  -> source UV layers, active_render and socket state
+  -> Image Texture, Texture Coordinate, Normal Map, Tangent and UV Map findings
+
+production_shader_capability_object_audit.py
+  -> object/material-slot orchestration
+  -> immutable audit plus proxy/UV enrichment
+
+production_shader_capability_routing.py
+  -> strongest object capability
+  -> deterministic failure messages
+  -> B1-B4 texture-plan selection
+
+production_shader_capabilities.py
+  -> compatibility re-exports only
 ```
 
-so live mute and UV preflight cannot be applied to a different snapshot node.
+Physical production flow:
+
+```text
+re-analyze renderer-specific live graph
+-> compare output, qualified nodes, links, channels, dependencies and issues
+-> validate snapshot/live-node alignment
+-> enrich current mute state
+-> run immutable capability audit
+-> apply Alpha proxy boundary
+-> apply source UV boundary
+-> select object bake, B4 or explicit failure
+```
+
+Equal-name nodes in reused groups are matched by `node_id` and `group_path`, not
+by name alone. Live UV or mute state therefore cannot silently move to another
+group instance between analysis and planning.
+
+`a1_texture_planning.py` imports physical object-audit and routing owners. The
+routing owner performs no node-tree, socket or source-UV inspection. Audit
+extension reuses `shader_capability_findings.order_unique_findings()` so one
+finding key/order contract is shared by immutable and production audits.
+
+Historical public and private names remain available from the facade.
 
 ## Single Connect fallback
 
@@ -292,7 +346,8 @@ staging, final statistics, UI router ownership and typed texture dispatch.
 Grouped B4 tracing follows validation, visibility, execution, shared
 postprocess and physical grouped output rather than the compatibility executor.
 Shader-graph planning follows physical analysis/traversal owners rather than
-`shader_graph_analyzer.py`.
+`shader_graph_analyzer.py`. Capability planning follows physical production
+object-audit and routing owners rather than `production_shader_capabilities.py`.
 
 ## Validation performed outside CI
 
@@ -300,17 +355,19 @@ No GitHub Actions workflow was triggered.
 
 Validation for the latest decomposition includes:
 
-- Python compilation of every new/replaced shader-graph production module;
+- Python compilation of every new/replaced production capability module;
 - source import-graph loading with domain stubs;
-- focused physical ownership tests;
+- acyclic physical import ownership;
 - compatibility facade alias checks;
-- renderer-specific Cycles/Eevee output parity;
-- nested, reused and unused-input group behavior;
-- muted `internal_links` bypass behavior;
-- recursive-cycle termination;
-- missing-output material-classification fallback;
-- exact snapshot/live-node parallel ordering;
-- preservation of grouped and single B4 architecture checks.
+- renderer-specific graph parity across qualified nodes, links and semantics;
+- equal-name reused-group instance swap rejection;
+- live-node count and ordering checks before UV inspection;
+- shared finding ordering and first-reason retention;
+- Alpha proxy and named UV finding-code preservation;
+- multiple active render UV rejection;
+- physical caller imports;
+- absence of `bpy.ops` access in all split modules;
+- preservation of existing single/grouped B4 architecture boundaries.
 
 The complete repository pytest suite and real Blender 4.4 integration matrices
 remain separate manual release gates.
