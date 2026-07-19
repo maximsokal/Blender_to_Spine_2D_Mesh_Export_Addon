@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from ..application import GroupedCameraOverlayResult, apply_grouped_camera_overlay
+from ..application import (
+    GroupedCameraOverlayResult,
+    apply_grouped_camera_overlay,
+)
 from ..domain.spine import SpineDocument
-from .grouped_camera_projection_executor import GroupedCameraProjectionStageResult
-from .grouped_camera_projection_policy import GroupedCameraProjectionRequest
+from .grouped_camera_projection_output import (
+    GroupedCameraProjectionStageResult,
+)
+from .grouped_camera_projection_policy import (
+    GroupedCameraProjectionRequest,
+)
 
 
 def apply_staged_grouped_camera_overlay(
