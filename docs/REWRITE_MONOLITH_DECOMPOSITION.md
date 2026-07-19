@@ -143,6 +143,35 @@ Invalid plans, snapshots, execution settings, renderer combinations, UV bindings
 
 The central `texture_executor.py` additionally captures a typed `TextureExecutionRequest` before dispatching object bake or B4 camera projection.
 
+### Retired duplicate object-bake core
+
+`bake_executor_core.py` previously retained a second complete object-bake implementation after the semantic split. That duplicate still owned validation, temporary Blender scopes, reservation, commit and result construction, including older pre-validation reservation and committed-path filtering behavior.
+
+The duplicate pipeline is now removed. Physical ownership is:
+
+```text
+bake_execution_error.py
+  -> shared BakeExecutionError contract
+
+semantic_bake_validation.py
+  -> bpy loading, immutable input validation and reservation-order validation
+
+semantic_bake_image_io.py
+  -> UV activation, temporary image lifecycle, frame changes and staged image writes
+
+semantic_bake_execution.py
+  -> reversible Blender execution only
+
+semantic_bake_output.py
+  -> reservation, transaction, commit and result ownership
+
+bake_executor_core.py
+  -> direct bpy.ops.object.bake hook
+  -> compatibility re-exports for historical private helper paths
+```
+
+`bake_executor_core.py` defines no transaction, temporary Mesh/material, frame/pass or result-building pipeline. The sole direct `bpy.ops.object.bake` access remains in `_call_bake_operator`, preserving public failure-injection tests while preventing two implementations from diverging.
+
 ## Single Connect fallback
 
 Exactly one selected object with `Connect` enabled cannot form a connected group. The router still falls back to standalone export, but this is no longer visible only in debug logs.
@@ -186,6 +215,8 @@ Validation for the newest split included:
 - Python compilation of every new or replaced production module;
 - architecture tests for UI compatibility facades and physical ownership;
 - architecture tests proving semantic execution cannot create or commit transactions;
+- retirement checks proving `bake_executor_core.py` owns only the object-bake operator hook;
+- compatibility checks for historical private helper re-exports;
 - ordering checks proving validation precedes transaction creation and reservation;
 - typed texture gateway checks;
 - preservation of existing private UI bridge helper re-exports.
