@@ -14,7 +14,8 @@ from ..domain.baking import (
 )
 from ..domain.baking.projection_layout import CameraProjectionLayout
 from ..infrastructure import AtomicOutputReservation
-from .camera_projection_state import CameraProjectionExecutionError
+from .camera_projection_error import CameraProjectionExecutionError
+
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,9 @@ def read_image_pixels(image: Any, width: int, height: int) -> array:
     try:
         image.pixels.foreach_get(pixels)
     except Exception as exc:
-        raise CameraProjectionExecutionError("Unable to read rendered image pixels") from exc
+        raise CameraProjectionExecutionError(
+            "Unable to read rendered image pixels"
+        ) from exc
     return pixels
 
 
@@ -62,7 +65,10 @@ def read_staged_alpha_coverage(
 
     image = None
     try:
-        image = bpy_module.data.images.load(str(staged_path), check_existing=False)
+        image = bpy_module.data.images.load(
+            str(staged_path),
+            check_existing=False,
+        )
         pixels = read_image_pixels(image, width, height)
         coverage = bytearray(width * height)
         for pixel_index in range(width * height):
@@ -98,6 +104,7 @@ def read_staged_alpha_mask(
         or not 0.0 <= float(threshold) <= 1.0
     ):
         raise ValueError("threshold must be finite and in [0, 1]")
+
     coverage = read_staged_alpha_coverage(
         bpy_module,
         staged_path,
@@ -121,12 +128,21 @@ def crop_pixel_buffer(
     layout: CameraProjectionLayout,
 ) -> array:
     if len(pixels) != full_width * full_height * 4:
-        raise CameraProjectionExecutionError("rendered pixel buffer has invalid length")
+        raise CameraProjectionExecutionError(
+            "rendered pixel buffer has invalid length"
+        )
+
     crop = layout.crop
-    result = array("f", [0.0]) * (layout.cropped_width * layout.cropped_height * 4)
+    result = array("f", [0.0]) * (
+        layout.cropped_width * layout.cropped_height * 4
+    )
     row_components = layout.cropped_width * 4
-    for target_y, source_y in enumerate(range(crop.minimum_y, crop.maximum_y)):
-        source_start = (source_y * full_width + crop.minimum_x) * 4
+    for target_y, source_y in enumerate(
+        range(crop.minimum_y, crop.maximum_y)
+    ):
+        source_start = (
+            source_y * full_width + crop.minimum_x
+        ) * 4
         target_start = target_y * row_components
         result[target_start : target_start + row_components] = pixels[
             source_start : source_start + row_components
@@ -143,8 +159,13 @@ def rewrite_staged_image_with_crop(
 ) -> None:
     """Crop and rewrite one staged frame using explicit HDR and alpha semantics."""
 
-    if not isinstance(output_policy, ResolvedProjectionOutputPolicy):
-        raise TypeError("output_policy must be ResolvedProjectionOutputPolicy")
+    if not isinstance(
+        output_policy,
+        ResolvedProjectionOutputPolicy,
+    ):
+        raise TypeError(
+            "output_policy must be ResolvedProjectionOutputPolicy"
+        )
     if output_policy.texture_format is not plan.settings.texture_format:
         raise CameraProjectionExecutionError(
             "resolved output policy texture format does not match camera plan"
@@ -157,8 +178,14 @@ def rewrite_staged_image_with_crop(
             str(reservation.staged_path),
             check_existing=False,
         )
-        pixels = read_image_pixels(loaded, plan.settings.width, plan.settings.height)
-        source_alpha_mode = str(getattr(loaded, "alpha_mode", "STRAIGHT") or "STRAIGHT")
+        pixels = read_image_pixels(
+            loaded,
+            plan.settings.width,
+            plan.settings.height,
+        )
+        source_alpha_mode = str(
+            getattr(loaded, "alpha_mode", "STRAIGHT") or "STRAIGHT"
+        )
         cropped_pixels = crop_pixel_buffer(
             pixels,
             full_width=plan.settings.width,
@@ -170,16 +197,24 @@ def rewrite_staged_image_with_crop(
             source_alpha_mode=source_alpha_mode,
             target=output_policy.alpha_representation,
         )
+
         color_space = None
         try:
             color_space = str(loaded.colorspace_settings.name)
         except Exception:
-            logger.debug("Unable to read source image color space", exc_info=True)
+            logger.debug(
+                "Unable to read source image color space",
+                exc_info=True,
+            )
+
         remove_image(bpy_module, loaded)
         loaded = None
 
         cropped = bpy_module.data.images.new(
-            name=f"__Spine2D_ProjectionCrop_{reservation.final_path.stem}",
+            name=(
+                "__Spine2D_ProjectionCrop_"
+                f"{reservation.final_path.stem}"
+            ),
             width=layout.cropped_width,
             height=layout.cropped_height,
             alpha=True,
@@ -189,7 +224,11 @@ def rewrite_staged_image_with_crop(
             try:
                 cropped.colorspace_settings.name = color_space
             except Exception:
-                logger.debug("Unable to restore cropped image color space", exc_info=True)
+                logger.debug(
+                    "Unable to restore cropped image color space",
+                    exc_info=True,
+                )
+
         try:
             cropped.alpha_mode = output_policy.blender_alpha_mode
         except Exception as exc:
@@ -197,21 +236,38 @@ def rewrite_staged_image_with_crop(
                 "Unable to apply resolved Blender alpha mode "
                 f"'{output_policy.blender_alpha_mode}'"
             ) from exc
+
         cropped.pixels.foreach_set(cropped_pixels)
         cropped.update()
         cropped.file_format = plan.settings.texture_format.value
         cropped.filepath_raw = str(reservation.staged_path)
         cropped.save()
-        if not reservation.staged_path.is_file() or reservation.staged_path.stat().st_size <= 0:
+
+        if (
+            not reservation.staged_path.is_file()
+            or reservation.staged_path.stat().st_size <= 0
+        ):
             raise CameraProjectionExecutionError(
-                f"Cropped projection output is missing or empty: {reservation.staged_path}"
+                "Cropped projection output is missing or empty: "
+                f"{reservation.staged_path}"
             )
     except CameraProjectionExecutionError:
         raise
     except Exception as exc:
         raise CameraProjectionExecutionError(
-            f"Unable to crop staged projection image '{reservation.staged_path}': {exc}"
+            "Unable to crop staged projection image "
+            f"'{reservation.staged_path}': {exc}"
         ) from exc
     finally:
         remove_image(bpy_module, loaded)
         remove_image(bpy_module, cropped)
+
+
+__all__ = [
+    "crop_pixel_buffer",
+    "read_image_pixels",
+    "read_staged_alpha_coverage",
+    "read_staged_alpha_mask",
+    "remove_image",
+    "rewrite_staged_image_with_crop",
+]
