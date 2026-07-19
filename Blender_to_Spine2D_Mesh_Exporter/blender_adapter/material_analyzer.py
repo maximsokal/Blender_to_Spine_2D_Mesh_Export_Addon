@@ -17,10 +17,13 @@ from ..domain.baking import (
     MaterialKind,
     ObjectMaterialAnalysis,
 )
-from .shader_graph_analyzer import (
-    MaterialGraphAnalysisError,
-    analyse_material_graph_detailed,
+from .shader_graph_analysis import analyse_material_graph_detailed
+from .shader_graph_error import MaterialGraphAnalysisError
+from .shader_graph_rna import (
+    is_temporary_node,
+    normalise_render_target,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -63,27 +66,8 @@ def _node_type(node: Any) -> str:
     return value or "UNKNOWN"
 
 
-def _is_temporary_bake_node(node: Any) -> bool:
-    name = str(getattr(node, "name", "") or "")
-    return name.startswith(
-        (
-            "TEMP_BAKE_",
-            "TEMP_UV_",
-            "__Spine2D_BakeTarget_",
-            "__Spine2D_Proxy_",
-        )
-    )
-
-
-def _normalise_render_target(value: str | None) -> str:
-    target = str(value or "ALL").strip().upper()
-    if target in {"ALL", "CYCLES", "EEVEE"}:
-        return target
-    if "CYCLE" in target:
-        return "CYCLES"
-    if "EEVEE" in target:
-        return "EEVEE"
-    return "ALL"
+_is_temporary_bake_node = is_temporary_node
+_normalise_render_target = normalise_render_target
 
 
 def render_target_from_engine(render_engine: str | None) -> str:
@@ -118,9 +102,9 @@ def _resolve_render_target(render_target: str | None) -> str:
 
 def _image_dependency(node: Any) -> tuple[ImageDependency | None, str | None]:
     image = getattr(node, "image", None)
-    node_name = str(getattr(node, "name", "") or "TEX_IMAGE")
+    node_name_value = str(getattr(node, "name", "") or "TEX_IMAGE")
     if image is None:
-        return None, f"Image Texture node '{node_name}' has no image"
+        return None, f"Image Texture node '{node_name_value}' has no image"
 
     image_name = str(
         getattr(image, "name_full", None)
@@ -128,7 +112,7 @@ def _image_dependency(node: Any) -> tuple[ImageDependency | None, str | None]:
         or ""
     )
     if not image_name:
-        return None, f"Image Texture node '{node_name}' references an unnamed image"
+        return None, f"Image Texture node '{node_name_value}' references an unnamed image"
     source = str(getattr(image, "source", "FILE") or "FILE")
     filepath_value = (
         getattr(image, "filepath_raw", None)
@@ -231,13 +215,13 @@ def analyse_material_slot(
             issues=("Material slot is empty",),
         )
 
-    material_name = _material_name(material)
+    resolved_material_name = _material_name(material)
     node_tree = getattr(material, "node_tree", None)
     use_nodes = bool(getattr(material, "use_nodes", node_tree is not None))
     if not use_nodes or node_tree is None:
         return MaterialAnalysis(
             slot_index=slot_index,
-            material_name=material_name,
+            material_name=resolved_material_name,
             kind=MaterialKind.SOLID_COLOR,
             issues=("Material has no node tree; diffuse_color fallback is required",),
         )
@@ -246,7 +230,7 @@ def analyse_material_slot(
         root_nodes = tuple(node_tree.nodes)
     except Exception as exc:
         raise MaterialAnalysisError(
-            f"Unable to iterate nodes of material '{material_name}'"
+            f"Unable to iterate nodes of material '{resolved_material_name}'"
         ) from exc
 
     target = _resolve_render_target(render_target)
@@ -272,7 +256,7 @@ def analyse_material_slot(
         graph_issues.append(f"Shader graph analysis failed: {exc}")
         logger.warning(
             "Shader graph analysis failed for material '%s'",
-            material_name,
+            resolved_material_name,
             exc_info=True,
         )
 
@@ -292,7 +276,7 @@ def analyse_material_slot(
 
     return MaterialAnalysis(
         slot_index=slot_index,
-        material_name=material_name,
+        material_name=resolved_material_name,
         kind=kind,
         node_types=node_types,
         image_dependencies=dependencies,
