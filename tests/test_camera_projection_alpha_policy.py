@@ -48,7 +48,7 @@ def test_b4_postprocess_uses_one_execution_threshold_for_coverage_layout():
         postprocess.build_projection_union_accumulator
     )
     processor_source = inspect.getsource(
-        postprocess.process_camera_projection_outputs
+        postprocess.process_projection_outputs
     )
     module_source = inspect.getsource(postprocess)
 
