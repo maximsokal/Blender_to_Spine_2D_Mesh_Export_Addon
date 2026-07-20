@@ -14,7 +14,7 @@ from ..application import (
     build_a1_texturing_topology,
     propagate_texturing_uv_to_regions,
 )
-from ..domain.uv import UvRangePolicy, UvUnwrapResult, enforce_uv_range
+from ..domain.uv import UvRangePolicy, UvUnwrapResult, inspect_uv_range
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
     StatisticsValue,
@@ -64,7 +64,13 @@ def prepare_a1_uv(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> A1UvPreparationResult:
-    """Build seam topology, unwrap it, validate its range, and propagate region UVs."""
+    """Build seam topology, unwrap it, inspect range, and propagate region UVs.
+
+    This stage cannot yet know whether material planning will choose object baking or
+    camera projection.  It therefore records range diagnostics but defers strict
+    enforcement to the final UV consumer: propagated object-bake regions or the
+    exporter-generated camera projection snapshot.
+    """
 
     if not isinstance(source, A1SourceGeometryPreparationResult):
         raise TypeError("source must be A1SourceGeometryPreparationResult")
@@ -89,10 +95,9 @@ def prepare_a1_uv(
             scene=scene,
         )
         raw_outside_count = unwrap_result.statistics.outside_unit_square_count
-        range_report = enforce_uv_range(
+        range_report = inspect_uv_range(
             unwrap_result.snapshot,
             source.settings.uv.layer_name,
-            policy=source.settings.uv.range_policy,
             epsilon=source.settings.uv.range_epsilon,
         )
         statistics = freeze_statistics(
@@ -116,8 +121,8 @@ def prepare_a1_uv(
                     message=(
                         f"{range_report.outside_loop_count} UV loops are outside "
                         "the unit square beyond epsilon "
-                        f"{range_report.epsilon}; export continues because "
-                        "uv.range_policy is WARN_ONLY"
+                        f"{range_report.epsilon}; object-bake export may continue "
+                        "because uv.range_policy is WARN_ONLY"
                     ),
                     object_id=source.object_id,
                     context={
