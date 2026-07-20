@@ -70,13 +70,13 @@ from .render_engine_contract import (
     render_engine_contract,
     render_engine_contract_from_execution,
 )
-from .scene_bake_analyzer import (
-    SceneBakeAnalysisError,
+from .scene_bake_capture import (
     analyse_bake_contexts,
-    analyse_object_bake_context,
     analyse_scene_bake_context,
-    validate_runtime_scene_context,
 )
+from .scene_bake_error import SceneBakeAnalysisError
+from .scene_bake_resources import analyse_object_bake_context
+from .scene_bake_runtime import validate_runtime_scene_context
 from .shader_capability_audit import audit_material_graph_capabilities
 from .shader_graph_analysis import analyse_material_graph
 from .shader_graph_error import MaterialGraphAnalysisError
