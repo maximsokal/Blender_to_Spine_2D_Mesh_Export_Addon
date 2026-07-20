@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from math import isfinite
 from typing import Tuple
 
 from ..domain.geometry import (
@@ -36,6 +35,12 @@ from ..domain.spine import (
     LegacyMeshAttachmentRequest,
     LegacyRigBuildResult,
 )
+from .a1_numeric_contracts import (
+    require_finite_number,
+    require_identity,
+    require_integer,
+    require_non_empty_string,
+)
 
 
 class A1AttachmentProjectionError(ValueError):
@@ -50,8 +55,7 @@ class A1VertexZBinding:
     def __post_init__(self) -> None:
         if not isinstance(self.vertex_id, VertexId):
             raise TypeError("vertex_id must be VertexId")
-        if not isinstance(self.z_group_index, int) or self.z_group_index < 0:
-            raise ValueError("z_group_index must be a non-negative integer")
+        require_integer(self.z_group_index, "z_group_index", minimum=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,15 +68,10 @@ class A1AttachmentVertexKey:
     def __post_init__(self) -> None:
         if not isinstance(self.vertex_id, VertexId):
             raise TypeError("vertex_id must be VertexId")
-        if (
-            not isinstance(self.uv, tuple)
-            or len(self.uv) != 2
-            or not all(
-                isinstance(value, (int, float)) and isfinite(float(value))
-                for value in self.uv
-            )
-        ):
+        if not isinstance(self.uv, tuple) or len(self.uv) != 2:
             raise ValueError("uv must contain two finite numeric values")
+        for index, value in enumerate(self.uv):
+            require_finite_number(value, f"uv[{index}]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,24 +94,25 @@ class A1AttachmentProjectionSettings:
             "slot_name",
             "attachment_name",
             "vertex_prefix",
-            "image_path",
             "uv_layer_name",
             "skin_name",
         ):
-            value = getattr(self, field_name)
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"{field_name} must be a non-empty string")
-        for field_name in (
+            require_identity(getattr(self, field_name), field_name)
+        require_non_empty_string(self.image_path, "image_path")
+        require_finite_number(
+            self.attachment_width,
             "attachment_width",
+            minimum=0.0,
+            minimum_inclusive=False,
+        )
+        require_finite_number(
+            self.attachment_height,
             "attachment_height",
-            "center_x",
-            "center_y",
-        ):
-            value = getattr(self, field_name)
-            if not isinstance(value, (int, float)) or not isfinite(float(value)):
-                raise ValueError(f"{field_name} must be finite")
-        if self.attachment_width <= 0.0 or self.attachment_height <= 0.0:
-            raise ValueError("attachment dimensions must be positive")
+            minimum=0.0,
+            minimum_inclusive=False,
+        )
+        require_finite_number(self.center_x, "center_x")
+        require_finite_number(self.center_y, "center_y")
         if not isinstance(self.z_bindings, tuple) or not self.z_bindings:
             raise ValueError("z_bindings must be a non-empty tuple")
         if not all(isinstance(item, A1VertexZBinding) for item in self.z_bindings):
@@ -161,14 +161,21 @@ class A1AttachmentProjectionResult:
         if not isinstance(self.loop_to_attachment_index, tuple):
             raise TypeError("loop_to_attachment_index must be tuple")
         loop_ids: list[LoopId] = []
-        for loop_id, attachment_index in self.loop_to_attachment_index:
+        for item_index, item in enumerate(self.loop_to_attachment_index):
+            if not isinstance(item, tuple) or len(item) != 2:
+                raise TypeError(
+                    f"loop_to_attachment_index[{item_index}] must be a "
+                    "(LoopId, attachment_index) tuple"
+                )
+            loop_id, attachment_index = item
             if not isinstance(loop_id, LoopId):
                 raise TypeError("loop_to_attachment_index keys must be LoopId")
-            if (
-                not isinstance(attachment_index, int)
-                or attachment_index < 0
-                or attachment_index >= len(self.ordered_vertex_keys)
-            ):
+            require_integer(
+                attachment_index,
+                f"loop_to_attachment_index[{item_index}].attachment_index",
+                minimum=0,
+            )
+            if attachment_index >= len(self.ordered_vertex_keys):
                 raise ValueError(
                     "loop_to_attachment_index contains an invalid attachment index"
                 )
@@ -222,9 +229,11 @@ class A1AttachmentProjectionResult:
         if not isinstance(vertex_id, VertexId):
             raise TypeError("vertex_id must be VertexId")
         if uv is not None:
+            if not isinstance(uv, tuple) or len(uv) != 2:
+                raise ValueError("uv must contain two finite numeric values")
             key = A1AttachmentVertexKey(
                 vertex_id=vertex_id,
-                uv=(float(uv[0]), float(uv[1])),
+                uv=(uv[0], uv[1]),
             )
             try:
                 return self.ordered_vertex_keys.index(key)
