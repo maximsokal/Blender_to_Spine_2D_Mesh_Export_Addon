@@ -61,9 +61,21 @@ def test_reservation_and_recovery_have_explicit_contracts():
     assert "minimum_stale_age_seconds" in source
 
 
-def test_os_process_start_identity_uses_platform_specific_creation_markers():
+def test_os_process_identity_uses_safe_platform_specific_probes():
     source = _source("atomic_work_state.py")
     assert '/proc/{process_id}/stat' in source
     assert "fields_after_command[19]" in source
     assert 'ctypes.WinDLL("kernel32"' in source
     assert "GetProcessTimes" in source
+    assert "GetExitCodeProcess" in source
+    assert "STILL_ACTIVE" not in source or "still_active = 259" in source
+    assert "if os.name == \"nt\":" in source
+
+
+def test_windows_liveness_does_not_route_through_os_kill():
+    source = _source("atomic_work_state.py")
+    windows_branch = source.index('if os.name == "nt":')
+    os_kill = source.index("os.kill(process_id, 0)")
+    assert windows_branch < os_kill
+    between = source[windows_branch:os_kill]
+    assert "return _windows_process_is_alive(process_id)" in between
