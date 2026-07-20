@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import isfinite
 from pathlib import Path
 from typing import Tuple
 
 from .context import ObjectBakeContext, SceneBakeContext
+from .contracts import (
+    require_finite_number,
+    require_integer,
+    require_non_empty_string,
+)
 from .graph import (
     MaterialDependencyKind,
     MaterialGraphSnapshot,
@@ -102,14 +106,11 @@ class ImageDependency:
     generated: bool = False
 
     def __post_init__(self) -> None:
-        if not isinstance(self.image_name, str) or not self.image_name.strip():
-            raise ValueError("image_name must be a non-empty string")
-        if not isinstance(self.source, str) or not self.source.strip():
-            raise ValueError("source must be a non-empty string")
+        require_non_empty_string(self.image_name, "image_name")
+        require_non_empty_string(self.source, "source")
         if self.filepath is not None and not isinstance(self.filepath, str):
             raise TypeError("filepath must be str or None")
-        if not isinstance(self.frame_duration, int) or self.frame_duration < 1:
-            raise ValueError("frame_duration must be a positive integer")
+        require_integer(self.frame_duration, "frame_duration", minimum=1)
         if not isinstance(self.generated, bool):
             raise TypeError("generated must be bool")
 
@@ -129,12 +130,9 @@ class MaterialAnalysis:
     graph: MaterialGraphSnapshot | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.slot_index, int) or self.slot_index < 0:
-            raise ValueError("slot_index must be a non-negative integer")
-        if self.material_name is not None and (
-            not isinstance(self.material_name, str) or not self.material_name.strip()
-        ):
-            raise ValueError("material_name must be a non-empty string or None")
+        require_integer(self.slot_index, "slot_index", minimum=0)
+        if self.material_name is not None:
+            require_non_empty_string(self.material_name, "material_name")
         if not isinstance(self.kind, MaterialKind):
             raise TypeError("kind must be MaterialKind")
         for field_name in ("node_types", "image_dependencies", "issues"):
@@ -202,8 +200,7 @@ class ObjectMaterialAnalysis:
     slots: Tuple[MaterialAnalysis, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.source_object_id, str) or not self.source_object_id.strip():
-            raise ValueError("source_object_id must be a non-empty string")
+        require_non_empty_string(self.source_object_id, "source_object_id")
         if not isinstance(self.slots, tuple):
             raise TypeError("slots must be tuple")
         if not all(isinstance(slot, MaterialAnalysis) for slot in self.slots):
@@ -243,39 +240,43 @@ class BakeSettings:
     sequence_frame_digits: int = 4
 
     def __post_init__(self) -> None:
-        for field_name in ("width", "height"):
-            value = getattr(self, field_name)
-            if not isinstance(value, int) or value <= 0:
-                raise ValueError(f"{field_name} must be a positive integer")
+        require_integer(self.width, "width", minimum=1)
+        require_integer(self.height, "height", minimum=1)
         if not isinstance(self.output_directory, Path):
             raise TypeError("output_directory must be pathlib.Path")
-        if not isinstance(self.output_stem, str) or not self.output_stem.strip():
-            raise ValueError("output_stem must be a non-empty string")
-        if not isinstance(self.uv_layer_name, str) or not self.uv_layer_name.strip():
-            raise ValueError("uv_layer_name must be a non-empty string")
+        require_non_empty_string(self.output_stem, "output_stem")
+        require_non_empty_string(self.uv_layer_name, "uv_layer_name")
         if not isinstance(self.texture_format, TextureFormat):
             raise TypeError("texture_format must be TextureFormat")
-        if not isinstance(self.margin_pixels, int) or self.margin_pixels < 0:
-            raise ValueError("margin_pixels must be a non-negative integer")
+        require_integer(self.margin_pixels, "margin_pixels", minimum=0)
         if not isinstance(self.selected_to_active, bool):
             raise TypeError("selected_to_active must be bool")
-        if not isinstance(self.cage_extrusion, (int, float)) or not isfinite(
-            float(self.cage_extrusion)
-        ):
-            raise ValueError("cage_extrusion must be finite")
-        if self.cage_extrusion < 0.0:
-            raise ValueError("cage_extrusion cannot be negative")
+        require_finite_number(
+            self.cage_extrusion,
+            "cage_extrusion",
+            minimum=0.0,
+        )
         for field_name in ("diffuse_mode", "procedural_mode"):
             if not isinstance(getattr(self, field_name), BakeMode):
                 raise TypeError(f"{field_name} must be BakeMode")
         if not isinstance(self.material_policy, BakeMaterialPolicy):
             raise TypeError("material_policy must be BakeMaterialPolicy")
-        if not isinstance(self.sequence_start_frame, int) or self.sequence_start_frame < 0:
-            raise ValueError("sequence_start_frame must be a non-negative integer")
-        if not isinstance(self.sequence_frame_count, int) or self.sequence_frame_count < 0:
-            raise ValueError("sequence_frame_count must be a non-negative integer")
-        if not isinstance(self.sequence_frame_digits, int) or not 1 <= self.sequence_frame_digits <= 12:
-            raise ValueError("sequence_frame_digits must be in [1, 12]")
+        require_integer(
+            self.sequence_start_frame,
+            "sequence_start_frame",
+            minimum=0,
+        )
+        require_integer(
+            self.sequence_frame_count,
+            "sequence_frame_count",
+            minimum=0,
+        )
+        require_integer(
+            self.sequence_frame_digits,
+            "sequence_frame_digits",
+            minimum=1,
+            maximum=12,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,14 +287,10 @@ class BakeFrameTask:
     output_path: Path
 
     def __post_init__(self) -> None:
-        if not isinstance(self.task_index, int) or self.task_index < 0:
-            raise ValueError("task_index must be a non-negative integer")
-        if self.timeline_frame is not None and (
-            not isinstance(self.timeline_frame, int) or self.timeline_frame < 0
-        ):
-            raise ValueError("timeline_frame must be a non-negative integer or None")
-        if not isinstance(self.image_name, str) or not self.image_name.strip():
-            raise ValueError("image_name must be a non-empty string")
+        require_integer(self.task_index, "task_index", minimum=0)
+        if self.timeline_frame is not None:
+            require_integer(self.timeline_frame, "timeline_frame", minimum=0)
+        require_non_empty_string(self.image_name, "image_name")
         if not isinstance(self.output_path, Path):
             raise TypeError("output_path must be pathlib.Path")
 
@@ -304,8 +301,7 @@ class MaterialSlotPreparation:
     mode: MaterialPreparationMode
 
     def __post_init__(self) -> None:
-        if not isinstance(self.slot_index, int) or self.slot_index < 0:
-            raise ValueError("slot_index must be a non-negative integer")
+        require_integer(self.slot_index, "slot_index", minimum=0)
         if not isinstance(self.mode, MaterialPreparationMode):
             raise TypeError("mode must be MaterialPreparationMode")
 
@@ -321,8 +317,7 @@ class BakePassPlan:
     material_preparations: Tuple[MaterialSlotPreparation, ...] = ()
 
     def __post_init__(self) -> None:
-        if not isinstance(self.pass_index, int) or self.pass_index < 0:
-            raise ValueError("pass_index must be a non-negative integer")
+        require_integer(self.pass_index, "pass_index", minimum=0)
         if not isinstance(self.strategy_id, BakeStrategyId):
             raise TypeError("strategy_id must be BakeStrategyId")
         if not isinstance(self.bake_mode, BakeMode):
@@ -331,10 +326,14 @@ class BakePassPlan:
             raise TypeError("evaluation_scope must be BakeEvaluationScope")
         if not isinstance(self.material_slot_indices, tuple) or not self.material_slot_indices:
             raise ValueError("material_slot_indices must be a non-empty tuple")
+        for index, slot_index in enumerate(self.material_slot_indices):
+            require_integer(
+                slot_index,
+                f"material_slot_indices[{index}]",
+                minimum=0,
+            )
         if tuple(sorted(set(self.material_slot_indices))) != self.material_slot_indices:
             raise ValueError("material_slot_indices must be sorted and unique")
-        if any(not isinstance(index, int) or index < 0 for index in self.material_slot_indices):
-            raise ValueError("material_slot_indices must contain non-negative integers")
         if not isinstance(self.semantic_channels, tuple) or not self.semantic_channels:
             raise ValueError("semantic_channels must be a non-empty tuple")
         if not all(
@@ -371,14 +370,16 @@ class BakeCompositePlan:
             raise TypeError("unpremultiply_color_by_alpha must be bool")
         if not isinstance(self.color_pass_indices, tuple):
             raise TypeError("color_pass_indices must be tuple")
+        for index, pass_index in enumerate(self.color_pass_indices):
+            require_integer(
+                pass_index,
+                f"color_pass_indices[{index}]",
+                minimum=0,
+            )
         if self.color_pass_indices != tuple(sorted(set(self.color_pass_indices))):
             raise ValueError("color_pass_indices must be sorted and unique")
-        if any(not isinstance(index, int) or index < 0 for index in self.color_pass_indices):
-            raise ValueError("color_pass_indices must contain non-negative integers")
-        if self.alpha_pass_index is not None and (
-            not isinstance(self.alpha_pass_index, int) or self.alpha_pass_index < 0
-        ):
-            raise ValueError("alpha_pass_index must be a non-negative integer or None")
+        if self.alpha_pass_index is not None:
+            require_integer(self.alpha_pass_index, "alpha_pass_index", minimum=0)
         if self.mode is BakeCompositeMode.SINGLE:
             if self.alpha_pass_index is not None or self.color_pass_indices:
                 raise ValueError("SINGLE composition cannot declare pass routing")
@@ -410,6 +411,11 @@ class BakePlan:
     scene_context: SceneBakeContext | None = None
 
     def __post_init__(self) -> None:
+        require_non_empty_string(self.source_object_id, "source_object_id")
+        if not isinstance(self.settings, BakeSettings):
+            raise TypeError("settings must be BakeSettings")
+        if not isinstance(self.material_analysis, ObjectMaterialAnalysis):
+            raise TypeError("material_analysis must be ObjectMaterialAnalysis")
         if self.source_object_id != self.material_analysis.source_object_id:
             raise ValueError("source_object_id and material_analysis disagree")
         if not isinstance(self.bake_mode, BakeMode):
@@ -424,12 +430,19 @@ class BakePlan:
             SceneBakeContext,
         ):
             raise TypeError("scene_context must be SceneBakeContext or None")
-        if not self.frame_tasks:
+        if not isinstance(self.frame_tasks, tuple) or not self.frame_tasks:
             raise ValueError("frame_tasks cannot be empty")
+        if not all(isinstance(task, BakeFrameTask) for task in self.frame_tasks):
+            raise TypeError("frame_tasks must contain BakeFrameTask values")
         actual_indices = tuple(task.task_index for task in self.frame_tasks)
         if actual_indices != tuple(range(len(self.frame_tasks))):
             raise ValueError("frame task indices must be ordered and dense from zero")
-        if not 0 <= self.representative_task_index < len(self.frame_tasks):
+        require_integer(
+            self.representative_task_index,
+            "representative_task_index",
+            minimum=0,
+        )
+        if self.representative_task_index >= len(self.frame_tasks):
             raise ValueError("representative_task_index is out of range")
         if not isinstance(self.passes, tuple):
             raise TypeError("passes must be tuple")
@@ -457,6 +470,8 @@ class BakePlan:
                     ),
                 ),
             )
+        if not all(isinstance(item, BakePassPlan) for item in self.passes):
+            raise TypeError("passes must contain BakePassPlan values")
         pass_indices = tuple(item.pass_index for item in self.passes)
         if pass_indices != tuple(range(len(self.passes))):
             raise ValueError("bake pass indices must be ordered and dense from zero")
