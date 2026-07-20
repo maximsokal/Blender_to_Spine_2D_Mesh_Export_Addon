@@ -10,11 +10,36 @@ import bpy
 from . import config
 from .blender_adapter.a1_ui_bridge import export_active_object_a1
 from .config import get_texture_size
+from .infrastructure.blender_registration import (
+    RnaPropertyRegistration,
+    class_cleanup_actions,
+    register_classes_transactionally,
+    register_rna_properties_transactionally,
+    rna_property_cleanup_actions,
+    unregister_all_best_effort,
+)
 from .legacy_loader import load_legacy_single_backend
 
 
 logger = logging.getLogger(__name__)
 SINGLE_BACKEND_PROPERTY = "spine2d_single_export_backend"
+DEFAULT_SINGLE_BACKEND = "REWRITE"
+_SINGLE_BACKENDS = frozenset({"REWRITE", "LEGACY"})
+
+
+def resolve_single_backend(scene: bpy.types.Scene) -> str:
+    """Resolve the single-object backend and fail closed to Rewrite."""
+
+    raw_value = getattr(scene, SINGLE_BACKEND_PROPERTY, DEFAULT_SINGLE_BACKEND)
+    backend = str(raw_value).strip().upper()
+    if backend in _SINGLE_BACKENDS:
+        return backend
+    logger.warning(
+        "Unknown single export backend %r; using %s",
+        raw_value,
+        DEFAULT_SINGLE_BACKEND,
+    )
+    return DEFAULT_SINGLE_BACKEND
 
 
 class OBJECT_OT_SaveUVAsJSON(bpy.types.Operator):
@@ -86,9 +111,7 @@ class OBJECT_OT_SaveUVAsJSON(bpy.types.Operator):
         return {"FINISHED"}
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
-        backend = str(
-            getattr(context.scene, SINGLE_BACKEND_PROPERTY, "LEGACY")
-        ).upper()
+        backend = resolve_single_backend(context.scene)
         logger.info("[SaveUVAsJSON] Start %s single-object export", backend)
         try:
             if backend == "LEGACY":
@@ -131,7 +154,7 @@ class OBJECT_PT_Spine2DSingleExportBackend(bpy.types.Panel):
             SINGLE_BACKEND_PROPERTY,
             text="Engine",
         )
-        backend = str(getattr(context.scene, SINGLE_BACKEND_PROPERTY, "REWRITE"))
+        backend = resolve_single_backend(context.scene)
         if backend == "LEGACY":
             column.label(text="Legacy intermediate-JSON pipeline", icon="ERROR")
         else:
@@ -143,12 +166,11 @@ CLASSES = (
     OBJECT_PT_Spine2DSingleExportBackend,
 )
 
-
-def register() -> None:
-    setattr(
-        bpy.types.Scene,
-        SINGLE_BACKEND_PROPERTY,
-        bpy.props.EnumProperty(
+RNA_PROPERTIES = (
+    RnaPropertyRegistration(
+        owner=bpy.types.Scene,
+        name=SINGLE_BACKEND_PROPERTY,
+        value=bpy.props.EnumProperty(
             name="Single Export Engine",
             description=(
                 "Select the rewritten transactional exporter or the explicit "
@@ -166,32 +188,64 @@ def register() -> None:
                     "Previous intermediate-JSON exporter kept for controlled fallback",
                 ),
             ),
-            default="REWRITE",
+            default=DEFAULT_SINGLE_BACKEND,
         ),
+    ),
+)
+
+
+def register() -> None:
+    """Register classes and Scene backend property as one transaction."""
+
+    registered_classes = register_classes_transactionally(
+        CLASSES,
+        register_class=bpy.utils.register_class,
+        unregister_class=bpy.utils.unregister_class,
     )
     try:
-        for cls in CLASSES:
-            bpy.utils.register_class(cls)
-    except Exception:
-        if hasattr(bpy.types.Scene, SINGLE_BACKEND_PROPERTY):
-            delattr(bpy.types.Scene, SINGLE_BACKEND_PROPERTY)
-        logger.exception("Failed to register single-object operator UI")
+        register_rna_properties_transactionally(RNA_PROPERTIES)
+    except Exception as exc:
+        logger.exception("Failed to register single-object operator RNA")
+        unregister_all_best_effort(
+            class_cleanup_actions(
+                registered_classes,
+                unregister_class=bpy.utils.unregister_class,
+            ),
+            operation="single-object registration rollback",
+            primary_error=exc,
+        )
         raise
     logger.debug("Single-object Rewrite/Legacy operator registered")
 
 
 def unregister() -> None:
-    errors: list[Exception] = []
-    for cls in reversed(CLASSES):
-        try:
-            bpy.utils.unregister_class(cls)
-        except Exception as exc:
-            errors.append(exc)
-            logger.exception("Failed to unregister %s", cls.__name__)
-    if hasattr(bpy.types.Scene, SINGLE_BACKEND_PROPERTY):
-        delattr(bpy.types.Scene, SINGLE_BACKEND_PROPERTY)
-    if errors:
-        raise RuntimeError(
-            f"Single-object operator unregistration failed {len(errors)} time(s)"
-        ) from errors[0]
+    """Remove every owned property and class even when one cleanup fails."""
+
+    try:
+        unregister_all_best_effort(
+            (
+                *rna_property_cleanup_actions(RNA_PROPERTIES),
+                *class_cleanup_actions(
+                    CLASSES,
+                    unregister_class=bpy.utils.unregister_class,
+                ),
+            ),
+            operation="single-object operator unregistration",
+        )
+    except Exception:
+        logger.exception("Single-object operator unregistration failed")
+        raise
     logger.debug("Single-object Rewrite/Legacy operator unregistered")
+
+
+__all__ = [
+    "CLASSES",
+    "DEFAULT_SINGLE_BACKEND",
+    "OBJECT_OT_SaveUVAsJSON",
+    "OBJECT_PT_Spine2DSingleExportBackend",
+    "RNA_PROPERTIES",
+    "SINGLE_BACKEND_PROPERTY",
+    "register",
+    "resolve_single_backend",
+    "unregister",
+]
