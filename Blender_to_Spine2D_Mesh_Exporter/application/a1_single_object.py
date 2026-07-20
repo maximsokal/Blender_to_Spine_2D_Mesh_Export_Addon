@@ -39,6 +39,25 @@ class A1SourceGeometryMode(str, Enum):
     EVALUATED = "EVALUATED"
 
 
+class A1SourceUvBoundaryMode(str, Enum):
+    """Select which pre-unwrap UV layout may influence A1 segmentation.
+
+    ``DISABLED`` is the Rewrite default because A1 generates a new shared
+    ``SpineBakeUV`` layout after segmentation and decomposition. The source
+    Blender active UV layer therefore must not silently change export topology.
+
+    ``EXPLICIT_LAYER`` opts into source-UV discontinuity cuts using the exact
+    layer named by ``source_uv_boundary_layer_name``.
+
+    ``ACTIVE_LAYER_LEGACY`` retains the historical active-layer behavior only
+    for callers that explicitly request compatibility.
+    """
+
+    DISABLED = "DISABLED"
+    EXPLICIT_LAYER = "EXPLICIT_LAYER"
+    ACTIVE_LAYER_LEGACY = "ACTIVE_LAYER_LEGACY"
+
+
 class A1SingleObjectStage(str, Enum):
     VALIDATE_REQUEST = "VALIDATE_REQUEST"
     READ_GEOMETRY = "READ_GEOMETRY"
@@ -70,6 +89,10 @@ class A1SingleObjectExportSettings:
         ModifierLineagePolicy.STRICT_PRESERVE
     )
     geometry: A1GeometryPreparationSettings = A1GeometryPreparationSettings()
+    source_uv_boundary_mode: A1SourceUvBoundaryMode = (
+        A1SourceUvBoundaryMode.DISABLED
+    )
+    source_uv_boundary_layer_name: str | None = None
     uv: UvUnwrapSettings = UvUnwrapSettings()
     texture_format: TextureFormat = TextureFormat.PNG
     material_policy: BakeMaterialPolicy = BakeMaterialPolicy.LEGACY_ANY_IMAGE
@@ -107,6 +130,23 @@ class A1SingleObjectExportSettings:
             )
         if not isinstance(self.geometry, A1GeometryPreparationSettings):
             raise TypeError("geometry must be A1GeometryPreparationSettings")
+        if not isinstance(self.source_uv_boundary_mode, A1SourceUvBoundaryMode):
+            raise TypeError(
+                "source_uv_boundary_mode must be A1SourceUvBoundaryMode"
+            )
+        if self.source_uv_boundary_mode is A1SourceUvBoundaryMode.EXPLICIT_LAYER:
+            if self.source_uv_boundary_layer_name is None:
+                raise ValueError(
+                    "source_uv_boundary_layer_name is required for EXPLICIT_LAYER"
+                )
+            require_non_empty_string(
+                self.source_uv_boundary_layer_name,
+                "source_uv_boundary_layer_name",
+            )
+        elif self.source_uv_boundary_layer_name is not None:
+            raise ValueError(
+                "source_uv_boundary_layer_name is only valid for EXPLICIT_LAYER"
+            )
         if not isinstance(self.uv, UvUnwrapSettings):
             raise TypeError("uv must be UvUnwrapSettings")
         if not isinstance(self.texture_format, TextureFormat):
@@ -138,6 +178,29 @@ class A1SingleObjectExportSettings:
 
     def resolved_geometry_settings(self) -> A1GeometryPreparationSettings:
         segmentation = self.geometry.segmentation
+
+        # A1 unwraps one shared full-object texturing snapshot after segmentation.
+        # Consequently, source UV discontinuities are not part of the generated
+        # SpineBakeUV topology unless the caller opts in explicitly.
+        if self.source_uv_boundary_mode is A1SourceUvBoundaryMode.DISABLED:
+            segmentation = replace(
+                segmentation,
+                split_uv_boundaries=False,
+                uv_layer_name=None,
+            )
+        elif self.source_uv_boundary_mode is A1SourceUvBoundaryMode.EXPLICIT_LAYER:
+            segmentation = replace(
+                segmentation,
+                split_uv_boundaries=True,
+                uv_layer_name=self.source_uv_boundary_layer_name,
+            )
+        else:
+            segmentation = replace(
+                segmentation,
+                split_uv_boundaries=True,
+                uv_layer_name=None,
+            )
+
         if self.export.seam_mode == "CUSTOM":
             segmentation = replace(
                 segmentation,
