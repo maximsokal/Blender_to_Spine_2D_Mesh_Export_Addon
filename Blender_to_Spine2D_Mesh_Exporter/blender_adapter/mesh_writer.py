@@ -66,9 +66,11 @@ class MeshTopologyCorrespondence:
                     raise TypeError(
                         f"{field_name}[{item_index}][0] must be {key_type.__name__}"
                     )
-                if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+                if isinstance(index, bool) or not isinstance(index, int):
+                    raise TypeError(f"{field_name}[{item_index}][1] must be int")
+                if index < 0:
                     raise ValueError(
-                        f"{field_name}[{item_index}][1] must be a non-negative int"
+                        f"{field_name}[{item_index}][1] must be non-negative"
                     )
                 keys.append(key)
                 indices.append(index)
@@ -134,21 +136,30 @@ def _edge_key(first: int, second: int) -> tuple[int, int]:
     return (first, second) if first < second else (second, first)
 
 
-def _rotation_offset(
+def _rotation_offsets(
     expected: tuple[int, ...],
     actual: tuple[int, ...],
-) -> int | None:
-    """Return the oriented cyclic offset or ``None`` when faces differ."""
+) -> tuple[int, ...]:
+    """Return every oriented cyclic offset that maps ``expected`` to ``actual``."""
 
     if len(expected) != len(actual) or not expected:
-        return None
-    for offset in range(len(expected)):
+        return ()
+    return tuple(
+        offset
+        for offset in range(len(expected))
         if all(
             actual[actual_index] == expected[(actual_index + offset) % len(expected)]
             for actual_index in range(len(expected))
-        ):
-            return offset
-    return None
+        )
+    )
+
+
+def _canonical_oriented_cycle(values: tuple[int, ...]) -> tuple[int, ...]:
+    """Return a deterministic key invariant to cyclic rotation, not winding."""
+
+    if not values:
+        raise MeshWriteError("A generated polygon cannot contain zero vertices")
+    return min(values[offset:] + values[:offset] for offset in range(len(values)))
 
 
 def _polygon_vertex_indices(mesh: Any, polygon: Any) -> tuple[int, ...]:
@@ -222,7 +233,14 @@ def build_mesh_topology_correspondence(
     polygon_vertices = tuple(
         _polygon_vertex_indices(mesh, polygon) for polygon in mesh.polygons
     )
-    unmatched_polygon_indices = set(range(len(mesh.polygons)))
+    polygon_indices_by_cycle: dict[tuple[int, ...], list[int]] = {}
+    for polygon_index, vertices in enumerate(polygon_vertices):
+        polygon_indices_by_cycle.setdefault(
+            _canonical_oriented_cycle(vertices),
+            [],
+        ).append(polygon_index)
+
+    used_polygon_indices: set[int] = set()
     face_pairs: list[tuple[FaceId, int]] = []
     loop_pairs: list[tuple[LoopId, int]] = []
 
@@ -230,28 +248,35 @@ def build_mesh_topology_correspondence(
         expected_vertices = tuple(
             loop_map[loop_id].vertex_id.index for loop_id in face.loop_ids
         )
-        candidates: list[tuple[int, int]] = []
-        for polygon_index in sorted(unmatched_polygon_indices):
-            offset = _rotation_offset(
-                expected_vertices,
-                polygon_vertices[polygon_index],
-            )
-            if offset is not None:
-                candidates.append((polygon_index, offset))
-
-        if not candidates:
+        cycle_key = _canonical_oriented_cycle(expected_vertices)
+        polygon_candidates = tuple(
+            polygon_index
+            for polygon_index in polygon_indices_by_cycle.get(cycle_key, ())
+            if polygon_index not in used_polygon_indices
+        )
+        if not polygon_candidates:
             raise MeshWriteError(
                 f"Face {face.id.index} has no oriented Blender polygon match "
                 f"during {stage}; expected vertices={expected_vertices}"
             )
-        if len(candidates) != 1:
+        if len(polygon_candidates) != 1:
             raise MeshWriteError(
                 f"Face {face.id.index} has ambiguous Blender polygon matches "
-                f"during {stage}: {tuple(index for index, _ in candidates)}"
+                f"during {stage}: {polygon_candidates}"
             )
 
-        polygon_index, offset = candidates[0]
-        unmatched_polygon_indices.remove(polygon_index)
+        polygon_index = polygon_candidates[0]
+        offsets = _rotation_offsets(
+            expected_vertices,
+            polygon_vertices[polygon_index],
+        )
+        if len(offsets) != 1:
+            raise MeshWriteError(
+                f"Face {face.id.index} has ambiguous cyclic corner offsets "
+                f"during {stage}: {offsets}"
+            )
+        offset = offsets[0]
+        used_polygon_indices.add(polygon_index)
         polygon = mesh.polygons[polygon_index]
         loop_start = int(polygon.loop_start)
         face_pairs.append((face.id, polygon_index))
@@ -292,6 +317,7 @@ def build_mesh_topology_correspondence(
                 )
             loop_pairs.append((loop_id, mesh_loop_index))
 
+    unmatched_polygon_indices = set(range(len(mesh.polygons))) - used_polygon_indices
     if unmatched_polygon_indices:
         raise MeshWriteError(
             f"Generated mesh contains unmatched polygons during {stage}: "
@@ -341,10 +367,16 @@ def _write_edge_flags(snapshot: MeshSnapshot, mesh: Any) -> None:
 def _write_face_properties(
     snapshot: MeshSnapshot,
     mesh: Any,
-    correspondence: MeshTopologyCorrespondence,
+    correspondence: MeshTopologyCorrespondence | None = None,
 ) -> None:
+    resolved = correspondence or build_mesh_topology_correspondence(
+        snapshot,
+        mesh,
+        stage="face-property-write",
+    )
+    polygon_index_by_face = dict(resolved.face_to_polygon_index)
     for face in snapshot.faces:
-        polygon = mesh.polygons[correspondence.polygon_index_for(face.id)]
+        polygon = mesh.polygons[polygon_index_by_face[face.id]]
         polygon.material_index = face.material_index
         polygon.use_smooth = face.smooth
 
@@ -389,14 +421,19 @@ def _write_uv_roles(snapshot: MeshSnapshot, mesh: Any) -> None:
 def _write_uv_layers(
     snapshot: MeshSnapshot,
     mesh: Any,
-    correspondence: MeshTopologyCorrespondence,
+    correspondence: MeshTopologyCorrespondence | None = None,
 ) -> None:
+    resolved = correspondence or build_mesh_topology_correspondence(
+        snapshot,
+        mesh,
+        stage="UV-layer-write",
+    )
     loop_map = snapshot.loop_by_id()
     for layer_name in snapshot.uv_layer_names:
         layer = mesh.uv_layers.get(layer_name)
         if layer is None:
             layer = mesh.uv_layers.new(name=layer_name)
-        for source_loop_id, mesh_loop_index in correspondence.loop_to_mesh_index:
+        for source_loop_id, mesh_loop_index in resolved.loop_to_mesh_index:
             coordinate = loop_map[source_loop_id].uv(layer_name)
             if coordinate is None:
                 raise MeshWriteError(
