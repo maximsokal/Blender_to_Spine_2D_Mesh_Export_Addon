@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import isfinite
 from typing import Iterable, Tuple
 
+from .contracts import vector_is_zero
 from .ids import EdgeId, FaceId, LoopId, VertexId
 from .model import MeshSnapshot
 
@@ -48,7 +48,7 @@ def _expected_dense_ids(count: int, id_type):
 
 
 class MeshSnapshotValidator:
-    """Validate local topology and source-lineage invariants."""
+    """Validate local topology, source lineage, and non-fatal geometry diagnostics."""
 
     def validate(self, snapshot: MeshSnapshot) -> Tuple[MeshValidationIssue, ...]:
         if not isinstance(snapshot, MeshSnapshot):
@@ -126,15 +126,13 @@ class MeshSnapshotValidator:
                         "SourceVertexId belongs to another source object",
                     )
                 )
-            if not all(
-                isfinite(float(value)) for value in (*vertex.position, *vertex.normal)
-            ):
+            if vector_is_zero(vertex.normal):
                 issues.append(
                     MeshValidationIssue(
-                        MeshValidationSeverity.ERROR,
-                        "NON_FINITE_VERTEX",
-                        f"vertices[{vertex.id.index}]",
-                        "Vertex coordinates and normal must be finite",
+                        MeshValidationSeverity.WARNING,
+                        "ZERO_VERTEX_NORMAL",
+                        f"vertices[{vertex.id.index}].normal",
+                        "Vertex normal has zero length; angular diagnostics may degrade",
                     )
                 )
 
@@ -173,6 +171,16 @@ class MeshSnapshotValidator:
                         "SourceFaceId belongs to another source object",
                     )
                 )
+            if vector_is_zero(face.normal):
+                issues.append(
+                    MeshValidationIssue(
+                        MeshValidationSeverity.WARNING,
+                        "ZERO_FACE_NORMAL",
+                        f"faces[{face.id.index}].normal",
+                        "Face normal has zero length; angular segmentation will isolate it",
+                    )
+                )
+
             face_loops = []
             for loop_id in face.loop_ids:
                 loop = loop_map.get(loop_id)
