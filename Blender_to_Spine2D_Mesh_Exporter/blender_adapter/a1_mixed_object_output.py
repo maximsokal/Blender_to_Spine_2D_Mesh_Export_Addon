@@ -9,6 +9,7 @@ from ..application import (
     A1MultiObjectExportSettings,
     A1MultiObjectStage,
     ExportResult,
+    validate_a1_realized_output_namespace,
 )
 from ..domain.spine import SpineSerializer
 from ..infrastructure import (
@@ -85,9 +86,39 @@ def export_a1_mixed_object(
             warnings=(),
         )
 
-    stage = A1MultiObjectStage.STAGE_OUTPUTS
+    stage = A1MultiObjectStage.VALIDATE_OUTPUTS
     statistics = dict(prepared.statistics)
     try:
+        prepared_partition = partition_mixed_prepared_objects(
+            prepared.objects,
+            connected_sources,
+            standalone_sources,
+        )
+        anchor = (
+            settings.anchor_component_id
+            or connected_sources[0].component_id
+        )
+        connected_settings = build_connected_subgroup_settings(
+            settings,
+            anchor,
+        )
+        grouped_request = resolve_grouped_camera_projection_request(
+            prepared_partition.connected,
+            connected_settings,
+        )
+        grouped_paths = (
+            ()
+            if grouped_request is None
+            else tuple(task.output_path for task in grouped_request.plan.frame_tasks)
+        )
+        validate_a1_realized_output_namespace(
+            output_root=settings.output_directory,
+            json_path=prepared.json_path,
+            texture_paths=prepared.texture_output_paths,
+            additional_texture_paths=grouped_paths,
+        )
+
+        stage = A1MultiObjectStage.STAGE_OUTPUTS
         with atomic_file_transaction(
             operation_name=_TRANSACTION_NAME
         ) as transaction:
@@ -100,24 +131,12 @@ def export_a1_mixed_object(
                 scene=scene,
             )
             statistics = dict(staged_objects.statistics)
-            partition = partition_mixed_prepared_objects(
+            finalized_partition = partition_mixed_prepared_objects(
                 staged_objects.objects,
                 connected_sources,
                 standalone_sources,
             )
 
-            anchor = (
-                settings.anchor_component_id
-                or connected_sources[0].component_id
-            )
-            connected_settings = build_connected_subgroup_settings(
-                settings,
-                anchor,
-            )
-            grouped_request = resolve_grouped_camera_projection_request(
-                partition.connected,
-                connected_settings,
-            )
             grouped_stage = None
             if grouped_request is not None:
                 grouped_stage = stage_grouped_camera_projection_outputs(
@@ -133,7 +152,7 @@ def export_a1_mixed_object(
             composition = compose_a1_mixed_document(
                 connected_sources,
                 standalone_sources,
-                partition,
+                finalized_partition,
                 settings,
                 grouped_request=grouped_request,
                 grouped_stage=grouped_stage,
