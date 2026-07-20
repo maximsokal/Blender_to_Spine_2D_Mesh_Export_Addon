@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import isfinite
 
-from ..geometry import MeshSnapshot
+from ..geometry import MeshSnapshot, MeshSnapshotValidator
+from ..geometry.contracts import (
+    require_exact_type,
+    require_finite_number,
+    require_integer,
+    require_non_empty_string,
+)
 
 
 class UvUnwrapMethod(str, Enum):
@@ -85,8 +90,7 @@ class UvUnwrapSettings:
     pack_shape_method: UvPackShapeMethod = UvPackShapeMethod.CONCAVE
 
     def __post_init__(self) -> None:
-        if not isinstance(self.layer_name, str) or not self.layer_name.strip():
-            raise ValueError("layer_name must be a non-empty string")
+        require_non_empty_string(self.layer_name, "layer_name")
         enum_fields = {
             "method": UvUnwrapMethod,
             "margin_method": UvMarginMethod,
@@ -97,31 +101,29 @@ class UvUnwrapSettings:
             "pack_shape_method": UvPackShapeMethod,
         }
         for field_name, enum_type in enum_fields.items():
-            if not isinstance(getattr(self, field_name), enum_type):
-                raise TypeError(f"{field_name} must be {enum_type.__name__}")
+            require_exact_type(getattr(self, field_name), enum_type, field_name)
 
-        for field_name in (
-            "smart_angle_limit_degrees",
-            "island_margin",
-            "area_weight",
-            "pack_margin",
-            "weight_factor",
-        ):
-            value = getattr(self, field_name)
-            if not isinstance(value, (int, float)) or not isfinite(float(value)):
-                raise ValueError(f"{field_name} must be finite")
-        if not 0.0 < self.smart_angle_limit_degrees <= 90.0:
+        numeric_values = {
+            field_name: require_finite_number(getattr(self, field_name), field_name)
+            for field_name in (
+                "smart_angle_limit_degrees",
+                "island_margin",
+                "area_weight",
+                "pack_margin",
+                "weight_factor",
+            )
+        }
+        if not 0.0 < numeric_values["smart_angle_limit_degrees"] <= 90.0:
             raise ValueError("smart_angle_limit_degrees must be in (0, 90]")
-        if not 0.0 <= self.island_margin <= 1.0:
+        if not 0.0 <= numeric_values["island_margin"] <= 1.0:
             raise ValueError("island_margin must be in [0, 1]")
-        if not 0.0 <= self.pack_margin <= 1.0:
+        if not 0.0 <= numeric_values["pack_margin"] <= 1.0:
             raise ValueError("pack_margin must be in [0, 1]")
-        if not 0.0 <= self.area_weight <= 1.0:
+        if not 0.0 <= numeric_values["area_weight"] <= 1.0:
             raise ValueError("area_weight must be in [0, 1]")
-        if not isinstance(self.iterations, int) or not 0 <= self.iterations <= 10000:
-            raise ValueError("iterations must be an integer in [0, 10000]")
-        if not isinstance(self.weight_group, str):
-            raise TypeError("weight_group must be str")
+
+        require_integer(self.iterations, "iterations", minimum=0, maximum=10000)
+        require_non_empty_string(self.weight_group, "weight_group")
 
         for field_name in (
             "correct_aspect",
@@ -149,6 +151,23 @@ class UvUnwrapStatistics:
     maximum_v: float
     outside_unit_square_count: int
 
+    def __post_init__(self) -> None:
+        require_integer(self.loop_count, "loop_count", minimum=1)
+        require_integer(
+            self.outside_unit_square_count,
+            "outside_unit_square_count",
+            minimum=0,
+            maximum=self.loop_count,
+        )
+        minimum_u = require_finite_number(self.minimum_u, "minimum_u")
+        maximum_u = require_finite_number(self.maximum_u, "maximum_u")
+        minimum_v = require_finite_number(self.minimum_v, "minimum_v")
+        maximum_v = require_finite_number(self.maximum_v, "maximum_v")
+        if minimum_u > maximum_u:
+            raise ValueError("minimum_u cannot exceed maximum_u")
+        if minimum_v > maximum_v:
+            raise ValueError("minimum_v cannot exceed maximum_v")
+
 
 @dataclass(frozen=True, slots=True)
 class UvUnwrapResult:
@@ -156,15 +175,34 @@ class UvUnwrapResult:
     settings: UvUnwrapSettings
     statistics: UvUnwrapStatistics
 
+    def __post_init__(self) -> None:
+        require_exact_type(self.snapshot, MeshSnapshot, "snapshot")
+        require_exact_type(self.settings, UvUnwrapSettings, "settings")
+        require_exact_type(self.statistics, UvUnwrapStatistics, "statistics")
+        MeshSnapshotValidator().validate_or_raise(self.snapshot)
+        if self.snapshot.active_uv_layer != self.settings.layer_name:
+            raise ValueError(
+                "snapshot.active_uv_layer must match settings.layer_name for an "
+                "UvUnwrapResult"
+            )
+        expected_statistics = calculate_uv_statistics(
+            self.snapshot,
+            self.settings.layer_name,
+        )
+        if self.statistics != expected_statistics:
+            raise ValueError(
+                "statistics do not match the UV coordinates stored in snapshot; "
+                f"expected={expected_statistics}, actual={self.statistics}"
+            )
+
 
 def calculate_uv_statistics(
     snapshot: MeshSnapshot,
     layer_name: str,
 ) -> UvUnwrapStatistics:
-    if not isinstance(snapshot, MeshSnapshot):
-        raise TypeError("snapshot must be MeshSnapshot")
-    if not isinstance(layer_name, str) or not layer_name.strip():
-        raise ValueError("layer_name must be a non-empty string")
+    require_exact_type(snapshot, MeshSnapshot, "snapshot")
+    require_non_empty_string(layer_name, "layer_name")
+    MeshSnapshotValidator().validate_or_raise(snapshot)
     coordinates = tuple(
         coordinate
         for loop in snapshot.loops
