@@ -77,7 +77,7 @@ def _preflight_sources(
 def _validate_sources(
     sources: Tuple[A1MultiObjectSource, ...],
     settings: A1MultiObjectExportSettings,
-) -> Tuple[Path, ...]:
+) -> None:
     if not isinstance(settings, A1MultiObjectExportSettings):
         raise TypeError("settings must be A1MultiObjectExportSettings")
     if settings.mode is A1MultiObjectMode.MIXED:
@@ -107,7 +107,6 @@ def _validate_sources(
                 f"Component '{item.component_id}' uses output root '{object_root}', "
                 f"but the multi-object transaction uses '{output_root}'"
             )
-    return _preflight_sources(sources, settings)
 
 
 def _settings_for_preparation(
@@ -181,7 +180,8 @@ def prepare_a1_multi_object(
     current_component: str | None = None
 
     try:
-        predicted_texture_paths = _validate_sources(sources, settings)
+        _validate_sources(sources, settings)
+        predicted_texture_paths = _preflight_sources(sources, settings)
         statistics.update(
             {
                 "object_count": len(sources),
