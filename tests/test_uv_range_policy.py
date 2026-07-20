@@ -3,6 +3,9 @@ from math import inf, nan
 
 import pytest
 
+from Blender_to_Spine2D_Mesh_Exporter.application.a1_document_assembly import (
+    A1DocumentAssemblySettings,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking.projection_layout import (
     build_full_frame_layout,
 )
@@ -90,6 +93,20 @@ def build_triangle_snapshot(coordinates) -> MeshSnapshot:
     )
 
 
+def build_assembly_settings(**changes) -> A1DocumentAssemblySettings:
+    values = {
+        "prefix": "Range",
+        "uv_layer_name": "SpineBakeUV",
+        "image_path": "Range.png",
+        "attachment_width": 64.0,
+        "attachment_height": 64.0,
+        "center_x": 0.0,
+        "center_y": 0.0,
+    }
+    values.update(changes)
+    return A1DocumentAssemblySettings(**values)
+
+
 def test_default_range_policy_is_strict_and_appended_for_compatibility():
     settings = UvUnwrapSettings()
     names = tuple(field.name for field in fields(UvUnwrapSettings))
@@ -97,6 +114,29 @@ def test_default_range_policy_is_strict_and_appended_for_compatibility():
     assert settings.range_policy is UvRangePolicy.REQUIRE_UNIT_SQUARE
     assert settings.range_epsilon == pytest.approx(1.0e-6)
     assert names[-2:] == ("range_policy", "range_epsilon")
+
+
+def test_document_assembly_range_fields_are_appended_and_strict_by_default():
+    settings = build_assembly_settings()
+    names = tuple(field.name for field in fields(A1DocumentAssemblySettings))
+
+    assert names[-2:] == ("uv_range_policy", "uv_range_epsilon")
+    assert settings.uv_range_policy is UvRangePolicy.REQUIRE_UNIT_SQUARE
+    assert settings.uv_range_epsilon == pytest.approx(1.0e-6)
+
+
+@pytest.mark.parametrize(
+    "changes, expected",
+    (
+        ({"uv_range_policy": "WARN_ONLY"}, "uv_range_policy"),
+        ({"uv_range_epsilon": True}, "uv_range_epsilon"),
+        ({"uv_range_epsilon": nan}, "uv_range_epsilon"),
+        ({"uv_range_epsilon": -0.001}, "uv_range_epsilon"),
+    ),
+)
+def test_document_assembly_rejects_malformed_range_configuration(changes, expected):
+    with pytest.raises((TypeError, ValueError), match=expected):
+        build_assembly_settings(**changes)
 
 
 def test_epsilon_accepts_boundary_noise_without_clamping_coordinates():
