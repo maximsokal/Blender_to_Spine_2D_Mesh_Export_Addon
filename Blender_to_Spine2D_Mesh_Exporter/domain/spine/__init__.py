@@ -34,17 +34,17 @@ from .legacy_attachment_builder import (
     build_legacy_mesh_document,
 )
 from .legacy_profile import LegacyRigProfile
-from .legacy_rig_builder import (
-    LegacyRigBuildError,
+from .legacy_rig_assembly import build_legacy_rig
+from .legacy_rig_contracts import (
     LegacyRigBuildRequest,
     LegacyRigBuildResult,
     LegacyRigInfo,
     LegacyZGroup,
     LegacyZGroupBuildInfo,
     UniformScaleMode,
-    build_legacy_rig,
-    calculate_uniform_scale,
 )
+from .legacy_rig_error import LegacyRigBuildError
+from .legacy_rig_scale import calculate_uniform_scale
 from .legacy_visuals import (
     apply_legacy_visual_options,
     build_legacy_control_slots_and_attachments,
