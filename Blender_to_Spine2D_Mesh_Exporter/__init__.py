@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable, Tuple
 
 
 bl_info = {
@@ -39,93 +39,131 @@ if bpy is not None:
     from .legacy_loader import install_legacy_multi_facade
 
     install_legacy_multi_facade()
-    from . import single_object_operator, ui
-    from .addon_preferences import (
-        AddonLoggingSettings,
-        CLASSES_TO_REGISTER,
-        LoggingModuleSettings,
-        ModelToSpine2DAddonPreferences,
-        SPINE2D_OT_RefreshLoggingModules,
-        WM_OT_UninstallAddon,
-        initialize_logging_preferences,
+
+    from . import addon_preferences, single_object_operator, ui
+    from .infrastructure.blender_registration import (
+        RegistrationCleanupAction,
+        RnaPropertyRegistration,
+        register_rna_properties_transactionally,
+        rna_property_cleanup_actions,
+        unregister_all_best_effort,
     )
+
+    # Preserve package-level aliases used by Blender and focused compatibility tests.
+    AddonLoggingSettings = addon_preferences.AddonLoggingSettings
+    CLASSES_TO_REGISTER = addon_preferences.CLASSES_TO_REGISTER
+    LoggingModuleSettings = addon_preferences.LoggingModuleSettings
+    ModelToSpine2DAddonPreferences = addon_preferences.ModelToSpine2DAddonPreferences
+    SPINE2D_OT_RefreshLoggingModules = (
+        addon_preferences.SPINE2D_OT_RefreshLoggingModules
+    )
+    WM_OT_UninstallAddon = addon_preferences.WM_OT_UninstallAddon
+    initialize_logging_preferences = addon_preferences.initialize_logging_preferences
 
     # Only modules that own live Blender classes/properties are imported during add-on startup.
     # Legacy implementation modules are loaded by ``legacy_loader`` only after explicit Legacy use.
-    MODULES = (ui, single_object_operator)
+    MODULES = (addon_preferences, ui, single_object_operator)
+
+    CONFIG_RNA_PROPERTIES = tuple(
+        RnaPropertyRegistration(
+            owner=bpy.types.Scene,
+            name=name,
+            value=prop,
+        )
+        for name, prop in config.PROPERTIES
+    )
+
+    RegistrationCallback = Callable[[], None]
+    RegistrationStep = Tuple[str, RegistrationCallback, RegistrationCallback]
 
     def _module_owns_runtime_registration(module: Any) -> bool:
         return module in MODULES
 
+    def _register_config_rna() -> None:
+        register_rna_properties_transactionally(CONFIG_RNA_PROPERTIES)
+
+    def _unregister_config_rna() -> None:
+        unregister_all_best_effort(
+            rna_property_cleanup_actions(CONFIG_RNA_PROPERTIES),
+            operation="config RNA unregistration",
+        )
+
+    REGISTRATION_STEPS: tuple[RegistrationStep, ...] = (
+        (
+            "addon preferences",
+            addon_preferences.register,
+            addon_preferences.unregister,
+        ),
+        (
+            "config RNA properties",
+            _register_config_rna,
+            _unregister_config_rna,
+        ),
+        (
+            "UI",
+            ui.register,
+            ui.unregister,
+        ),
+        (
+            "single-object operator",
+            single_object_operator.register,
+            single_object_operator.unregister,
+        ),
+    )
+
+    def _registration_cleanup_actions(
+        completed_steps: tuple[RegistrationStep, ...],
+    ) -> tuple[RegistrationCleanupAction, ...]:
+        return tuple(
+            RegistrationCleanupAction(
+                label=label,
+                callback=unregister_callback,
+            )
+            for label, _register_callback, unregister_callback in reversed(
+                completed_steps
+            )
+        )
+
     def register() -> None:
+        """Register the complete add-on or roll back every completed owner."""
+
         config._setup_default_logging()
         logger.debug("Registering Blender_to_Spine2D_Mesh_Exporter")
 
-        registered_classes: list[type] = []
-        registered_modules: list[Any] = []
+        completed: list[RegistrationStep] = []
         try:
-            for cls in CLASSES_TO_REGISTER:
-                bpy.utils.register_class(cls)
-                registered_classes.append(cls)
-
-            for module in MODULES:
-                if not _module_owns_runtime_registration(module):
-                    continue
-                register_module = getattr(module, "register", None)
-                if callable(register_module):
-                    register_module()
-                    registered_modules.append(module)
+            for step in REGISTRATION_STEPS:
+                _label, register_callback, _unregister_callback = step
+                register_callback()
+                completed.append(step)
 
             prefs = bpy.context.preferences.addons[__name__].preferences
             initialize_logging_preferences(prefs)
             config.setup_logging()
             logger.info("User logging and diagnostics preferences applied")
-        except Exception:
+        except Exception as exc:
             logger.exception("Addon registration failed")
-            for module in reversed(registered_modules):
-                try:
-                    unregister_module = getattr(module, "unregister", None)
-                    if callable(unregister_module):
-                        unregister_module()
-                except Exception:
-                    logger.exception(
-                        "Registration rollback failed for module %s",
-                        module.__name__,
-                    )
-            for cls in reversed(registered_classes):
-                try:
-                    bpy.utils.unregister_class(cls)
-                except Exception:
-                    logger.exception("Registration rollback failed for %s", cls.__name__)
+            unregister_all_best_effort(
+                _registration_cleanup_actions(tuple(completed)),
+                operation="addon registration rollback",
+                primary_error=exc,
+            )
             raise
 
     def unregister() -> None:
+        """Run every owner cleanup in reverse order before reporting failures."""
+
         logger.debug("Unregistering Blender_to_Spine2D_Mesh_Exporter")
-        errors: list[Exception] = []
-        for module in reversed(MODULES):
-            if not _module_owns_runtime_registration(module):
-                continue
-            try:
-                unregister_module = getattr(module, "unregister", None)
-                if callable(unregister_module):
-                    unregister_module()
-            except Exception as exc:
-                errors.append(exc)
-                logger.exception("Failed to unregister module %s", module.__name__)
-        for cls in reversed(CLASSES_TO_REGISTER):
-            try:
-                bpy.utils.unregister_class(cls)
-            except Exception as exc:
-                errors.append(exc)
-                logger.exception("Failed to unregister class %s", cls.__name__)
-        if errors:
-            raise RuntimeError(
-                f"Addon unregistration failed {len(errors)} time(s)"
-            ) from errors[0]
+        unregister_all_best_effort(
+            _registration_cleanup_actions(REGISTRATION_STEPS),
+            operation="addon unregistration",
+        )
 
 else:
     MODULES: tuple[Any, ...] = ()
     CLASSES_TO_REGISTER: tuple[Any, ...] = ()
+    CONFIG_RNA_PROPERTIES: tuple[Any, ...] = ()
+    REGISTRATION_STEPS: tuple[Any, ...] = ()
 
     def _module_owns_runtime_registration(_module: Any) -> bool:
         return False
