@@ -11,15 +11,17 @@ from typing import Tuple
 
 from ..application import A1MultiObjectExportSettings, A1MultiObjectMode
 from ..domain.spine import (
-    ConnectedGroupBuildResult,
-    ConnectedGroupSettings,
-    ConnectedObjectDocument,
     ConstraintOrderPolicy,
     SpineCompositionSettings,
     SpineDocumentComponent,
     SpineDocumentCompositionResult,
-    build_connected_group_document,
     compose_spine_documents,
+)
+from ..domain.spine.connected_group_assembly import build_connected_group_document
+from ..domain.spine.connected_group_contracts import (
+    ConnectedGroupBuildResult,
+    ConnectedGroupSettings,
+    ConnectedObjectDocument,
 )
 from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_object_preparation import PreparedA1Object
@@ -127,6 +129,7 @@ def compose_a1_multi_object_document(
             anchor_component_id=settings.anchor_component_id,
             z_tolerance=settings.z_tolerance,
             scale_mode=settings.connected_scale_mode,
+            namespace_animations=settings.namespace_animations,
             animation_separator=settings.animation_separator,
         ),
     )
