@@ -146,11 +146,58 @@ def _validate_minimum_age(value: float) -> float:
     return resolved
 
 
+def _windows_process_is_alive(process_id: int) -> bool:
+    """Query process state without using ``os.kill(pid, 0)`` on Windows.
+
+    Python documents that non-console signals on Windows call TerminateProcess, so
+    signal zero is not a safe liveness probe there.
+    """
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        process_query_limited_information = 0x1000
+        still_active = 259
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        open_process.restype = wintypes.HANDLE
+        get_exit_code = kernel32.GetExitCodeProcess
+        get_exit_code.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        get_exit_code.restype = wintypes.BOOL
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [wintypes.HANDLE]
+        close_handle.restype = wintypes.BOOL
+
+        handle = open_process(
+            process_query_limited_information,
+            False,
+            process_id,
+        )
+        if not handle:
+            return False
+        try:
+            exit_code = wintypes.DWORD()
+            return bool(
+                get_exit_code(handle, ctypes.byref(exit_code))
+            ) and int(exit_code.value) == still_active
+        finally:
+            close_handle(handle)
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
+        return False
+
+
 def _process_is_alive(process_id: int) -> bool:
     if process_id <= 0:
         return False
     if process_id == os.getpid():
         return True
+    if os.name == "nt":
+        return _windows_process_is_alive(process_id)
     try:
         os.kill(process_id, 0)
     except ProcessLookupError:
@@ -199,7 +246,11 @@ def _windows_process_start_marker(process_id: int) -> str | None:
         close_handle.argtypes = [wintypes.HANDLE]
         close_handle.restype = wintypes.BOOL
 
-        handle = open_process(process_query_limited_information, False, process_id)
+        handle = open_process(
+            process_query_limited_information,
+            False,
+            process_id,
+        )
         if not handle:
             return None
         try:
@@ -283,7 +334,10 @@ def _work_file_age_seconds(
     now_ns: int,
 ) -> float:
     if metadata is not None and metadata.created_ns <= now_ns:
-        return max(0.0, (now_ns - metadata.created_ns) / 1_000_000_000.0)
+        return max(
+            0.0,
+            (now_ns - metadata.created_ns) / 1_000_000_000.0,
+        )
     try:
         modified_ns = path.stat().st_mtime_ns
     except OSError:
@@ -314,7 +368,10 @@ class _ProcessLocalAtomicRegistry:
     def claim_final_path(self, final_path: Path, token: str) -> None:
         if not isinstance(final_path, Path):
             raise TypeError("final_path must be pathlib.Path")
-        if not final_path.is_absolute() or final_path != final_path.resolve(strict=False):
+        if (
+            not final_path.is_absolute()
+            or final_path != final_path.resolve(strict=False)
+        ):
             raise ValueError("final_path must be absolute and normalized")
         with self._lock:
             if token not in self._tokens:
@@ -322,8 +379,8 @@ class _ProcessLocalAtomicRegistry:
             owner = self._final_path_owners.get(final_path)
             if owner is not None and owner != token:
                 raise RuntimeError(
-                    "final output is already reserved by another active transaction: "
-                    f"{final_path}"
+                    "final output is already reserved by another active "
+                    f"transaction: {final_path}"
                 )
             self._final_path_owners[final_path] = token
 
@@ -374,8 +431,16 @@ def assess_atomic_work_file(
         raise ValueError("now_ns must be positive")
 
     token = work_file_token(path)
-    metadata = AtomicWorkTokenMetadata.parse(token) if token is not None else None
-    age_seconds = _work_file_age_seconds(path, metadata, resolved_now_ns)
+    metadata = (
+        AtomicWorkTokenMetadata.parse(token)
+        if token is not None
+        else None
+    )
+    age_seconds = _work_file_age_seconds(
+        path,
+        metadata,
+        resolved_now_ns,
+    )
 
     if token is not None and _REGISTRY.is_token_active(token):
         return AtomicWorkFileAssessment(
@@ -391,9 +456,12 @@ def assess_atomic_work_file(
     if metadata is not None:
         if (
             metadata.process_id == _CURRENT_PROCESS_ID
-            and metadata.process_start_marker == _CURRENT_PROCESS_START_MARKER
+            and metadata.process_start_marker
+            == _CURRENT_PROCESS_START_MARKER
         ):
-            stale_reason = AtomicRecoveryReason.UNREGISTERED_CURRENT_PROCESS_TOKEN
+            stale_reason = (
+                AtomicRecoveryReason.UNREGISTERED_CURRENT_PROCESS_TOKEN
+            )
         elif not _process_is_alive(metadata.process_id):
             stale_reason = AtomicRecoveryReason.OWNER_PROCESS_EXITED
         else:
@@ -416,7 +484,9 @@ def assess_atomic_work_file(
                     age_seconds,
                     metadata,
                 )
-            stale_reason = AtomicRecoveryReason.OWNER_PROCESS_IDENTITY_MISMATCH
+            stale_reason = (
+                AtomicRecoveryReason.OWNER_PROCESS_IDENTITY_MISMATCH
+            )
     elif token is not None:
         legacy_pid = _legacy_process_id(token)
         if legacy_pid is not None:
@@ -429,7 +499,9 @@ def assess_atomic_work_file(
                     age_seconds,
                     None,
                 )
-            stale_reason = AtomicRecoveryReason.LEGACY_OWNER_PROCESS_EXITED
+            stale_reason = (
+                AtomicRecoveryReason.LEGACY_OWNER_PROCESS_EXITED
+            )
         else:
             stale_reason = AtomicRecoveryReason.MALFORMED_WORK_TOKEN
     else:
