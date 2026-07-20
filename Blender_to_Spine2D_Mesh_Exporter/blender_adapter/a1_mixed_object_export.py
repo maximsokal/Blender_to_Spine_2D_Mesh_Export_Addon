@@ -54,7 +54,7 @@ def _validate_mixed_sources(
     connected_sources: Tuple[A1MultiObjectSource, ...],
     standalone_sources: Tuple[A1MultiObjectSource, ...],
     settings: A1MultiObjectExportSettings,
-) -> Tuple[Path, ...]:
+) -> None:
     if not isinstance(settings, A1MultiObjectExportSettings):
         raise TypeError("settings must be A1MultiObjectExportSettings")
     if settings.mode is not A1MultiObjectMode.MIXED:
@@ -86,7 +86,6 @@ def _validate_mixed_sources(
                 f"Component '{source.component_id}' uses output root '{source_root}', "
                 f"but mixed export uses '{output_root}'"
             )
-    return _preflight_mixed_sources(all_sources, settings)
 
 
 def _prepare_standalone_objects(
@@ -191,11 +190,9 @@ def prepare_a1_mixed_object(
 ) -> PreparedA1MultiObject:
     """Prepare both mixed subgroups and validate one shared output namespace."""
 
-    predicted_texture_paths = _validate_mixed_sources(
-        connected_sources,
-        standalone_sources,
-        settings,
-    )
+    _validate_mixed_sources(connected_sources, standalone_sources, settings)
+    all_sources = connected_sources + standalone_sources
+    predicted_texture_paths = _preflight_mixed_sources(all_sources, settings)
     anchor = settings.anchor_component_id or connected_sources[0].component_id
     connected = prepare_a1_multi_object(
         connected_sources,
