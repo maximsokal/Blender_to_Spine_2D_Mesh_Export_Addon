@@ -12,10 +12,37 @@ import bpy
 
 from .blender_adapter.a1_ui_bridge import export_selected_objects_a1
 from .config import get_default_output_dir
+from .infrastructure.blender_registration import (
+    RnaPropertyRegistration,
+    class_cleanup_actions,
+    register_classes_transactionally,
+    register_rna_properties_transactionally,
+    rna_property_cleanup_actions,
+    unregister_all_best_effort,
+)
 from .multi_object_export import export_selected_objects
 
 logger = logging.getLogger(__name__)
 logger.debug("[LOG] Loading ui.py")
+
+MULTI_BACKEND_PROPERTY = "spine2d_multi_export_backend"
+DEFAULT_MULTI_BACKEND = "REWRITE"
+_MULTI_BACKENDS = frozenset({"REWRITE", "LEGACY"})
+
+
+def resolve_multi_backend(scene: bpy.types.Scene) -> str:
+    """Resolve the multi-object backend and fail closed to Rewrite."""
+
+    raw_value = getattr(scene, MULTI_BACKEND_PROPERTY, DEFAULT_MULTI_BACKEND)
+    backend = str(raw_value).strip().upper()
+    if backend in _MULTI_BACKENDS:
+        return backend
+    logger.warning(
+        "Unknown multi export backend %r; using %s",
+        raw_value,
+        DEFAULT_MULTI_BACKEND,
+    )
+    return DEFAULT_MULTI_BACKEND
 
 
 class SPINE2D_OT_ResetSettings(bpy.types.Operator):
@@ -33,7 +60,7 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene.spine2d_images_path = "./images/"
             scene.spine2d_control_icons = True
             scene.spine2d_export_preview_animation = True
-            scene.spine2d_multi_export_backend = "REWRITE"
+            setattr(scene, MULTI_BACKEND_PROPERTY, DEFAULT_MULTI_BACKEND)
             scene.spine2d_angle_limit = 30
             scene.spine2d_angular_mode = "LEGACY_SEED_CONE"
             scene.spine2d_local_angle_limit = 30.0
@@ -323,7 +350,7 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             column.separator()
             column.prop(
                 scene,
-                "spine2d_multi_export_backend",
+                MULTI_BACKEND_PROPERTY,
                 text="Multi Export Engine",
             )
             column.label(text="Connect objects:")
@@ -423,9 +450,7 @@ class OBJECT_OT_Spine2DMultiExport(bpy.types.Operator):
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
         scene = context.scene
-        backend = str(
-            getattr(scene, "spine2d_multi_export_backend", "LEGACY")
-        ).upper()
+        backend = resolve_multi_backend(scene)
         try:
             if backend == "LEGACY":
                 texture_size = max(2, int(scene.spine2d_texture_size))
@@ -448,7 +473,7 @@ class OBJECT_OT_Spine2DMultiExport(bpy.types.Operator):
             return {"CANCELLED"}
 
 
-SCENE_PROPERTIES = [
+SCENE_PROPERTIES = (
     (
         "spine2d_show_settings",
         bpy.props.BoolProperty(
@@ -530,7 +555,7 @@ SCENE_PROPERTIES = [
         ),
     ),
     (
-        "spine2d_multi_export_backend",
+        MULTI_BACKEND_PROPERTY,
         bpy.props.EnumProperty(
             name="Multi Export Engine",
             description="Select the rewritten transactional exporter or the legacy fallback",
@@ -546,51 +571,91 @@ SCENE_PROPERTIES = [
                     "Previous intermediate-JSON exporter kept as an explicit fallback",
                 ),
             ),
-            default="REWRITE",
+            default=DEFAULT_MULTI_BACKEND,
         ),
     ),
-]
+)
 
-CLASSES = [
+CLASSES = (
     Spine2DBakeSettings,
     Spine2DConnectSettings,
     SPINE2D_OT_ResetSettings,
     OBJECT_OT_Spine2DRefreshInfo,
     OBJECT_PT_Spine2DMeshPanel,
     OBJECT_OT_Spine2DMultiExport,
-]
+)
+
+RNA_PROPERTIES = tuple(
+    RnaPropertyRegistration(
+        owner=bpy.types.Scene,
+        name=name,
+        value=prop,
+    )
+    for name, prop in SCENE_PROPERTIES
+) + (
+    RnaPropertyRegistration(
+        owner=bpy.types.Object,
+        name="spine2d_bake_settings",
+        value=bpy.props.PointerProperty(type=Spine2DBakeSettings),
+    ),
+    RnaPropertyRegistration(
+        owner=bpy.types.Object,
+        name="spine2d_connect_settings",
+        value=bpy.props.PointerProperty(type=Spine2DConnectSettings),
+    ),
+)
 
 
 def register() -> None:
+    """Register all UI classes and properties as one transaction."""
+
+    registered_classes = register_classes_transactionally(
+        CLASSES,
+        register_class=bpy.utils.register_class,
+        unregister_class=bpy.utils.unregister_class,
+    )
     try:
-        for cls in CLASSES:
-            bpy.utils.register_class(cls)
-        for name, prop in SCENE_PROPERTIES:
-            setattr(bpy.types.Scene, name, prop)
-        bpy.types.Object.spine2d_bake_settings = bpy.props.PointerProperty(
-            type=Spine2DBakeSettings
+        register_rna_properties_transactionally(RNA_PROPERTIES)
+    except Exception as exc:
+        logger.exception("[ERROR] UI RNA registration failed")
+        unregister_all_best_effort(
+            class_cleanup_actions(
+                registered_classes,
+                unregister_class=bpy.utils.unregister_class,
+            ),
+            operation="UI registration rollback",
+            primary_error=exc,
         )
-        bpy.types.Object.spine2d_connect_settings = bpy.props.PointerProperty(
-            type=Spine2DConnectSettings
-        )
-        logger.debug("UI: Panel & operators registered.")
-    except Exception:
-        logger.exception("[ERROR] UI registration failed")
         raise
+    logger.debug("UI: Panel & operators registered.")
 
 
 def unregister() -> None:
+    """Remove every UI property and class before reporting aggregate failures."""
+
     try:
-        if hasattr(bpy.types.Object, "spine2d_bake_settings"):
-            del bpy.types.Object.spine2d_bake_settings
-        if hasattr(bpy.types.Object, "spine2d_connect_settings"):
-            del bpy.types.Object.spine2d_connect_settings
-        for name, _ in SCENE_PROPERTIES:
-            if hasattr(bpy.types.Scene, name):
-                delattr(bpy.types.Scene, name)
-        for cls in reversed(CLASSES):
-            bpy.utils.unregister_class(cls)
-        logger.debug("UI: Panel & operators unregistered.")
+        unregister_all_best_effort(
+            (
+                *rna_property_cleanup_actions(RNA_PROPERTIES),
+                *class_cleanup_actions(
+                    CLASSES,
+                    unregister_class=bpy.utils.unregister_class,
+                ),
+            ),
+            operation="UI unregistration",
+        )
     except Exception:
         logger.exception("[ERROR] UI unregistration failed")
         raise
+    logger.debug("UI: Panel & operators unregistered.")
+
+
+__all__ = [
+    "CLASSES",
+    "DEFAULT_MULTI_BACKEND",
+    "MULTI_BACKEND_PROPERTY",
+    "RNA_PROPERTIES",
+    "register",
+    "resolve_multi_backend",
+    "unregister",
+]
