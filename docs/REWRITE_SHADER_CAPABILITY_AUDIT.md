@@ -74,9 +74,50 @@ shader_graph_analyzer.py
 `snapshot.reachable_nodes`. The production capability gate relies on this invariant when it
 combines immutable snapshots with live `mute`, UV-map and socket state.
 
-`material_analyzer.py` and the public adapter package import the physical analysis/error/RNA
-owners directly. Historical public and private imports remain available from
-`shader_graph_analyzer.py` without retaining a second implementation.
+`material_graph_resolution.py`, production graph runtime and the public adapter package import the
+physical analysis/error/RNA owners directly. Historical public and private shader-graph imports
+remain available from `shader_graph_analyzer.py` without retaining a second implementation.
+
+## Physical material-analysis ownership
+
+The former `material_analyzer.py` mixed renderer-target resolution, Blender Image inspection,
+legacy `MaterialKind` policy, recursive graph fallback and object material-slot orchestration.
+Physical ownership is now:
+
+```text
+material_analysis_error.py
+  -> MaterialAnalysisError
+
+material_analysis_rna.py
+  -> material/object/node reads and renderer target
+
+material_node_classification.py
+  -> procedural policy and ImageDependency extraction
+  -> deterministic deduplication and total ordering
+
+material_graph_resolution.py
+  -> effective reachable graph or historical root-node fallback
+
+material_slot_analysis.py
+  -> one MaterialAnalysis
+
+material_object_analysis.py
+  -> dense object material-slot orchestration
+
+material_analyzer.py
+  -> compatibility re-exports only
+```
+
+An effective renderer graph classifies only reachable live nodes. Missing Material Output with no
+semantic channels, or a `MaterialGraphAnalysisError`, retains the legacy root-node fallback and its
+diagnostics. This keeps shader capability input semantics unchanged while removing editor-only
+unreachable nodes from material kind and image dependency classification.
+
+Image dependency deduplication keeps the historical raw key. Its separate total-order key safely
+handles domain-valid optional filepaths, including `None` beside string paths.
+
+`a1_texture_planning.py` and public adapter exports import physical material owners directly.
+The compatibility `_classify_nodes()` alias still returns the historical four-item tuple.
 
 ## Physical production capability ownership
 
@@ -283,6 +324,19 @@ Shader-graph split checks cover:
 - recursive-cycle termination;
 - deterministic snapshot/live-node parallel ordering;
 - missing-output material-classification fallback.
+
+Material-analysis split checks cover:
+
+- compatibility facade ownership and historical tuple return;
+- physical package and A1 caller imports;
+- effective reachable nodes versus unreachable editor nodes;
+- missing-output and graph-error root fallback;
+- classification-before-graph issue ordering and deduplication;
+- optional filepath total ordering and dependency deduplication;
+- muted and temporary-node filtering;
+- dense slot order and source object ID override;
+- material-slot collection failure wrapping;
+- no `bpy.ops` access in any split material module.
 
 Production capability split checks cover:
 
