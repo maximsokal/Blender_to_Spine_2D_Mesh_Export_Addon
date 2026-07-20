@@ -16,9 +16,12 @@ from ..application import (
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
     A1MultiObjectStage,
+    A1OutputPreflightSource,
     A1SingleObjectExportSettings,
     ExportIssue,
+    preflight_a1_output_namespace,
 )
+from ..domain.baking import windows_path_identity
 from .a1_multi_object_contracts import (
     A1MultiObjectPreparationError,
     A1MultiObjectSource,
@@ -33,10 +36,48 @@ from .a1_object_preparation import (
 )
 
 
+def _source_object_name(source: A1MultiObjectSource) -> str:
+    """Resolve the object name required for pure output prediction."""
+
+    if not isinstance(source, A1MultiObjectSource):
+        raise TypeError("source must be A1MultiObjectSource")
+    value = str(
+        getattr(source.source_object, "name_full", None)
+        or getattr(source.source_object, "name", None)
+        or ""
+    ).strip()
+    if not value:
+        raise ValueError(
+            f"Component '{source.component_id}' has an empty source object name"
+        )
+    return value
+
+
+def _preflight_sources(
+    sources: Tuple[A1MultiObjectSource, ...],
+    settings: A1MultiObjectExportSettings,
+) -> Tuple[Path, ...]:
+    """Validate the complete Windows output namespace before geometry preparation."""
+
+    result = preflight_a1_output_namespace(
+        output_root=settings.output_directory,
+        json_path=settings.json_path,
+        sources=tuple(
+            A1OutputPreflightSource(
+                owner=source.component_id,
+                object_name=_source_object_name(source),
+                settings=_settings_for_preparation(source, settings.mode),
+            )
+            for source in sources
+        ),
+    )
+    return result.texture_paths
+
+
 def _validate_sources(
     sources: Tuple[A1MultiObjectSource, ...],
     settings: A1MultiObjectExportSettings,
-) -> None:
+) -> Tuple[Path, ...]:
     if not isinstance(settings, A1MultiObjectExportSettings):
         raise TypeError("settings must be A1MultiObjectExportSettings")
     if settings.mode is A1MultiObjectMode.MIXED:
@@ -66,6 +107,7 @@ def _validate_sources(
                 f"Component '{item.component_id}' uses output root '{object_root}', "
                 f"but the multi-object transaction uses '{output_root}'"
             )
+    return _preflight_sources(sources, settings)
 
 
 def _settings_for_preparation(
@@ -96,7 +138,9 @@ def _validate_prepared_outputs(
     output_root = settings.output_directory.expanduser().resolve(strict=False)
     final_json = settings.json_path.expanduser().resolve(strict=False)
     paths: list[Path] = []
-    owner_by_path: dict[Path, str] = {final_json: "final JSON"}
+    owner_by_identity: dict[Tuple[str, ...], tuple[str, Path]] = {
+        windows_path_identity(final_json): ("final JSON", final_json)
+    }
     for item in prepared:
         for task in item.bake_plan.frame_tasks:
             path = task.output_path.expanduser().resolve(strict=False)
@@ -107,13 +151,15 @@ def _validate_prepared_outputs(
                     f"Texture output for '{item.object_id}' escapes the multi-object "
                     f"root: {path}"
                 ) from exc
-            previous_owner = owner_by_path.get(path)
-            if previous_owner is not None:
+            identity = windows_path_identity(path)
+            previous = owner_by_identity.get(identity)
+            if previous is not None:
+                previous_owner, previous_path = previous
                 raise ValueError(
-                    f"Output path collision '{path}' between {previous_owner} and "
-                    f"component '{item.object_id}'"
+                    f"Windows output path collision between {previous_owner} "
+                    f"({previous_path}) and component '{item.object_id}' ({path})"
                 )
-            owner_by_path[path] = item.object_id
+            owner_by_identity[identity] = (item.object_id, path)
             paths.append(path)
     if not paths:
         raise ValueError("multi-object export contains no texture output tasks")
@@ -135,12 +181,13 @@ def prepare_a1_multi_object(
     current_component: str | None = None
 
     try:
-        _validate_sources(sources, settings)
+        predicted_texture_paths = _validate_sources(sources, settings)
         statistics.update(
             {
                 "object_count": len(sources),
                 "mode": settings.mode.value,
                 "output_stem": settings.resolved_output_stem,
+                "predicted_texture_output_count": len(predicted_texture_paths),
             }
         )
 
