@@ -71,6 +71,17 @@ jobs:
             --python tests/blender_headless/run_scene_bake_extended_integration.py \
             2>&1 | tee test-results/blender-scene-extended.log
 
+      - name: Run planning execution scene parity fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${BLENDER_DIRECTORY}/blender" \
+            --background \
+            --factory-startup \
+            --python-exit-code 1 \
+            --python tests/blender_headless/run_scene_bake_parity_integration.py \
+            2>&1 | tee test-results/blender-scene-parity.log
+
       - name: Upload scene bake logs
         if: always()
         uses: actions/upload-artifact@v4
