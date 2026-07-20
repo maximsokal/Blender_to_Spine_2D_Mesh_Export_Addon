@@ -12,7 +12,7 @@ from math import isfinite
 from typing import Tuple
 
 from ..domain.geometry import MeshSnapshot, MeshSnapshotValidator, SourceVertexId
-from ..domain.spine import LegacyZGroup
+from ..domain.spine.legacy_rig_contracts import LegacyZGroup
 from .a1_attachment_projection import A1VertexZBinding
 
 
