@@ -103,6 +103,9 @@ def test_production_callers_use_physical_legacy_rig_owners():
         ROOT / "application" / "a1_z_groups.py": (
             "domain.spine.legacy_rig_contracts",
         ),
+        SPINE / "legacy_attachment_builder.py": (
+            "from .legacy_rig_contracts import LegacyRigBuildResult",
+        ),
         SPINE / "connected_group_contracts.py": (
             "from .legacy_rig_contracts import UniformScaleMode",
         ),
