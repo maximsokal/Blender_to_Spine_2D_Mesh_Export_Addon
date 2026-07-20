@@ -32,7 +32,7 @@ from .connected_group_validation import (
     validate_connected_group_inputs,
 )
 from .legacy_profile import LegacyRigProfile
-from .legacy_rig_builder import calculate_uniform_scale
+from .legacy_rig_scale import calculate_uniform_scale
 from .model import Bone, SpineDocument
 from .validator import SpineValidator
 
