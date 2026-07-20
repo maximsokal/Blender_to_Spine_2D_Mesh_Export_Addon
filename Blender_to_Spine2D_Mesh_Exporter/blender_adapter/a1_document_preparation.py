@@ -114,6 +114,8 @@ def prepare_a1_document(
             sequence=build_a1_attachment_sequence(texture.bake_plan),
             include_control_icons=source.settings.include_control_icons,
             include_preview_animation=source.settings.include_preview_animation,
+            uv_range_policy=source.settings.uv.range_policy,
+            uv_range_epsilon=source.settings.uv.range_epsilon,
         )
         skeleton_metadata = build_skeleton_metadata(source.settings)
         if camera_projection:
