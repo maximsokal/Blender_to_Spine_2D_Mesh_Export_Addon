@@ -6,6 +6,15 @@ from dataclasses import dataclass
 from math import isclose
 from typing import Iterable, Tuple
 
+from .contracts import (
+    require_exact_type,
+    require_finite_number,
+    require_finite_vector,
+    require_identity,
+    require_integer,
+    require_non_empty_string,
+    require_tuple_items,
+)
 from .ids import EdgeId, FaceId, LoopId, SourceLoopId, VertexId
 from .model import LoopUV, MeshEdge, MeshFace, MeshLoop, MeshSnapshot, MeshVertex, Vector2
 from .validator import MeshSnapshotValidator
@@ -17,7 +26,14 @@ class CorrespondenceError(ValueError):
 
 class MissingSourceLoopError(CorrespondenceError):
     def __init__(self, source_loop_ids: Iterable[SourceLoopId]):
-        self.source_loop_ids = tuple(sorted(set(source_loop_ids)))
+        resolved = tuple(source_loop_ids)
+        for index, source_loop_id in enumerate(resolved):
+            require_exact_type(
+                source_loop_id,
+                SourceLoopId,
+                f"source_loop_ids[{index}]",
+            )
+        self.source_loop_ids = tuple(sorted(set(resolved)))
         super().__init__(
             "No source UV was found for SourceLoopId values: "
             + ", ".join(
@@ -29,6 +45,9 @@ class MissingSourceLoopError(CorrespondenceError):
 
 class ConflictingSourceLoopUVError(CorrespondenceError):
     def __init__(self, source_loop_id: SourceLoopId, first: Vector2, second: Vector2):
+        require_exact_type(source_loop_id, SourceLoopId, "source_loop_id")
+        require_finite_vector(first, 2, "first")
+        require_finite_vector(second, 2, "second")
         self.source_loop_id = source_loop_id
         self.first = first
         self.second = second
@@ -44,11 +63,22 @@ class SourceLoopUV:
     source_loop_id: SourceLoopId
     coordinate: Vector2
 
+    def __post_init__(self) -> None:
+        require_exact_type(self.source_loop_id, SourceLoopId, "source_loop_id")
+        require_finite_vector(self.coordinate, 2, "coordinate")
+
 
 @dataclass(frozen=True, slots=True)
 class UvCorrespondenceMap:
     layer_name: str
     entries: Tuple[SourceLoopUV, ...]
+
+    def __post_init__(self) -> None:
+        require_non_empty_string(self.layer_name, "layer_name")
+        require_tuple_items(self.entries, SourceLoopUV, "entries")
+        source_loop_ids = tuple(entry.source_loop_id for entry in self.entries)
+        if len(source_loop_ids) != len(set(source_loop_ids)):
+            raise ValueError("entries contain duplicate SourceLoopId values")
 
     def as_dict(self) -> dict[SourceLoopId, Vector2]:
         return {entry.source_loop_id: entry.coordinate for entry in self.entries}
@@ -62,16 +92,56 @@ class UvTransferReport:
     missing_source_loop_ids: Tuple[SourceLoopId, ...]
     unused_source_loop_ids: Tuple[SourceLoopId, ...]
 
+    def __post_init__(self) -> None:
+        require_non_empty_string(self.source_layer_name, "source_layer_name")
+        require_non_empty_string(self.target_layer_name, "target_layer_name")
+        require_integer(self.updated_loop_count, "updated_loop_count", minimum=0)
+        require_tuple_items(
+            self.missing_source_loop_ids,
+            SourceLoopId,
+            "missing_source_loop_ids",
+        )
+        require_tuple_items(
+            self.unused_source_loop_ids,
+            SourceLoopId,
+            "unused_source_loop_ids",
+        )
+        for field_name, values in (
+            ("missing_source_loop_ids", self.missing_source_loop_ids),
+            ("unused_source_loop_ids", self.unused_source_loop_ids),
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError(f"{field_name} cannot contain duplicates")
+        overlap = set(self.missing_source_loop_ids).intersection(
+            self.unused_source_loop_ids
+        )
+        if overlap:
+            raise ValueError(
+                "missing_source_loop_ids and unused_source_loop_ids cannot overlap: "
+                + str(tuple(sorted(overlap)))
+            )
+
     @property
     def complete(self) -> bool:
         return not self.missing_source_loop_ids
 
 
 def _coordinates_equal(first: Vector2, second: Vector2, tolerance: float) -> bool:
-    if tolerance < 0.0:
+    require_finite_vector(first, 2, "first")
+    require_finite_vector(second, 2, "second")
+    resolved_tolerance = require_finite_number(tolerance, "tolerance")
+    if resolved_tolerance < 0.0:
         raise ValueError("tolerance cannot be negative")
-    return isclose(first[0], second[0], rel_tol=0.0, abs_tol=tolerance) and isclose(
-        first[1], second[1], rel_tol=0.0, abs_tol=tolerance
+    return isclose(
+        first[0],
+        second[0],
+        rel_tol=0.0,
+        abs_tol=resolved_tolerance,
+    ) and isclose(
+        first[1],
+        second[1],
+        rel_tol=0.0,
+        abs_tol=resolved_tolerance,
     )
 
 
@@ -81,13 +151,22 @@ def build_uv_correspondence(
     *,
     duplicate_tolerance: float = 0.0,
 ) -> UvCorrespondenceMap:
-    """Build one exact SourceLoopId -> UV lookup.
+    """Build one exact ``SourceLoopId -> UV`` lookup.
 
     Repeated SourceLoopId values are legal in derived topology, for example after
     triangulating an n-gon. They must resolve to the same UV coordinate; conflicting
     values are rejected instead of silently selecting one by rounded position.
     """
 
+    require_exact_type(snapshot, MeshSnapshot, "snapshot")
+    require_non_empty_string(layer_name, "layer_name")
+    resolved_tolerance = require_finite_number(
+        duplicate_tolerance,
+        "duplicate_tolerance",
+    )
+    if resolved_tolerance < 0.0:
+        raise ValueError("duplicate_tolerance cannot be negative")
+    MeshSnapshotValidator().validate_or_raise(snapshot)
     if layer_name not in snapshot.uv_layer_names:
         raise KeyError(f"UV layer '{layer_name}' is not present in snapshot")
 
@@ -101,7 +180,9 @@ def build_uv_correspondence(
             )
         previous = lookup.get(loop.source_id)
         if previous is not None and not _coordinates_equal(
-            previous, coordinate, duplicate_tolerance
+            previous,
+            coordinate,
+            resolved_tolerance,
         ):
             raise ConflictingSourceLoopUVError(loop.source_id, previous, coordinate)
         lookup[loop.source_id] = coordinate
@@ -126,6 +207,20 @@ def transfer_uv_by_source_loop(
 ) -> tuple[MeshSnapshot, UvTransferReport]:
     """Transfer UVs without coordinate rounding or nearest-point matching."""
 
+    require_exact_type(source, MeshSnapshot, "source")
+    require_exact_type(target, MeshSnapshot, "target")
+    require_non_empty_string(source_layer_name, "source_layer_name")
+    require_non_empty_string(target_layer_name, "target_layer_name")
+    if not isinstance(require_complete, bool):
+        raise TypeError("require_complete must be bool")
+    resolved_tolerance = require_finite_number(
+        duplicate_tolerance,
+        "duplicate_tolerance",
+    )
+    if resolved_tolerance < 0.0:
+        raise ValueError("duplicate_tolerance cannot be negative")
+    MeshSnapshotValidator().validate_or_raise(source)
+    MeshSnapshotValidator().validate_or_raise(target)
     if source.source_object_id != target.source_object_id:
         raise CorrespondenceError(
             "source and target snapshots must originate from the same source object"
@@ -134,7 +229,7 @@ def transfer_uv_by_source_loop(
     correspondence = build_uv_correspondence(
         source,
         source_layer_name,
-        duplicate_tolerance=duplicate_tolerance,
+        duplicate_tolerance=resolved_tolerance,
     )
     lookup = correspondence.as_dict()
     used: set[SourceLoopId] = set()
