@@ -105,6 +105,54 @@ def validate_a1_output_claims(
     return tuple(normalized_paths)
 
 
+def validate_a1_realized_output_namespace(
+    *,
+    output_root: Path,
+    json_path: Path,
+    texture_paths: Tuple[Path, ...],
+    additional_texture_paths: Tuple[Path, ...] = (),
+) -> Tuple[Path, ...]:
+    """Validate prepared and conditionally derived outputs before any reservation."""
+
+    if not isinstance(json_path, Path):
+        raise TypeError("json_path must be pathlib.Path")
+    for field_name, paths in (
+        ("texture_paths", texture_paths),
+        ("additional_texture_paths", additional_texture_paths),
+    ):
+        if not isinstance(paths, tuple):
+            raise TypeError(f"{field_name} must be tuple")
+        if not all(isinstance(path, Path) for path in paths):
+            raise TypeError(f"{field_name} must contain pathlib.Path values")
+    if not texture_paths:
+        raise ValueError("texture_paths must be a non-empty tuple")
+
+    claims: list[A1OutputPathClaim] = [
+        A1OutputPathClaim(
+            path=json_path,
+            owner="final document",
+            kind=A1OutputPathKind.JSON,
+        )
+    ]
+    claims.extend(
+        A1OutputPathClaim(
+            path=path,
+            owner=f"prepared texture[{index}]",
+            kind=A1OutputPathKind.TEXTURE,
+        )
+        for index, path in enumerate(texture_paths)
+    )
+    claims.extend(
+        A1OutputPathClaim(
+            path=path,
+            owner=f"additional texture[{index}]",
+            kind=A1OutputPathKind.TEXTURE,
+        )
+        for index, path in enumerate(additional_texture_paths)
+    )
+    return validate_a1_output_claims(output_root, tuple(claims))
+
+
 def preflight_a1_output_namespace(
     *,
     output_root: Path,
@@ -153,4 +201,5 @@ __all__ = [
     "A1OutputPreflightSource",
     "preflight_a1_output_namespace",
     "validate_a1_output_claims",
+    "validate_a1_realized_output_namespace",
 ]
