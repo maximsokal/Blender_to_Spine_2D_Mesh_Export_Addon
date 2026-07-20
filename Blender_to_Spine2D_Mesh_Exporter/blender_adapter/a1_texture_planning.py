@@ -27,7 +27,7 @@ from .production_shader_capability_routing import (
     build_capability_checked_texture_plan,
     strongest_object_capability,
 )
-from .scene_bake_analyzer import analyse_bake_contexts
+from .scene_bake_capture import analyse_bake_contexts
 
 
 logger = logging.getLogger(__name__)
