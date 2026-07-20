@@ -19,7 +19,7 @@ from .a1_preparation_contracts import (
     warning_issue,
 )
 from .a1_uv_preparation import A1UvPreparationResult
-from .material_analyzer import analyse_object_materials
+from .material_object_analysis import analyse_object_materials
 from .production_shader_capability_object_audit import (
     audit_object_material_capabilities,
 )
