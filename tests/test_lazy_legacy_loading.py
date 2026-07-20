@@ -64,7 +64,11 @@ def test_root_startup_imports_only_runtime_registration_boundaries():
     }
     modules = assignments["MODULES"]
     assert isinstance(modules, ast.Tuple)
-    assert [item.id for item in modules.elts] == ["ui", "single_object_operator"]
+    assert [item.id for item in modules.elts] == [
+        "addon_preferences",
+        "ui",
+        "single_object_operator",
+    ]
     assert "install_legacy_multi_facade" in source
 
 
