@@ -19,7 +19,7 @@ from .render_engine_contract import (
     render_engine_contract,
     render_engine_contract_from_execution,
 )
-from .scene_bake_analyzer import validate_runtime_scene_context
+from .scene_bake_runtime import validate_runtime_scene_context
 from .view_layer_contract import validate_source_view_layer_for_camera_projection
 
 
