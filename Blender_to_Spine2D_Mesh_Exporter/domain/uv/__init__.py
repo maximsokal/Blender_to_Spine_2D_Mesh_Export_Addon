@@ -20,6 +20,14 @@ from .model import (
     UvUnwrapStatistics,
     calculate_uv_statistics,
 )
+from .range import (
+    UvRangeError,
+    UvRangePolicy,
+    UvRangeReport,
+    UvRangeViolation,
+    enforce_uv_range,
+    inspect_uv_range,
+)
 
 __all__ = [
     "UvLayout",
@@ -30,6 +38,10 @@ __all__ = [
     "UvPackRotateMethod",
     "UvPackShapeMethod",
     "UvPackUdimSource",
+    "UvRangeError",
+    "UvRangePolicy",
+    "UvRangeReport",
+    "UvRangeViolation",
     "UvSmartRotateMethod",
     "UvUnwrapMethod",
     "UvUnwrapResult",
@@ -38,4 +50,6 @@ __all__ = [
     "apply_uv_layout",
     "build_uv_layout",
     "calculate_uv_statistics",
+    "enforce_uv_range",
+    "inspect_uv_range",
 ]
