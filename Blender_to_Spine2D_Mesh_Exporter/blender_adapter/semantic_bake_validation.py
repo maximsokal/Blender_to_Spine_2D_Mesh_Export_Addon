@@ -14,7 +14,7 @@ from .render_engine_contract import (
     RenderEngineContract,
     render_engine_contract_from_execution,
 )
-from .scene_bake_analyzer import validate_runtime_scene_context
+from .scene_bake_runtime import validate_runtime_scene_context
 
 
 def _load_bpy() -> Any:
