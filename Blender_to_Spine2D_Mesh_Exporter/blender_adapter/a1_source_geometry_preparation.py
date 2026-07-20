@@ -12,6 +12,7 @@ from ..application import (
     A1SingleObjectExportSettings,
     A1SingleObjectStage,
     A1SourceGeometryMode,
+    A1SourceUvBoundaryMode,
     A1ZGroupAssignmentPlan,
     ExportIssue,
     build_a1_z_group_assignment,
@@ -134,6 +135,42 @@ def _read_source_snapshot(
     return snapshot, 0, ()
 
 
+def _resolve_source_uv_boundary_layer(
+    snapshot: MeshSnapshot,
+    settings: A1SingleObjectExportSettings,
+) -> str | None:
+    """Resolve the exact pre-unwrap UV layer allowed to affect segmentation."""
+
+    if not isinstance(snapshot, MeshSnapshot):
+        raise TypeError("snapshot must be MeshSnapshot")
+    if not isinstance(settings, A1SingleObjectExportSettings):
+        raise TypeError("settings must be A1SingleObjectExportSettings")
+
+    mode = settings.source_uv_boundary_mode
+    if mode is A1SourceUvBoundaryMode.DISABLED:
+        return None
+    if mode is A1SourceUvBoundaryMode.EXPLICIT_LAYER:
+        layer_name = settings.source_uv_boundary_layer_name
+        if layer_name is None:
+            raise ValueError(
+                "EXPLICIT_LAYER requires source_uv_boundary_layer_name"
+            )
+        if layer_name not in snapshot.uv_layer_names:
+            raise ValueError(
+                f"Source UV boundary layer '{layer_name}' is absent from "
+                f"snapshot '{snapshot.snapshot_id}'"
+            )
+        return layer_name
+    if mode is A1SourceUvBoundaryMode.ACTIVE_LAYER_LEGACY:
+        layer_name = snapshot.active_uv_layer
+        if layer_name is None:
+            raise ValueError(
+                "ACTIVE_LAYER_LEGACY requires the source mesh to have an active UV layer"
+            )
+        return layer_name
+    raise TypeError(f"Unsupported source UV boundary mode: {mode!r}")
+
+
 def prepare_a1_source_geometry(
     source_obj: Any,
     settings: A1SingleObjectExportSettings,
@@ -158,6 +195,10 @@ def prepare_a1_source_geometry(
                 "source_object": object_id,
                 "rig_prefix": prefix,
                 "source_geometry_mode": settings.source_geometry_mode.value,
+                "source_uv_boundary_mode": settings.source_uv_boundary_mode.value,
+                "source_uv_boundary_configured_layer": (
+                    settings.source_uv_boundary_layer_name or ""
+                ),
                 "include_control_icons": int(settings.include_control_icons),
                 "include_preview_animation": int(settings.include_preview_animation),
                 "render_engine": renderer.blender_engine,
@@ -172,6 +213,12 @@ def prepare_a1_source_geometry(
             settings,
             scene=scene,
         )
+
+        stage = A1SingleObjectStage.PREPARE_GEOMETRY
+        resolved_source_uv_boundary_layer = _resolve_source_uv_boundary_layer(
+            source_snapshot,
+            settings,
+        )
         statistics = freeze_statistics(
             statistics,
             {
@@ -179,6 +226,9 @@ def prepare_a1_source_geometry(
                 "source_vertices": len(source_snapshot.vertices),
                 "source_edges": len(source_snapshot.edges),
                 "source_faces": len(source_snapshot.faces),
+                "source_uv_boundary_resolved_layer": (
+                    resolved_source_uv_boundary_layer or ""
+                ),
             },
         )
 
@@ -203,11 +253,14 @@ def prepare_a1_source_geometry(
             },
         )
         logger.debug(
-            "Prepared source geometry for %s: vertices=%d faces=%d regions=%d",
+            "Prepared source geometry for %s: vertices=%d faces=%d regions=%d "
+            "source_uv_boundary_mode=%s source_uv_boundary_layer=%s",
             object_id,
             len(source_snapshot.vertices),
             len(source_snapshot.faces),
             len(geometry.regions),
+            settings.source_uv_boundary_mode.value,
+            resolved_source_uv_boundary_layer,
         )
         return A1SourceGeometryPreparationResult(
             source_object=source_obj,
