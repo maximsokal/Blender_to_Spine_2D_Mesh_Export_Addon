@@ -213,11 +213,16 @@ def _capture_uv_layout(
     snapshot: MeshSnapshot,
     mesh: Any,
     layer_name: str,
-    correspondence: MeshTopologyCorrespondence,
+    correspondence: MeshTopologyCorrespondence | None = None,
 ) -> UvLayout:
-    if not isinstance(correspondence, MeshTopologyCorrespondence):
-        raise TypeError("correspondence must be MeshTopologyCorrespondence")
-    if correspondence.snapshot_id != snapshot.snapshot_id:
+    resolved = correspondence or build_mesh_topology_correspondence(
+        snapshot,
+        mesh,
+        stage="UV-layout-capture",
+    )
+    if not isinstance(resolved, MeshTopologyCorrespondence):
+        raise TypeError("correspondence must be MeshTopologyCorrespondence or None")
+    if resolved.snapshot_id != snapshot.snapshot_id:
         raise UvUnwrapError(
             "Topology correspondence belongs to a different snapshot"
         )
@@ -228,7 +233,7 @@ def _capture_uv_layout(
 
     coordinates: list[UvLoopCoordinate] = []
     loop_map = snapshot.loop_by_id()
-    for loop_id, mesh_loop_index in correspondence.loop_to_mesh_index:
+    for loop_id, mesh_loop_index in resolved.loop_to_mesh_index:
         try:
             uv_value = layer.data[mesh_loop_index].uv
             coordinate = (float(uv_value[0]), float(uv_value[1]))
