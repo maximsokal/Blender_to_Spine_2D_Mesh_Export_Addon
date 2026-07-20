@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import Enum
-from math import isfinite
 from pathlib import Path, PurePosixPath
 from typing import Tuple
 
@@ -27,6 +26,11 @@ from ..domain.spine.legacy_rig_contracts import UniformScaleMode
 from ..domain.spine.legacy_rig_scale import calculate_uniform_scale
 from ..domain.uv import UvUnwrapSettings
 from .a1_geometry_preparation import A1GeometryPreparationSettings
+from .a1_numeric_contracts import (
+    require_finite_number,
+    require_integer,
+    require_non_empty_string,
+)
 from .contracts import ExportSettings
 
 
@@ -93,10 +97,8 @@ class A1SingleObjectExportSettings:
             raise ValueError("A1 requires rig_profile LEGACY_ROTATABLE_MESH")
         for field_name in ("prefix", "output_stem", "json_output_stem"):
             value = getattr(self, field_name)
-            if value is not None and (
-                not isinstance(value, str) or not value.strip()
-            ):
-                raise ValueError(f"{field_name} must be a non-empty string or None")
+            if value is not None:
+                require_non_empty_string(value, field_name)
         if not isinstance(self.source_geometry_mode, A1SourceGeometryMode):
             raise TypeError("source_geometry_mode must be A1SourceGeometryMode")
         if not isinstance(self.modifier_lineage_policy, ModifierLineagePolicy):
@@ -116,12 +118,11 @@ class A1SingleObjectExportSettings:
                 raise TypeError(f"{field_name} must be BakeMode")
         if not isinstance(self.selected_to_active, bool):
             raise TypeError("selected_to_active must be bool")
-        if not isinstance(self.cage_extrusion, (int, float)) or not isfinite(
-            float(self.cage_extrusion)
-        ):
-            raise ValueError("cage_extrusion must be finite")
-        if self.cage_extrusion < 0.0:
-            raise ValueError("cage_extrusion cannot be negative")
+        require_finite_number(
+            self.cage_extrusion,
+            "cage_extrusion",
+            minimum=0.0,
+        )
         if not isinstance(self.bake_execution, BakeExecutionSettings):
             raise TypeError("bake_execution must be BakeExecutionSettings")
         if not isinstance(self.rig_scale_mode, UniformScaleMode):
@@ -133,8 +134,7 @@ class A1SingleObjectExportSettings:
         ):
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be bool")
-        if not isinstance(self.json_indent, int) or not 0 <= self.json_indent <= 16:
-            raise ValueError("json_indent must be an integer in [0, 16]")
+        require_integer(self.json_indent, "json_indent", minimum=0, maximum=16)
 
     def resolved_geometry_settings(self) -> A1GeometryPreparationSettings:
         segmentation = self.geometry.segmentation
