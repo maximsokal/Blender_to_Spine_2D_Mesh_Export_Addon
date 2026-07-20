@@ -11,6 +11,16 @@ from .composition import (
     SpineDocumentCompositionResult,
     compose_spine_documents,
 )
+from .connected_group_assembly import build_connected_group_document
+from .connected_group_contracts import (
+    ConnectedConstraintSchedule,
+    ConnectedGroupBuildResult,
+    ConnectedGroupSettings,
+    ConnectedObjectDocument,
+    ConnectedObjectPlacement,
+    ConnectedZLayer,
+)
+from .connected_group_error import ConnectedGroupBuildError
 from .golden import LegacyCompatibilityFingerprint, build_legacy_fingerprint
 from .legacy_attachment_builder import (
     LegacyAttachmentComponent,
@@ -22,16 +32,6 @@ from .legacy_attachment_builder import (
     LegacyMeshDocumentBuildResult,
     build_legacy_mesh_attachment,
     build_legacy_mesh_document,
-)
-from .legacy_connected_group import (
-    ConnectedConstraintSchedule,
-    ConnectedGroupBuildError,
-    ConnectedGroupBuildResult,
-    ConnectedGroupSettings,
-    ConnectedObjectDocument,
-    ConnectedObjectPlacement,
-    ConnectedZLayer,
-    build_connected_group_document,
 )
 from .legacy_profile import LegacyRigProfile
 from .legacy_rig_builder import (
