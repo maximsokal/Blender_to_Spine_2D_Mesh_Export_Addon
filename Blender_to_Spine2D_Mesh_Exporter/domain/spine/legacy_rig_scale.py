@@ -43,7 +43,12 @@ def calculate_uniform_scale(
         raise ValueError("texture dimensions are too large for finite rig scale") from exc
 
     if mode is UniformScaleMode.AVERAGE:
-        result = (width_float / 2.0) + (height_float / 2.0)
+        legacy_sum = width_float + height_float
+        result = (
+            legacy_sum / 2.0
+            if isfinite(legacy_sum)
+            else (width_float / 2.0) + (height_float / 2.0)
+        )
     elif mode is UniformScaleMode.MAXIMUM:
         result = max(width_float, height_float)
     else:
