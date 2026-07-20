@@ -11,6 +11,7 @@ from ..application import (
     A1MultiObjectMode,
     A1MultiObjectStage,
     ExportResult,
+    validate_a1_realized_output_namespace,
 )
 from ..domain.spine import ConnectedGroupBuildResult, SpineSerializer
 from ..infrastructure import (
@@ -82,9 +83,30 @@ def export_a1_multi_object(
             warnings=(),
         )
 
-    stage = A1MultiObjectStage.STAGE_OUTPUTS
+    stage = A1MultiObjectStage.VALIDATE_OUTPUTS
     statistics = dict(prepared.statistics)
     try:
+        grouped_request = (
+            resolve_grouped_camera_projection_request(
+                prepared.objects,
+                settings,
+            )
+            if settings.mode is A1MultiObjectMode.CONNECTED
+            else None
+        )
+        grouped_paths = (
+            ()
+            if grouped_request is None
+            else tuple(task.output_path for task in grouped_request.plan.frame_tasks)
+        )
+        validate_a1_realized_output_namespace(
+            output_root=settings.output_directory,
+            json_path=prepared.json_path,
+            texture_paths=prepared.texture_output_paths,
+            additional_texture_paths=grouped_paths,
+        )
+
+        stage = A1MultiObjectStage.STAGE_OUTPUTS
         with atomic_file_transaction(
             operation_name=_TRANSACTION_NAME,
         ) as output_transaction:
@@ -99,14 +121,6 @@ def export_a1_multi_object(
             statistics = dict(staged_objects.statistics)
             finalized_objects = staged_objects.objects
 
-            grouped_request = (
-                resolve_grouped_camera_projection_request(
-                    finalized_objects,
-                    settings,
-                )
-                if settings.mode is A1MultiObjectMode.CONNECTED
-                else None
-            )
             grouped_stage = None
             if grouped_request is not None:
                 grouped_stage = stage_grouped_camera_projection_outputs(
