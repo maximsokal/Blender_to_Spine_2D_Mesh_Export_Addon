@@ -14,6 +14,7 @@ from ..domain.spine import (
     apply_legacy_visual_options,
     build_legacy_mesh_document,
 )
+from ..domain.uv import UvRangePolicy, enforce_uv_range
 from .a1_attachment_projection import (
     A1AttachmentProjectionResult,
     A1AttachmentProjectionSettings,
@@ -40,6 +41,9 @@ class A1DocumentAssemblySettings:
     segment_index_base: int = 0
     include_control_icons: bool = False
     include_preview_animation: bool = False
+    # Appended to preserve positional compatibility with existing callers.
+    uv_range_policy: UvRangePolicy = UvRangePolicy.REQUIRE_UNIT_SQUARE
+    uv_range_epsilon: float = 1.0e-6
 
     def __post_init__(self) -> None:
         for field_name in ("prefix", "uv_layer_name", "image_path", "skin_name"):
@@ -53,7 +57,7 @@ class A1DocumentAssemblySettings:
             "center_y",
         ):
             value = getattr(self, field_name)
-            if not isinstance(value, (int, float)) or not isfinite(float(value)):
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or not isfinite(float(value)):
                 raise ValueError(f"{field_name} must be finite")
         if self.attachment_width <= 0.0 or self.attachment_height <= 0.0:
             raise ValueError("attachment dimensions must be positive")
@@ -61,11 +65,25 @@ class A1DocumentAssemblySettings:
             self.sequence, LegacyAttachmentSequence
         ):
             raise TypeError("sequence must be LegacyAttachmentSequence or None")
-        if not isinstance(self.segment_index_base, int) or self.segment_index_base < 0:
+        if (
+            not isinstance(self.segment_index_base, int)
+            or isinstance(self.segment_index_base, bool)
+            or self.segment_index_base < 0
+        ):
             raise ValueError("segment_index_base must be a non-negative integer")
         for field_name in ("include_control_icons", "include_preview_animation"):
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be bool")
+        if type(self.uv_range_policy) is not UvRangePolicy:
+            raise TypeError("uv_range_policy must be UvRangePolicy")
+        if (
+            isinstance(self.uv_range_epsilon, bool)
+            or not isinstance(self.uv_range_epsilon, (int, float))
+            or not isfinite(float(self.uv_range_epsilon))
+        ):
+            raise TypeError("uv_range_epsilon must be a finite number")
+        if float(self.uv_range_epsilon) < 0.0:
+            raise ValueError("uv_range_epsilon cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +132,14 @@ def assemble_a1_document(
     projections: list[A1AttachmentProjectionResult] = []
     for region_offset, snapshot in enumerate(region_snapshots):
         MeshSnapshotValidator().validate_or_raise(snapshot)
+        # Validate the exact propagated region state, not only the pre-propagation
+        # full-object unwrap.  This prevents a damaged transfer from reaching Spine.
+        enforce_uv_range(
+            snapshot,
+            settings.uv_layer_name,
+            policy=settings.uv_range_policy,
+            epsilon=settings.uv_range_epsilon,
+        )
         segment_index = settings.segment_index_base + region_offset
         segment_name = rig.profile.segment_slot(settings.prefix, segment_index)
         projection = project_triangulated_disk_attachment(
