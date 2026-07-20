@@ -41,7 +41,11 @@ from .model import (
     ObjectMaterialAnalysis,
     TextureFormat,
     build_bake_plan,
+)
+from .output_naming import (
+    predict_bake_output_paths,
     sanitize_filename_stem,
+    windows_path_identity,
 )
 from .camera_projection import (
     CameraProjectionMode,
@@ -177,6 +181,7 @@ __all__ = [
     "convert_rgba_alpha_representation",
     "convex_hull",
     "grouped_projection_output_paths",
+    "predict_bake_output_paths",
     "requires_camera_projection",
     "resolve_bake_strategy_plan",
     "resolve_projection_output_policy",
@@ -186,4 +191,5 @@ __all__ = [
     "texture_plan_output_paths",
     "triangulate_convex_hull",
     "triangulate_simple_contour",
+    "windows_path_identity",
 ]
