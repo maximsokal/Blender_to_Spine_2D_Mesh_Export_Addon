@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Mapping, Tuple
 
-from .legacy_rig_builder import LegacyRigBuildResult
+from .legacy_rig_contracts import LegacyRigBuildResult
 from .model import Bone, MeshAttachment, Skin, Slot, SpineDocument
 from .validator import SpineValidator
 from .weighted_vertices import (
