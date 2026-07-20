@@ -3,27 +3,31 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite
 from typing import Tuple
+
+from .contracts import (
+    require_finite_number,
+    require_integer,
+    require_non_empty_string,
+)
 
 
 def _validate_name(value: str, field_name: str) -> None:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} must be a non-empty string")
+    require_non_empty_string(value, field_name)
 
 
 def _validate_matrix(value: Tuple[float, ...], field_name: str) -> None:
     if not isinstance(value, tuple) or len(value) != 16:
         raise ValueError(f"{field_name} must contain sixteen values")
-    if not all(isinstance(item, (int, float)) and isfinite(float(item)) for item in value):
-        raise ValueError(f"{field_name} must contain finite numeric values")
+    for index, item in enumerate(value):
+        require_finite_number(item, f"{field_name}[{index}]")
 
 
 def _validate_color(value: Tuple[float, ...], field_name: str) -> None:
     if not isinstance(value, tuple) or len(value) != 3:
         raise ValueError(f"{field_name} must contain three values")
-    if not all(isinstance(item, (int, float)) and isfinite(float(item)) for item in value):
-        raise ValueError(f"{field_name} must contain finite numeric values")
+    for index, item in enumerate(value):
+        require_finite_number(item, f"{field_name}[{index}]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,12 +76,12 @@ class WorldBakeSnapshot:
             isinstance(value, str) and value.strip() for value in self.node_types
         ):
             raise TypeError("node_types must contain non-empty strings")
-        if self.background_strength is not None and (
-            not isinstance(self.background_strength, (int, float))
-            or not isfinite(float(self.background_strength))
-            or float(self.background_strength) < 0.0
-        ):
-            raise ValueError("background_strength must be finite, non-negative, or None")
+        if self.background_strength is not None:
+            require_finite_number(
+                self.background_strength,
+                "background_strength",
+                minimum=0.0,
+            )
         if not isinstance(self.animated, bool):
             raise TypeError("animated must be bool")
 
@@ -104,10 +108,7 @@ class LightBakeSnapshot:
     def __post_init__(self) -> None:
         _validate_name(self.object_id, "object_id")
         _validate_name(self.light_type, "light_type")
-        if not isinstance(self.energy, (int, float)) or not isfinite(float(self.energy)):
-            raise ValueError("energy must be finite")
-        if float(self.energy) < 0.0:
-            raise ValueError("energy cannot be negative")
+        require_finite_number(self.energy, "energy", minimum=0.0)
         _validate_color(self.color, "color")
         _validate_matrix(self.world_matrix, "world_matrix")
         if not isinstance(self.use_shadow, bool):
@@ -136,11 +137,12 @@ class CameraBakeSnapshot:
         _validate_name(self.camera_type, "camera_type")
         _validate_matrix(self.world_matrix, "world_matrix")
         for field_name in ("lens", "ortho_scale", "clip_start", "clip_end"):
-            value = getattr(self, field_name)
-            if not isinstance(value, (int, float)) or not isfinite(float(value)):
-                raise ValueError(f"{field_name} must be finite")
-            if float(value) <= 0.0:
-                raise ValueError(f"{field_name} must be positive")
+            require_finite_number(
+                getattr(self, field_name),
+                field_name,
+                minimum=0.0,
+                minimum_inclusive=False,
+            )
         if float(self.clip_end) <= float(self.clip_start):
             raise ValueError("clip_end must be greater than clip_start")
         if not isinstance(self.animated, bool):
@@ -158,12 +160,13 @@ class ColorManagementSnapshot:
         _validate_name(self.view_transform, "view_transform")
         if not isinstance(self.look, str):
             raise TypeError("look must be str")
-        for field_name in ("exposure", "gamma"):
-            value = getattr(self, field_name)
-            if not isinstance(value, (int, float)) or not isfinite(float(value)):
-                raise ValueError(f"{field_name} must be finite")
-        if float(self.gamma) <= 0.0:
-            raise ValueError("gamma must be positive")
+        require_finite_number(self.exposure, "exposure")
+        require_finite_number(
+            self.gamma,
+            "gamma",
+            minimum=0.0,
+            minimum_inclusive=False,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,8 +186,7 @@ class SceneBakeContext:
     def __post_init__(self) -> None:
         _validate_name(self.scene_name, "scene_name")
         _validate_name(self.render_engine, "render_engine")
-        if not isinstance(self.analysis_frame, int):
-            raise TypeError("analysis_frame must be int")
+        require_integer(self.analysis_frame, "analysis_frame")
         if self.world is not None and not isinstance(self.world, WorldBakeSnapshot):
             raise TypeError("world must be WorldBakeSnapshot or None")
         if self.camera is not None and not isinstance(self.camera, CameraBakeSnapshot):
