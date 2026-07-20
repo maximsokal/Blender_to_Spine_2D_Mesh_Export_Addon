@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
-from math import ceil, isfinite
+from math import ceil
 from typing import Iterable, Tuple
+
+from .contracts import require_finite_number, require_integer
 
 
 class ProjectionCoverageError(ValueError):
@@ -33,25 +35,22 @@ class ProjectionCoveragePolicy:
     def __post_init__(self) -> None:
         if not isinstance(self.mode, ProjectionCoverageMode):
             raise TypeError("mode must be ProjectionCoverageMode")
-        if (
-            isinstance(self.core_alpha_threshold, bool)
-            or not isinstance(self.core_alpha_threshold, (int, float))
-            or not isfinite(float(self.core_alpha_threshold))
-            or not 0.0 <= float(self.core_alpha_threshold) <= 1.0
-        ):
-            raise ValueError("core_alpha_threshold must be finite and in [0, 1]")
-        if (
-            not isinstance(self.minimum_component_pixels, int)
-            or isinstance(self.minimum_component_pixels, bool)
-            or self.minimum_component_pixels < 1
-        ):
-            raise ValueError("minimum_component_pixels must be a positive integer")
-        if (
-            not isinstance(self.maximum_hole_pixels, int)
-            or isinstance(self.maximum_hole_pixels, bool)
-            or self.maximum_hole_pixels < 0
-        ):
-            raise ValueError("maximum_hole_pixels must be a non-negative integer")
+        require_finite_number(
+            self.core_alpha_threshold,
+            "core_alpha_threshold",
+            minimum=0.0,
+            maximum=1.0,
+        )
+        require_integer(
+            self.minimum_component_pixels,
+            "minimum_component_pixels",
+            minimum=1,
+        )
+        require_integer(
+            self.maximum_hole_pixels,
+            "maximum_hole_pixels",
+            minimum=0,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,9 +82,7 @@ class ProjectionCoverageResult:
             "removed_component_pixel_count",
             "filled_hole_pixel_count",
         ):
-            value = getattr(self, field_name)
-            if not isinstance(value, int) or value < 0:
-                raise ValueError(f"{field_name} must be a non-negative integer")
+            require_integer(getattr(self, field_name), field_name, minimum=0)
         if self.visible_pixel_count != sum(1 for value in self.mask if value):
             raise ValueError("visible_pixel_count does not match mask")
         if not isinstance(self.used_weak_only_fallback, bool):
@@ -93,21 +90,17 @@ class ProjectionCoverageResult:
 
 
 def _validate_dimensions(width: int, height: int) -> None:
-    if not isinstance(width, int) or isinstance(width, bool) or width <= 0:
-        raise ValueError("width must be a positive integer")
-    if not isinstance(height, int) or isinstance(height, bool) or height <= 0:
-        raise ValueError("height must be a positive integer")
+    require_integer(width, "width", minimum=1)
+    require_integer(height, "height", minimum=1)
 
 
 def _validate_alpha_threshold(value: float, name: str) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not isfinite(float(value))
-        or not 0.0 <= float(value) <= 1.0
-    ):
-        raise ValueError(f"{name} must be finite and in [0, 1]")
-    return float(value)
+    return require_finite_number(
+        value,
+        name,
+        minimum=0.0,
+        maximum=1.0,
+    )
 
 
 def _coverage_byte_threshold(value: float) -> int:
