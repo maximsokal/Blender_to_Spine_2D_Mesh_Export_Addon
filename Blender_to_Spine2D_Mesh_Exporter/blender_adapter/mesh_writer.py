@@ -13,7 +13,7 @@ import logging
 from typing import Any, Iterator
 from uuid import uuid4
 
-from ..domain.geometry import MeshSnapshot, MeshSnapshotValidator
+from ..domain.geometry import FaceId, LoopId, MeshSnapshot, MeshSnapshotValidator
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,73 @@ class TemporaryMeshObject:
     object: Any
     mesh: Any
     collection: Any
+
+
+@dataclass(frozen=True, slots=True)
+class MeshTopologyCorrespondence:
+    """Exact snapshot-face/loop mapping for one materialized Blender mesh.
+
+    Blender is allowed to reorder polygons or cyclically rotate polygon corners
+    while preserving the same oriented face. Every later property/UV write must
+    therefore use this explicit mapping instead of assuming ``zip`` or
+    ``polygon.loop_start + source_corner`` remains identical to the snapshot.
+    Reversed winding is rejected because it changes the exported triangle
+    orientation and loop-edge semantics.
+    """
+
+    snapshot_id: str
+    face_to_polygon_index: tuple[tuple[FaceId, int], ...]
+    loop_to_mesh_index: tuple[tuple[LoopId, int], ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.snapshot_id, str) or not self.snapshot_id.strip():
+            raise ValueError("snapshot_id must be a non-empty string")
+        for field_name, values, key_type in (
+            ("face_to_polygon_index", self.face_to_polygon_index, FaceId),
+            ("loop_to_mesh_index", self.loop_to_mesh_index, LoopId),
+        ):
+            if not isinstance(values, tuple):
+                raise TypeError(f"{field_name} must be tuple")
+            keys: list[FaceId | LoopId] = []
+            indices: list[int] = []
+            for item_index, item in enumerate(values):
+                if not isinstance(item, tuple) or len(item) != 2:
+                    raise TypeError(
+                        f"{field_name}[{item_index}] must be a two-item tuple"
+                    )
+                key, index = item
+                if type(key) is not key_type:
+                    raise TypeError(
+                        f"{field_name}[{item_index}][0] must be {key_type.__name__}"
+                    )
+                if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+                    raise ValueError(
+                        f"{field_name}[{item_index}][1] must be a non-negative int"
+                    )
+                keys.append(key)
+                indices.append(index)
+            if len(keys) != len(set(keys)):
+                raise ValueError(f"{field_name} contains duplicate snapshot IDs")
+            if len(indices) != len(set(indices)):
+                raise ValueError(f"{field_name} contains duplicate Blender indices")
+
+    def polygon_index_for(self, face_id: FaceId) -> int:
+        if type(face_id) is not FaceId:
+            raise TypeError("face_id must be FaceId")
+        mapping = dict(self.face_to_polygon_index)
+        try:
+            return mapping[face_id]
+        except KeyError as exc:
+            raise KeyError(f"No Blender polygon mapped for face {face_id.index}") from exc
+
+    def mesh_loop_index_for(self, loop_id: LoopId) -> int:
+        if type(loop_id) is not LoopId:
+            raise TypeError("loop_id must be LoopId")
+        mapping = dict(self.loop_to_mesh_index)
+        try:
+            return mapping[loop_id]
+        except KeyError as exc:
+            raise KeyError(f"No Blender loop mapped for loop {loop_id.index}") from exc
 
 
 def _load_bpy() -> Any:
@@ -67,30 +134,190 @@ def _edge_key(first: int, second: int) -> tuple[int, int]:
     return (first, second) if first < second else (second, first)
 
 
-def _verify_generated_topology(snapshot: MeshSnapshot, mesh: Any) -> None:
-    expected = {
+def _rotation_offset(
+    expected: tuple[int, ...],
+    actual: tuple[int, ...],
+) -> int | None:
+    """Return the oriented cyclic offset or ``None`` when faces differ."""
+
+    if len(expected) != len(actual) or not expected:
+        return None
+    for offset in range(len(expected)):
+        if all(
+            actual[actual_index] == expected[(actual_index + offset) % len(expected)]
+            for actual_index in range(len(expected))
+        ):
+            return offset
+    return None
+
+
+def _polygon_vertex_indices(mesh: Any, polygon: Any) -> tuple[int, ...]:
+    try:
+        polygon_vertices = tuple(int(value) for value in polygon.vertices)
+    except Exception as exc:
+        raise MeshWriteError("Unable to read generated polygon vertices") from exc
+
+    loop_start = int(polygon.loop_start)
+    loop_total = int(polygon.loop_total)
+    try:
+        loop_vertices = tuple(
+            int(mesh.loops[loop_start + corner_index].vertex_index)
+            for corner_index in range(loop_total)
+        )
+    except Exception as exc:
+        raise MeshWriteError("Unable to read generated polygon loops") from exc
+    if loop_vertices != polygon_vertices:
+        raise MeshWriteError(
+            "Generated polygon vertex order disagrees with its mesh loop order; "
+            f"polygon={polygon_vertices}, loops={loop_vertices}"
+        )
+    return polygon_vertices
+
+
+def build_mesh_topology_correspondence(
+    snapshot: MeshSnapshot,
+    mesh: Any,
+    *,
+    stage: str = "materialization",
+) -> MeshTopologyCorrespondence:
+    """Map snapshot faces and loops to a generated Blender mesh exactly.
+
+    Polygon collection reordering and oriented cyclic corner rotations are
+    supported. Missing, ambiguous, reversed, or edge-inconsistent faces are
+    rejected before UV or material data can be attached to the wrong corner.
+    """
+
+    if not isinstance(snapshot, MeshSnapshot):
+        raise TypeError("snapshot must be MeshSnapshot")
+    if mesh is None:
+        raise ValueError("mesh cannot be None")
+    if not isinstance(stage, str) or not stage.strip():
+        raise ValueError("stage must be a non-empty string")
+
+    expected_counts = {
         "vertices": len(snapshot.vertices),
         "edges": len(snapshot.edges),
         "loops": len(snapshot.loops),
         "polygons": len(snapshot.faces),
     }
-    actual = {
-        "vertices": len(mesh.vertices),
-        "edges": len(mesh.edges),
-        "loops": len(mesh.loops),
-        "polygons": len(mesh.polygons),
-    }
-    if actual != expected:
+    try:
+        actual_counts = {
+            "vertices": len(mesh.vertices),
+            "edges": len(mesh.edges),
+            "loops": len(mesh.loops),
+            "polygons": len(mesh.polygons),
+        }
+    except Exception as exc:
         raise MeshWriteError(
-            f"Temporary mesh topology mismatch; expected={expected}, actual={actual}"
+            f"Unable to inspect generated topology during {stage}"
+        ) from exc
+    if actual_counts != expected_counts:
+        raise MeshWriteError(
+            f"Temporary mesh topology mismatch during {stage}; "
+            f"expected={expected_counts}, actual={actual_counts}"
         )
 
-    for face, polygon in zip(snapshot.faces, mesh.polygons):
-        if int(polygon.loop_total) != len(face.loop_ids):
-            raise MeshWriteError(
-                f"Face {face.id.index} loop count changed from {len(face.loop_ids)} "
-                f"to {polygon.loop_total} during materialization"
+    loop_map = snapshot.loop_by_id()
+    edge_map = snapshot.edge_by_id()
+    polygon_vertices = tuple(
+        _polygon_vertex_indices(mesh, polygon) for polygon in mesh.polygons
+    )
+    unmatched_polygon_indices = set(range(len(mesh.polygons)))
+    face_pairs: list[tuple[FaceId, int]] = []
+    loop_pairs: list[tuple[LoopId, int]] = []
+
+    for face in snapshot.faces:
+        expected_vertices = tuple(
+            loop_map[loop_id].vertex_id.index for loop_id in face.loop_ids
+        )
+        candidates: list[tuple[int, int]] = []
+        for polygon_index in sorted(unmatched_polygon_indices):
+            offset = _rotation_offset(
+                expected_vertices,
+                polygon_vertices[polygon_index],
             )
+            if offset is not None:
+                candidates.append((polygon_index, offset))
+
+        if not candidates:
+            raise MeshWriteError(
+                f"Face {face.id.index} has no oriented Blender polygon match "
+                f"during {stage}; expected vertices={expected_vertices}"
+            )
+        if len(candidates) != 1:
+            raise MeshWriteError(
+                f"Face {face.id.index} has ambiguous Blender polygon matches "
+                f"during {stage}: {tuple(index for index, _ in candidates)}"
+            )
+
+        polygon_index, offset = candidates[0]
+        unmatched_polygon_indices.remove(polygon_index)
+        polygon = mesh.polygons[polygon_index]
+        loop_start = int(polygon.loop_start)
+        face_pairs.append((face.id, polygon_index))
+
+        for source_corner_index, loop_id in enumerate(face.loop_ids):
+            actual_corner_index = (source_corner_index - offset) % len(face.loop_ids)
+            mesh_loop_index = loop_start + actual_corner_index
+            mesh_loop = mesh.loops[mesh_loop_index]
+            source_loop = loop_map[loop_id]
+            actual_vertex_index = int(mesh_loop.vertex_index)
+            if actual_vertex_index != source_loop.vertex_id.index:
+                raise MeshWriteError(
+                    f"Loop {loop_id.index} mapped to Blender loop {mesh_loop_index} "
+                    f"with vertex {actual_vertex_index}, expected "
+                    f"{source_loop.vertex_id.index} during {stage}"
+                )
+
+            try:
+                actual_edge = mesh.edges[int(mesh_loop.edge_index)]
+                actual_edge_vertices = _edge_key(
+                    int(actual_edge.vertices[0]),
+                    int(actual_edge.vertices[1]),
+                )
+            except Exception as exc:
+                raise MeshWriteError(
+                    f"Unable to inspect Blender edge for loop {mesh_loop_index} "
+                    f"during {stage}"
+                ) from exc
+            source_edge = edge_map[source_loop.edge_id]
+            expected_edge_vertices = _edge_key(
+                source_edge.vertex_ids[0].index,
+                source_edge.vertex_ids[1].index,
+            )
+            if actual_edge_vertices != expected_edge_vertices:
+                raise MeshWriteError(
+                    f"Loop {loop_id.index} edge mismatch during {stage}; "
+                    f"expected={expected_edge_vertices}, actual={actual_edge_vertices}"
+                )
+            loop_pairs.append((loop_id, mesh_loop_index))
+
+    if unmatched_polygon_indices:
+        raise MeshWriteError(
+            f"Generated mesh contains unmatched polygons during {stage}: "
+            f"{tuple(sorted(unmatched_polygon_indices))}"
+        )
+    if len(loop_pairs) != len(snapshot.loops):
+        raise MeshWriteError(
+            f"Loop correspondence is incomplete during {stage}; "
+            f"mapped={len(loop_pairs)}, expected={len(snapshot.loops)}"
+        )
+
+    return MeshTopologyCorrespondence(
+        snapshot_id=snapshot.snapshot_id,
+        face_to_polygon_index=tuple(
+            sorted(face_pairs, key=lambda item: item[0].index)
+        ),
+        loop_to_mesh_index=tuple(
+            sorted(loop_pairs, key=lambda item: item[0].index)
+        ),
+    )
+
+
+def _verify_generated_topology(snapshot: MeshSnapshot, mesh: Any) -> None:
+    """Backward-compatible validation wrapper for existing callers/tests."""
+
+    build_mesh_topology_correspondence(snapshot, mesh)
 
 
 def _write_edge_flags(snapshot: MeshSnapshot, mesh: Any) -> None:
@@ -111,8 +338,13 @@ def _write_edge_flags(snapshot: MeshSnapshot, mesh: Any) -> None:
             mesh_edge.use_edge_sharp = source_edge.sharp
 
 
-def _write_face_properties(snapshot: MeshSnapshot, mesh: Any) -> None:
-    for face, polygon in zip(snapshot.faces, mesh.polygons):
+def _write_face_properties(
+    snapshot: MeshSnapshot,
+    mesh: Any,
+    correspondence: MeshTopologyCorrespondence,
+) -> None:
+    for face in snapshot.faces:
+        polygon = mesh.polygons[correspondence.polygon_index_for(face.id)]
         polygon.material_index = face.material_index
         polygon.use_smooth = face.smooth
 
@@ -154,26 +386,23 @@ def _write_uv_roles(snapshot: MeshSnapshot, mesh: Any) -> None:
         ) from exc
 
 
-def _write_uv_layers(snapshot: MeshSnapshot, mesh: Any) -> None:
+def _write_uv_layers(
+    snapshot: MeshSnapshot,
+    mesh: Any,
+    correspondence: MeshTopologyCorrespondence,
+) -> None:
     loop_map = snapshot.loop_by_id()
     for layer_name in snapshot.uv_layer_names:
         layer = mesh.uv_layers.get(layer_name)
         if layer is None:
             layer = mesh.uv_layers.new(name=layer_name)
-        for face, polygon in zip(snapshot.faces, mesh.polygons):
-            if int(polygon.loop_total) != len(face.loop_ids):
+        for source_loop_id, mesh_loop_index in correspondence.loop_to_mesh_index:
+            coordinate = loop_map[source_loop_id].uv(layer_name)
+            if coordinate is None:
                 raise MeshWriteError(
-                    f"Cannot write UV layer '{layer_name}': face {face.id.index} loop "
-                    "count changed"
+                    f"Loop {source_loop_id.index} is missing UV layer '{layer_name}'"
                 )
-            for corner_index, source_loop_id in enumerate(face.loop_ids):
-                mesh_loop_index = int(polygon.loop_start) + corner_index
-                coordinate = loop_map[source_loop_id].uv(layer_name)
-                if coordinate is None:
-                    raise MeshWriteError(
-                        f"Loop {source_loop_id.index} is missing UV layer '{layer_name}'"
-                    )
-                layer.data[mesh_loop_index].uv = coordinate
+            layer.data[mesh_loop_index].uv = coordinate
 
     _write_uv_roles(snapshot, mesh)
 
@@ -260,10 +489,14 @@ def temporary_mesh_object(
                 _face_vertex_indices(snapshot),
             )
             mesh.update(calc_edges=True)
-            _verify_generated_topology(snapshot, mesh)
+            correspondence = build_mesh_topology_correspondence(
+                snapshot,
+                mesh,
+                stage="materialization",
+            )
             _write_edge_flags(snapshot, mesh)
-            _write_face_properties(snapshot, mesh)
-            _write_uv_layers(snapshot, mesh)
+            _write_face_properties(snapshot, mesh, correspondence)
+            _write_uv_layers(snapshot, mesh, correspondence)
             _set_world_matrix(obj, snapshot.world_matrix)
         except MeshWriteError:
             raise
