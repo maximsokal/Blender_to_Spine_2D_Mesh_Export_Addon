@@ -59,11 +59,9 @@ from .evaluated_mesh_reader import (
     LineageAttributeNames,
     read_evaluated_mesh_snapshot,
 )
-from .material_analyzer import (
-    MaterialAnalysisError,
-    analyse_material_slot,
-    analyse_object_materials,
-)
+from .material_analysis_error import MaterialAnalysisError
+from .material_object_analysis import analyse_object_materials
+from .material_slot_analysis import analyse_material_slot
 from .mesh_reader import MeshReadError, read_source_mesh_snapshot
 from .mesh_writer import MeshWriteError, TemporaryMeshObject, temporary_mesh_object
 from .render_engine_contract import (
