@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import isfinite
 from pathlib import Path
 
 from ..domain.baking import sanitize_filename_stem
 from ..domain.spine import UniformScaleMode
+from .a1_numeric_contracts import (
+    require_finite_number,
+    require_identity,
+    require_integer,
+    require_non_empty_string,
+)
 
 
 class A1MultiObjectMode(str, Enum):
@@ -58,35 +63,22 @@ class A1MultiObjectExportSettings:
     def __post_init__(self) -> None:
         if not isinstance(self.output_directory, Path):
             raise TypeError("output_directory must be pathlib.Path")
-        if not isinstance(self.output_stem, str) or not self.output_stem.strip():
-            raise ValueError("output_stem must be a non-empty string")
+        require_non_empty_string(self.output_stem, "output_stem")
         sanitize_filename_stem(self.output_stem)
         if not isinstance(self.mode, A1MultiObjectMode):
             raise TypeError("mode must be A1MultiObjectMode")
-        if not isinstance(self.json_indent, int) or not 0 <= self.json_indent <= 16:
-            raise ValueError("json_indent must be an integer in [0, 16]")
+        require_integer(self.json_indent, "json_indent", minimum=0, maximum=16)
         if not isinstance(self.namespace_animations, bool):
             raise TypeError("namespace_animations must be bool")
-        if not isinstance(self.animation_separator, str) or not self.animation_separator:
-            raise ValueError("animation_separator must be a non-empty string")
-        if (
-            not isinstance(self.connected_group_prefix, str)
-            or not self.connected_group_prefix.strip()
-        ):
-            raise ValueError("connected_group_prefix must be a non-empty string")
-        if self.anchor_component_id is not None and (
-            not isinstance(self.anchor_component_id, str)
-            or not self.anchor_component_id.strip()
-        ):
-            raise ValueError(
-                "anchor_component_id must be a non-empty string or None"
-            )
-        if not isinstance(self.z_tolerance, (int, float)) or not isfinite(
-            float(self.z_tolerance)
-        ):
-            raise ValueError("z_tolerance must be finite")
-        if self.z_tolerance < 0.0:
-            raise ValueError("z_tolerance cannot be negative")
+        require_non_empty_string(self.animation_separator, "animation_separator")
+        require_identity(self.connected_group_prefix, "connected_group_prefix")
+        if self.anchor_component_id is not None:
+            require_identity(self.anchor_component_id, "anchor_component_id")
+        require_finite_number(
+            self.z_tolerance,
+            "z_tolerance",
+            minimum=0.0,
+        )
         if not isinstance(self.connected_scale_mode, UniformScaleMode):
             raise TypeError("connected_scale_mode must be UniformScaleMode")
         if not isinstance(
