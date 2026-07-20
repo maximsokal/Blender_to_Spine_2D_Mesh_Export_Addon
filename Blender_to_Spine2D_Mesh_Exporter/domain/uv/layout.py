@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from math import isfinite
-from typing import Iterable, Tuple
+from typing import Tuple
 
 from ..geometry import (
     LoopId,
     MeshSnapshot,
     MeshSnapshotValidator,
     SourceLoopId,
+)
+from ..geometry.contracts import (
+    require_exact_type,
+    require_finite_vector,
+    require_identity,
+    require_non_empty_string,
+    require_tuple_items,
 )
 
 
@@ -25,13 +31,9 @@ class UvLoopCoordinate:
     coordinate: Tuple[float, float]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.coordinate, tuple) or len(self.coordinate) != 2:
-            raise ValueError("coordinate must contain two values")
-        if not all(
-            isinstance(value, (int, float)) and isfinite(float(value))
-            for value in self.coordinate
-        ):
-            raise ValueError("coordinate must contain finite numeric values")
+        require_exact_type(self.loop_id, LoopId, "loop_id")
+        require_exact_type(self.source_loop_id, SourceLoopId, "source_loop_id")
+        require_finite_vector(self.coordinate, 2, "coordinate")
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,12 +43,9 @@ class UvLayout:
     coordinates: Tuple[UvLoopCoordinate, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.snapshot_id, str) or not self.snapshot_id.strip():
-            raise ValueError("snapshot_id must be a non-empty string")
-        if not isinstance(self.layer_name, str) or not self.layer_name.strip():
-            raise ValueError("layer_name must be a non-empty string")
-        if not isinstance(self.coordinates, tuple):
-            raise TypeError("coordinates must be tuple")
+        require_identity(self.snapshot_id, "snapshot_id")
+        require_non_empty_string(self.layer_name, "layer_name")
+        require_tuple_items(self.coordinates, UvLoopCoordinate, "coordinates")
         loop_ids = tuple(entry.loop_id for entry in self.coordinates)
         if len(loop_ids) != len(set(loop_ids)):
             raise ValueError("coordinates contain duplicate local LoopId values")
@@ -61,6 +60,8 @@ def build_uv_layout(
 ) -> UvLayout:
     """Capture one existing UV layer without coordinate-based matching."""
 
+    require_exact_type(snapshot, MeshSnapshot, "snapshot")
+    require_non_empty_string(layer_name, "layer_name")
     MeshSnapshotValidator().validate_or_raise(snapshot)
     if layer_name not in snapshot.uv_layer_names:
         raise UvLayoutError(f"UV layer '{layer_name}' is absent from snapshot")
@@ -91,11 +92,19 @@ def apply_uv_layout(
     *,
     require_complete: bool = True,
 ) -> MeshSnapshot:
-    """Return a new snapshot with a layout applied by exact local LoopId."""
+    """Return a new snapshot with a layout applied by exact local ``LoopId``.
 
+    A partial layout can only update a layer that already exists on every omitted
+    loop. The immutable :class:`MeshSnapshot` contract declares UV layers globally,
+    so silently introducing a new layer on only part of the loops would create an
+    invalid snapshot and defer the real error to a later validator.
+    """
+
+    require_exact_type(snapshot, MeshSnapshot, "snapshot")
+    require_exact_type(layout, UvLayout, "layout")
+    if not isinstance(require_complete, bool):
+        raise TypeError("require_complete must be bool")
     MeshSnapshotValidator().validate_or_raise(snapshot)
-    if not isinstance(layout, UvLayout):
-        raise TypeError("layout must be UvLayout")
     if layout.snapshot_id != snapshot.snapshot_id:
         raise UvLayoutError("layout does not belong to the supplied snapshot")
 
@@ -114,6 +123,23 @@ def apply_uv_layout(
             "layout is incomplete; missing loops: "
             + str(sorted(loop_id.index for loop_id in missing))
         )
+    if missing:
+        loop_map = snapshot.loop_by_id()
+        missing_without_target_layer = tuple(
+            sorted(
+                (
+                    loop_id.index
+                    for loop_id in missing
+                    if loop_map[loop_id].uv(layout.layer_name) is None
+                )
+            )
+        )
+        if missing_without_target_layer:
+            raise UvLayoutError(
+                "a partial layout cannot introduce a new UV layer on only some "
+                "loops; omitted loops without layer "
+                f"'{layout.layer_name}': {missing_without_target_layer}"
+            )
 
     updated_loops = []
     for loop in snapshot.loops:
@@ -126,9 +152,7 @@ def apply_uv_layout(
                 f"Loop {loop.id.index} source lineage changed from {loop.source_id} "
                 f"to {entry.source_loop_id}"
             )
-        updated_loops.append(
-            loop.with_uv(layout.layer_name, entry.coordinate)
-        )
+        updated_loops.append(loop.with_uv(layout.layer_name, entry.coordinate))
 
     layer_names = tuple(
         sorted(set(snapshot.uv_layer_names) | {layout.layer_name})
