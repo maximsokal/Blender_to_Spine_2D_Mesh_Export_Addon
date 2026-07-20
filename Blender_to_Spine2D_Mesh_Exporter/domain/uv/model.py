@@ -12,6 +12,7 @@ from ..geometry.contracts import (
     require_integer,
     require_non_empty_string,
 )
+from .range import UvRangePolicy
 
 
 class UvUnwrapMethod(str, Enum):
@@ -88,6 +89,9 @@ class UvUnwrapSettings:
     pack_pin: bool = False
     pack_pin_method: UvPackPinMethod = UvPackPinMethod.LOCKED
     pack_shape_method: UvPackShapeMethod = UvPackShapeMethod.CONCAVE
+    # Appended to preserve the positional layout of the pre-hardening contract.
+    range_policy: UvRangePolicy = UvRangePolicy.REQUIRE_UNIT_SQUARE
+    range_epsilon: float = 1.0e-6
 
     def __post_init__(self) -> None:
         require_non_empty_string(self.layer_name, "layer_name")
@@ -99,6 +103,7 @@ class UvUnwrapSettings:
             "pack_rotate_method": UvPackRotateMethod,
             "pack_pin_method": UvPackPinMethod,
             "pack_shape_method": UvPackShapeMethod,
+            "range_policy": UvRangePolicy,
         }
         for field_name, enum_type in enum_fields.items():
             require_exact_type(getattr(self, field_name), enum_type, field_name)
@@ -111,6 +116,7 @@ class UvUnwrapSettings:
                 "area_weight",
                 "pack_margin",
                 "weight_factor",
+                "range_epsilon",
             )
         }
         if not 0.0 < numeric_values["smart_angle_limit_degrees"] <= 90.0:
@@ -121,6 +127,8 @@ class UvUnwrapSettings:
             raise ValueError("pack_margin must be in [0, 1]")
         if not 0.0 <= numeric_values["area_weight"] <= 1.0:
             raise ValueError("area_weight must be in [0, 1]")
+        if numeric_values["range_epsilon"] < 0.0:
+            raise ValueError("range_epsilon cannot be negative")
 
         require_integer(self.iterations, "iterations", minimum=0, maximum=10000)
         require_non_empty_string(self.weight_group, "weight_group")
