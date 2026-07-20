@@ -58,6 +58,7 @@ from .a1_output_preflight import (
     A1OutputPreflightSource,
     preflight_a1_output_namespace,
     validate_a1_output_claims,
+    validate_a1_realized_output_namespace,
 )
 from .a1_texturing_layout import (
     A1TexturingLayoutError,
@@ -142,4 +143,5 @@ __all__ = [
     "resolve_a1_names",
     "resolve_a1_output_paths",
     "validate_a1_output_claims",
+    "validate_a1_realized_output_namespace",
 ]
