@@ -1,0 +1,130 @@
+"""Build the exact legacy A1 IK and Transform constraint payload."""
+
+from __future__ import annotations
+
+from typing import Tuple
+
+from .legacy_profile import LegacyRigProfile
+from .legacy_rig_contracts import (
+    LegacyRigBuildRequest,
+    LegacyRigInfo,
+)
+from .legacy_rig_plan import LegacyRigBuildPlan
+from .model import IKConstraint, TransformConstraint
+
+
+def build_legacy_constraints(
+    request: LegacyRigBuildRequest,
+    profile: LegacyRigProfile,
+    info: LegacyRigInfo,
+) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
+    """Compatibility-shaped constraint builder using resolved immutable metadata."""
+
+    if not isinstance(request, LegacyRigBuildRequest):
+        raise TypeError("request must be LegacyRigBuildRequest")
+    if not isinstance(profile, LegacyRigProfile):
+        raise TypeError("profile must be LegacyRigProfile")
+    if not isinstance(info, LegacyRigInfo):
+        raise TypeError("info must be LegacyRigInfo")
+
+    prefix = request.prefix
+    control_x, control_y, control_z = info.control_bone_names
+    constraint_bone, _, constraint_rotate_ik, constraint_ik = (
+        info.ik_chain_bone_names
+    )
+
+    ik = (
+        IKConstraint(
+            name=profile.scale_ik_constraint(prefix),
+            order=3,
+            bones=(constraint_bone,),
+            target=constraint_ik,
+            extras={"compress": True, "stretch": True},
+        ),
+    )
+
+    transform = (
+        TransformConstraint(
+            name=profile.rotation_x_constraint(prefix),
+            order=1,
+            bones=info.sub_bone_scale_names + (info.base_bone_name,),
+            target=control_x,
+            extras={
+                "rotation": 90,
+                "local": True,
+                "relative": True,
+                "x": -(info.uniform_scale * 2.0),
+                "y": -info.half_scale,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+        ),
+        TransformConstraint(
+            name=profile.rotation_y_constraint(prefix),
+            order=2,
+            bones=(info.main_rotation_bone_name, constraint_rotate_ik),
+            target=control_y,
+            extras={
+                "local": True,
+                "relative": True,
+                "x": info.uniform_scale,
+                "scaleX": -1,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+        ),
+        TransformConstraint(
+            name=profile.rotation_z_constraint(prefix),
+            order=5,
+            bones=info.sub_bone_names,
+            target=control_z,
+            extras={
+                "local": True,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+        ),
+        TransformConstraint(
+            name=profile.scale_constraint(prefix),
+            order=4,
+            bones=info.sub_bone_scale_names,
+            target=constraint_bone,
+            extras={
+                "scaleX": -1,
+                "mixRotate": 0,
+                "mixX": 0,
+                "mixShearY": 0,
+            },
+        ),
+        TransformConstraint(
+            name=profile.scale_compensator_constraint(prefix),
+            order=6,
+            bones=tuple(reversed(info.sub_bone_scale_names)),
+            target=info.base_bone_name,
+            extras={
+                "mixRotate": 0,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixScaleY": 0,
+                "mixShearY": 0,
+            },
+        ),
+    )
+    return ik, transform
+
+
+def build_legacy_rig_constraints(
+    plan: LegacyRigBuildPlan,
+) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
+    if not isinstance(plan, LegacyRigBuildPlan):
+        raise TypeError("plan must be LegacyRigBuildPlan")
+    return build_legacy_constraints(plan.request, plan.profile, plan.info)
+
+
+__all__ = [
+    "build_legacy_constraints",
+    "build_legacy_rig_constraints",
+]
