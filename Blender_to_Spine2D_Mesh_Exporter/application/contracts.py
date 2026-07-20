@@ -12,6 +12,12 @@ from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping, Tuple
 
+from .a1_numeric_contracts import (
+    require_finite_number,
+    require_integer,
+    require_non_empty_string,
+)
+
 
 class IssueSeverity(str, Enum):
     """Severity levels exposed to the Blender UI and export logs."""
@@ -54,26 +60,40 @@ class ExportSettings:
     preserve_debug_artifacts: bool = False
 
     def __post_init__(self) -> None:
-        if not isinstance(self.texture_width, int) or self.texture_width <= 0:
-            raise ValueError("texture_width must be a positive integer")
-        if not isinstance(self.texture_height, int) or self.texture_height <= 0:
-            raise ValueError("texture_height must be a positive integer")
+        require_integer(self.texture_width, "texture_width", minimum=1)
+        require_integer(self.texture_height, "texture_height", minimum=1)
         if not isinstance(self.output_directory, Path):
             raise TypeError("output_directory must be pathlib.Path")
         _validate_relative_output_directory(
             self.images_relative_path,
             "images_relative_path",
         )
+        require_non_empty_string(self.spine_version, "spine_version")
+        require_non_empty_string(self.rig_profile, "rig_profile")
+        if not isinstance(self.seam_mode, str):
+            raise TypeError("seam_mode must be str")
         if self.seam_mode not in {"AUTO", "CUSTOM"}:
             raise ValueError("seam_mode must be 'AUTO' or 'CUSTOM'")
-        if self.angle_limit_degrees <= 0.0 or self.angle_limit_degrees > 180.0:
-            raise ValueError("angle_limit_degrees must be in the range (0, 180]")
-        if self.bake_margin < 0:
-            raise ValueError("bake_margin cannot be negative")
-        if self.sequence_start_frame < 0:
-            raise ValueError("sequence_start_frame cannot be negative")
-        if self.sequence_frame_count < 0:
-            raise ValueError("sequence_frame_count cannot be negative")
+        require_finite_number(
+            self.angle_limit_degrees,
+            "angle_limit_degrees",
+            minimum=0.0,
+            maximum=180.0,
+            minimum_inclusive=False,
+        )
+        require_integer(self.bake_margin, "bake_margin", minimum=0)
+        require_integer(
+            self.sequence_start_frame,
+            "sequence_start_frame",
+            minimum=0,
+        )
+        require_integer(
+            self.sequence_frame_count,
+            "sequence_frame_count",
+            minimum=0,
+        )
+        if not isinstance(self.preserve_debug_artifacts, bool):
+            raise TypeError("preserve_debug_artifacts must be bool")
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,8 +106,22 @@ class ExportRequest:
     connected_object_ids: Tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.source_object_ids:
+        if not isinstance(self.source_object_ids, tuple) or not self.source_object_ids:
             raise ValueError("source_object_ids cannot be empty")
+        if not all(isinstance(value, str) and value.strip() for value in self.source_object_ids):
+            raise TypeError("source_object_ids must contain non-empty strings")
+        if len(self.source_object_ids) != len(set(self.source_object_ids)):
+            raise ValueError("source_object_ids cannot contain duplicates")
+        require_non_empty_string(self.active_object_id, "active_object_id")
+        if not isinstance(self.settings, ExportSettings):
+            raise TypeError("settings must be ExportSettings")
+        if not isinstance(self.connected_object_ids, tuple) or not all(
+            isinstance(value, str) and value.strip()
+            for value in self.connected_object_ids
+        ):
+            raise TypeError("connected_object_ids must contain non-empty strings")
+        if len(self.connected_object_ids) != len(set(self.connected_object_ids)):
+            raise ValueError("connected_object_ids cannot contain duplicates")
         if self.active_object_id not in self.source_object_ids:
             raise ValueError("active_object_id must be present in source_object_ids")
         unknown_connected = set(self.connected_object_ids) - set(self.source_object_ids)
@@ -121,6 +155,8 @@ class ExportResult:
     statistics: Mapping[str, int | float | str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.success, bool):
+            raise TypeError("success must be bool")
         if self.success and any(
             issue.severity is IssueSeverity.ERROR for issue in self.issues
         ):
