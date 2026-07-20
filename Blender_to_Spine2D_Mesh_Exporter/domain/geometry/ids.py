@@ -9,19 +9,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .contracts import require_identity, require_integer
+
 
 def _validate_non_negative_index(value: int, field_name: str) -> None:
-    if not isinstance(value, int):
-        raise TypeError(f"{field_name} must be int")
-    if value < 0:
-        raise ValueError(f"{field_name} cannot be negative")
+    require_integer(value, field_name, minimum=0)
 
 
-def _validate_object_id(value: str) -> None:
-    if not isinstance(value, str):
-        raise TypeError("object_id must be str")
-    if not value.strip():
-        raise ValueError("object_id cannot be empty")
+def _validate_object_id(value: str, field_name: str) -> None:
+    require_identity(value, field_name)
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -62,8 +58,8 @@ class SourceVertexId:
     vertex_index: int
 
     def __post_init__(self) -> None:
-        _validate_object_id(self.object_id)
-        _validate_non_negative_index(self.vertex_index, "vertex_index")
+        _validate_object_id(self.object_id, "SourceVertexId.object_id")
+        _validate_non_negative_index(self.vertex_index, "SourceVertexId.vertex_index")
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -72,8 +68,8 @@ class SourceEdgeId:
     edge_index: int
 
     def __post_init__(self) -> None:
-        _validate_object_id(self.object_id)
-        _validate_non_negative_index(self.edge_index, "edge_index")
+        _validate_object_id(self.object_id, "SourceEdgeId.object_id")
+        _validate_non_negative_index(self.edge_index, "SourceEdgeId.edge_index")
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -82,8 +78,8 @@ class SourceFaceId:
     face_index: int
 
     def __post_init__(self) -> None:
-        _validate_object_id(self.object_id)
-        _validate_non_negative_index(self.face_index, "face_index")
+        _validate_object_id(self.object_id, "SourceFaceId.object_id")
+        _validate_non_negative_index(self.face_index, "SourceFaceId.face_index")
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -101,6 +97,6 @@ class SourceLoopId:
     corner_index: int
 
     def __post_init__(self) -> None:
-        _validate_object_id(self.object_id)
-        _validate_non_negative_index(self.face_index, "face_index")
-        _validate_non_negative_index(self.corner_index, "corner_index")
+        _validate_object_id(self.object_id, "SourceLoopId.object_id")
+        _validate_non_negative_index(self.face_index, "SourceLoopId.face_index")
+        _validate_non_negative_index(self.corner_index, "SourceLoopId.corner_index")
