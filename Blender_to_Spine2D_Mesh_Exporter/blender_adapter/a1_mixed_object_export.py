@@ -10,8 +10,11 @@ from ..application import (
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
     A1MultiObjectStage,
+    A1OutputPreflightSource,
     ExportIssue,
+    preflight_a1_output_namespace,
 )
+from ..domain.baking import windows_path_identity
 from .a1_mixed_settings import build_connected_subgroup_settings
 from .a1_multi_object_contracts import (
     A1MultiObjectPreparationError,
@@ -19,7 +22,7 @@ from .a1_multi_object_contracts import (
     PreparedA1MultiObject,
     record_object_statistics,
 )
-from .a1_multi_object_export import prepare_a1_multi_object
+from .a1_multi_object_export import _source_object_name, prepare_a1_multi_object
 from .a1_object_preparation import (
     A1ObjectPreparationError,
     PreparedA1Object,
@@ -28,11 +31,30 @@ from .a1_object_preparation import (
 )
 
 
+def _preflight_mixed_sources(
+    sources: Tuple[A1MultiObjectSource, ...],
+    settings: A1MultiObjectExportSettings,
+) -> Tuple[Path, ...]:
+    result = preflight_a1_output_namespace(
+        output_root=settings.output_directory,
+        json_path=settings.json_path,
+        sources=tuple(
+            A1OutputPreflightSource(
+                owner=source.component_id,
+                object_name=_source_object_name(source),
+                settings=source.settings,
+            )
+            for source in sources
+        ),
+    )
+    return result.texture_paths
+
+
 def _validate_mixed_sources(
     connected_sources: Tuple[A1MultiObjectSource, ...],
     standalone_sources: Tuple[A1MultiObjectSource, ...],
     settings: A1MultiObjectExportSettings,
-) -> None:
+) -> Tuple[Path, ...]:
     if not isinstance(settings, A1MultiObjectExportSettings):
         raise TypeError("settings must be A1MultiObjectExportSettings")
     if settings.mode is not A1MultiObjectMode.MIXED:
@@ -64,6 +86,7 @@ def _validate_mixed_sources(
                 f"Component '{source.component_id}' uses output root '{source_root}', "
                 f"but mixed export uses '{output_root}'"
             )
+    return _preflight_mixed_sources(all_sources, settings)
 
 
 def _prepare_standalone_objects(
@@ -126,7 +149,9 @@ def _validate_final_paths(
 ) -> Tuple[Path, ...]:
     output_root = settings.output_directory.expanduser().resolve(strict=False)
     resolved_json = settings.json_path.expanduser().resolve(strict=False)
-    owner_by_path: dict[Path, str] = {resolved_json: "final mixed JSON"}
+    owner_by_identity: dict[Tuple[str, ...], tuple[str, Path]] = {
+        windows_path_identity(resolved_json): ("final mixed JSON", resolved_json)
+    }
     result: list[Path] = []
     for group_name, paths in (
         ("connected", connected_paths),
@@ -140,13 +165,16 @@ def _validate_final_paths(
                 raise ValueError(
                     f"Mixed {group_name} texture escapes output root: {resolved}"
                 ) from exc
-            previous = owner_by_path.get(resolved)
+            identity = windows_path_identity(resolved)
+            previous = owner_by_identity.get(identity)
             if previous is not None:
+                previous_owner, previous_path = previous
                 raise ValueError(
-                    f"Mixed output path collision '{resolved}' between {previous} "
-                    f"and {group_name} group"
+                    "Windows mixed output path collision between "
+                    f"{previous_owner} ({previous_path}) and {group_name} texture "
+                    f"({resolved})"
                 )
-            owner_by_path[resolved] = f"{group_name} texture"
+            owner_by_identity[identity] = (f"{group_name} texture", resolved)
             result.append(resolved)
     if not result:
         raise ValueError("mixed export contains no texture output tasks")
@@ -163,7 +191,11 @@ def prepare_a1_mixed_object(
 ) -> PreparedA1MultiObject:
     """Prepare both mixed subgroups and validate one shared output namespace."""
 
-    _validate_mixed_sources(connected_sources, standalone_sources, settings)
+    predicted_texture_paths = _validate_mixed_sources(
+        connected_sources,
+        standalone_sources,
+        settings,
+    )
     anchor = settings.anchor_component_id or connected_sources[0].component_id
     connected = prepare_a1_multi_object(
         connected_sources,
@@ -186,6 +218,7 @@ def prepare_a1_mixed_object(
         "connected_object_count": len(connected_sources),
         "standalone_object_count": len(standalone_sources),
         "mode": A1MultiObjectMode.MIXED.value,
+        "predicted_texture_output_count": len(predicted_texture_paths),
         "texture_output_count": len(texture_paths),
     }
     return PreparedA1MultiObject(
