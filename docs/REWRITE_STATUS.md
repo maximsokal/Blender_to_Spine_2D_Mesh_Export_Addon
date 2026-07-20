@@ -46,9 +46,46 @@ Recursive analysis supports renderer-specific outputs, muted bypasses, nested
 groups, instance-qualified IDs, cycles, bounded depth and no source-node
 mutation.
 
+## Material analysis ownership
+
+The Blender material adapter is physically decomposed:
+
+```text
+material_analysis_rna.py
+  -> material/object names, node types and renderer target
+  -> root node and dense slot freezing
+
+material_node_classification.py
+  -> procedural policy and ImageDependency extraction
+  -> deterministic dependency deduplication and total ordering
+
+material_graph_resolution.py
+  -> effective recursive graph or legacy root-node fallback
+  -> graph-analysis diagnostics
+
+material_slot_analysis.py
+  -> one immutable MaterialAnalysis
+
+material_object_analysis.py
+  -> dense object material-slot orchestration
+  -> ObjectMaterialAnalysis
+
+material_analyzer.py
+  -> compatibility re-exports only
+```
+
+`a1_texture_planning.py` imports the physical object owner. Public adapter
+exports use the physical error, slot and object owners. The historical
+`_classify_nodes()` alias still returns `(kind, node_types,
+image_dependencies, issues)`.
+
+Image dependency ordering now handles every domain-valid optional filepath.
+`None` and string paths cannot reach a Python `None < str` comparison, and the
+result does not depend on Blender node iteration order.
+
 ## Shader-graph analysis ownership
 
-The recursive material analyzer is physically decomposed:
+The recursive shader graph analyzer is physically decomposed:
 
 ```text
 shader_graph_rna.py
@@ -70,9 +107,9 @@ shader_graph_analyzer.py
   -> compatibility re-exports only
 ```
 
-`material_analyzer.py` and public adapter exports use physical owners. Snapshot
-and live Blender nodes remain exactly parallel so live mute and source-UV
-preflight retain their existing contract.
+`material_graph_resolution.py`, production graph runtime and public adapter
+exports use physical shader-graph owners. Snapshot and live Blender nodes remain
+exactly parallel so live mute and source-UV preflight retain their contract.
 
 ## Production shader capability ownership
 
@@ -317,20 +354,19 @@ The last complete automatic matrix before workflows became manual-only passed:
 - Blender 4.4 Camera Projection: success;
 - full Blender 4.4 Headless: success.
 
-For the newest production capability decomposition:
+For the newest material-analysis decomposition:
 
-- all new/replaced production modules compile;
-- nineteen focused local tests pass across the split mirror;
+- all new/replaced material-analysis modules compile;
+- thirteen focused source/behavior tests pass in a local split mirror;
 - the physical import graph is acyclic;
-- equal-name reused-group instance swaps fail closed;
-- node type, link, channel, dependency and issue changes fail closed;
-- live-node count/alignment is validated before source-UV inspection;
-- immutable and production audit enrichment share one finding-order contract;
-- Alpha proxy and named UV finding codes remain unchanged;
-- multiple active render UV layers fail explicitly;
-- `a1_texture_planning.py` imports physical owners;
-- compatibility public/private aliases remain;
-- operator-boundary checks include every split module;
+- effective reachable graph nodes override unreachable root editor nodes;
+- missing-output and graph-error paths retain root classification;
+- classification issues precede graph issues and duplicates retain first order;
+- optional `None`/string image paths have a total deterministic ordering;
+- dependency ordering is independent of node iteration order;
+- dense material-slot order and source object ID override remain unchanged;
+- public and historical private aliases remain;
+- operator-boundary checks include every split material module;
 - GitHub Actions remain disabled/manual-only.
 
 The complete pytest suite and real Blender matrices have not been rerun on the
