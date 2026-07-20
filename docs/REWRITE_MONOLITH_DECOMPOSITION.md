@@ -265,9 +265,10 @@ resolve material and renderer target
 -> build deterministic snapshot + parallel live-node tuple
 ```
 
-`material_analyzer.py` and the public adapter package import physical owners
-directly. Historical public and private names remain available from the
-compatibility facade.
+`material_graph_resolution.py`, production graph runtime and the public adapter
+package import physical shader-graph owners directly. Historical public and
+private names remain available from `shader_graph_analyzer.py` without retaining
+a second implementation.
 
 ## 9. Production shader capability gate
 
@@ -331,6 +332,65 @@ finding key/order contract is shared by immutable and production audits.
 
 Historical public and private names remain available from the facade.
 
+## 10. Blender material analysis
+
+The former `material_analyzer.py` mixed Blender RNA reads, renderer-target
+resolution, Image datablock extraction, legacy kind policy, recursive graph
+fallback, slot orchestration and public compatibility names.
+
+```text
+material_analysis_error.py
+  -> MaterialAnalysisError
+
+material_analysis_rna.py
+  -> material/object names and node types
+  -> root nodes and dense material-slot freezing
+  -> explicit or active-Scene renderer target
+
+material_node_classification.py
+  -> procedural node policy
+  -> ImageDependency extraction, deduplication and total ordering
+  -> typed MaterialNodeClassification
+  -> historical tuple adapter
+
+material_graph_resolution.py
+  -> effective reachable graph resolution
+  -> missing-output and graph-error root fallback
+  -> graph diagnostics
+
+material_slot_analysis.py
+  -> empty/non-node handling
+  -> one immutable MaterialAnalysis
+
+material_object_analysis.py
+  -> MESH validation and dense slot orchestration
+  -> ObjectMaterialAnalysis
+
+material_analyzer.py
+  -> compatibility re-exports only
+```
+
+Physical material flow:
+
+```text
+resolve object and renderer target
+-> freeze dense material slots
+-> validate each slot
+-> resolve effective reachable graph or root fallback
+-> classify selected nodes and image dependencies
+-> merge classification issues before graph issues
+-> build MaterialAnalysis values
+-> build ObjectMaterialAnalysis
+```
+
+`a1_texture_planning.py` imports `material_object_analysis.py` directly. Public
+adapter exports use physical error, slot and object owners. The facade retains
+historical private aliases, including the four-item `_classify_nodes()` tuple.
+
+Image dependency deduplication retains its historical raw key. A separate total
+sort key handles optional paths, so `filepath=None` and a string path cannot
+raise during sorting and result order no longer depends on node order.
+
 ## Single Connect fallback
 
 Exactly one selected object with `Connect` enabled still falls back to
@@ -348,6 +408,8 @@ postprocess and physical grouped output rather than the compatibility executor.
 Shader-graph planning follows physical analysis/traversal owners rather than
 `shader_graph_analyzer.py`. Capability planning follows physical production
 object-audit and routing owners rather than `production_shader_capabilities.py`.
+Material planning follows physical graph-resolution, slot and object owners
+rather than `material_analyzer.py`.
 
 ## Validation performed outside CI
 
@@ -355,19 +417,19 @@ No GitHub Actions workflow was triggered.
 
 Validation for the latest decomposition includes:
 
-- Python compilation of every new/replaced production capability module;
-- source import-graph loading with domain stubs;
+- Python compilation of every new/replaced material-analysis module;
+- thirteen focused source and behavior tests in a local split mirror;
 - acyclic physical import ownership;
-- compatibility facade alias checks;
-- renderer-specific graph parity across qualified nodes, links and semantics;
-- equal-name reused-group instance swap rejection;
-- live-node count and ordering checks before UV inspection;
-- shared finding ordering and first-reason retention;
-- Alpha proxy and named UV finding-code preservation;
-- multiple active render UV rejection;
-- physical caller imports;
+- compatibility facade alias and return-type checks;
+- effective reachable-node classification;
+- missing-output and graph-error root fallback;
+- classification-before-graph issue ordering and deduplication;
+- optional `None`/string ImageDependency filepath total ordering;
+- dependency ordering independent of node iteration order;
+- dense material-slot order and source object ID preservation;
+- physical production and package imports;
 - absence of `bpy.ops` access in all split modules;
-- preservation of existing single/grouped B4 architecture boundaries.
+- preservation of production capability and B4 architecture boundaries.
 
 The complete repository pytest suite and real Blender 4.4 integration matrices
 remain separate manual release gates.
