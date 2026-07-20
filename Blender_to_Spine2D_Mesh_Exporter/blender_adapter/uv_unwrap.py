@@ -24,7 +24,12 @@ from ..domain.uv import (
     calculate_uv_statistics,
 )
 from .context_state import BlenderContextError, activate_object_for_operator
-from .mesh_writer import MeshWriteError, temporary_mesh_object
+from .mesh_writer import (
+    MeshTopologyCorrespondence,
+    MeshWriteError,
+    build_mesh_topology_correspondence,
+    temporary_mesh_object,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +127,11 @@ def _require_finished(result: Any, operator_name: str) -> None:
         )
 
 
-def _call_operator(operator: Any, operator_name: str, arguments: Mapping[str, object]) -> None:
+def _call_operator(
+    operator: Any,
+    operator_name: str,
+    arguments: Mapping[str, object],
+) -> None:
     poll = getattr(operator, "poll", None)
     if callable(poll) and not poll():
         raise UvUnwrapError(f"bpy.ops.uv.{operator_name}.poll() returned False")
@@ -204,38 +213,37 @@ def _capture_uv_layout(
     snapshot: MeshSnapshot,
     mesh: Any,
     layer_name: str,
+    correspondence: MeshTopologyCorrespondence,
 ) -> UvLayout:
+    if not isinstance(correspondence, MeshTopologyCorrespondence):
+        raise TypeError("correspondence must be MeshTopologyCorrespondence")
+    if correspondence.snapshot_id != snapshot.snapshot_id:
+        raise UvUnwrapError(
+            "Topology correspondence belongs to a different snapshot"
+        )
+
     layer = mesh.uv_layers.get(layer_name)
     if layer is None:
         raise UvUnwrapError(f"Result UV layer '{layer_name}' is missing")
-    if len(mesh.polygons) != len(snapshot.faces):
-        raise UvUnwrapError(
-            "Temporary mesh polygon count changed during UV operations"
-        )
 
     coordinates: list[UvLoopCoordinate] = []
     loop_map = snapshot.loop_by_id()
-    for face, polygon in zip(snapshot.faces, mesh.polygons):
-        if int(polygon.loop_total) != len(face.loop_ids):
+    for loop_id, mesh_loop_index in correspondence.loop_to_mesh_index:
+        try:
+            uv_value = layer.data[mesh_loop_index].uv
+            coordinate = (float(uv_value[0]), float(uv_value[1]))
+        except Exception as exc:
             raise UvUnwrapError(
-                f"Face {face.id.index} loop count changed during UV operations"
+                f"Unable to read UV for loop {loop_id.index} "
+                f"from Blender loop {mesh_loop_index}"
+            ) from exc
+        coordinates.append(
+            UvLoopCoordinate(
+                loop_id=loop_id,
+                source_loop_id=loop_map[loop_id].source_id,
+                coordinate=coordinate,
             )
-        for corner_index, loop_id in enumerate(face.loop_ids):
-            mesh_loop_index = int(polygon.loop_start) + corner_index
-            try:
-                uv_value = layer.data[mesh_loop_index].uv
-                coordinate = (float(uv_value[0]), float(uv_value[1]))
-            except Exception as exc:
-                raise UvUnwrapError(
-                    f"Unable to read UV for face {face.id.index}, corner {corner_index}"
-                ) from exc
-            coordinates.append(
-                UvLoopCoordinate(
-                    loop_id=loop_id,
-                    source_loop_id=loop_map[loop_id].source_id,
-                    coordinate=coordinate,
-                )
-            )
+        )
 
     coordinates.sort(key=lambda entry: entry.loop_id.index)
     if len(coordinates) != len(snapshot.loops):
@@ -307,10 +315,22 @@ def unwrap_snapshot_uv(
             update = getattr(temporary.mesh, "update", None)
             if callable(update):
                 update()
+            try:
+                correspondence = build_mesh_topology_correspondence(
+                    snapshot,
+                    temporary.mesh,
+                    stage="post-UV-operators",
+                )
+            except MeshWriteError as exc:
+                raise UvUnwrapError(
+                    "Temporary mesh topology no longer corresponds to the "
+                    f"snapshot after UV operations: {exc}"
+                ) from exc
             layout = _capture_uv_layout(
                 snapshot,
                 temporary.mesh,
                 resolved_settings.layer_name,
+                correspondence,
             )
             updated_snapshot = apply_uv_layout(snapshot, layout)
             statistics = calculate_uv_statistics(
