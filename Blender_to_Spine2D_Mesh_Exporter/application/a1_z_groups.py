@@ -8,12 +8,16 @@ comparing transformed floating-point coordinates.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite
 from typing import Tuple
 
 from ..domain.geometry import MeshSnapshot, MeshSnapshotValidator, SourceVertexId
 from ..domain.spine.legacy_rig_contracts import LegacyZGroup
 from .a1_attachment_projection import A1VertexZBinding
+from .a1_numeric_contracts import (
+    require_finite_number,
+    require_identity,
+    require_integer,
+)
 
 
 class A1ZGroupAssignmentError(ValueError):
@@ -26,10 +30,8 @@ class A1ZGroupHeightOverride:
     height_real_pixels: float
 
     def __post_init__(self) -> None:
-        for field_name in ("z_value", "height_real_pixels"):
-            value = getattr(self, field_name)
-            if not isinstance(value, (int, float)) or not isfinite(float(value)):
-                raise ValueError(f"{field_name} must be finite")
+        require_finite_number(self.z_value, "z_value")
+        require_finite_number(self.height_real_pixels, "height_real_pixels")
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,8 +42,7 @@ class A1SourceVertexZBinding:
     def __post_init__(self) -> None:
         if not isinstance(self.source_vertex_id, SourceVertexId):
             raise TypeError("source_vertex_id must be SourceVertexId")
-        if not isinstance(self.z_group_index, int) or self.z_group_index < 0:
-            raise ValueError("z_group_index must be a non-negative integer")
+        require_integer(self.z_group_index, "z_group_index", minimum=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,14 +53,21 @@ class A1ZGroupAssignmentPlan:
     source_bindings: Tuple[A1SourceVertexZBinding, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.source_snapshot_id, str) or not self.source_snapshot_id.strip():
-            raise ValueError("source_snapshot_id must be a non-empty string")
-        if not isinstance(self.z_index_base, int) or self.z_index_base < 0:
-            raise ValueError("z_index_base must be a non-negative integer")
+        require_identity(self.source_snapshot_id, "source_snapshot_id")
+        require_integer(self.z_index_base, "z_index_base", minimum=0)
         if not isinstance(self.groups, tuple) or not self.groups:
             raise ValueError("groups must be a non-empty tuple")
+        if not all(isinstance(group, LegacyZGroup) for group in self.groups):
+            raise TypeError("groups must contain LegacyZGroup values")
         if not isinstance(self.source_bindings, tuple) or not self.source_bindings:
             raise ValueError("source_bindings must be a non-empty tuple")
+        if not all(
+            isinstance(binding, A1SourceVertexZBinding)
+            for binding in self.source_bindings
+        ):
+            raise TypeError(
+                "source_bindings must contain A1SourceVertexZBinding values"
+            )
         source_ids = tuple(binding.source_vertex_id for binding in self.source_bindings)
         if len(source_ids) != len(set(source_ids)):
             raise ValueError("source_bindings contain duplicate SourceVertexId values")
@@ -145,8 +153,7 @@ def build_a1_z_group_assignment(
         raise TypeError("height_overrides must be tuple")
     if not all(isinstance(item, A1ZGroupHeightOverride) for item in height_overrides):
         raise TypeError("height_overrides must contain A1ZGroupHeightOverride values")
-    if not isinstance(z_index_base, int) or z_index_base < 0:
-        raise ValueError("z_index_base must be a non-negative integer")
+    require_integer(z_index_base, "z_index_base", minimum=0)
 
     override_values = tuple(float(item.z_value) for item in height_overrides)
     if len(override_values) != len(set(override_values)):
