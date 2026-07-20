@@ -22,11 +22,9 @@ from ..domain.baking import (
     sanitize_filename_stem,
 )
 from ..domain.geometry import MeshSnapshot, ModifierLineagePolicy
-from ..domain.spine import (
-    LegacyAttachmentSequence,
-    UniformScaleMode,
-    calculate_uniform_scale,
-)
+from ..domain.spine import LegacyAttachmentSequence
+from ..domain.spine.legacy_rig_contracts import UniformScaleMode
+from ..domain.spine.legacy_rig_scale import calculate_uniform_scale
 from ..domain.uv import UvUnwrapSettings
 from .a1_geometry_preparation import A1GeometryPreparationSettings
 from .contracts import ExportSettings
