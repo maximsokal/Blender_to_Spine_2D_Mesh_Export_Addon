@@ -7,6 +7,11 @@ import bpy
 
 from . import config
 from .config import AddonLoggingSettings, LoggingModuleSettings
+from .infrastructure.blender_registration import (
+    class_cleanup_actions,
+    register_classes_transactionally,
+    unregister_all_best_effort,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -157,10 +162,44 @@ CLASSES_TO_REGISTER = (
 )
 
 
+def register() -> None:
+    """Register all preference classes atomically in dependency order."""
+
+    try:
+        register_classes_transactionally(
+            CLASSES_TO_REGISTER,
+            register_class=bpy.utils.register_class,
+            unregister_class=bpy.utils.unregister_class,
+        )
+    except Exception:
+        logger.exception("Addon preference registration failed")
+        raise
+    logger.debug("Addon preference classes registered")
+
+
+def unregister() -> None:
+    """Attempt every preference-class cleanup before reporting aggregate failure."""
+
+    try:
+        unregister_all_best_effort(
+            class_cleanup_actions(
+                CLASSES_TO_REGISTER,
+                unregister_class=bpy.utils.unregister_class,
+            ),
+            operation="addon preference unregistration",
+        )
+    except Exception:
+        logger.exception("Addon preference unregistration failed")
+        raise
+    logger.debug("Addon preference classes unregistered")
+
+
 __all__ = [
     "CLASSES_TO_REGISTER",
     "ModelToSpine2DAddonPreferences",
     "SPINE2D_OT_RefreshLoggingModules",
     "WM_OT_UninstallAddon",
     "initialize_logging_preferences",
+    "register",
+    "unregister",
 ]
