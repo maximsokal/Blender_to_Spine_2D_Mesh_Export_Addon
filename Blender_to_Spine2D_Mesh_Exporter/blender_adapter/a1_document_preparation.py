@@ -19,7 +19,11 @@ from ..application import (
     calculate_a1_mesh_bounds,
 )
 from ..domain.baking import CameraProjectionPlan
-from ..domain.spine import LegacyRigBuildRequest, LegacyRigBuildResult, build_legacy_rig
+from ..domain.spine.legacy_rig_assembly import build_legacy_rig
+from ..domain.spine.legacy_rig_contracts import (
+    LegacyRigBuildRequest,
+    LegacyRigBuildResult,
+)
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
     StatisticsValue,
