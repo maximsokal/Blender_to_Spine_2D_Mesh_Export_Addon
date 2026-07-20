@@ -43,7 +43,7 @@ class A1SourceUvBoundaryMode(str, Enum):
     """Select which pre-unwrap UV layout may influence A1 segmentation.
 
     ``DISABLED`` is the Rewrite default because A1 generates a new shared
-    ``SpineBakeUV`` layout after segmentation and decomposition. The source
+    ``SpineBakeUV`` layout after segmentation and decomposition.  The source
     Blender active UV layer therefore must not silently change export topology.
 
     ``EXPLICIT_LAYER`` opts into source-UV discontinuity cuts using the exact
@@ -89,10 +89,6 @@ class A1SingleObjectExportSettings:
         ModifierLineagePolicy.STRICT_PRESERVE
     )
     geometry: A1GeometryPreparationSettings = A1GeometryPreparationSettings()
-    source_uv_boundary_mode: A1SourceUvBoundaryMode = (
-        A1SourceUvBoundaryMode.DISABLED
-    )
-    source_uv_boundary_layer_name: str | None = None
     uv: UvUnwrapSettings = UvUnwrapSettings()
     texture_format: TextureFormat = TextureFormat.PNG
     material_policy: BakeMaterialPolicy = BakeMaterialPolicy.LEGACY_ANY_IMAGE
@@ -110,6 +106,11 @@ class A1SingleObjectExportSettings:
     include_control_icons: bool = False
     include_preview_animation: bool = False
     json_indent: int = 2
+    # Appended to preserve the positional layout of the pre-hardening dataclass.
+    source_uv_boundary_mode: A1SourceUvBoundaryMode = (
+        A1SourceUvBoundaryMode.DISABLED
+    )
+    source_uv_boundary_layer_name: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.export, ExportSettings):
