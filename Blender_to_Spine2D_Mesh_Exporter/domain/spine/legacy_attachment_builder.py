@@ -26,6 +26,58 @@ from .weighted_vertices import (
 )
 
 
+def _require_integer(
+    value: object,
+    field_name: str,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    """Validate one strict integer while rejecting Python ``bool`` values."""
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be int")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{field_name} must be at least {minimum}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{field_name} must be at most {maximum}")
+    return value
+
+
+def _require_finite_number(
+    value: object,
+    field_name: str,
+    *,
+    minimum: float | None = None,
+    minimum_inclusive: bool = True,
+) -> float:
+    """Validate one finite scalar without accepting ``bool`` as 0 or 1."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{field_name} must be a finite number")
+    resolved = float(value)
+    if not isfinite(resolved):
+        raise ValueError(f"{field_name} must be finite")
+    if minimum is not None:
+        invalid = resolved < minimum if minimum_inclusive else resolved <= minimum
+        if invalid:
+            operator = ">=" if minimum_inclusive else ">"
+            raise ValueError(f"{field_name} must be {operator} {minimum}")
+    return resolved
+
+
+def _require_finite_pair(value: object, field_name: str) -> Tuple[float, float]:
+    """Validate a two-component immutable finite vector."""
+
+    if not isinstance(value, tuple):
+        raise TypeError(f"{field_name} must be tuple")
+    if len(value) != 2:
+        raise ValueError(f"{field_name} must contain exactly two values")
+    _require_finite_number(value[0], f"{field_name}[0]")
+    _require_finite_number(value[1], f"{field_name}[1]")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class LegacyAttachmentVertex:
     """One exported Spine mesh vertex and its exact legacy vertex-bone binding."""
@@ -36,24 +88,10 @@ class LegacyAttachmentVertex:
     z_group_index: int
 
     def __post_init__(self) -> None:
-        if not isinstance(self.index, int) or self.index < 0:
-            raise ValueError("index must be a non-negative integer")
-        for field_name, value in (
-            ("uv", self.uv),
-            ("bone_position_pixels", self.bone_position_pixels),
-        ):
-            if (
-                not isinstance(value, tuple)
-                or len(value) != 2
-                or not all(
-                    isinstance(component, (int, float))
-                    and isfinite(float(component))
-                    for component in value
-                )
-            ):
-                raise ValueError(f"{field_name} must contain two finite values")
-        if not isinstance(self.z_group_index, int) or self.z_group_index < 0:
-            raise ValueError("z_group_index must be a non-negative integer")
+        _require_integer(self.index, "index", minimum=0)
+        _require_finite_pair(self.uv, "uv")
+        _require_finite_pair(self.bone_position_pixels, "bone_position_pixels")
+        _require_integer(self.z_group_index, "z_group_index", minimum=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,16 +102,16 @@ class LegacyAttachmentSequence:
     setup: int | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.count, int) or self.count <= 0:
-            raise ValueError("count must be a positive integer")
-        if not isinstance(self.start, int) or self.start < 0:
-            raise ValueError("start must be a non-negative integer")
-        if not isinstance(self.digits, int) or not 1 <= self.digits <= 12:
-            raise ValueError("digits must be in [1, 12]")
-        if self.setup is not None and (
-            not isinstance(self.setup, int) or not 0 <= self.setup < self.count
-        ):
-            raise ValueError("setup must be a valid sequence frame index or None")
+        _require_integer(self.count, "count", minimum=1)
+        _require_integer(self.start, "start", minimum=0)
+        _require_integer(self.digits, "digits", minimum=1, maximum=12)
+        if self.setup is not None:
+            _require_integer(
+                self.setup,
+                "setup",
+                minimum=0,
+                maximum=self.count - 1,
+            )
 
     @property
     def resolved_setup(self) -> int:
@@ -118,12 +156,18 @@ class LegacyMeshAttachmentRequest:
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field_name} must be a non-empty string")
-        for field_name in ("width", "height"):
-            value = getattr(self, field_name)
-            if not isinstance(value, (int, float)) or not isfinite(float(value)):
-                raise ValueError(f"{field_name} must be finite")
-            if value <= 0:
-                raise ValueError(f"{field_name} must be positive")
+        _require_finite_number(
+            self.width,
+            "width",
+            minimum=0.0,
+            minimum_inclusive=False,
+        )
+        _require_finite_number(
+            self.height,
+            "height",
+            minimum=0.0,
+            minimum_inclusive=False,
+        )
         if not isinstance(self.vertices, tuple) or not self.vertices:
             raise ValueError("vertices must be a non-empty tuple")
         if not all(isinstance(vertex, LegacyAttachmentVertex) for vertex in self.vertices):
@@ -135,8 +179,12 @@ class LegacyMeshAttachmentRequest:
             raise ValueError("triangles must be a tuple divisible into triples")
         if not isinstance(self.edges, tuple) or len(self.edges) % 2 != 0:
             raise ValueError("edges must be a tuple divisible into pairs")
-        if not isinstance(self.hull, int) or not 0 <= self.hull <= len(self.vertices):
-            raise ValueError("hull must be in [0, vertex_count]")
+        _require_integer(
+            self.hull,
+            "hull",
+            minimum=0,
+            maximum=len(self.vertices),
+        )
         if self.sequence is not None and not isinstance(
             self.sequence, LegacyAttachmentSequence
         ):
@@ -148,13 +196,12 @@ class LegacyMeshAttachmentRequest:
             ("edges", self.edges),
         ):
             for value_index, value in enumerate(values):
-                if not isinstance(value, int):
-                    raise TypeError(f"{field_name}[{value_index}] must be int")
-                if value < 0 or value >= vertex_count:
-                    raise ValueError(
-                        f"{field_name}[{value_index}]={value} is outside "
-                        f"[0, {vertex_count})"
-                    )
+                _require_integer(
+                    value,
+                    f"{field_name}[{value_index}]",
+                    minimum=0,
+                    maximum=vertex_count - 1,
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,8 +213,11 @@ class LegacyAttachmentComponent:
     slot: Slot
 
     def __post_init__(self) -> None:
-        if not isinstance(self.vertex_bone_start_index, int) or self.vertex_bone_start_index < 0:
-            raise ValueError("vertex_bone_start_index must be a non-negative integer")
+        _require_integer(
+            self.vertex_bone_start_index,
+            "vertex_bone_start_index",
+            minimum=0,
+        )
         if len(self.vertex_bones) != len(self.request.vertices):
             raise ValueError("one vertex bone is required for every attachment vertex")
 
@@ -248,8 +298,11 @@ def _build_weighted_stream(
     request: LegacyMeshAttachmentRequest,
     first_vertex_bone_index: int,
 ) -> Tuple[float | int, ...]:
-    if not isinstance(first_vertex_bone_index, int) or first_vertex_bone_index < 0:
-        raise ValueError("first_vertex_bone_index must be a non-negative integer")
+    _require_integer(
+        first_vertex_bone_index,
+        "first_vertex_bone_index",
+        minimum=0,
+    )
     weighted = tuple(
         WeightedVertex(
             (
