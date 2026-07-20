@@ -35,17 +35,19 @@ def test_unwrap_settings_own_explicit_policy_and_epsilon():
     assert 'if numeric_values["range_epsilon"] < 0.0' in source
 
 
-def test_full_object_unwrap_is_checked_before_region_propagation():
+def test_shared_unwrap_is_diagnostic_until_bake_mode_is_known():
     source = read(UV_PREPARATION)
 
-    enforce_index = source.index("range_report = enforce_uv_range(")
+    inspect_index = source.index("range_report = inspect_uv_range(")
     propagate_index = source.index("uv_regions = propagate_texturing_uv_to_regions(")
-    assert enforce_index < propagate_index
+    assert inspect_index < propagate_index
+    assert "enforce_uv_range(" not in source
+    assert "cannot yet know whether material planning" in source
     assert "uv_outside_range_tolerance" in source
     assert "uv.range_policy is WARN_ONLY" in source
 
 
-def test_propagated_regions_are_rechecked_before_attachment_projection():
+def test_propagated_object_bake_regions_are_checked_before_attachment_projection():
     source = read(DOCUMENT_ASSEMBLY)
 
     validate_index = source.index("enforce_uv_range(")
