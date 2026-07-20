@@ -51,6 +51,14 @@ from .a1_single_object import (
     resolve_a1_names,
     resolve_a1_output_paths,
 )
+from .a1_output_preflight import (
+    A1OutputNamespacePreflight,
+    A1OutputPathClaim,
+    A1OutputPathKind,
+    A1OutputPreflightSource,
+    preflight_a1_output_namespace,
+    validate_a1_output_claims,
+)
 from .a1_texturing_layout import (
     A1TexturingLayoutError,
     A1TexturingTopology,
@@ -89,6 +97,10 @@ __all__ = [
     "A1MultiObjectExportSettings",
     "A1MultiObjectMode",
     "A1MultiObjectStage",
+    "A1OutputNamespacePreflight",
+    "A1OutputPathClaim",
+    "A1OutputPathKind",
+    "A1OutputPreflightSource",
     "A1PreparedRegion",
     "A1ResolvedOutputPaths",
     "A1SingleObjectExportSettings",
@@ -123,9 +135,11 @@ __all__ = [
     "build_camera_projection_quad_snapshot",
     "calculate_a1_main_position_pixels",
     "calculate_a1_mesh_bounds",
+    "preflight_a1_output_namespace",
     "prepare_a1_geometry_regions",
     "project_triangulated_disk_attachment",
     "propagate_texturing_uv_to_regions",
     "resolve_a1_names",
     "resolve_a1_output_paths",
+    "validate_a1_output_claims",
 ]
