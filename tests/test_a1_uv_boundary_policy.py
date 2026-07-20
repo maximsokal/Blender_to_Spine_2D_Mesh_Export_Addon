@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 
 import pytest
@@ -8,7 +8,13 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1SourceUvBoundaryMode,
     ExportSettings,
 )
-from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import SegmentationSettings
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_source_geometry_preparation import (
+    _resolve_source_uv_boundary_layer,
+)
+from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import (
+    MeshSnapshot,
+    SegmentationSettings,
+)
 
 
 def make_settings(tmp_path: Path, **changes) -> A1SingleObjectExportSettings:
@@ -108,3 +114,68 @@ def test_uv_boundary_policy_does_not_override_custom_seam_mode(tmp_path):
     assert resolved.uv_layer_name == "SourceUV"
     assert resolved.split_by_angle is False
     assert resolved.respect_seams is True
+
+
+def make_uv_only_snapshot(*, active_uv_layer: str | None) -> MeshSnapshot:
+    return MeshSnapshot(
+        snapshot_id="uv-policy",
+        source_object_id="Object",
+        object_name="Object",
+        vertices=(),
+        edges=(),
+        loops=(),
+        faces=(),
+        uv_layer_names=("SourceUV", "OtherUV"),
+        active_uv_layer=active_uv_layer,
+        render_uv_layer=active_uv_layer,
+    )
+
+
+def test_new_uv_policy_fields_are_appended_for_positional_compatibility():
+    names = tuple(field.name for field in fields(A1SingleObjectExportSettings))
+
+    assert names[-2:] == (
+        "source_uv_boundary_mode",
+        "source_uv_boundary_layer_name",
+    )
+
+
+def test_disabled_mode_never_resolves_the_active_source_layer(tmp_path):
+    snapshot = make_uv_only_snapshot(active_uv_layer="SourceUV")
+
+    assert _resolve_source_uv_boundary_layer(
+        snapshot,
+        make_settings(tmp_path),
+    ) is None
+
+
+def test_explicit_mode_rejects_a_layer_missing_from_the_snapshot(tmp_path):
+    settings = make_settings(
+        tmp_path,
+        source_uv_boundary_mode=A1SourceUvBoundaryMode.EXPLICIT_LAYER,
+        source_uv_boundary_layer_name="MissingUV",
+    )
+
+    with pytest.raises(ValueError, match="is absent from snapshot"):
+        _resolve_source_uv_boundary_layer(
+            make_uv_only_snapshot(active_uv_layer="SourceUV"),
+            settings,
+        )
+
+
+def test_legacy_mode_requires_and_resolves_the_active_layer(tmp_path):
+    settings = make_settings(
+        tmp_path,
+        source_uv_boundary_mode=A1SourceUvBoundaryMode.ACTIVE_LAYER_LEGACY,
+    )
+
+    assert _resolve_source_uv_boundary_layer(
+        make_uv_only_snapshot(active_uv_layer="OtherUV"),
+        settings,
+    ) == "OtherUV"
+
+    with pytest.raises(ValueError, match="requires the source mesh"):
+        _resolve_source_uv_boundary_layer(
+            make_uv_only_snapshot(active_uv_layer=None),
+            settings,
+        )
