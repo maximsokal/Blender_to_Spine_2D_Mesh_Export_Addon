@@ -22,7 +22,11 @@ class LegacyRigProfile:
             raise ValueError("profile_id must be a non-empty string")
         if not isinstance(self.root_name, str) or not self.root_name.strip():
             raise ValueError("root_name must be a non-empty string")
-        if not isinstance(self.z_index_base, int) or self.z_index_base < 0:
+        if (
+            isinstance(self.z_index_base, bool)
+            or not isinstance(self.z_index_base, int)
+            or self.z_index_base < 0
+        ):
             raise ValueError("z_index_base must be a non-negative integer")
 
     def _require_prefix(self, prefix: str) -> str:
@@ -115,26 +119,42 @@ class LegacyRigProfile:
         )
 
     def z_scale_bone(self, prefix: str, index: int) -> str:
-        if not isinstance(index, int) or index < self.z_index_base:
+        if (
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or index < self.z_index_base
+        ):
             raise ValueError(
                 f"index must be an integer >= z_index_base ({self.z_index_base})"
             )
         return f"{self._require_prefix(prefix)}_{index}_scale"
 
     def z_bone(self, prefix: str, index: int) -> str:
-        if not isinstance(index, int) or index < self.z_index_base:
+        if (
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or index < self.z_index_base
+        ):
             raise ValueError(
                 f"index must be an integer >= z_index_base ({self.z_index_base})"
             )
         return f"{self._require_prefix(prefix)}_{index}"
 
     def segment_slot(self, prefix: str, segment_index: int) -> str:
-        if not isinstance(segment_index, int) or segment_index < 0:
+        if (
+            isinstance(segment_index, bool)
+            or not isinstance(segment_index, int)
+            or segment_index < 0
+        ):
             raise ValueError("segment_index must be a non-negative integer")
         return f"{self._require_prefix(prefix)}_Segment_{segment_index}"
 
     def vertex_bone(self, segment_name: str, vertex_index: int) -> str:
         name = self._require_prefix(segment_name)
-        if not isinstance(vertex_index, int) or vertex_index < 0:
+        if (
+            isinstance(vertex_index, bool)
+            or not isinstance(vertex_index, int)
+            or vertex_index < 0
+        ):
             raise ValueError("vertex_index must be a non-negative integer")
         return f"{name}_vertex_{vertex_index}"
