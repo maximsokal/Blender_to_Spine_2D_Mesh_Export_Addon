@@ -7,7 +7,7 @@ from math import isfinite
 from typing import Tuple
 
 from .composition import SpineDocumentCompositionResult
-from .legacy_rig_builder import UniformScaleMode
+from .legacy_rig_contracts import UniformScaleMode
 from .model import SpineDocument
 
 
