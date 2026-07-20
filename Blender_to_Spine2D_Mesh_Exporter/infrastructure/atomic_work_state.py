@@ -150,7 +150,9 @@ def _windows_process_is_alive(process_id: int) -> bool:
     """Query process state without using ``os.kill(pid, 0)`` on Windows.
 
     Python documents that non-console signals on Windows call TerminateProcess, so
-    signal zero is not a safe liveness probe there.
+    signal zero is not a safe liveness probe there. Access-denied probes fail closed
+    as active because deleting another live process's work file is worse than
+    deferring recovery.
     """
 
     try:
@@ -158,6 +160,7 @@ def _windows_process_is_alive(process_id: int) -> bool:
         from ctypes import wintypes
 
         process_query_limited_information = 0x1000
+        error_access_denied = 5
         still_active = 259
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         open_process = kernel32.OpenProcess
@@ -179,12 +182,12 @@ def _windows_process_is_alive(process_id: int) -> bool:
             process_id,
         )
         if not handle:
-            return False
+            return ctypes.get_last_error() == error_access_denied
         try:
             exit_code = wintypes.DWORD()
-            return bool(
-                get_exit_code(handle, ctypes.byref(exit_code))
-            ) and int(exit_code.value) == still_active
+            if not get_exit_code(handle, ctypes.byref(exit_code)):
+                return ctypes.get_last_error() == error_access_denied
+            return int(exit_code.value) == still_active
         finally:
             close_handle(handle)
     except (AttributeError, ImportError, OSError, TypeError, ValueError):
