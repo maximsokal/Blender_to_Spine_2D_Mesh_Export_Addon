@@ -64,8 +64,8 @@ class ConnectedGroupSettings:
     anchor_component_id: str | None = None
     z_tolerance: float = 1e-4
     scale_mode: UniformScaleMode = UniformScaleMode.AVERAGE
-    namespace_animations: bool = True
     animation_separator: str = "/"
+    namespace_animations: bool = True
 
     def __post_init__(self) -> None:
         for field_name in ("texture_width", "texture_height"):
