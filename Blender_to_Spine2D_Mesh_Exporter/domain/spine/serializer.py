@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from .curve_timeline_contract import validate_animation_curves
 from .deform_timeline_contract import validate_animation_deform_timelines
+from .linked_mesh_contract import validate_setup_linked_meshes
 from .model import (
     Bone,
     IKConstraint,
@@ -170,6 +171,10 @@ class SpineSerializer:
         if not isinstance(document, SpineDocument):
             raise TypeError("document must be SpineDocument")
         self._validator.validate_or_raise(document)
+        validate_setup_linked_meshes(
+            document.skins,
+            path="document.skins",
+        )
         validate_animation_slot_color_timelines(
             document.animations,
             slot_names=tuple(slot.name for slot in document.slots),
