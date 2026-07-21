@@ -35,15 +35,15 @@ def test_typed_and_raw_attachments_share_one_metadata_helper():
     assert "_validate_attachment_metadata(attachment, path=attachment_path)" in source
 
 
-def test_attachment_color_contract_matches_runtime_string_forms():
+def test_attachment_color_contract_matches_official_rgba_format():
     source = read(MODEL)
     helper_index = source.index("def _validate_attachment_metadata(")
     finite_sequence_index = source.index("def _validate_finite_sequence(")
     helper_source = source[helper_index:finite_sequence_index]
 
-    assert 'color.startswith("#")' in helper_source
-    assert "len(normalized) not in (6, 8)" in helper_source
-    assert 'fullmatch(r"[0-9A-Fa-f]+", normalized)' in helper_source
+    assert "len(color) != 8" in helper_source
+    assert 'fullmatch(r"[0-9A-Fa-f]{8}", color)' in helper_source
+    assert 'color.startswith("#")' not in helper_source
 
 
 def test_metadata_validation_does_not_consume_or_rewrite_extra_fields():
