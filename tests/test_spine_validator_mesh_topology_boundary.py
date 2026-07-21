@@ -70,7 +70,14 @@ def test_validator_owns_explicit_triangle_and_edge_issue_codes():
 def test_serializer_cannot_bypass_complete_spine_validation():
     source = read(SERIALIZER)
 
-    validation_index = source.index("self._validator.validate_or_raise(document)")
-    serialization_index = source.index("data: dict[str, Any] = {")
+    to_dict_index = source.index("def to_dict(")
+    validation_index = source.index(
+        "self._validator.validate_or_raise(document)",
+        to_dict_index,
+    )
+    serialization_index = source.index(
+        "data: dict[str, Any] = {",
+        validation_index,
+    )
 
-    assert validation_index < serialization_index
+    assert to_dict_index < validation_index < serialization_index
