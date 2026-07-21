@@ -17,6 +17,7 @@ from .model import (
     SpineDocument,
     TransformConstraint,
 )
+from .sequence_timeline_contract import validate_animation_sequence_timelines
 from .slot_color_timeline_contract import (
     validate_animation_slot_color_timelines,
 )
@@ -179,6 +180,12 @@ class SpineSerializer:
             path="document.animations",
         )
         validate_animation_deform_timelines(
+            document.animations,
+            skins=document.skins,
+            slot_names=tuple(slot.name for slot in document.slots),
+            path="document.animations",
+        )
+        validate_animation_sequence_timelines(
             document.animations,
             skins=document.skins,
             slot_names=tuple(slot.name for slot in document.slots),
