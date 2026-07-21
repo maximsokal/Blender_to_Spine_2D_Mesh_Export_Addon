@@ -103,8 +103,8 @@ class LegacyAttachmentSequence:
 
     def __post_init__(self) -> None:
         _require_integer(self.count, "count", minimum=1)
-        _require_integer(self.start, "start", minimum=0)
-        _require_integer(self.digits, "digits", minimum=1, maximum=12)
+        _require_integer(self.start, "start")
+        _require_integer(self.digits, "digits", minimum=0)
         if self.setup is not None:
             _require_integer(
                 self.setup,
