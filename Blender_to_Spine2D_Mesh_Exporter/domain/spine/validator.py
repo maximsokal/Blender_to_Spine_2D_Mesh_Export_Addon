@@ -437,7 +437,10 @@ class SpineValidator:
         sequence = attachment.get("sequence")
         if sequence is not None:
             issues.extend(
-                self._validate_json_mapping(sequence, path=f"{path}.sequence")
+                self._validate_attachment_sequence(
+                    sequence,
+                    path=f"{path}.sequence",
+                )
             )
         return issues
 
@@ -454,7 +457,7 @@ class SpineValidator:
         )
         if attachment.sequence is not None:
             issues.extend(
-                self._validate_json_mapping(
+                self._validate_attachment_sequence(
                     attachment.sequence,
                     path=f"{path}.sequence",
                 )
@@ -472,6 +475,111 @@ class SpineValidator:
                 bone_count=bone_count,
             )
         )
+        return issues
+
+    def _validate_attachment_sequence(
+        self,
+        sequence: Any,
+        *,
+        path: str,
+    ) -> list[SpineValidationIssue]:
+        """Validate the shared raw/typed Spine attachment sequence mapping."""
+
+        if not isinstance(sequence, Mapping):
+            return [
+                _issue(
+                    "INVALID_SEQUENCE_MAPPING",
+                    path,
+                    "Attachment sequence must be a JSON mapping",
+                )
+            ]
+
+        json_issues = self._validate_json_mapping(sequence, path=path)
+        if json_issues:
+            return json_issues
+
+        issues: list[SpineValidationIssue] = []
+        for required_field in ("count", "start"):
+            if required_field not in sequence:
+                issues.append(
+                    _issue(
+                        "MISSING_SEQUENCE_FIELD",
+                        f"{path}.{required_field}",
+                        f"Attachment sequence is missing required field "
+                        f"'{required_field}'",
+                    )
+                )
+
+        count: int | None = None
+        if "count" in sequence:
+            raw_count = sequence["count"]
+            if (
+                isinstance(raw_count, bool)
+                or not isinstance(raw_count, int)
+                or raw_count < 1
+            ):
+                issues.append(
+                    _issue(
+                        "INVALID_SEQUENCE_COUNT",
+                        f"{path}.count",
+                        "Sequence count must be an integer greater than or equal to 1",
+                    )
+                )
+            else:
+                count = raw_count
+
+        if "start" in sequence:
+            raw_start = sequence["start"]
+            if (
+                isinstance(raw_start, bool)
+                or not isinstance(raw_start, int)
+                or raw_start < 0
+            ):
+                issues.append(
+                    _issue(
+                        "INVALID_SEQUENCE_START",
+                        f"{path}.start",
+                        "Sequence start must be a non-negative integer",
+                    )
+                )
+
+        if "digits" in sequence:
+            raw_digits = sequence["digits"]
+            if (
+                isinstance(raw_digits, bool)
+                or not isinstance(raw_digits, int)
+                or raw_digits < 1
+                or raw_digits > 12
+            ):
+                issues.append(
+                    _issue(
+                        "INVALID_SEQUENCE_DIGITS",
+                        f"{path}.digits",
+                        "Sequence digits must be an integer in [1, 12]",
+                    )
+                )
+
+        if "setup" in sequence:
+            raw_setup = sequence["setup"]
+            setup_is_integer = (
+                not isinstance(raw_setup, bool) and isinstance(raw_setup, int)
+            )
+            if not setup_is_integer or raw_setup < 0:
+                issues.append(
+                    _issue(
+                        "INVALID_SEQUENCE_SETUP",
+                        f"{path}.setup",
+                        "Sequence setup must be a non-negative integer",
+                    )
+                )
+            elif count is not None and raw_setup >= count:
+                issues.append(
+                    _issue(
+                        "INVALID_SEQUENCE_SETUP",
+                        f"{path}.setup",
+                        f"Sequence setup {raw_setup} must be inside [0, {count})",
+                    )
+                )
         return issues
 
     def _validate_mesh_payload(
