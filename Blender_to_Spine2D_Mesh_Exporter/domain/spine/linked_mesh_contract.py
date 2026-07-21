@@ -66,12 +66,12 @@ def _is_linked_raw_attachment(
     *,
     path: str,
 ) -> bool:
-    """Recognize canonical linkedmesh and the legacy mesh+parent spelling."""
+    """Recognize canonical linkedmesh and runtime mesh+truthy-parent spelling."""
 
     attachment_type = _raw_attachment_type(attachment, path=path)
     if attachment_type in _LINKED_MESH_TYPES:
         return True
-    return attachment_type == "mesh" and attachment.get("parent") is not None
+    return attachment_type == "mesh" and bool(attachment.get("parent"))
 
 
 class LinkedMeshResolver:
@@ -90,7 +90,6 @@ class LinkedMeshResolver:
 
         self._path = path
         self._skin_by_name: dict[str, Skin] = {}
-        self._skin_path_by_name: dict[str, str] = {}
         self._ambiguous_skin_names: set[str] = set()
         self._records: dict[AttachmentReference, _AttachmentRecord] = {}
         self._cache: dict[AttachmentReference, ResolvedLinkedMesh] = {}
@@ -103,7 +102,6 @@ class LinkedMeshResolver:
                 self._ambiguous_skin_names.add(skin.name)
             else:
                 self._skin_by_name[skin.name] = skin
-                self._skin_path_by_name[skin.name] = skin_path
 
             attachments_path = f"{skin_path}.attachments"
             for slot_name, slot_attachments in skin.attachments.items():
