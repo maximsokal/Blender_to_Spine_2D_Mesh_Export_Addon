@@ -83,13 +83,9 @@ def _validate_attachment_metadata(
         color = metadata["color"]
         if not isinstance(color, str):
             raise TypeError(f"{path}.color must be str")
-        normalized = color[1:] if color.startswith("#") else color
-        if (
-            len(normalized) not in (6, 8)
-            or fullmatch(r"[0-9A-Fa-f]+", normalized) is None
-        ):
+        if len(color) != 8 or fullmatch(r"[0-9A-Fa-f]{8}", color) is None:
             raise ValueError(
-                f"{path}.color must contain 6 or 8 hexadecimal digits"
+                f"{path}.color must contain exactly 8 hexadecimal RGBA digits"
             )
 
 
