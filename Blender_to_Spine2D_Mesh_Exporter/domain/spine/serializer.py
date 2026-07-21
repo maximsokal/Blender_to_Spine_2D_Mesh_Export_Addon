@@ -15,6 +15,9 @@ from .model import (
     SpineDocument,
     TransformConstraint,
 )
+from .slot_color_timeline_contract import (
+    validate_animation_slot_color_timelines,
+)
 from .validator import SpineValidator
 
 
@@ -164,6 +167,11 @@ class SpineSerializer:
         if not isinstance(document, SpineDocument):
             raise TypeError("document must be SpineDocument")
         self._validator.validate_or_raise(document)
+        validate_animation_slot_color_timelines(
+            document.animations,
+            slot_names=tuple(slot.name for slot in document.slots),
+            path="document.animations",
+        )
 
         data: dict[str, Any] = {
             "skeleton": dict(document.skeleton),
