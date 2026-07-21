@@ -13,6 +13,9 @@ from .spine_json_contract import SpineJsonContractError, validate_json_mapping
 from .weighted_vertices import decode_weighted_vertices
 
 
+_SEQUENCE_ATTACHMENT_TYPES = frozenset({"region", "mesh", "linkedmesh"})
+
+
 class ValidationSeverity(str, Enum):
     ERROR = "ERROR"
     WARNING = "WARNING"
@@ -402,6 +405,16 @@ class SpineValidator:
                 )
             )
             return issues
+
+        sequence = attachment.get("sequence")
+        if attachment_type in _SEQUENCE_ATTACHMENT_TYPES and sequence is not None:
+            issues.extend(
+                self._validate_attachment_sequence(
+                    sequence,
+                    path=f"{path}.sequence",
+                )
+            )
+
         if attachment_type != "mesh":
             return issues
 
@@ -434,14 +447,6 @@ class SpineValidator:
                 bone_count=bone_count,
             )
         )
-        sequence = attachment.get("sequence")
-        if sequence is not None:
-            issues.extend(
-                self._validate_attachment_sequence(
-                    sequence,
-                    path=f"{path}.sequence",
-                )
-            )
         return issues
 
     def _validate_mesh_attachment(
@@ -483,7 +488,12 @@ class SpineValidator:
         *,
         path: str,
     ) -> list[SpineValidationIssue]:
-        """Validate the shared raw/typed Spine attachment sequence mapping."""
+        """Validate one Spine 4.2 setup attachment sequence mapping.
+
+        ``count`` is the only required field. Spine defaults ``start`` to 1,
+        ``digits`` to 0, and ``setup`` to 0 when those fields are omitted.
+        Validation never inserts those defaults into the source mapping.
+        """
 
         if not isinstance(sequence, Mapping):
             return [
@@ -499,16 +509,14 @@ class SpineValidator:
             return json_issues
 
         issues: list[SpineValidationIssue] = []
-        for required_field in ("count", "start"):
-            if required_field not in sequence:
-                issues.append(
-                    _issue(
-                        "MISSING_SEQUENCE_FIELD",
-                        f"{path}.{required_field}",
-                        f"Attachment sequence is missing required field "
-                        f"'{required_field}'",
-                    )
+        if "count" not in sequence:
+            issues.append(
+                _issue(
+                    "MISSING_SEQUENCE_FIELD",
+                    f"{path}.count",
+                    "Attachment sequence is missing required field 'count'",
                 )
+            )
 
         count: int | None = None
         if "count" in sequence:
@@ -530,16 +538,12 @@ class SpineValidator:
 
         if "start" in sequence:
             raw_start = sequence["start"]
-            if (
-                isinstance(raw_start, bool)
-                or not isinstance(raw_start, int)
-                or raw_start < 0
-            ):
+            if isinstance(raw_start, bool) or not isinstance(raw_start, int):
                 issues.append(
                     _issue(
                         "INVALID_SEQUENCE_START",
                         f"{path}.start",
-                        "Sequence start must be a non-negative integer",
+                        "Sequence start must be an integer",
                     )
                 )
 
@@ -548,14 +552,13 @@ class SpineValidator:
             if (
                 isinstance(raw_digits, bool)
                 or not isinstance(raw_digits, int)
-                or raw_digits < 1
-                or raw_digits > 12
+                or raw_digits < 0
             ):
                 issues.append(
                     _issue(
                         "INVALID_SEQUENCE_DIGITS",
                         f"{path}.digits",
-                        "Sequence digits must be an integer in [1, 12]",
+                        "Sequence digits must be a non-negative integer",
                     )
                 )
 
