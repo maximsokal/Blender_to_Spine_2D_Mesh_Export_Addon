@@ -135,21 +135,23 @@ def test_slot_color_time_requires_a_number(value):
 
 
 @pytest.mark.parametrize("value", (nan, inf, -inf))
-def test_slot_color_time_rejects_non_finite_values(value):
-    document = build_document(
-        {
-            "idle": {
-                "slots": {
-                    "slot": {
-                        "rgba": [{"time": value, "color": "FFFFFFFF"}],
+def test_direct_contract_rejects_non_finite_time(value):
+    with pytest.raises(ValueError) as error:
+        validate_animation_slot_color_timelines(
+            {
+                "idle": {
+                    "slots": {
+                        "slot": {
+                            "rgba": [
+                                {"time": value, "color": "FFFFFFFF"},
+                            ]
+                        }
                     }
                 }
-            }
-        }
-    )
-
-    with pytest.raises((ValueError, TypeError)) as error:
-        SpineSerializer().to_dict(document)
+            },
+            slot_names=("slot",),
+            path="document.animations",
+        )
 
     assert "document.animations.idle.slots.slot.rgba[0].time" in str(error.value)
 
@@ -261,13 +263,21 @@ def test_alpha_value_requires_a_number_when_present(value):
 
 
 @pytest.mark.parametrize("value", (nan, inf, -inf))
-def test_alpha_value_rejects_non_finite_numbers(value):
-    document = build_document(
-        {"idle": {"slots": {"slot": {"alpha": [{"value": value}]}}}}
-    )
-
+def test_direct_contract_rejects_non_finite_alpha(value):
     with pytest.raises(ValueError, match=r"alpha\[0\]\.value must be finite"):
-        SpineSerializer().to_dict(document)
+        validate_animation_slot_color_timelines(
+            {
+                "idle": {
+                    "slots": {
+                        "slot": {
+                            "alpha": [{"value": value}],
+                        }
+                    }
+                }
+            },
+            slot_names=("slot",),
+            path="document.animations",
+        )
 
 
 def test_unknown_slot_timeline_and_curve_are_preserved_without_validation():
@@ -287,9 +297,9 @@ def test_unknown_slot_timeline_and_curve_are_preserved_without_validation():
         }
     }
 
-    assert SpineSerializer().to_dict(build_document(animations))["animations"] == (
-        animations
-    )
+    serialized = SpineSerializer().to_dict(build_document(animations))
+
+    assert serialized["animations"] == animations
 
 
 def test_serializer_revalidates_mutated_nested_animation_payload():
