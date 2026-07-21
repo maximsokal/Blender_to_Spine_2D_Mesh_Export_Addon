@@ -415,6 +415,10 @@ class SpineValidator:
                 )
             )
 
+        parent = attachment.get("parent")
+        if attachment_type in {"mesh", "linkedmesh"} and parent:
+            return issues
+
         if attachment_type != "mesh":
             return issues
 
