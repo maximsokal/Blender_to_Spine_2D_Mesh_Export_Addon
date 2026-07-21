@@ -21,6 +21,7 @@ _SKELETON_NUMBER_FIELDS = (
     "fps",
 )
 _EVENT_STRING_FIELDS = ("string", "audio")
+_EVENT_TIMELINE_STRING_FIELDS = ("string",)
 _EVENT_NUMBER_FIELDS = ("float", "volume", "balance")
 _EVENT_INT_MIN = -(2**31)
 _EVENT_INT_MAX = 2**31 - 1
@@ -158,6 +159,7 @@ def _validate_event_definitions(
 
     for event_name, event_metadata in events.items():
         event_path = json_path_key(path, event_name)
+        _require_name(event_name, f"{event_path} event name")
         if not isinstance(event_metadata, Mapping):
             raise TypeError(f"{event_path} must be a mapping")
 
@@ -185,6 +187,92 @@ def _validate_event_definitions(
                 raise TypeError(f"{event_path}.{field_name} must be a finite number")
             if not _is_finite_number(value):
                 raise ValueError(f"{event_path}.{field_name} must be finite")
+
+
+def _validate_animation_event_timelines(
+    animations: Mapping[str, Any],
+    *,
+    event_definitions: Mapping[str, Any],
+    path: str,
+) -> None:
+    """Validate animation event keyframes and their setup-event references."""
+
+    event_names = frozenset(event_definitions)
+    for animation_name, animation_metadata in animations.items():
+        animation_path = json_path_key(path, animation_name)
+        if not isinstance(animation_metadata, Mapping):
+            raise TypeError(f"{animation_path} must be a mapping")
+
+        if "events" not in animation_metadata:
+            continue
+
+        timeline = animation_metadata["events"]
+        timeline_path = f"{animation_path}.events"
+        if not isinstance(timeline, (list, tuple)):
+            raise TypeError(f"{timeline_path} must be a list or tuple")
+        if not timeline:
+            raise ValueError(f"{timeline_path} cannot be empty")
+
+        previous_time: float | int | None = None
+        for keyframe_index, keyframe in enumerate(timeline):
+            keyframe_path = f"{timeline_path}[{keyframe_index}]"
+            if not isinstance(keyframe, Mapping):
+                raise TypeError(f"{keyframe_path} must be a mapping")
+
+            if "name" not in keyframe:
+                raise ValueError(f"{keyframe_path}.name is required")
+            event_name = keyframe["name"]
+            _require_name(event_name, f"{keyframe_path}.name")
+            if event_name not in event_names:
+                raise ValueError(
+                    f"{keyframe_path}.name references undefined event "
+                    f"'{event_name}'"
+                )
+
+            time_value = keyframe.get("time", 0)
+            if isinstance(time_value, bool) or not isinstance(
+                time_value,
+                (int, float),
+            ):
+                raise TypeError(f"{keyframe_path}.time must be a finite number")
+            if not _is_finite_number(time_value):
+                raise ValueError(f"{keyframe_path}.time must be finite")
+            if previous_time is not None and time_value < previous_time:
+                raise ValueError(
+                    f"{keyframe_path}.time must be greater than or equal to "
+                    f"the previous event time {previous_time}"
+                )
+            previous_time = time_value
+
+            if "int" in keyframe:
+                int_value = keyframe["int"]
+                if isinstance(int_value, bool) or not isinstance(int_value, int):
+                    raise TypeError(f"{keyframe_path}.int must be int")
+                if int_value < _EVENT_INT_MIN or int_value > _EVENT_INT_MAX:
+                    raise ValueError(
+                        f"{keyframe_path}.int must be inside signed 32-bit range "
+                        f"[{_EVENT_INT_MIN}, {_EVENT_INT_MAX}]"
+                    )
+
+            for field_name in _EVENT_TIMELINE_STRING_FIELDS:
+                if field_name in keyframe and not isinstance(
+                    keyframe[field_name],
+                    str,
+                ):
+                    raise TypeError(f"{keyframe_path}.{field_name} must be str")
+
+            for field_name in _EVENT_NUMBER_FIELDS:
+                if field_name not in keyframe:
+                    continue
+                value = keyframe[field_name]
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise TypeError(
+                        f"{keyframe_path}.{field_name} must be a finite number"
+                    )
+                if not _is_finite_number(value):
+                    raise ValueError(
+                        f"{keyframe_path}.{field_name} must be finite"
+                    )
 
 
 def _validate_finite_sequence(values: tuple, field_name: str) -> None:
@@ -460,6 +548,11 @@ class SpineDocument:
         validate_json_mapping(self.animations, path="document.animations")
         validate_json_mapping(self.events, path="document.events")
         _validate_event_definitions(self.events, path="document.events")
+        _validate_animation_event_timelines(
+            self.animations,
+            event_definitions=self.events,
+            path="document.animations",
+        )
         _validate_extras(
             self.extras,
             path="document.extras",
