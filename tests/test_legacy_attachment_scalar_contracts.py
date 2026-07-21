@@ -68,7 +68,7 @@ def test_attachment_vertex_rejects_permissive_python_scalars(changes, expected):
         ({"digits": True}, "digits must be int"),
         ({"setup": False}, "setup must be int"),
         ({"count": 0}, "count must be at least 1"),
-        ({"digits": 13}, "digits must be at most 12"),
+        ({"digits": -1}, "digits must be at least 0"),
         ({"count": 2, "setup": 2}, "setup must be at most 1"),
     ),
 )
@@ -80,7 +80,31 @@ def test_attachment_sequence_rejects_boolean_and_invalid_indices(changes, expect
         LegacyAttachmentSequence(**values)
 
 
-def test_attachment_sequence_mapping_is_unchanged_for_valid_values():
+@pytest.mark.parametrize(
+    "start, digits",
+    (
+        (-7, 0),
+        (0, 4),
+        (7, 100),
+    ),
+)
+def test_attachment_sequence_accepts_runtime_integer_ranges(start, digits):
+    sequence = LegacyAttachmentSequence(
+        count=3,
+        start=start,
+        digits=digits,
+        setup=1,
+    )
+
+    assert sequence.to_spine_mapping() == {
+        "count": 3,
+        "start": start,
+        "digits": digits,
+        "setup": 1,
+    }
+
+
+def test_attachment_sequence_mapping_is_unchanged_for_legacy_defaults():
     sequence = LegacyAttachmentSequence(count=3, start=7, digits=4, setup=1)
 
     assert sequence.to_spine_mapping() == {
@@ -89,6 +113,7 @@ def test_attachment_sequence_mapping_is_unchanged_for_valid_values():
         "digits": 4,
         "setup": 1,
     }
+    assert LegacyAttachmentSequence(count=2, start=0).digits == 4
     assert LegacyAttachmentSequence(count=2, start=0).resolved_setup == 1
     assert LegacyAttachmentSequence(count=1, start=0).resolved_setup == 0
 
