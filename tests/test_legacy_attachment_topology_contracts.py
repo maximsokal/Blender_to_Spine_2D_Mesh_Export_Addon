@@ -50,7 +50,7 @@ def test_attachment_request_rejects_empty_triangle_array():
     "triangles",
     (
         (0, 0, 1),
-        (2, 3, 2),
+        (2, 1, 2),
         (1, 1, 1),
     ),
 )
