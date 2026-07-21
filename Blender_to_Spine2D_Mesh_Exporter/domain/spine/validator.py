@@ -511,32 +511,45 @@ class SpineValidator:
                 vertex_count = len(uvs) // 2
             issues.extend(self._validate_numeric_sequence(uvs, path=f"{path}.uvs"))
 
+        triangle_path = f"{path}.triangles"
         if not _is_sequence(triangles):
             issues.append(
                 _issue(
                     "INVALID_TRIANGLE_ARRAY",
-                    f"{path}.triangles",
+                    triangle_path,
                     "Triangles must be a list or tuple",
                 )
             )
         else:
-            if len(triangles) % 3:
+            triangle_shape_valid = len(triangles) % 3 == 0
+            if not triangle_shape_valid:
                 issues.append(
                     _issue(
                         "INVALID_TRIANGLE_ARRAY",
-                        f"{path}.triangles",
+                        triangle_path,
                         "Triangle array length must be divisible by 3",
                     )
                 )
-            issues.extend(
-                self._validate_index_sequence(
-                    triangles,
-                    path=f"{path}.triangles",
-                    vertex_count=vertex_count,
-                    non_integer_code="NON_INTEGER_TRIANGLE_INDEX",
-                    out_of_range_code="TRIANGLE_INDEX_OUT_OF_RANGE",
-                )
+            triangle_index_issues = self._validate_index_sequence(
+                triangles,
+                path=triangle_path,
+                vertex_count=vertex_count,
+                non_integer_code="NON_INTEGER_TRIANGLE_INDEX",
+                out_of_range_code="TRIANGLE_INDEX_OUT_OF_RANGE",
             )
+            issues.extend(triangle_index_issues)
+            if (
+                triangle_shape_valid
+                and not triangle_index_issues
+                and vertex_count is not None
+            ):
+                issues.extend(
+                    self._validate_triangle_topology(
+                        triangles,
+                        vertex_count=vertex_count,
+                        path=triangle_path,
+                    )
+                )
 
         if not _is_sequence(vertices):
             issues.append(
@@ -579,32 +592,35 @@ class SpineValidator:
                 )
             )
 
+        edge_path = f"{path}.edges"
         if not _is_sequence(edges):
             issues.append(
                 _issue(
                     "INVALID_EDGE_ARRAY",
-                    f"{path}.edges",
+                    edge_path,
                     "Edges must be a list or tuple",
                 )
             )
         else:
-            if len(edges) % 2:
+            edge_shape_valid = len(edges) % 2 == 0
+            if not edge_shape_valid:
                 issues.append(
                     _issue(
                         "INVALID_EDGE_ARRAY",
-                        f"{path}.edges",
+                        edge_path,
                         "Edge array length must be divisible into pairs",
                     )
                 )
-            issues.extend(
-                self._validate_index_sequence(
-                    edges,
-                    path=f"{path}.edges",
-                    vertex_count=vertex_count,
-                    non_integer_code="NON_INTEGER_EDGE_INDEX",
-                    out_of_range_code="EDGE_INDEX_OUT_OF_RANGE",
-                )
+            edge_index_issues = self._validate_index_sequence(
+                edges,
+                path=edge_path,
+                vertex_count=vertex_count,
+                non_integer_code="NON_INTEGER_EDGE_INDEX",
+                out_of_range_code="EDGE_INDEX_OUT_OF_RANGE",
             )
+            issues.extend(edge_index_issues)
+            if edge_shape_valid and not edge_index_issues and vertex_count is not None:
+                issues.extend(self._validate_edge_topology(edges, path=edge_path))
 
         for field_name, value in (("width", width), ("height", height)):
             if value is not None and not _is_finite_number(value):
@@ -615,6 +631,116 @@ class SpineValidator:
                         "Mesh dimensions must be finite numbers when present",
                     )
                 )
+        return issues
+
+    def _validate_triangle_topology(
+        self,
+        triangles: Sequence[int],
+        *,
+        vertex_count: int,
+        path: str,
+    ) -> list[SpineValidationIssue]:
+        """Validate triangle groups after shape, type, and range checks succeed."""
+
+        if not triangles:
+            return [
+                _issue(
+                    "EMPTY_TRIANGLE_ARRAY",
+                    path,
+                    "Mesh attachments must contain at least one triangle",
+                )
+            ]
+
+        issues: list[SpineValidationIssue] = []
+        seen_geometry: dict[tuple[int, int, int], int] = {}
+        referenced_vertices: set[int] = set()
+        for offset in range(0, len(triangles), 3):
+            triangle_index = offset // 3
+            triangle = (
+                triangles[offset],
+                triangles[offset + 1],
+                triangles[offset + 2],
+            )
+            if len(set(triangle)) != 3:
+                issues.append(
+                    _issue(
+                        "DEGENERATE_TRIANGLE",
+                        f"{path}[{triangle_index}]",
+                        f"Triangle {triangle} must reference three distinct vertices",
+                    )
+                )
+                continue
+
+            normalized = tuple(sorted(triangle))
+            previous_index = seen_geometry.get(normalized)
+            if previous_index is not None:
+                issues.append(
+                    _issue(
+                        "DUPLICATE_TRIANGLE",
+                        f"{path}[{triangle_index}]",
+                        f"Triangle {triangle} duplicates triangle {previous_index} "
+                        "independently of winding",
+                    )
+                )
+                continue
+
+            seen_geometry[normalized] = triangle_index
+            referenced_vertices.update(triangle)
+
+        # Avoid reporting unused vertices as a secondary symptom of malformed
+        # triangle groups. Coverage is meaningful only when every group itself is valid.
+        if issues:
+            return issues
+
+        unused_vertices = tuple(sorted(set(range(vertex_count)) - referenced_vertices))
+        if unused_vertices:
+            issues.append(
+                _issue(
+                    "UNUSED_MESH_VERTEX",
+                    path,
+                    "Every UV/attachment vertex must be referenced by at least one "
+                    f"triangle; unused={unused_vertices}",
+                )
+            )
+        return issues
+
+    def _validate_edge_topology(
+        self,
+        edges: Sequence[int],
+        *,
+        path: str,
+    ) -> list[SpineValidationIssue]:
+        """Validate optional undirected edge pairs after scalar checks succeed."""
+
+        issues: list[SpineValidationIssue] = []
+        seen_pairs: dict[tuple[int, int], int] = {}
+        for offset in range(0, len(edges), 2):
+            edge_index = offset // 2
+            first = edges[offset]
+            second = edges[offset + 1]
+            if first == second:
+                issues.append(
+                    _issue(
+                        "SELF_EDGE",
+                        f"{path}[{edge_index}]",
+                        f"Edge {(first, second)} references one vertex twice",
+                    )
+                )
+                continue
+
+            normalized = (first, second) if first < second else (second, first)
+            previous_index = seen_pairs.get(normalized)
+            if previous_index is not None:
+                issues.append(
+                    _issue(
+                        "DUPLICATE_EDGE",
+                        f"{path}[{edge_index}]",
+                        f"Edge {(first, second)} duplicates edge {previous_index} "
+                        "independently of direction",
+                    )
+                )
+                continue
+            seen_pairs[normalized] = edge_index
         return issues
 
     def _validate_vertex_stream(
