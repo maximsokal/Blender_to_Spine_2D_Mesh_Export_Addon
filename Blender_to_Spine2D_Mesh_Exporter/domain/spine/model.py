@@ -7,7 +7,7 @@ from math import isfinite
 from re import fullmatch
 from typing import Any, Mapping, Tuple
 
-from .spine_json_contract import validate_json_mapping
+from .spine_json_contract import json_path_key, validate_json_mapping
 
 JsonMapping = Mapping[str, Any]
 _SLOT_BLEND_VALUES = frozenset({"normal", "additive", "multiply", "screen"})
@@ -20,6 +20,10 @@ _SKELETON_NUMBER_FIELDS = (
     "referenceScale",
     "fps",
 )
+_EVENT_STRING_FIELDS = ("string", "audio")
+_EVENT_NUMBER_FIELDS = ("float", "volume", "balance")
+_EVENT_INT_MIN = -(2**31)
+_EVENT_INT_MAX = 2**31 - 1
 
 
 def _require_name(value: str, field_name: str = "name") -> None:
@@ -143,6 +147,44 @@ def _validate_skeleton_metadata(
             raise TypeError(f"{path}.{field_name} must be a finite number")
         if not _is_finite_number(value):
             raise ValueError(f"{path}.{field_name} must be finite")
+
+
+def _validate_event_definitions(
+    events: Mapping[str, Any],
+    *,
+    path: str,
+) -> None:
+    """Validate setup-pose event definitions without inserting runtime defaults."""
+
+    for event_name, event_metadata in events.items():
+        event_path = json_path_key(path, event_name)
+        if not isinstance(event_metadata, Mapping):
+            raise TypeError(f"{event_path} must be a mapping")
+
+        if "int" in event_metadata:
+            int_value = event_metadata["int"]
+            if isinstance(int_value, bool) or not isinstance(int_value, int):
+                raise TypeError(f"{event_path}.int must be int")
+            if int_value < _EVENT_INT_MIN or int_value > _EVENT_INT_MAX:
+                raise ValueError(
+                    f"{event_path}.int must be inside signed 32-bit range "
+                    f"[{_EVENT_INT_MIN}, {_EVENT_INT_MAX}]"
+                )
+
+        for field_name in _EVENT_STRING_FIELDS:
+            if field_name in event_metadata and not isinstance(
+                event_metadata[field_name], str
+            ):
+                raise TypeError(f"{event_path}.{field_name} must be str")
+
+        for field_name in _EVENT_NUMBER_FIELDS:
+            if field_name not in event_metadata:
+                continue
+            value = event_metadata[field_name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{event_path}.{field_name} must be a finite number")
+            if not _is_finite_number(value):
+                raise ValueError(f"{event_path}.{field_name} must be finite")
 
 
 def _validate_finite_sequence(values: tuple, field_name: str) -> None:
@@ -417,6 +459,7 @@ class SpineDocument:
             raise ValueError("SpineDocument must contain at least one bone")
         validate_json_mapping(self.animations, path="document.animations")
         validate_json_mapping(self.events, path="document.events")
+        _validate_event_definitions(self.events, path="document.events")
         _validate_extras(
             self.extras,
             path="document.extras",
