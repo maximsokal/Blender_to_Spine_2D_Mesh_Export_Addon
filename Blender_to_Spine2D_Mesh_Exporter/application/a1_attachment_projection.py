@@ -144,6 +144,8 @@ class A1AttachmentProjectionResult:
                 raise TypeError(
                     f"{field_name} must be a tuple of A1AttachmentVertexKey values"
                 )
+        if len(self.hull_vertex_keys) < 3:
+            raise ValueError("hull_vertex_keys must contain at least three vertices")
         if not self.ordered_vertex_keys:
             raise ValueError("ordered_vertex_keys cannot be empty")
         if len(self.ordered_vertex_keys) != len(set(self.ordered_vertex_keys)):
@@ -158,9 +160,24 @@ class A1AttachmentProjectionResult:
             raise ValueError(
                 "request vertex count does not match ordered_vertex_keys"
             )
+        for attachment_index, (vertex, key) in enumerate(
+            zip(self.request.vertices, self.ordered_vertex_keys)
+        ):
+            if vertex.index != attachment_index:
+                raise ValueError(
+                    "request vertices must stay dense and aligned with "
+                    "ordered_vertex_keys"
+                )
+            if vertex.uv != key.uv:
+                raise ValueError(
+                    f"request vertex {attachment_index} UV {vertex.uv} does not match "
+                    f"ordered key UV {key.uv}"
+                )
+
         if not isinstance(self.loop_to_attachment_index, tuple):
             raise TypeError("loop_to_attachment_index must be tuple")
         loop_ids: list[LoopId] = []
+        mapped_attachment_indices: list[int] = []
         for item_index, item in enumerate(self.loop_to_attachment_index):
             if not isinstance(item, tuple) or len(item) != 2:
                 raise TypeError(
@@ -180,8 +197,19 @@ class A1AttachmentProjectionResult:
                     "loop_to_attachment_index contains an invalid attachment index"
                 )
             loop_ids.append(loop_id)
+            mapped_attachment_indices.append(attachment_index)
         if len(loop_ids) != len(set(loop_ids)):
             raise ValueError("loop_to_attachment_index contains duplicate LoopId values")
+        if len(self.loop_to_attachment_index) != len(self.request.triangles):
+            raise ValueError(
+                "loop_to_attachment_index must contain one entry for every triangle "
+                "corner"
+            )
+        if tuple(mapped_attachment_indices) != self.request.triangles:
+            raise ValueError(
+                "loop_to_attachment_index attachment indices must exactly match "
+                "request.triangles corner order"
+            )
 
     @property
     def hull_vertex_ids(self) -> Tuple[VertexId, ...]:
@@ -639,19 +667,16 @@ def project_triangulated_disk_attachment(
     )
 
     face_map = snapshot.face_by_id()
-    triangles = tuple(
-        key_to_index[loop_keys[loop_id]]
+    triangle_loop_ids = tuple(
+        loop_id
         for face_id in sorted(face_map, key=lambda item: item.index)
         for loop_id in face_map[face_id].loop_ids
     )
-    edges = _attachment_edges(snapshot, loop_keys, key_to_index)
-    loop_to_attachment_index = tuple(
-        (loop_id, key_to_index[key])
-        for loop_id, key in sorted(
-            loop_keys.items(),
-            key=lambda item: item[0].index,
-        )
+    triangles = tuple(
+        key_to_index[loop_keys[loop_id]] for loop_id in triangle_loop_ids
     )
+    edges = _attachment_edges(snapshot, loop_keys, key_to_index)
+    loop_to_attachment_index = tuple(zip(triangle_loop_ids, triangles))
 
     request = LegacyMeshAttachmentRequest(
         slot_name=settings.slot_name,
