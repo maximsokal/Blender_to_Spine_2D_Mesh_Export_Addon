@@ -395,6 +395,98 @@ def _validate_animation_draw_order_timelines(
                 target_to_entry_index[target_index] = offset_index
 
 
+def _validate_animation_slot_attachment_timelines(
+    animations: Mapping[str, Any],
+    *,
+    slot_names: Tuple[str, ...],
+    attachment_names_by_slot: Mapping[str, frozenset[str]],
+    path: str,
+) -> None:
+    """Validate slot attachment timelines and their setup attachment references."""
+
+    known_slot_names: set[str] = set()
+    ambiguous_slot_names: set[str] = set()
+    for slot_name in slot_names:
+        if slot_name in known_slot_names:
+            ambiguous_slot_names.add(slot_name)
+        known_slot_names.add(slot_name)
+
+    for animation_name, animation_metadata in animations.items():
+        animation_path = json_path_key(path, animation_name)
+        if not isinstance(animation_metadata, Mapping):
+            raise TypeError(f"{animation_path} must be a mapping")
+
+        if "slots" not in animation_metadata:
+            continue
+
+        slot_timelines = animation_metadata["slots"]
+        slots_path = f"{animation_path}.slots"
+        if not isinstance(slot_timelines, Mapping):
+            raise TypeError(f"{slots_path} must be a mapping")
+
+        for slot_name, slot_metadata in slot_timelines.items():
+            slot_path = json_path_key(slots_path, slot_name)
+            _require_name(slot_name, f"{slot_path} slot name")
+            if slot_name not in known_slot_names:
+                raise ValueError(
+                    f"{slot_path} references undefined slot '{slot_name}'"
+                )
+            if slot_name in ambiguous_slot_names:
+                raise ValueError(
+                    f"{slot_path} references duplicated setup slot '{slot_name}'"
+                )
+            if not isinstance(slot_metadata, Mapping):
+                raise TypeError(f"{slot_path} must be a mapping")
+
+            if "attachment" not in slot_metadata:
+                continue
+
+            timeline = slot_metadata["attachment"]
+            timeline_path = f"{slot_path}.attachment"
+            if not isinstance(timeline, (list, tuple)):
+                raise TypeError(f"{timeline_path} must be a list or tuple")
+            if not timeline:
+                raise ValueError(f"{timeline_path} cannot be empty")
+
+            available_names = attachment_names_by_slot.get(
+                slot_name,
+                frozenset(),
+            )
+            previous_time: float | int | None = None
+            for keyframe_index, keyframe in enumerate(timeline):
+                keyframe_path = f"{timeline_path}[{keyframe_index}]"
+                if not isinstance(keyframe, Mapping):
+                    raise TypeError(f"{keyframe_path} must be a mapping")
+
+                time_value = keyframe.get("time", 0)
+                if isinstance(time_value, bool) or not isinstance(
+                    time_value,
+                    (int, float),
+                ):
+                    raise TypeError(
+                        f"{keyframe_path}.time must be a finite number"
+                    )
+                if not _is_finite_number(time_value):
+                    raise ValueError(f"{keyframe_path}.time must be finite")
+                if previous_time is not None and time_value < previous_time:
+                    raise ValueError(
+                        f"{keyframe_path}.time must be greater than or equal to "
+                        f"the previous attachment time {previous_time}"
+                    )
+                previous_time = time_value
+
+                if "name" not in keyframe or keyframe["name"] is None:
+                    continue
+
+                attachment_name = keyframe["name"]
+                _require_name(attachment_name, f"{keyframe_path}.name")
+                if attachment_name not in available_names:
+                    raise ValueError(
+                        f"{keyframe_path}.name references undefined attachment "
+                        f"'{attachment_name}' for slot '{slot_name}'"
+                    )
+
+
 def _validate_finite_sequence(values: tuple, field_name: str) -> None:
     for index, value in enumerate(values):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -676,6 +768,22 @@ class SpineDocument:
         _validate_animation_draw_order_timelines(
             self.animations,
             slot_names=tuple(slot.name for slot in self.slots),
+            path="document.animations",
+        )
+
+        attachment_names_by_slot: dict[str, set[str]] = {}
+        for skin in self.skins:
+            for slot_name, slot_attachments in skin.attachments.items():
+                attachment_names_by_slot.setdefault(slot_name, set()).update(
+                    slot_attachments
+                )
+        _validate_animation_slot_attachment_timelines(
+            self.animations,
+            slot_names=tuple(slot.name for slot in self.slots),
+            attachment_names_by_slot={
+                slot_name: frozenset(attachment_names)
+                for slot_name, attachment_names in attachment_names_by_slot.items()
+            },
             path="document.animations",
         )
         _validate_extras(
