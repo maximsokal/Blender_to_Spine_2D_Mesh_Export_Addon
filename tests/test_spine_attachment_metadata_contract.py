@@ -68,9 +68,9 @@ def test_runtime_default_zero_dimensions_and_hull_remain_valid(typed):
 
 @pytest.mark.parametrize(
     "color",
-    ("FFFFFF", "FFFFFFFF", "#AABBCC", "#AABBCCDD"),
+    ("FFFFFFFF", "AABBCCDD", "aabbccdd"),
 )
-def test_runtime_compatible_attachment_colors_are_accepted(color):
+def test_official_rgba_attachment_colors_are_accepted(color):
     raw = deepcopy(VALID_RAW_MESH)
     raw.update({"name": "actual-mesh", "path": "", "color": color})
 
@@ -87,9 +87,10 @@ def test_runtime_compatible_attachment_colors_are_accepted(color):
         ("path", None, TypeError),
         ("path", 7, TypeError),
         ("color", False, TypeError),
-        ("color", "FFF", ValueError),
-        ("color", "GGGGGG", ValueError),
-        ("color", "#123456789", ValueError),
+        ("color", "FFFFFF", ValueError),
+        ("color", "#AABBCCDD", ValueError),
+        ("color", "GGGGGGGG", ValueError),
+        ("color", "123456789", ValueError),
     ),
 )
 def test_raw_attachment_metadata_is_rejected_at_skin_boundary(
@@ -112,7 +113,8 @@ def test_raw_attachment_metadata_is_rejected_at_skin_boundary(
         ({"name": 7}, TypeError),
         ({"name": ""}, ValueError),
         ({"color": None}, TypeError),
-        ({"color": "12XZ56"}, ValueError),
+        ({"color": "12XZ5678"}, ValueError),
+        ({"color": "AABBCC"}, ValueError),
     ),
 )
 def test_typed_mesh_extras_share_attachment_metadata_contract(
@@ -131,7 +133,7 @@ def test_typed_path_still_uses_existing_optional_string_contract():
 def test_serializer_preserves_valid_typed_metadata_without_normalization():
     attachment = build_typed_mesh(
         path="images/body",
-        extras={"name": "actual-body", "color": "#AABBCCDD"},
+        extras={"name": "actual-body", "color": "AABBCCDD"},
     )
 
     serialized = SpineSerializer().to_dict(build_document(attachment))
@@ -139,4 +141,4 @@ def test_serializer_preserves_valid_typed_metadata_without_normalization():
 
     assert mesh["name"] == "actual-body"
     assert mesh["path"] == "images/body"
-    assert mesh["color"] == "#AABBCCDD"
+    assert mesh["color"] == "AABBCCDD"
