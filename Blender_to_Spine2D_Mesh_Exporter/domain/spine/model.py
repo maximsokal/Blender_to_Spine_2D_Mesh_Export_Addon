@@ -11,6 +11,15 @@ from .spine_json_contract import validate_json_mapping
 
 JsonMapping = Mapping[str, Any]
 _SLOT_BLEND_VALUES = frozenset({"normal", "additive", "multiply", "screen"})
+_SKELETON_STRING_FIELDS = ("hash", "images", "audio")
+_SKELETON_NUMBER_FIELDS = (
+    "x",
+    "y",
+    "width",
+    "height",
+    "referenceScale",
+    "fps",
+)
 
 
 def _require_name(value: str, field_name: str = "name") -> None:
@@ -110,6 +119,30 @@ def _validate_attachment_metadata(
 
     if "color" in metadata:
         _require_rgba_hex_string(metadata["color"], f"{path}.color")
+
+
+def _validate_skeleton_metadata(
+    metadata: Mapping[str, Any],
+    *,
+    path: str,
+) -> None:
+    """Validate known Spine skeleton metadata without rejecting future fields."""
+
+    if "spine" in metadata:
+        _require_name(metadata["spine"], f"{path}.spine")
+
+    for field_name in _SKELETON_STRING_FIELDS:
+        if field_name in metadata and not isinstance(metadata[field_name], str):
+            raise TypeError(f"{path}.{field_name} must be str")
+
+    for field_name in _SKELETON_NUMBER_FIELDS:
+        if field_name not in metadata:
+            continue
+        value = metadata[field_name]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"{path}.{field_name} must be a finite number")
+        if not _is_finite_number(value):
+            raise ValueError(f"{path}.{field_name} must be finite")
 
 
 def _validate_finite_sequence(values: tuple, field_name: str) -> None:
@@ -367,6 +400,7 @@ class SpineDocument:
 
     def __post_init__(self) -> None:
         validate_json_mapping(self.skeleton, path="document.skeleton")
+        _validate_skeleton_metadata(self.skeleton, path="document.skeleton")
         for field_name, item_type in (
             ("bones", Bone),
             ("slots", Slot),
