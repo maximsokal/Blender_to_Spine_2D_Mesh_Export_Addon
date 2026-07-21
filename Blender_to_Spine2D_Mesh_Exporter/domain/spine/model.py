@@ -10,6 +10,7 @@ from typing import Any, Mapping, Tuple
 from .spine_json_contract import validate_json_mapping
 
 JsonMapping = Mapping[str, Any]
+_SLOT_BLEND_VALUES = frozenset({"normal", "additive", "multiply", "screen"})
 
 
 def _require_name(value: str, field_name: str = "name") -> None:
@@ -22,6 +23,34 @@ def _require_name(value: str, field_name: str = "name") -> None:
 def _require_optional_string(value: str | None, field_name: str) -> None:
     if value is not None and not isinstance(value, str):
         raise TypeError(f"{field_name} must be str or None")
+
+
+def _require_rgba_hex_string(value: object, field_name: str) -> None:
+    """Require the cross-runtime Spine JSON ``RRGGBBAA`` color representation."""
+
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be str")
+    if len(value) != 8 or fullmatch(r"[0-9A-Fa-f]{8}", value) is None:
+        raise ValueError(
+            f"{field_name} must contain exactly 8 hexadecimal RGBA digits"
+        )
+
+
+def _require_optional_rgba_hex_string(value: object, field_name: str) -> None:
+    if value is not None:
+        _require_rgba_hex_string(value, field_name)
+
+
+def _require_optional_slot_blend(value: object, field_name: str) -> None:
+    """Require one canonical Spine slot blend token without silent normalization."""
+
+    if value is None:
+        return
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be str or None")
+    if value not in _SLOT_BLEND_VALUES:
+        allowed = ", ".join(sorted(_SLOT_BLEND_VALUES))
+        raise ValueError(f"{field_name} must be one of: {allowed}")
 
 
 def _is_finite_number(value: object) -> bool:
@@ -80,13 +109,7 @@ def _validate_attachment_metadata(
         raise TypeError(f"{path}.path must be str")
 
     if "color" in metadata:
-        color = metadata["color"]
-        if not isinstance(color, str):
-            raise TypeError(f"{path}.color must be str")
-        if len(color) != 8 or fullmatch(r"[0-9A-Fa-f]{8}", color) is None:
-            raise ValueError(
-                f"{path}.color must contain exactly 8 hexadecimal RGBA digits"
-            )
+        _require_rgba_hex_string(metadata["color"], f"{path}.color")
 
 
 def _validate_finite_sequence(values: tuple, field_name: str) -> None:
@@ -134,7 +157,7 @@ class Bone:
             "scale_y",
         ):
             _require_finite_number(getattr(self, field_name), field_name)
-        _require_optional_string(self.color, "color")
+        _require_optional_rgba_hex_string(self.color, "color")
         _require_optional_string(self.icon, "icon")
         _validate_extras(
             self.extras,
@@ -167,8 +190,8 @@ class Slot:
         _require_name(self.name)
         _require_name(self.bone, "bone")
         _require_optional_string(self.attachment, "attachment")
-        _require_optional_string(self.color, "color")
-        _require_optional_string(self.blend, "blend")
+        _require_optional_rgba_hex_string(self.color, "color")
+        _require_optional_slot_blend(self.blend, "blend")
         _validate_extras(
             self.extras,
             path="slot.extras",
