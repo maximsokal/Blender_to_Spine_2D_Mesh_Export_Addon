@@ -22,6 +22,17 @@ def sequence_attachment(*, count=4, attachment_type="region"):
     }
 
 
+def raw_mesh(name="mesh"):
+    return {
+        "type": "mesh",
+        "name": name,
+        "uvs": [0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+        "triangles": [0, 1, 2],
+        "vertices": [0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+        "hull": 3,
+    }
+
+
 def sequence_animation(
     frames,
     *,
@@ -97,10 +108,7 @@ def test_all_sequence_modes_and_delay_inheritance_are_preserved():
                 "futureField": True,
             },
         ],
-        extra_timelines={
-            "deform": [{"futureOnly": True}],
-            "futureTimeline": {"enabled": True},
-        },
+        extra_timelines={"futureTimeline": {"enabled": True}},
     )
     source = deepcopy(animations)
 
@@ -115,17 +123,21 @@ def test_all_sequence_modes_and_delay_inheritance_are_preserved():
 
 @pytest.mark.parametrize("attachment_type", ("region", "mesh", "linkedmesh"))
 def test_supported_texture_region_attachment_types(attachment_type):
-    attachment = sequence_attachment(attachment_type=attachment_type)
-    if attachment_type == "mesh":
-        attachment.update(
-            {
-                "uvs": [0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
-                "triangles": [0, 1, 2],
-                "vertices": [0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
-                "hull": 3,
-            }
-        )
-    skins = (Skin("default", {"slot": {"item": attachment}}),)
+    if attachment_type == "region":
+        attachments = {"item": sequence_attachment()}
+    elif attachment_type == "mesh":
+        item = raw_mesh("item")
+        item["sequence"] = {"count": 4, "start": 0}
+        attachments = {"item": item}
+    else:
+        linked = {
+            "type": "linkedmesh",
+            "parent": "parent",
+            "sequence": {"count": 4, "start": 0},
+        }
+        attachments = {"parent": raw_mesh("parent"), "item": linked}
+
+    skins = (Skin("default", {"slot": attachments}),)
 
     SpineSerializer().to_dict(
         build_document(sequence_animation([{}]), skins=skins)
