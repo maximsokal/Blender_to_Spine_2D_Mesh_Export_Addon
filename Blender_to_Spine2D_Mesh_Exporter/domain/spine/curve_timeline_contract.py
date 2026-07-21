@@ -67,13 +67,20 @@ def _require_finite_number(value: object, field_name: str) -> None:
         raise ValueError(f"{field_name} must be finite")
 
 
-def _validate_curve_value(
+def validate_curve_value(
     curve: object,
     *,
     channel_count: int,
     path: str,
 ) -> None:
-    """Validate one Spine curve without rewriting absolute control points."""
+    """Validate one consumed Spine curve without rewriting control points."""
+
+    if isinstance(channel_count, bool) or not isinstance(channel_count, int):
+        raise TypeError("channel_count must be int")
+    if channel_count < 1:
+        raise ValueError("channel_count must be greater than or equal to 1")
+    if not isinstance(path, str) or not path:
+        raise ValueError("path must be a non-empty string")
 
     if curve == "stepped":
         return
@@ -129,7 +136,7 @@ def _validate_curve_timeline(
         # Spine reads a curve only when the current frame has a following frame.
         # A terminal curve is inert metadata and is preserved for compatibility.
         if "curve" in keyframe and keyframe_index < last_keyframe_index:
-            _validate_curve_value(
+            validate_curve_value(
                 keyframe["curve"],
                 channel_count=channel_count,
                 path=f"{keyframe_path}.curve",
@@ -220,4 +227,4 @@ def validate_animation_curves(
             )
 
 
-__all__ = ["validate_animation_curves"]
+__all__ = ["validate_animation_curves", "validate_curve_value"]
