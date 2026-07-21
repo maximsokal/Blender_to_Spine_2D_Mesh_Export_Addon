@@ -177,6 +177,8 @@ class LegacyMeshAttachmentRequest:
             raise ValueError("vertex indices must be ordered and dense from zero")
         if not isinstance(self.triangles, tuple) or len(self.triangles) % 3 != 0:
             raise ValueError("triangles must be a tuple divisible into triples")
+        if not self.triangles:
+            raise ValueError("triangles must contain at least one triangle")
         if not isinstance(self.edges, tuple) or len(self.edges) % 2 != 0:
             raise ValueError("edges must be a tuple divisible into pairs")
         _require_integer(
@@ -202,6 +204,48 @@ class LegacyMeshAttachmentRequest:
                     minimum=0,
                     maximum=vertex_count - 1,
                 )
+
+        triangle_keys: set[tuple[int, int, int]] = set()
+        referenced_vertices: set[int] = set()
+        for triangle_index in range(0, len(self.triangles), 3):
+            triangle = self.triangles[triangle_index : triangle_index + 3]
+            if len(set(triangle)) != 3:
+                raise ValueError(
+                    f"triangles[{triangle_index // 3}] is degenerate: {triangle}"
+                )
+            normalized = tuple(sorted(triangle))
+            if normalized in triangle_keys:
+                raise ValueError(
+                    "triangles contain duplicate geometry at triangle "
+                    f"{triangle_index // 3}: {triangle}"
+                )
+            triangle_keys.add(normalized)
+            referenced_vertices.update(triangle)
+
+        missing_triangle_vertices = tuple(
+            sorted(set(range(vertex_count)) - referenced_vertices)
+        )
+        if missing_triangle_vertices:
+            raise ValueError(
+                "every attachment vertex must be referenced by a triangle; "
+                f"missing={missing_triangle_vertices}"
+            )
+
+        edge_keys: set[tuple[int, int]] = set()
+        for edge_index in range(0, len(self.edges), 2):
+            first = self.edges[edge_index]
+            second = self.edges[edge_index + 1]
+            if first == second:
+                raise ValueError(
+                    f"edges[{edge_index // 2}] is a self-edge for vertex {first}"
+                )
+            normalized = (first, second) if first < second else (second, first)
+            if normalized in edge_keys:
+                raise ValueError(
+                    "edges contain duplicate undirected pair at edge "
+                    f"{edge_index // 2}: {(first, second)}"
+                )
+            edge_keys.add(normalized)
 
 
 @dataclass(frozen=True, slots=True)
