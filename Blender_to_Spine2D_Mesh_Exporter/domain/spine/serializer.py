@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from .curve_timeline_contract import validate_animation_curves
 from .model import (
     Bone,
     IKConstraint,
@@ -170,6 +171,10 @@ class SpineSerializer:
         validate_animation_slot_color_timelines(
             document.animations,
             slot_names=tuple(slot.name for slot in document.slots),
+            path="document.animations",
+        )
+        validate_animation_curves(
+            document.animations,
             path="document.animations",
         )
 
