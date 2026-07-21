@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from math import isfinite
+from re import fullmatch
 from typing import Any, Mapping, Tuple
 
 from .spine_json_contract import validate_json_mapping
@@ -63,6 +64,33 @@ def _validate_extras(
         raise ValueError(
             f"{path}: extras cannot overwrite known fields: {', '.join(collisions)}"
         )
+
+
+def _validate_attachment_metadata(
+    metadata: Mapping[str, Any],
+    *,
+    path: str,
+) -> None:
+    """Validate common optional attachment fields consumed as strings by runtimes."""
+
+    if "name" in metadata:
+        _require_name(metadata["name"], f"{path}.name")
+
+    if "path" in metadata and not isinstance(metadata["path"], str):
+        raise TypeError(f"{path}.path must be str")
+
+    if "color" in metadata:
+        color = metadata["color"]
+        if not isinstance(color, str):
+            raise TypeError(f"{path}.color must be str")
+        normalized = color[1:] if color.startswith("#") else color
+        if (
+            len(normalized) not in (6, 8)
+            or fullmatch(r"[0-9A-Fa-f]+", normalized) is None
+        ):
+            raise ValueError(
+                f"{path}.color must contain 6 or 8 hexadecimal digits"
+            )
 
 
 def _validate_finite_sequence(values: tuple, field_name: str) -> None:
@@ -261,6 +289,7 @@ class MeshAttachment:
                 "sequence",
             ),
         )
+        _validate_attachment_metadata(self.extras, path="mesh.extras")
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,10 +316,11 @@ class Skin:
                     raise TypeError(
                         "skin attachments must be MeshAttachment values or mappings"
                     )
-                validate_json_mapping(
-                    attachment,
-                    path=f"skin.attachments.{slot_name}.{attachment_name}",
+                attachment_path = (
+                    f"skin.attachments.{slot_name}.{attachment_name}"
                 )
+                validate_json_mapping(attachment, path=attachment_path)
+                _validate_attachment_metadata(attachment, path=attachment_path)
         _require_tuple(self.bones, "bones")
         _require_tuple(self.constraints, "constraints")
         for bone_name in self.bones:
