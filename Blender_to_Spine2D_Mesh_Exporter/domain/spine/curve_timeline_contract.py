@@ -111,6 +111,7 @@ def _validate_curve_timeline(
         raise ValueError(f"{path} cannot be empty")
 
     previous_time: float | int | None = None
+    last_keyframe_index = len(timeline) - 1
     for keyframe_index, keyframe in enumerate(timeline):
         keyframe_path = f"{path}[{keyframe_index}]"
         if not isinstance(keyframe, Mapping):
@@ -125,7 +126,9 @@ def _validate_curve_timeline(
             )
         previous_time = time_value
 
-        if "curve" in keyframe:
+        # Spine reads a curve only when the current frame has a following frame.
+        # A terminal curve is inert metadata and is preserved for compatibility.
+        if "curve" in keyframe and keyframe_index < last_keyframe_index:
             _validate_curve_value(
                 keyframe["curve"],
                 channel_count=channel_count,
@@ -182,9 +185,10 @@ def validate_animation_curves(
     """Validate known slot, bone, and constraint curve-bearing timelines.
 
     Omitted curves remain linear. Exact ``"stepped"`` strings and absolute
-    Bezier control arrays are preserved byte-for-byte. Discrete timelines,
-    deform/sequence attachment timelines, and unknown future timeline kinds
-    are intentionally outside this contract.
+    Bezier control arrays are preserved byte-for-byte. Curves on terminal
+    keyframes are preserved as inert metadata, matching Spine runtime parsing.
+    Discrete timelines, deform/sequence attachment timelines, and unknown
+    future timeline kinds are intentionally outside this contract.
     """
 
     if not isinstance(animations, Mapping):
