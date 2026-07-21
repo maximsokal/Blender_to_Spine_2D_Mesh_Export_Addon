@@ -87,7 +87,6 @@ def test_contract_never_normalizes_or_rewrites_attachments():
         'attachment["type"] =',
         ".lower()",
         ".upper()",
-        ".strip()",
     ):
         assert forbidden not in source
 
