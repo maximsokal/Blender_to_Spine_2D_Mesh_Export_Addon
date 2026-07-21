@@ -275,6 +275,126 @@ def _validate_animation_event_timelines(
                     )
 
 
+def _validate_animation_draw_order_timelines(
+    animations: Mapping[str, Any],
+    *,
+    slot_names: Tuple[str, ...],
+    path: str,
+) -> None:
+    """Validate draw-order keyframes as deterministic slot permutations."""
+
+    slot_index_by_name: dict[str, int] = {}
+    ambiguous_slot_names: set[str] = set()
+    for slot_index, slot_name in enumerate(slot_names):
+        if slot_name in slot_index_by_name:
+            ambiguous_slot_names.add(slot_name)
+        else:
+            slot_index_by_name[slot_name] = slot_index
+
+    slot_count = len(slot_names)
+    for animation_name, animation_metadata in animations.items():
+        animation_path = json_path_key(path, animation_name)
+        if not isinstance(animation_metadata, Mapping):
+            raise TypeError(f"{animation_path} must be a mapping")
+
+        if "drawOrder" not in animation_metadata:
+            continue
+
+        timeline = animation_metadata["drawOrder"]
+        timeline_path = f"{animation_path}.drawOrder"
+        if not isinstance(timeline, (list, tuple)):
+            raise TypeError(f"{timeline_path} must be a list or tuple")
+        if not timeline:
+            raise ValueError(f"{timeline_path} cannot be empty")
+
+        previous_time: float | int | None = None
+        for keyframe_index, keyframe in enumerate(timeline):
+            keyframe_path = f"{timeline_path}[{keyframe_index}]"
+            if not isinstance(keyframe, Mapping):
+                raise TypeError(f"{keyframe_path} must be a mapping")
+
+            time_value = keyframe.get("time", 0)
+            if isinstance(time_value, bool) or not isinstance(
+                time_value,
+                (int, float),
+            ):
+                raise TypeError(f"{keyframe_path}.time must be a finite number")
+            if not _is_finite_number(time_value):
+                raise ValueError(f"{keyframe_path}.time must be finite")
+            if previous_time is not None and time_value < previous_time:
+                raise ValueError(
+                    f"{keyframe_path}.time must be greater than or equal to "
+                    f"the previous draw order time {previous_time}"
+                )
+            previous_time = time_value
+
+            if "offsets" not in keyframe:
+                continue
+
+            offsets = keyframe["offsets"]
+            offsets_path = f"{keyframe_path}.offsets"
+            if not isinstance(offsets, (list, tuple)):
+                raise TypeError(f"{offsets_path} must be a list or tuple")
+
+            previous_source_index = -1
+            seen_slot_names: set[str] = set()
+            target_to_entry_index: dict[int, int] = {}
+            for offset_index, offset_entry in enumerate(offsets):
+                entry_path = f"{offsets_path}[{offset_index}]"
+                if not isinstance(offset_entry, Mapping):
+                    raise TypeError(f"{entry_path} must be a mapping")
+
+                if "slot" not in offset_entry:
+                    raise ValueError(f"{entry_path}.slot is required")
+                slot_name = offset_entry["slot"]
+                _require_name(slot_name, f"{entry_path}.slot")
+                if slot_name in seen_slot_names:
+                    raise ValueError(
+                        f"{entry_path}.slot duplicates slot '{slot_name}' "
+                        "in the same draw order keyframe"
+                    )
+                seen_slot_names.add(slot_name)
+
+                if slot_name not in slot_index_by_name:
+                    raise ValueError(
+                        f"{entry_path}.slot references undefined slot '{slot_name}'"
+                    )
+                if slot_name in ambiguous_slot_names:
+                    raise ValueError(
+                        f"{entry_path}.slot references duplicated setup slot "
+                        f"'{slot_name}'"
+                    )
+
+                source_index = slot_index_by_name[slot_name]
+                if source_index <= previous_source_index:
+                    raise ValueError(
+                        f"{entry_path}.slot must follow setup slot order"
+                    )
+                previous_source_index = source_index
+
+                if "offset" not in offset_entry:
+                    raise ValueError(f"{entry_path}.offset is required")
+                offset_value = offset_entry["offset"]
+                if isinstance(offset_value, bool) or not isinstance(offset_value, int):
+                    raise TypeError(f"{entry_path}.offset must be int")
+
+                target_index = source_index + offset_value
+                if target_index < 0 or target_index >= slot_count:
+                    raise ValueError(
+                        f"{entry_path}.offset moves slot '{slot_name}' outside "
+                        f"draw order range [0, {slot_count})"
+                    )
+
+                previous_entry_index = target_to_entry_index.get(target_index)
+                if previous_entry_index is not None:
+                    raise ValueError(
+                        f"{entry_path}.offset targets draw order index "
+                        f"{target_index}, already used by "
+                        f"{offsets_path}[{previous_entry_index}]"
+                    )
+                target_to_entry_index[target_index] = offset_index
+
+
 def _validate_finite_sequence(values: tuple, field_name: str) -> None:
     for index, value in enumerate(values):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -551,6 +671,11 @@ class SpineDocument:
         _validate_animation_event_timelines(
             self.animations,
             event_definitions=self.events,
+            path="document.animations",
+        )
+        _validate_animation_draw_order_timelines(
+            self.animations,
+            slot_names=tuple(slot.name for slot in self.slots),
             path="document.animations",
         )
         _validate_extras(
