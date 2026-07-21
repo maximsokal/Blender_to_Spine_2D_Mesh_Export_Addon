@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .curve_timeline_contract import validate_animation_curves
+from .deform_timeline_contract import validate_animation_deform_timelines
 from .model import (
     Bone,
     IKConstraint,
@@ -175,6 +176,12 @@ class SpineSerializer:
         )
         validate_animation_curves(
             document.animations,
+            path="document.animations",
+        )
+        validate_animation_deform_timelines(
+            document.animations,
+            skins=document.skins,
+            slot_names=tuple(slot.name for slot in document.slots),
             path="document.animations",
         )
 
