@@ -124,6 +124,7 @@ def test_explicit_parent_skin_and_cross_skin_chain_are_supported():
     assert result.source == AttachmentReference("default", "slot", "child")
     assert result.terminal == AttachmentReference("default", "slot", "base")
     assert isinstance(result.terminal_attachment, MeshAttachment)
+    assert result.terminal_path.endswith(".attachments.slot.base")
     assert len(resolver.validate_all()) == 2
 
 
@@ -142,7 +143,7 @@ def test_parent_lookup_is_locked_to_the_same_slot():
         Slot("other", "root"),
     )
 
-    with pytest.raises(ValueError, match="undefined parent attachment 'parent'"):
+    with pytest.raises(ValueError, match="undefined attachment 'parent'"):
         SpineSerializer().to_dict(build_document(skins, slots=slots))
 
 
@@ -203,7 +204,7 @@ def test_missing_parent_attachment_is_rejected():
         Skin("default", {"slot": {"child": linked("missing")}}),
     )
 
-    with pytest.raises(ValueError, match="undefined parent attachment 'missing'"):
+    with pytest.raises(ValueError, match="undefined attachment 'missing'"):
         validate_setup_linked_meshes(skins)
 
 
@@ -299,7 +300,7 @@ def test_serializer_revalidates_mutated_linked_parent():
     document = build_document(skins)
     child["parent"] = "missing"
 
-    with pytest.raises(ValueError, match="undefined parent attachment 'missing'"):
+    with pytest.raises(ValueError, match="undefined attachment 'missing'"):
         SpineSerializer().to_dict(document)
 
 
