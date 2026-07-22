@@ -8,6 +8,7 @@ from typing import Any
 
 from .model import MeshAttachment, Skin
 from .spine_json_contract import json_path_key
+from .spine_scalar_contract import require_name as _require_name
 
 
 _LINKED_MESH_TYPES = frozenset({"linkedmesh"})
@@ -42,14 +43,6 @@ class ResolvedLinkedMesh:
     terminal: AttachmentReference
     terminal_attachment: MeshAttachment | Mapping[str, Any]
     terminal_path: str
-
-
-def _require_name(value: object, field_name: str) -> str:
-    if not isinstance(value, str):
-        raise TypeError(f"{field_name} must be str")
-    if not value.strip():
-        raise ValueError(f"{field_name} cannot be empty")
-    return value
 
 
 def raw_attachment_type(
