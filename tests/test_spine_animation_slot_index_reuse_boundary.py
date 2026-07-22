@@ -38,6 +38,13 @@ def test_serializer_builds_and_passes_one_exact_index():
     assert to_dict_source.count("SetupSlotIndex(slot_names)") == 1
     assert "setup_slot_index = SetupSlotIndex(slot_names)" in to_dict_source
 
+    model_call = to_dict_source[
+        to_dict_source.index("validate_animation_model_contracts(") :
+        to_dict_source.index("validate_setup_linked_meshes(")
+    ]
+    assert "slot_names=slot_names" in model_call
+    assert "setup_slot_index=setup_slot_index" in model_call
+
     color_call = to_dict_source[to_dict_source.index("validate_animation_slot_color_timelines(") : to_dict_source.index("validate_animation_curves(")]
     deform_call = to_dict_source[to_dict_source.index("validate_animation_deform_timelines(") : to_dict_source.index("validate_animation_sequence_timelines(")]
     sequence_call = to_dict_source[to_dict_source.index("validate_animation_sequence_timelines(") : to_dict_source.index('data: dict[str, Any] = {')]
@@ -51,8 +58,9 @@ def test_serializer_keeps_existing_boundary_order():
     body = source[source.index("def to_dict(") :]
     names = (
         "self._validator.validate_or_raise(document)",
-        "validate_setup_linked_meshes(",
         "setup_slot_index = SetupSlotIndex(slot_names)",
+        "validate_animation_model_contracts(",
+        "validate_setup_linked_meshes(",
         "validate_animation_slot_color_timelines(",
         "validate_animation_curves(",
         "validate_animation_deform_timelines(",
