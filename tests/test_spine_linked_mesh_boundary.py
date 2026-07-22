@@ -39,6 +39,17 @@ def test_linked_mesh_contract_owns_exact_setup_types_and_default_skin():
     assert "parent_skin_name = _DEFAULT_SKIN_NAME" in source
 
 
+def test_linked_mesh_contract_aliases_shared_name_requirement():
+    source = read(CONTRACT)
+
+    assert (
+        "from .spine_scalar_contract import require_name as _require_name"
+        in source
+    )
+    assert "def _require_name(" not in source
+    assert "_require_name(" in source
+
+
 def test_parent_reference_is_forced_to_the_source_slot():
     source = read(CONTRACT)
 
