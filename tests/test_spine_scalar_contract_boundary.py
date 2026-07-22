@@ -22,7 +22,11 @@ def test_scalar_contract_is_blender_and_model_independent():
     assert "from .animation_model_contract import" not in source
     assert "def require_name(" in source
     assert "def is_finite_number(" in source
-    assert '__all__ = ["is_finite_number", "require_name"]' in source
+    assert "def require_finite_number(" in source
+    assert (
+        '__all__ = ["is_finite_number", "require_finite_number", "require_name"]'
+        in source
+    )
 
 
 def test_name_contract_preserves_spelling_and_exact_diagnostics():
@@ -40,11 +44,25 @@ def test_name_contract_preserves_spelling_and_exact_diagnostics():
 
 def test_finite_number_contract_excludes_bool_and_non_finite_float():
     source = read(SCALAR)
-    helper = source[source.index("def is_finite_number(") : source.index("__all__")]
+    helper = source[
+        source.index("def is_finite_number(") : source.index("def require_finite_number(")
+    ]
 
     assert "isinstance(value, bool)" in helper
     assert "not isinstance(value, (int, float))" in helper
     assert "return isinstance(value, int) or isfinite(value)" in helper
+
+
+def test_required_finite_number_reuses_predicate_and_preserves_diagnostics():
+    source = read(SCALAR)
+    helper = source[source.index("def require_finite_number(") : source.index("__all__")]
+
+    assert "isinstance(value, bool)" in helper
+    assert "not isinstance(value, (int, float))" in helper
+    assert 'raise TypeError(f"{field_name} must be a finite number")' in helper
+    assert "if not is_finite_number(value):" in helper
+    assert 'raise ValueError(f"{field_name} must be finite")' in helper
+    assert "return value" in helper
 
 
 def test_model_and_animation_alias_shared_scalar_helpers():
