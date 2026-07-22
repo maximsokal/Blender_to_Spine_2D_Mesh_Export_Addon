@@ -2,20 +2,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL = (
-    ROOT
-    / "Blender_to_Spine2D_Mesh_Exporter"
-    / "domain"
-    / "spine"
-    / "model.py"
-)
-SERIALIZER = (
-    ROOT
-    / "Blender_to_Spine2D_Mesh_Exporter"
-    / "domain"
-    / "spine"
-    / "serializer.py"
-)
+SPINE = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "domain" / "spine"
+CONTRACT = SPINE / "animation_model_contract.py"
+MODEL = SPINE / "model.py"
+SERIALIZER = SPINE / "serializer.py"
 
 
 def read(path: Path) -> str:
@@ -23,7 +13,7 @@ def read(path: Path) -> str:
 
 
 def draw_order_helper_source() -> str:
-    source = read(MODEL)
+    source = read(CONTRACT)
     helper_start = source.index("def _validate_animation_draw_order_timelines(")
     next_helper = source.index(
         "def _validate_animation_slot_attachment_timelines(",
@@ -33,36 +23,29 @@ def draw_order_helper_source() -> str:
 
 
 def test_draw_order_validation_runs_after_recursive_animation_validation():
-    source = read(MODEL)
-    document_start = source.index("class SpineDocument:")
-    document_source = source[document_start:]
+    source = read(CONTRACT)
+    body = source[source.index("def validate_animation_model_contracts(") :]
 
-    json_index = document_source.index(
-        'validate_json_mapping(self.animations, path="document.animations")'
-    )
-    event_index = document_source.index(
-        "_validate_animation_event_timelines("
-    )
-    draw_order_index = document_source.index(
-        "_validate_animation_draw_order_timelines("
-    )
+    json_index = body.index("validate_json_mapping(animations, path=path)")
+    event_index = body.index("_validate_animation_event_timelines(")
+    draw_order_index = body.index("_validate_animation_draw_order_timelines(")
 
     assert json_index < event_index < draw_order_index
 
 
-def test_draw_order_receives_shared_setup_slot_index_without_hidden_sorting():
+def test_model_passes_shared_setup_slot_index_without_hidden_sorting():
     source = read(MODEL)
-    document_start = source.index("class SpineDocument:")
-    document_source = source[document_start:]
+    document_source = source[source.index("class SpineDocument:") :]
 
     assert "slot_names = tuple(slot.name for slot in self.slots)" in document_source
     assert "setup_slot_index = SetupSlotIndex(slot_names)" in document_source
-    draw_call = document_source[
-        document_source.index("_validate_animation_draw_order_timelines(") :
-        document_source.index("attachment_names_by_slot:")
+    call = document_source[
+        document_source.index("validate_animation_model_contracts(") :
+        document_source.index("_validate_extras(", document_source.index("validate_animation_model_contracts("))
     ]
-    assert "setup_slot_index=setup_slot_index" in draw_call
-    assert "slot_names=tuple(" not in draw_call
+    assert "setup_slot_index=setup_slot_index" in call
+    assert "slot_names=slot_names" in call
+    assert "slot_names=tuple(" not in call
     assert "slot_names=tuple(sorted(" not in document_source
 
 
