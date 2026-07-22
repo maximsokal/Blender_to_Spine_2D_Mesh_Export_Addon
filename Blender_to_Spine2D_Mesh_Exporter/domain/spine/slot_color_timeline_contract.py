@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from math import isfinite
 from re import fullmatch
 from typing import Any
 
 from .setup_slot_contract import SetupSlotIndex, resolve_setup_slot_index
 from .spine_json_contract import json_path_key
+from .spine_scalar_contract import require_finite_number as _require_finite_number
 
 
 _SLOT_COLOR_FIELDS: dict[str, tuple[tuple[str, int], ...]] = {
@@ -18,12 +18,6 @@ _SLOT_COLOR_FIELDS: dict[str, tuple[tuple[str, int], ...]] = {
     "rgb2": (("light", 6), ("dark", 6)),
 }
 _SLOT_COLOR_TIMELINE_NAMES = frozenset((*_SLOT_COLOR_FIELDS, "alpha"))
-
-
-def _is_finite_number(value: object) -> bool:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-    return isinstance(value, int) or isfinite(value)
 
 
 def _require_hex_color(
@@ -44,13 +38,6 @@ def _require_hex_color(
             f"{field_name} must contain exactly {digits} hexadecimal "
             f"{color_kind} digits"
         )
-
-
-def _require_finite_number(value: object, field_name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise TypeError(f"{field_name} must be a finite number")
-    if not _is_finite_number(value):
-        raise ValueError(f"{field_name} must be finite")
 
 
 def validate_animation_slot_color_timelines(
