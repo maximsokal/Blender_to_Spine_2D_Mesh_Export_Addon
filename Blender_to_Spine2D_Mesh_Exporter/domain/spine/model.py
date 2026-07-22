@@ -7,9 +7,9 @@ from math import isfinite
 from re import fullmatch
 from typing import Any, Mapping, Tuple
 
-from .setup_attachment_contract import SetupAttachmentNameIndex
+from .animation_model_contract import validate_animation_model_contracts
 from .setup_slot_contract import SetupSlotIndex
-from .spine_json_contract import json_path_key, validate_json_mapping
+from .spine_json_contract import validate_json_mapping
 
 JsonMapping = Mapping[str, Any]
 _SLOT_BLEND_VALUES = frozenset({"normal", "additive", "multiply", "screen"})
@@ -22,11 +22,6 @@ _SKELETON_NUMBER_FIELDS = (
     "referenceScale",
     "fps",
 )
-_EVENT_STRING_FIELDS = ("string", "audio")
-_EVENT_TIMELINE_STRING_FIELDS = ("string",)
-_EVENT_NUMBER_FIELDS = ("float", "volume", "balance")
-_EVENT_INT_MIN = -(2**31)
-_EVENT_INT_MAX = 2**31 - 1
 
 
 def _require_name(value: str, field_name: str = "name") -> None:
@@ -150,320 +145,6 @@ def _validate_skeleton_metadata(
             raise TypeError(f"{path}.{field_name} must be a finite number")
         if not _is_finite_number(value):
             raise ValueError(f"{path}.{field_name} must be finite")
-
-
-def _validate_event_definitions(
-    events: Mapping[str, Any],
-    *,
-    path: str,
-) -> None:
-    """Validate setup-pose event definitions without inserting runtime defaults."""
-
-    for event_name, event_metadata in events.items():
-        event_path = json_path_key(path, event_name)
-        _require_name(event_name, f"{event_path} event name")
-        if not isinstance(event_metadata, Mapping):
-            raise TypeError(f"{event_path} must be a mapping")
-
-        if "int" in event_metadata:
-            int_value = event_metadata["int"]
-            if isinstance(int_value, bool) or not isinstance(int_value, int):
-                raise TypeError(f"{event_path}.int must be int")
-            if int_value < _EVENT_INT_MIN or int_value > _EVENT_INT_MAX:
-                raise ValueError(
-                    f"{event_path}.int must be inside signed 32-bit range "
-                    f"[{_EVENT_INT_MIN}, {_EVENT_INT_MAX}]"
-                )
-
-        for field_name in _EVENT_STRING_FIELDS:
-            if field_name in event_metadata and not isinstance(
-                event_metadata[field_name], str
-            ):
-                raise TypeError(f"{event_path}.{field_name} must be str")
-
-        for field_name in _EVENT_NUMBER_FIELDS:
-            if field_name not in event_metadata:
-                continue
-            value = event_metadata[field_name]
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise TypeError(f"{event_path}.{field_name} must be a finite number")
-            if not _is_finite_number(value):
-                raise ValueError(f"{event_path}.{field_name} must be finite")
-
-
-def _validate_animation_event_timelines(
-    animations: Mapping[str, Any],
-    *,
-    event_definitions: Mapping[str, Any],
-    path: str,
-) -> None:
-    """Validate animation event keyframes and their setup-event references."""
-
-    event_names = frozenset(event_definitions)
-    for animation_name, animation_metadata in animations.items():
-        animation_path = json_path_key(path, animation_name)
-        if not isinstance(animation_metadata, Mapping):
-            raise TypeError(f"{animation_path} must be a mapping")
-
-        if "events" not in animation_metadata:
-            continue
-
-        timeline = animation_metadata["events"]
-        timeline_path = f"{animation_path}.events"
-        if not isinstance(timeline, (list, tuple)):
-            raise TypeError(f"{timeline_path} must be a list or tuple")
-        if not timeline:
-            raise ValueError(f"{timeline_path} cannot be empty")
-
-        previous_time: float | int | None = None
-        for keyframe_index, keyframe in enumerate(timeline):
-            keyframe_path = f"{timeline_path}[{keyframe_index}]"
-            if not isinstance(keyframe, Mapping):
-                raise TypeError(f"{keyframe_path} must be a mapping")
-
-            if "name" not in keyframe:
-                raise ValueError(f"{keyframe_path}.name is required")
-            event_name = keyframe["name"]
-            _require_name(event_name, f"{keyframe_path}.name")
-            if event_name not in event_names:
-                raise ValueError(
-                    f"{keyframe_path}.name references undefined event "
-                    f"'{event_name}'"
-                )
-
-            time_value = keyframe.get("time", 0)
-            if isinstance(time_value, bool) or not isinstance(
-                time_value,
-                (int, float),
-            ):
-                raise TypeError(f"{keyframe_path}.time must be a finite number")
-            if not _is_finite_number(time_value):
-                raise ValueError(f"{keyframe_path}.time must be finite")
-            if previous_time is not None and time_value < previous_time:
-                raise ValueError(
-                    f"{keyframe_path}.time must be greater than or equal to "
-                    f"the previous event time {previous_time}"
-                )
-            previous_time = time_value
-
-            if "int" in keyframe:
-                int_value = keyframe["int"]
-                if isinstance(int_value, bool) or not isinstance(int_value, int):
-                    raise TypeError(f"{keyframe_path}.int must be int")
-                if int_value < _EVENT_INT_MIN or int_value > _EVENT_INT_MAX:
-                    raise ValueError(
-                        f"{keyframe_path}.int must be inside signed 32-bit range "
-                        f"[{_EVENT_INT_MIN}, {_EVENT_INT_MAX}]"
-                    )
-
-            for field_name in _EVENT_TIMELINE_STRING_FIELDS:
-                if field_name in keyframe and not isinstance(
-                    keyframe[field_name],
-                    str,
-                ):
-                    raise TypeError(f"{keyframe_path}.{field_name} must be str")
-
-            for field_name in _EVENT_NUMBER_FIELDS:
-                if field_name not in keyframe:
-                    continue
-                value = keyframe[field_name]
-                if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    raise TypeError(
-                        f"{keyframe_path}.{field_name} must be a finite number"
-                    )
-                if not _is_finite_number(value):
-                    raise ValueError(
-                        f"{keyframe_path}.{field_name} must be finite"
-                    )
-
-
-def _validate_animation_draw_order_timelines(
-    animations: Mapping[str, Any],
-    *,
-    setup_slot_index: SetupSlotIndex,
-    path: str,
-) -> None:
-    """Validate draw-order keyframes as deterministic slot permutations."""
-
-    if not isinstance(setup_slot_index, SetupSlotIndex):
-        raise TypeError("setup_slot_index must be SetupSlotIndex")
-
-    slot_count = len(setup_slot_index.slot_names)
-    for animation_name, animation_metadata in animations.items():
-        animation_path = json_path_key(path, animation_name)
-        if not isinstance(animation_metadata, Mapping):
-            raise TypeError(f"{animation_path} must be a mapping")
-
-        if "drawOrder" not in animation_metadata:
-            continue
-
-        timeline = animation_metadata["drawOrder"]
-        timeline_path = f"{animation_path}.drawOrder"
-        if not isinstance(timeline, (list, tuple)):
-            raise TypeError(f"{timeline_path} must be a list or tuple")
-        if not timeline:
-            raise ValueError(f"{timeline_path} cannot be empty")
-
-        previous_time: float | int | None = None
-        for keyframe_index, keyframe in enumerate(timeline):
-            keyframe_path = f"{timeline_path}[{keyframe_index}]"
-            if not isinstance(keyframe, Mapping):
-                raise TypeError(f"{keyframe_path} must be a mapping")
-
-            time_value = keyframe.get("time", 0)
-            if isinstance(time_value, bool) or not isinstance(
-                time_value,
-                (int, float),
-            ):
-                raise TypeError(f"{keyframe_path}.time must be a finite number")
-            if not _is_finite_number(time_value):
-                raise ValueError(f"{keyframe_path}.time must be finite")
-            if previous_time is not None and time_value < previous_time:
-                raise ValueError(
-                    f"{keyframe_path}.time must be greater than or equal to "
-                    f"the previous draw order time {previous_time}"
-                )
-            previous_time = time_value
-
-            if "offsets" not in keyframe:
-                continue
-
-            offsets = keyframe["offsets"]
-            offsets_path = f"{keyframe_path}.offsets"
-            if not isinstance(offsets, (list, tuple)):
-                raise TypeError(f"{offsets_path} must be a list or tuple")
-
-            previous_source_index = -1
-            seen_slot_names: set[str] = set()
-            target_to_entry_index: dict[int, int] = {}
-            for offset_index, offset_entry in enumerate(offsets):
-                entry_path = f"{offsets_path}[{offset_index}]"
-                if not isinstance(offset_entry, Mapping):
-                    raise TypeError(f"{entry_path} must be a mapping")
-
-                if "slot" not in offset_entry:
-                    raise ValueError(f"{entry_path}.slot is required")
-                slot_name = offset_entry["slot"]
-                _require_name(slot_name, f"{entry_path}.slot")
-                if slot_name in seen_slot_names:
-                    raise ValueError(
-                        f"{entry_path}.slot duplicates slot '{slot_name}' "
-                        "in the same draw order keyframe"
-                    )
-                seen_slot_names.add(slot_name)
-
-                source_index = setup_slot_index.require(
-                    slot_name,
-                    path=f"{entry_path}.slot",
-                )
-                if source_index <= previous_source_index:
-                    raise ValueError(
-                        f"{entry_path}.slot must follow setup slot order"
-                    )
-                previous_source_index = source_index
-
-                if "offset" not in offset_entry:
-                    raise ValueError(f"{entry_path}.offset is required")
-                offset_value = offset_entry["offset"]
-                if isinstance(offset_value, bool) or not isinstance(offset_value, int):
-                    raise TypeError(f"{entry_path}.offset must be int")
-
-                target_index = source_index + offset_value
-                if target_index < 0 or target_index >= slot_count:
-                    raise ValueError(
-                        f"{entry_path}.offset moves slot '{slot_name}' outside "
-                        f"draw order range [0, {slot_count})"
-                    )
-
-                previous_entry_index = target_to_entry_index.get(target_index)
-                if previous_entry_index is not None:
-                    raise ValueError(
-                        f"{entry_path}.offset targets draw order index "
-                        f"{target_index}, already used by "
-                        f"{offsets_path}[{previous_entry_index}]"
-                    )
-                target_to_entry_index[target_index] = offset_index
-
-
-def _validate_animation_slot_attachment_timelines(
-    animations: Mapping[str, Any],
-    *,
-    setup_slot_index: SetupSlotIndex,
-    setup_attachment_index: SetupAttachmentNameIndex,
-    path: str,
-) -> None:
-    """Validate slot attachment timelines and their setup attachment references."""
-
-    if not isinstance(setup_slot_index, SetupSlotIndex):
-        raise TypeError("setup_slot_index must be SetupSlotIndex")
-    if not isinstance(setup_attachment_index, SetupAttachmentNameIndex):
-        raise TypeError(
-            "setup_attachment_index must be SetupAttachmentNameIndex"
-        )
-
-    for animation_name, animation_metadata in animations.items():
-        animation_path = json_path_key(path, animation_name)
-        if not isinstance(animation_metadata, Mapping):
-            raise TypeError(f"{animation_path} must be a mapping")
-
-        if "slots" not in animation_metadata:
-            continue
-
-        slot_timelines = animation_metadata["slots"]
-        slots_path = f"{animation_path}.slots"
-        if not isinstance(slot_timelines, Mapping):
-            raise TypeError(f"{slots_path} must be a mapping")
-
-        for slot_name, slot_metadata in slot_timelines.items():
-            slot_path = json_path_key(slots_path, slot_name)
-            _require_name(slot_name, f"{slot_path} slot name")
-            setup_slot_index.require(slot_name, path=slot_path)
-            if not isinstance(slot_metadata, Mapping):
-                raise TypeError(f"{slot_path} must be a mapping")
-
-            if "attachment" not in slot_metadata:
-                continue
-
-            timeline = slot_metadata["attachment"]
-            timeline_path = f"{slot_path}.attachment"
-            if not isinstance(timeline, (list, tuple)):
-                raise TypeError(f"{timeline_path} must be a list or tuple")
-            if not timeline:
-                raise ValueError(f"{timeline_path} cannot be empty")
-
-            previous_time: float | int | None = None
-            for keyframe_index, keyframe in enumerate(timeline):
-                keyframe_path = f"{timeline_path}[{keyframe_index}]"
-                if not isinstance(keyframe, Mapping):
-                    raise TypeError(f"{keyframe_path} must be a mapping")
-
-                time_value = keyframe.get("time", 0)
-                if isinstance(time_value, bool) or not isinstance(
-                    time_value,
-                    (int, float),
-                ):
-                    raise TypeError(
-                        f"{keyframe_path}.time must be a finite number"
-                    )
-                if not _is_finite_number(time_value):
-                    raise ValueError(f"{keyframe_path}.time must be finite")
-                if previous_time is not None and time_value < previous_time:
-                    raise ValueError(
-                        f"{keyframe_path}.time must be greater than or equal to "
-                        f"the previous attachment time {previous_time}"
-                    )
-                previous_time = time_value
-
-                if "name" not in keyframe or keyframe["name"] is None:
-                    continue
-
-                attachment_name = keyframe["name"]
-                _require_name(attachment_name, f"{keyframe_path}.name")
-                setup_attachment_index.require(
-                    slot_name,
-                    attachment_name,
-                    path=f"{keyframe_path}.name",
-                )
 
 
 def _validate_finite_sequence(values: tuple, field_name: str) -> None:
@@ -739,29 +420,15 @@ class SpineDocument:
 
         slot_names = tuple(slot.name for slot in self.slots)
         setup_slot_index = SetupSlotIndex(slot_names)
-
-        validate_json_mapping(self.animations, path="document.animations")
-        validate_json_mapping(self.events, path="document.events")
-        _validate_event_definitions(self.events, path="document.events")
-        _validate_animation_event_timelines(
+        skin_attachments = tuple(skin.attachments for skin in self.skins)
+        validate_animation_model_contracts(
             self.animations,
-            event_definitions=self.events,
+            events=self.events,
+            slot_names=slot_names,
+            skin_attachments=skin_attachments,
             path="document.animations",
-        )
-        _validate_animation_draw_order_timelines(
-            self.animations,
+            events_path="document.events",
             setup_slot_index=setup_slot_index,
-            path="document.animations",
-        )
-
-        setup_attachment_index = SetupAttachmentNameIndex(
-            tuple(skin.attachments for skin in self.skins)
-        )
-        _validate_animation_slot_attachment_timelines(
-            self.animations,
-            setup_slot_index=setup_slot_index,
-            setup_attachment_index=setup_attachment_index,
-            path="document.animations",
         )
         _validate_extras(
             self.extras,
