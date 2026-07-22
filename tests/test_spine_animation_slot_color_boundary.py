@@ -69,6 +69,19 @@ def test_color_contract_is_a_separate_output_boundary_not_model_mutation():
     )
 
 
+def test_color_contract_reuses_shared_finite_requirement():
+    source = read(CONTRACT)
+
+    assert (
+        "from .spine_scalar_contract import "
+        "require_finite_number as _require_finite_number"
+        in source
+    )
+    assert "def _require_finite_number(" not in source
+    assert "def _is_finite_number(" not in source
+    assert "from math import isfinite" not in source
+
+
 def test_known_timeline_containers_and_keyframes_are_fail_closed():
     source = read(CONTRACT)
 
