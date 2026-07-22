@@ -12,21 +12,24 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_revalidation_contract_is_the_only_private_model_bridge():
+def test_contract_owns_model_animation_implementation_without_import_cycle():
     source = read(CONTRACT)
+    model_source = read(MODEL)
     serializer_source = read(SERIALIZER)
 
+    assert "from .model import" not in source
     for name in (
         "_validate_event_definitions",
         "_validate_animation_event_timelines",
         "_validate_animation_draw_order_timelines",
         "_validate_animation_slot_attachment_timelines",
     ):
-        assert name in source
+        assert f"def {name}(" in source
+        assert f"def {name}(" not in model_source
         assert name not in serializer_source
 
 
-def test_contract_revalidates_in_model_order_without_mutation():
+def test_contract_validates_in_original_model_order_without_mutation():
     source = read(CONTRACT)
     names = (
         "validate_json_mapping(animations, path=path)",
@@ -54,6 +57,28 @@ def test_contract_accepts_and_reuses_both_exact_indexes():
     assert "setup_attachment_index," in source
     assert "setup_slot_index=slot_index" in source
     assert "setup_attachment_index=attachment_index" in source
+
+
+def test_model_delegates_construction_validation_to_public_contract():
+    source = read(MODEL)
+    document_source = source[source.index("class SpineDocument:") :]
+    call = document_source[
+        document_source.index("validate_animation_model_contracts(") :
+        document_source.index("_validate_extras(", document_source.index("validate_animation_model_contracts("))
+    ]
+
+    assert (
+        "from .animation_model_contract import validate_animation_model_contracts"
+        in source
+    )
+    assert "slot_names = tuple(slot.name for slot in self.slots)" in document_source
+    assert "setup_slot_index = SetupSlotIndex(slot_names)" in document_source
+    assert "skin_attachments = tuple(skin.attachments for skin in self.skins)" in document_source
+    assert "events=self.events" in call
+    assert "slot_names=slot_names" in call
+    assert "skin_attachments=skin_attachments" in call
+    assert "setup_slot_index=setup_slot_index" in call
+    assert "setup_attachment_index=" not in call
 
 
 def test_serializer_revalidates_before_output_specific_boundaries():
@@ -89,12 +114,3 @@ def test_serializer_passes_exact_snapshots_and_indexes_to_revalidation():
     assert "skin_attachments=skin_attachments" in call
     assert "setup_slot_index=setup_slot_index" in call
     assert "setup_attachment_index=setup_attachment_index" in call
-
-
-def test_model_remains_unchanged_owner_of_construction_time_validation():
-    source = read(MODEL)
-
-    assert "def _validate_animation_event_timelines(" in source
-    assert "def _validate_animation_draw_order_timelines(" in source
-    assert "def _validate_animation_slot_attachment_timelines(" in source
-    assert "animation_model_contract" not in source
