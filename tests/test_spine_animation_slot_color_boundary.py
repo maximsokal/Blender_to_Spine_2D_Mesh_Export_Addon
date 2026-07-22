@@ -53,9 +53,8 @@ def test_serializer_runs_color_contract_after_general_validator():
     data_index = to_dict_source.index('data: dict[str, Any] = {')
 
     assert validator_index < color_index < data_index
-    assert "slot_names=tuple(slot.name for slot in document.slots)" in (
-        to_dict_source
-    )
+    assert "slot_names=slot_names" in to_dict_source
+    assert "setup_slot_index=setup_slot_index" in to_dict_source
     assert 'path="document.animations"' in to_dict_source
 
 
