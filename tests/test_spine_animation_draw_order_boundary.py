@@ -25,7 +25,10 @@ def read(path: Path) -> str:
 def draw_order_helper_source() -> str:
     source = read(MODEL)
     helper_start = source.index("def _validate_animation_draw_order_timelines(")
-    next_helper = source.index("def _validate_finite_sequence(", helper_start)
+    next_helper = source.index(
+        "def _validate_animation_slot_attachment_timelines(",
+        helper_start,
+    )
     return source[helper_start:next_helper]
 
 
@@ -47,12 +50,19 @@ def test_draw_order_validation_runs_after_recursive_animation_validation():
     assert json_index < event_index < draw_order_index
 
 
-def test_draw_order_receives_setup_slot_order_without_hidden_sorting():
+def test_draw_order_receives_shared_setup_slot_index_without_hidden_sorting():
     source = read(MODEL)
     document_start = source.index("class SpineDocument:")
     document_source = source[document_start:]
 
-    assert "slot_names=tuple(slot.name for slot in self.slots)" in document_source
+    assert "slot_names = tuple(slot.name for slot in self.slots)" in document_source
+    assert "setup_slot_index = SetupSlotIndex(slot_names)" in document_source
+    draw_call = document_source[
+        document_source.index("_validate_animation_draw_order_timelines(") :
+        document_source.index("attachment_names_by_slot:")
+    ]
+    assert "setup_slot_index=setup_slot_index" in draw_call
+    assert "slot_names=tuple(" not in draw_call
     assert "slot_names=tuple(sorted(" not in document_source
 
 
@@ -78,15 +88,17 @@ def test_draw_order_time_is_finite_and_non_decreasing():
     assert "time_value <= previous_time" not in helper
 
 
-def test_draw_order_slot_references_are_exact_and_unambiguous():
+def test_draw_order_slot_references_use_shared_exact_index():
     helper = draw_order_helper_source()
 
-    assert "slot_index_by_name: dict[str, int] = {}" in helper
-    assert "ambiguous_slot_names: set[str] = set()" in helper
+    assert "setup_slot_index: SetupSlotIndex" in helper
+    assert "isinstance(setup_slot_index, SetupSlotIndex)" in helper
     assert '_require_name(slot_name, f"{entry_path}.slot")' in helper
     assert "if slot_name in seen_slot_names:" in helper
-    assert "if slot_name not in slot_index_by_name:" in helper
-    assert "if slot_name in ambiguous_slot_names:" in helper
+    assert "source_index = setup_slot_index.require(" in helper
+    assert 'path=f"{entry_path}.slot"' in helper
+    assert "slot_index_by_name" not in helper
+    assert "ambiguous_slot_names" not in helper
 
 
 def test_draw_order_offset_entries_preserve_runtime_setup_order():
