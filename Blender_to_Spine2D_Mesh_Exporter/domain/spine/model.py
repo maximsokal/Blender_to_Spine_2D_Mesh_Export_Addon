@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import isfinite
 from re import fullmatch
 from typing import Any, Mapping, Tuple
 
 from .animation_model_contract import validate_animation_model_contracts
 from .setup_slot_contract import SetupSlotIndex
 from .spine_json_contract import validate_json_mapping
+from .spine_scalar_contract import (
+    is_finite_number as _is_finite_number,
+    require_name as _require_name,
+)
 
 JsonMapping = Mapping[str, Any]
 _SLOT_BLEND_VALUES = frozenset({"normal", "additive", "multiply", "screen"})
@@ -22,13 +25,6 @@ _SKELETON_NUMBER_FIELDS = (
     "referenceScale",
     "fps",
 )
-
-
-def _require_name(value: str, field_name: str = "name") -> None:
-    if not isinstance(value, str):
-        raise TypeError(f"{field_name} must be str")
-    if not value.strip():
-        raise ValueError(f"{field_name} cannot be empty")
 
 
 def _require_optional_string(value: str | None, field_name: str) -> None:
@@ -62,12 +58,6 @@ def _require_optional_slot_blend(value: object, field_name: str) -> None:
     if value not in _SLOT_BLEND_VALUES:
         allowed = ", ".join(sorted(_SLOT_BLEND_VALUES))
         raise ValueError(f"{field_name} must be one of: {allowed}")
-
-
-def _is_finite_number(value: object) -> bool:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-    return isinstance(value, int) or isfinite(value)
 
 
 def _require_finite_number(value: float | int | None, field_name: str) -> None:
