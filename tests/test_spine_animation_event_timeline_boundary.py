@@ -2,20 +2,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL = (
-    ROOT
-    / "Blender_to_Spine2D_Mesh_Exporter"
-    / "domain"
-    / "spine"
-    / "model.py"
-)
-SERIALIZER = (
-    ROOT
-    / "Blender_to_Spine2D_Mesh_Exporter"
-    / "domain"
-    / "spine"
-    / "serializer.py"
-)
+SPINE = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "domain" / "spine"
+CONTRACT = SPINE / "animation_model_contract.py"
+SERIALIZER = SPINE / "serializer.py"
 
 
 def read(path: Path) -> str:
@@ -23,36 +12,30 @@ def read(path: Path) -> str:
 
 
 def timeline_helper_source() -> str:
-    source = read(MODEL)
+    source = read(CONTRACT)
     helper_start = source.index("def _validate_animation_event_timelines(")
-    next_helper = source.index("def _validate_finite_sequence(", helper_start)
+    next_helper = source.index(
+        "def _validate_animation_draw_order_timelines(",
+        helper_start,
+    )
     return source[helper_start:next_helper]
 
 
 def test_event_timeline_validation_runs_after_recursive_json_and_setup_events():
-    source = read(MODEL)
-    document_start = source.index("class SpineDocument:")
-    document_source = source[document_start:]
+    source = read(CONTRACT)
+    body = source[source.index("def validate_animation_model_contracts(") :]
 
-    animation_json_index = document_source.index(
-        'validate_json_mapping(self.animations, path="document.animations")'
-    )
-    event_json_index = document_source.index(
-        'validate_json_mapping(self.events, path="document.events")'
-    )
-    setup_index = document_source.index(
-        '_validate_event_definitions(self.events, path="document.events")'
-    )
-    timeline_index = document_source.index(
-        "_validate_animation_event_timelines("
-    )
+    animation_json_index = body.index("validate_json_mapping(animations, path=path)")
+    event_json_index = body.index("validate_json_mapping(events, path=events_path)")
+    setup_index = body.index("_validate_event_definitions(events, path=events_path)")
+    timeline_index = body.index("_validate_animation_event_timelines(")
 
     assert animation_json_index < timeline_index
     assert event_json_index < setup_index < timeline_index
 
 
 def test_event_timeline_reuses_setup_event_scalar_contracts():
-    source = read(MODEL)
+    source = read(CONTRACT)
 
     assert '_EVENT_TIMELINE_STRING_FIELDS = ("string",)' in source
     assert '_EVENT_NUMBER_FIELDS = ("float", "volume", "balance")' in source
@@ -86,7 +69,7 @@ def test_event_names_use_json_paths_and_reference_setup_definitions():
 
 
 def test_setup_event_mapping_keys_are_non_empty_names():
-    source = read(MODEL)
+    source = read(CONTRACT)
     helper_start = source.index("def _validate_event_definitions(")
     next_helper = source.index(
         "def _validate_animation_event_timelines(",
@@ -112,7 +95,7 @@ def test_event_timeline_does_not_insert_defaults_or_unproven_ranges():
     helper = timeline_helper_source()
 
     assert "setdefault(" not in helper
-    assert "keyframe[\"time\"] =" not in helper
+    assert 'keyframe["time"] =' not in helper
     assert "volume <" not in helper
     assert "volume >" not in helper
     assert "balance <" not in helper
