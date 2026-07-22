@@ -23,4 +23,14 @@ def is_finite_number(value: object) -> bool:
     return isinstance(value, int) or isfinite(value)
 
 
-__all__ = ["is_finite_number", "require_name"]
+def require_finite_number(value: object, field_name: str) -> int | float:
+    """Return one strict finite number while preserving its exact numeric type."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{field_name} must be a finite number")
+    if not is_finite_number(value):
+        raise ValueError(f"{field_name} must be finite")
+    return value
+
+
+__all__ = ["is_finite_number", "require_finite_number", "require_name"]
