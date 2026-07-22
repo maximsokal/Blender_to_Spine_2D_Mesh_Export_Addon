@@ -167,13 +167,17 @@ def test_offset_is_not_read_without_vertices():
     assert 'keyframe["offset"]' not in source
 
 
-def test_deform_time_and_components_are_strict_finite_numbers():
+def test_deform_scalar_requirements_are_shared_without_changing_timeline_order():
     source = read(CONTRACT)
 
-    assert "isinstance(value, bool)" in source
-    assert "not isinstance(value, (int, float))" in source
-    assert "not isfinite(value)" in source
+    assert "from .spine_scalar_contract import (" in source
+    assert "require_finite_number as _require_finite_number" in source
+    assert "require_name as _require_name" in source
+    assert "def _require_finite_number(" not in source
+    assert "def _require_name(" not in source
+    assert "from math import isfinite" not in source
     assert 'time_value = keyframe.get("time", 0)' in source
+    assert "_require_finite_number(" in source
     assert "time_value < previous_time" in source
     assert "time_value <= previous_time" not in source
 
