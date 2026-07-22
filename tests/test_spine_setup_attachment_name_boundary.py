@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SPINE = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "domain" / "spine"
 CONTRACT = SPINE / "setup_attachment_contract.py"
+ANIMATION = SPINE / "animation_model_contract.py"
 MODEL = SPINE / "model.py"
 LINKED = SPINE / "linked_mesh_contract.py"
 
@@ -49,15 +50,24 @@ def test_index_owns_path_aware_attachment_reference_failure():
     assert "for slot" in source
 
 
-def test_model_uses_contract_without_importing_linked_mesh_resolver():
+def test_model_delegates_attachment_validation_without_resolver_coupling():
     model_source = read(MODEL)
+    animation_source = read(ANIMATION)
 
     assert (
-        "from .setup_attachment_contract import SetupAttachmentNameIndex"
+        "from .animation_model_contract import validate_animation_model_contracts"
         in model_source
     )
+    assert "setup_attachment_contract" not in model_source
+    assert "SetupAttachmentNameIndex" not in model_source
     assert "linked_mesh_contract" not in model_source
     assert "LinkedMeshResolver" not in model_source
+
+    assert "from .setup_attachment_contract import (" in animation_source
+    assert "SetupAttachmentNameIndex" in animation_source
+    assert "resolve_setup_attachment_name_index" in animation_source
+    assert "linked_mesh_contract" not in animation_source
+    assert "LinkedMeshResolver" not in animation_source
 
 
 def test_linked_mesh_contract_keeps_exact_skin_specific_ownership():
