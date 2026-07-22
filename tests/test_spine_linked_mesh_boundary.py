@@ -55,6 +55,7 @@ def test_linked_mesh_contract_has_recursive_cache_and_cycle_detection():
     assert "if reference in stack:" in source
     assert "stack=stack + (reference,)" in source
     assert "linked mesh parent cycle" in source
+    assert "terminal_path=terminal.terminal_path" in source
 
 
 def test_terminal_parent_must_be_mesh_compatible():
@@ -70,9 +71,21 @@ def test_resolver_validates_every_setup_linked_mesh_not_only_animated_ones():
 
     assert "def validate_all(" in source
     assert "for record in self._records.values():" in source
-    assert "if not _is_linked_raw_attachment" in source
+    assert "if not is_linked_mesh_attachment" in source
     assert "resolved.append(self.resolve(record.reference))" in source
     assert "animations" not in source
+
+
+def test_public_lookup_is_shared_with_deform_contract():
+    linked_source = read(CONTRACT)
+    deform_source = read(DEFORM)
+
+    assert "def require_skin(" in linked_source
+    assert "def get_attachment(" in linked_source
+    assert "SetupAttachment" in linked_source
+    assert "resolver.require_skin(" in deform_source
+    assert "resolver.get_attachment(" in deform_source
+    assert "resolver.resolve(reference)" in deform_source
 
 
 def test_contract_never_normalizes_or_rewrites_attachments():
@@ -85,6 +98,10 @@ def test_contract_never_normalizes_or_rewrites_attachments():
         'attachment["parent"] =',
         'attachment["skin"] =',
         'attachment["type"] =',
+        'attachment["timelines"] =',
+        'attachment["name"] =',
+        'attachment["path"] =',
+        'attachment["color"] =',
         ".lower()",
         ".upper()",
     ):
@@ -131,6 +148,7 @@ def test_deform_capacity_logic_remains_animation_specific():
     assert "deform" not in linked_source
     assert "_resolve_deform_capacity" in deform_source
     assert "decode_weighted_vertices" in deform_source
+    assert "decode_weighted_vertices" not in linked_source
 
 
 def test_serializer_keeps_skin_attachment_mappings_as_supplied():
