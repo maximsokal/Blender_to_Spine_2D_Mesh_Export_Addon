@@ -196,6 +196,7 @@ class SpineSerializer:
             skins=document.skins,
             slot_names=tuple(slot.name for slot in document.slots),
             path="document.animations",
+            linked_mesh_resolver=linked_mesh_resolver,
         )
 
         data: dict[str, Any] = {
