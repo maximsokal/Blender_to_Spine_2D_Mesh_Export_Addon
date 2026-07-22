@@ -7,6 +7,7 @@ from math import isfinite
 from re import fullmatch
 from typing import Any, Mapping, Tuple
 
+from .setup_attachment_contract import SetupAttachmentNameIndex
 from .setup_slot_contract import SetupSlotIndex
 from .spine_json_contract import json_path_key, validate_json_mapping
 
@@ -388,13 +389,17 @@ def _validate_animation_slot_attachment_timelines(
     animations: Mapping[str, Any],
     *,
     setup_slot_index: SetupSlotIndex,
-    attachment_names_by_slot: Mapping[str, frozenset[str]],
+    setup_attachment_index: SetupAttachmentNameIndex,
     path: str,
 ) -> None:
     """Validate slot attachment timelines and their setup attachment references."""
 
     if not isinstance(setup_slot_index, SetupSlotIndex):
         raise TypeError("setup_slot_index must be SetupSlotIndex")
+    if not isinstance(setup_attachment_index, SetupAttachmentNameIndex):
+        raise TypeError(
+            "setup_attachment_index must be SetupAttachmentNameIndex"
+        )
 
     for animation_name, animation_metadata in animations.items():
         animation_path = json_path_key(path, animation_name)
@@ -426,10 +431,6 @@ def _validate_animation_slot_attachment_timelines(
             if not timeline:
                 raise ValueError(f"{timeline_path} cannot be empty")
 
-            available_names = attachment_names_by_slot.get(
-                slot_name,
-                frozenset(),
-            )
             previous_time: float | int | None = None
             for keyframe_index, keyframe in enumerate(timeline):
                 keyframe_path = f"{timeline_path}[{keyframe_index}]"
@@ -458,11 +459,11 @@ def _validate_animation_slot_attachment_timelines(
 
                 attachment_name = keyframe["name"]
                 _require_name(attachment_name, f"{keyframe_path}.name")
-                if attachment_name not in available_names:
-                    raise ValueError(
-                        f"{keyframe_path}.name references undefined attachment "
-                        f"'{attachment_name}' for slot '{slot_name}'"
-                    )
+                setup_attachment_index.require(
+                    slot_name,
+                    attachment_name,
+                    path=f"{keyframe_path}.name",
+                )
 
 
 def _validate_finite_sequence(values: tuple, field_name: str) -> None:
@@ -753,19 +754,13 @@ class SpineDocument:
             path="document.animations",
         )
 
-        attachment_names_by_slot: dict[str, set[str]] = {}
-        for skin in self.skins:
-            for slot_name, slot_attachments in skin.attachments.items():
-                attachment_names_by_slot.setdefault(slot_name, set()).update(
-                    slot_attachments
-                )
+        setup_attachment_index = SetupAttachmentNameIndex(
+            tuple(skin.attachments for skin in self.skins)
+        )
         _validate_animation_slot_attachment_timelines(
             self.animations,
             setup_slot_index=setup_slot_index,
-            attachment_names_by_slot={
-                slot_name: frozenset(attachment_names)
-                for slot_name, attachment_names in attachment_names_by_slot.items()
-            },
+            setup_attachment_index=setup_attachment_index,
             path="document.animations",
         )
         _validate_extras(
