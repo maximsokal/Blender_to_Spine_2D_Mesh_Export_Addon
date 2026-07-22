@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from math import isfinite
 from typing import Any
 
 from .setup_attachment_contract import (
@@ -12,6 +11,10 @@ from .setup_attachment_contract import (
 )
 from .setup_slot_contract import SetupSlotIndex, resolve_setup_slot_index
 from .spine_json_contract import json_path_key, validate_json_mapping
+from .spine_scalar_contract import (
+    is_finite_number as _is_finite_number,
+    require_name as _require_name,
+)
 
 
 _EVENT_STRING_FIELDS = ("string", "audio")
@@ -19,20 +22,6 @@ _EVENT_TIMELINE_STRING_FIELDS = ("string",)
 _EVENT_NUMBER_FIELDS = ("float", "volume", "balance")
 _EVENT_INT_MIN = -(2**31)
 _EVENT_INT_MAX = 2**31 - 1
-
-
-def _require_name(value: object, field_name: str = "name") -> str:
-    if not isinstance(value, str):
-        raise TypeError(f"{field_name} must be str")
-    if not value.strip():
-        raise ValueError(f"{field_name} cannot be empty")
-    return value
-
-
-def _is_finite_number(value: object) -> bool:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-    return isinstance(value, int) or isfinite(value)
 
 
 def _validate_event_definitions(
