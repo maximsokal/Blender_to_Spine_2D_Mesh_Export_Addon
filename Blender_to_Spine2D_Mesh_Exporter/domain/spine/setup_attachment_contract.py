@@ -106,4 +106,27 @@ class SetupAttachmentNameIndex:
             )
 
 
-__all__ = ["SetupAttachmentNameIndex"]
+def resolve_setup_attachment_name_index(
+    skin_attachments: tuple[Mapping[str, Mapping[str, Any]], ...],
+    setup_attachment_index: SetupAttachmentNameIndex | None,
+) -> SetupAttachmentNameIndex:
+    """Build a direct-call index or validate reuse of the exact skin snapshot."""
+
+    if setup_attachment_index is None:
+        return SetupAttachmentNameIndex(skin_attachments)
+    if not isinstance(setup_attachment_index, SetupAttachmentNameIndex):
+        raise TypeError(
+            "setup_attachment_index must be SetupAttachmentNameIndex or None"
+        )
+    if setup_attachment_index.skin_attachments is not skin_attachments:
+        raise ValueError(
+            "setup_attachment_index must be built from the exact "
+            "skin_attachments tuple"
+        )
+    return setup_attachment_index
+
+
+__all__ = [
+    "SetupAttachmentNameIndex",
+    "resolve_setup_attachment_name_index",
+]
