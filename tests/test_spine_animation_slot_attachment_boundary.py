@@ -58,20 +58,26 @@ def test_slot_attachment_validation_runs_after_recursive_animation_validation():
     assert json_index < event_index < draw_order_index < attachment_index
 
 
-def test_attachment_names_are_collected_from_all_skins_by_slot_key():
+def test_attachment_names_use_cross_skin_setup_index():
     source = read(MODEL)
     document_start = source.index("class SpineDocument:")
     document_source = source[document_start:]
 
-    assert "attachment_names_by_slot: dict[str, set[str]] = {}" in document_source
-    assert "for skin in self.skins:" in document_source
-    assert "for slot_name, slot_attachments in skin.attachments.items():" in (
-        document_source
+    setup_index_position = document_source.index(
+        "setup_attachment_index = SetupAttachmentNameIndex("
     )
-    assert "attachment_names_by_slot.setdefault(slot_name, set()).update(" in (
-        document_source
+    draw_order_position = document_source.index(
+        "_validate_animation_draw_order_timelines("
     )
-    assert "slot_attachments" in document_source
+    attachment_position = document_source.index(
+        "_validate_animation_slot_attachment_timelines("
+    )
+
+    assert draw_order_position < setup_index_position < attachment_position
+    assert "tuple(skin.attachments for skin in self.skins)" in document_source
+    assert "setup_attachment_index=setup_attachment_index" in document_source
+    assert "attachment_names_by_slot: dict[str, set[str]] = {}" not in document_source
+    assert "attachment_names_by_slot.setdefault(" not in document_source
     assert "self.skins[0]" not in document_source
     assert 'skin.name == "default"' not in document_source
 
@@ -100,6 +106,16 @@ def test_slot_references_use_shared_exact_index():
     assert "ambiguous_slot_names" not in helper
 
 
+def test_attachment_names_use_shared_cross_skin_index():
+    helper = slot_attachment_helper_source()
+
+    assert "setup_attachment_index: SetupAttachmentNameIndex" in helper
+    assert "isinstance(setup_attachment_index, SetupAttachmentNameIndex)" in helper
+    assert "setup_attachment_index.require(" in helper
+    assert "attachment_names_by_slot" not in helper
+    assert "available_names" not in helper
+
+
 def test_attachment_time_is_finite_and_non_decreasing():
     helper = slot_attachment_helper_source()
 
@@ -115,7 +131,7 @@ def test_null_or_omitted_name_hides_attachment_without_fake_default():
 
     assert 'if "name" not in keyframe or keyframe["name"] is None:' in helper
     assert '_require_name(attachment_name, f"{keyframe_path}.name")' in helper
-    assert "attachment_name not in available_names" in helper
+    assert "setup_attachment_index.require(" in helper
     assert "setdefault(" not in helper
     assert 'keyframe["name"] =' not in helper
     assert 'keyframe.get("name", None)' not in helper
