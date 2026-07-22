@@ -13,6 +13,7 @@ from .spine_json_contract import json_path_key
 _LINKED_MESH_TYPES = frozenset({"linkedmesh"})
 _MESH_PARENT_TYPES = frozenset({"mesh", "linkedmesh"})
 _DEFAULT_SKIN_NAME = "default"
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,19 +26,22 @@ class AttachmentReference:
 
 
 @dataclass(frozen=True, slots=True)
+class SetupAttachment:
+    """One indexed setup attachment and its exact JSON path."""
+
+    reference: AttachmentReference
+    attachment: MeshAttachment | Mapping[str, Any]
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
 class ResolvedLinkedMesh:
     """A linked attachment and its terminal non-linked mesh parent."""
 
     source: AttachmentReference
     terminal: AttachmentReference
     terminal_attachment: MeshAttachment | Mapping[str, Any]
-
-
-@dataclass(frozen=True, slots=True)
-class _AttachmentRecord:
-    reference: AttachmentReference
-    attachment: MeshAttachment | Mapping[str, Any]
-    path: str
+    terminal_path: str
 
 
 def _require_name(value: object, field_name: str) -> str:
@@ -48,11 +52,13 @@ def _require_name(value: object, field_name: str) -> str:
     return value
 
 
-def _raw_attachment_type(
+def raw_attachment_type(
     attachment: Mapping[str, Any],
     *,
     path: str,
 ) -> str:
+    """Return the exact Spine attachment type without case normalization."""
+
     attachment_type = attachment.get("type", "region")
     if not isinstance(attachment_type, str):
         raise TypeError(f"{path}.type must be str")
@@ -61,17 +67,85 @@ def _raw_attachment_type(
     return attachment_type
 
 
-def _is_linked_raw_attachment(
+def is_linked_mesh_attachment(
     attachment: Mapping[str, Any],
     *,
     path: str,
 ) -> bool:
     """Recognize canonical linkedmesh and runtime mesh+truthy-parent spelling."""
 
-    attachment_type = _raw_attachment_type(attachment, path=path)
+    attachment_type = raw_attachment_type(attachment, path=path)
     if attachment_type in _LINKED_MESH_TYPES:
         return True
     return attachment_type == "mesh" and bool(attachment.get("parent"))
+
+
+# Private aliases retain compatibility for existing architecture assertions while
+# production consumers use the explicit public names above.
+_raw_attachment_type = raw_attachment_type
+_is_linked_raw_attachment = is_linked_mesh_attachment
+
+
+def _validate_optional_string_metadata(
+    attachment: Mapping[str, Any],
+    *,
+    field_name: str,
+    path: str,
+) -> None:
+    if field_name not in attachment:
+        return
+    value = attachment[field_name]
+    if not isinstance(value, str):
+        raise TypeError(f"{path}.{field_name} must be str")
+
+
+def _validate_optional_color_metadata(
+    attachment: Mapping[str, Any],
+    *,
+    path: str,
+) -> None:
+    if "color" not in attachment:
+        return
+
+    color = attachment["color"]
+    if color is None or color == "":
+        return
+    if not isinstance(color, str):
+        raise TypeError(f"{path}.color must be str or None")
+
+    hexadecimal = color[1:] if color.startswith("#") else color
+    if len(hexadecimal) not in (6, 8) or any(
+        character not in _HEX_DIGITS for character in hexadecimal
+    ):
+        raise ValueError(
+            f"{path}.color must contain 6 or 8 hexadecimal digits, "
+            "optionally prefixed by '#'"
+        )
+
+
+def _validate_linked_metadata(record: SetupAttachment) -> None:
+    attachment = record.attachment
+    if isinstance(attachment, MeshAttachment):
+        return
+
+    for field_name in ("name", "path"):
+        _validate_optional_string_metadata(
+            attachment,
+            field_name=field_name,
+            path=record.path,
+        )
+
+    _validate_optional_color_metadata(attachment, path=record.path)
+
+    if "timelines" in attachment and not isinstance(
+        attachment["timelines"],
+        bool,
+    ):
+        raise TypeError(f"{record.path}.timelines must be bool")
+
+    sequence = attachment.get("sequence")
+    if sequence is not None and not isinstance(sequence, Mapping):
+        raise TypeError(f"{record.path}.sequence must be a mapping or None")
 
 
 class LinkedMeshResolver:
@@ -91,7 +165,7 @@ class LinkedMeshResolver:
         self._path = path
         self._skin_by_name: dict[str, Skin] = {}
         self._ambiguous_skin_names: set[str] = set()
-        self._records: dict[AttachmentReference, _AttachmentRecord] = {}
+        self._records: dict[AttachmentReference, SetupAttachment] = {}
         self._cache: dict[AttachmentReference, ResolvedLinkedMesh] = {}
 
         for skin_index, skin in enumerate(skins):
@@ -114,13 +188,16 @@ class LinkedMeshResolver:
                         slot_name=slot_name,
                         attachment_name=attachment_name,
                     )
-                    self._records[reference] = _AttachmentRecord(
+                    self._records[reference] = SetupAttachment(
                         reference=reference,
                         attachment=attachment,
                         path=json_path_key(slot_path, attachment_name),
                     )
 
-    def _require_skin(self, skin_name: str, *, path: str) -> Skin:
+    def require_skin(self, skin_name: str, *, path: str) -> Skin:
+        """Return one unambiguous setup skin or fail with the caller path."""
+
+        _require_name(skin_name, f"{path} skin name")
         if skin_name in self._ambiguous_skin_names:
             raise ValueError(f"{path} references duplicated skin '{skin_name}'")
         skin = self._skin_by_name.get(skin_name)
@@ -128,13 +205,20 @@ class LinkedMeshResolver:
             raise ValueError(f"{path} references undefined skin '{skin_name}'")
         return skin
 
-    def _require_record(
+    def get_attachment(
         self,
         reference: AttachmentReference,
         *,
         path: str,
-    ) -> _AttachmentRecord:
-        skin = self._require_skin(reference.skin_name, path=path)
+    ) -> SetupAttachment:
+        """Return one exact setup attachment without resolving parent geometry."""
+
+        if not isinstance(reference, AttachmentReference):
+            raise TypeError("reference must be AttachmentReference")
+        if not isinstance(path, str) or not path:
+            raise ValueError("path must be a non-empty string")
+
+        skin = self.require_skin(reference.skin_name, path=path)
         slot_attachments = skin.attachments.get(reference.slot_name)
         if slot_attachments is None:
             raise ValueError(
@@ -143,24 +227,24 @@ class LinkedMeshResolver:
             )
         if reference.attachment_name not in slot_attachments:
             raise ValueError(
-                f"{path} references undefined parent attachment "
+                f"{path} references undefined attachment "
                 f"'{reference.attachment_name}' for slot "
                 f"'{reference.slot_name}' in skin '{reference.skin_name}'"
             )
 
         record = self._records.get(reference)
         if record is None:
-            raise TypeError(f"{path} parent attachment has an unsupported value type")
+            raise TypeError(f"{path} setup attachment has an unsupported value type")
         return record
 
     @staticmethod
-    def _parent_reference(record: _AttachmentRecord) -> AttachmentReference | None:
+    def _parent_reference(record: SetupAttachment) -> AttachmentReference | None:
         attachment = record.attachment
         if isinstance(attachment, MeshAttachment):
             return None
 
-        attachment_type = _raw_attachment_type(attachment, path=record.path)
-        is_linked = _is_linked_raw_attachment(attachment, path=record.path)
+        attachment_type = raw_attachment_type(attachment, path=record.path)
+        is_linked = is_linked_mesh_attachment(attachment, path=record.path)
         if not is_linked:
             if attachment_type != "mesh":
                 raise ValueError(
@@ -168,6 +252,8 @@ class LinkedMeshResolver:
                     f"'{attachment_type}'"
                 )
             return None
+
+        _validate_linked_metadata(record)
 
         if "parent" not in attachment or attachment["parent"] is None:
             raise ValueError(f"{record.path}.parent is required for a linked mesh")
@@ -224,31 +310,29 @@ class LinkedMeshResolver:
                 f"{rendered}"
             )
 
-        record = self._require_record(
-            reference,
-            path=(
-                f"linked mesh reference "
-                f"{reference.skin_name!r}/{reference.slot_name!r}/"
-                f"{reference.attachment_name!r}"
-            ),
+        reference_path = (
+            f"linked mesh reference {reference.skin_name!r}/"
+            f"{reference.slot_name!r}/{reference.attachment_name!r}"
         )
+        record = self.get_attachment(reference, path=reference_path)
         parent_reference = self._parent_reference(record)
         if parent_reference is None:
             result = ResolvedLinkedMesh(
                 source=reference,
                 terminal=reference,
                 terminal_attachment=record.attachment,
+                terminal_path=record.path,
             )
             self._cache[reference] = result
             return result
 
-        parent_record = self._require_record(
+        parent_record = self.get_attachment(
             parent_reference,
             path=f"{record.path}.parent",
         )
         parent_attachment = parent_record.attachment
         if isinstance(parent_attachment, Mapping):
-            parent_type = _raw_attachment_type(
+            parent_type = raw_attachment_type(
                 parent_attachment,
                 path=parent_record.path,
             )
@@ -266,6 +350,7 @@ class LinkedMeshResolver:
             source=reference,
             terminal=terminal.terminal,
             terminal_attachment=terminal.terminal_attachment,
+            terminal_path=terminal.terminal_path,
         )
         self._cache[reference] = result
         return result
@@ -278,7 +363,7 @@ class LinkedMeshResolver:
             attachment = record.attachment
             if not isinstance(attachment, Mapping):
                 continue
-            if not _is_linked_raw_attachment(attachment, path=record.path):
+            if not is_linked_mesh_attachment(attachment, path=record.path):
                 continue
             resolved.append(self.resolve(record.reference))
         return tuple(resolved)
@@ -298,5 +383,8 @@ __all__ = [
     "AttachmentReference",
     "LinkedMeshResolver",
     "ResolvedLinkedMesh",
+    "SetupAttachment",
+    "is_linked_mesh_attachment",
+    "raw_attachment_type",
     "validate_setup_linked_meshes",
 ]
