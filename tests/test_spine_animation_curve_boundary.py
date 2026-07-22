@@ -9,6 +9,13 @@ CONTRACT = (
     / "spine"
     / "curve_timeline_contract.py"
 )
+SCALAR = (
+    ROOT
+    / "Blender_to_Spine2D_Mesh_Exporter"
+    / "domain"
+    / "spine"
+    / "spine_scalar_contract.py"
+)
 SERIALIZER = (
     ROOT
     / "Blender_to_Spine2D_Mesh_Exporter"
@@ -80,12 +87,20 @@ def test_curve_contract_accepts_only_stepped_or_exact_bezier_sequence():
     assert "for value_index, value in enumerate(curve):" in source
 
 
-def test_curve_numbers_and_times_are_strict_finite_numbers():
+def test_curve_numbers_and_times_reuse_shared_strict_finite_requirement():
     source = read(CONTRACT)
+    scalar_source = read(SCALAR)
 
-    assert "isinstance(value, bool)" in source
-    assert "not isinstance(value, (int, float))" in source
-    assert "not isfinite(value)" in source
+    assert (
+        "from .spine_scalar_contract import require_finite_number as "
+        "_require_finite_number"
+    ) in source
+    assert "def _require_finite_number(" not in source
+    assert "from math import isfinite" not in source
+    assert "def require_finite_number(" in scalar_source
+    assert "isinstance(value, bool)" in scalar_source
+    assert "not isinstance(value, (int, float))" in scalar_source
+    assert "if not is_finite_number(value):" in scalar_source
     assert 'time_value = keyframe.get("time", 0)' in source
     assert "time_value < previous_time" in source
     assert "time_value <= previous_time" not in source
@@ -125,7 +140,8 @@ def test_discrete_and_attachment_specific_timelines_remain_outside_contract():
     ):
         assert discrete_name not in source
 
-    assert "unknown future timeline kinds" in source
+    assert "unknown" in source
+    assert "future timeline kinds" in source
 
 
 def test_serializer_runs_curve_contract_after_existing_boundaries():
