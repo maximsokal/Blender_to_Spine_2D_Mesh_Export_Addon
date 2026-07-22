@@ -88,17 +88,16 @@ def test_slot_attachment_containers_are_fail_closed():
     assert "if not isinstance(keyframe, Mapping):" in helper
 
 
-def test_slot_references_are_exact_and_duplicate_safe():
+def test_slot_references_use_shared_exact_index():
     helper = slot_attachment_helper_source()
 
-    assert "known_slot_names: set[str] = set()" in helper
-    assert "ambiguous_slot_names: set[str] = set()" in helper
+    assert "setup_slot_index: SetupSlotIndex" in helper
+    assert "isinstance(setup_slot_index, SetupSlotIndex)" in helper
     assert "slot_path = json_path_key(slots_path, slot_name)" in helper
     assert '_require_name(slot_name, f"{slot_path} slot name")' in helper
-    assert "if slot_name not in known_slot_names:" in helper
-    assert "if slot_name in ambiguous_slot_names:" in helper
-    assert "references undefined slot" in helper
-    assert "references duplicated setup slot" in helper
+    assert "setup_slot_index.require(slot_name, path=slot_path)" in helper
+    assert "known_slot_names" not in helper
+    assert "ambiguous_slot_names" not in helper
 
 
 def test_attachment_time_is_finite_and_non_decreasing():
