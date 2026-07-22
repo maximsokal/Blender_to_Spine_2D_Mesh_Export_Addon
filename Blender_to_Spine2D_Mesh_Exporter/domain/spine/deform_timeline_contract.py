@@ -14,6 +14,7 @@ from .linked_mesh_contract import (
     raw_attachment_type,
 )
 from .model import MeshAttachment, Skin
+from .setup_slot_contract import SetupSlotIndex, resolve_setup_slot_index
 from .spine_json_contract import json_path_key
 from .weighted_vertices import decode_weighted_vertices
 
@@ -201,6 +202,7 @@ def validate_animation_deform_timelines(
     slot_names: tuple[str, ...],
     path: str,
     linked_mesh_resolver: LinkedMeshResolver | None = None,
+    setup_slot_index: SetupSlotIndex | None = None,
 ) -> None:
     """Validate Spine 4.2 ``animations.attachments`` deform timelines.
 
@@ -228,13 +230,7 @@ def validate_animation_deform_timelines(
             )
         resolver = linked_mesh_resolver
 
-    known_slot_names: set[str] = set()
-    ambiguous_slot_names: set[str] = set()
-    for slot_index, slot_name in enumerate(slot_names):
-        _require_name(slot_name, f"slot_names[{slot_index}]")
-        if slot_name in known_slot_names:
-            ambiguous_slot_names.add(slot_name)
-        known_slot_names.add(slot_name)
+    slot_index = resolve_setup_slot_index(slot_names, setup_slot_index)
 
     capacity_cache: dict[AttachmentReference, int] = {}
     for animation_name, animation_metadata in animations.items():
@@ -258,16 +254,7 @@ def validate_animation_deform_timelines(
 
             for slot_name, slot_metadata in skin_metadata.items():
                 slot_path = _mapping_key_path(skin_path, slot_name)
-                _require_name(slot_name, f"{slot_path} slot name")
-                if slot_name in ambiguous_slot_names:
-                    raise ValueError(
-                        f"{slot_path} references duplicated setup slot "
-                        f"'{slot_name}'"
-                    )
-                if slot_name not in known_slot_names:
-                    raise ValueError(
-                        f"{slot_path} references undefined slot '{slot_name}'"
-                    )
+                slot_index.require(slot_name, path=slot_path)
                 if not isinstance(slot_metadata, Mapping):
                     raise TypeError(f"{slot_path} must be a mapping")
 
