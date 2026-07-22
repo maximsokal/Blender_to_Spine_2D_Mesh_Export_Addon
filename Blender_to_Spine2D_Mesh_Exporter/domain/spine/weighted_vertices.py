@@ -44,8 +44,15 @@ class WeightedVertex:
     influences: Tuple[WeightedVertexInfluence, ...]
 
     def __post_init__(self) -> None:
+        if not isinstance(self.influences, tuple):
+            raise TypeError("influences must be tuple")
         if not self.influences:
             raise ValueError("WeightedVertex must contain at least one influence")
+        for influence_index, influence in enumerate(self.influences):
+            if not isinstance(influence, WeightedVertexInfluence):
+                raise TypeError(
+                    f"influences[{influence_index}] must be WeightedVertexInfluence"
+                )
 
 
 def encode_weighted_vertices(vertices: Iterable[WeightedVertex]) -> Tuple[float | int, ...]:
