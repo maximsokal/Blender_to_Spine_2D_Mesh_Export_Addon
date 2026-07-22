@@ -2,43 +2,37 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL = (
-    ROOT
-    / "Blender_to_Spine2D_Mesh_Exporter"
-    / "domain"
-    / "spine"
-    / "model.py"
-)
-SERIALIZER = (
-    ROOT
-    / "Blender_to_Spine2D_Mesh_Exporter"
-    / "domain"
-    / "spine"
-    / "serializer.py"
-)
+SPINE = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "domain" / "spine"
+CONTRACT = SPINE / "animation_model_contract.py"
+SERIALIZER = SPINE / "serializer.py"
 
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_event_validation_runs_after_recursive_json_validation():
-    source = read(MODEL)
-    document_start = source.index("class SpineDocument:")
-    document_source = source[document_start:]
+def event_definition_source() -> str:
+    source = read(CONTRACT)
+    helper_start = source.index("def _validate_event_definitions(")
+    next_helper = source.index(
+        "def _validate_animation_event_timelines(",
+        helper_start,
+    )
+    return source[helper_start:next_helper]
 
-    json_index = document_source.index(
-        'validate_json_mapping(self.events, path="document.events")'
-    )
-    event_index = document_source.index(
-        '_validate_event_definitions(self.events, path="document.events")'
-    )
+
+def test_event_validation_runs_after_recursive_json_validation():
+    source = read(CONTRACT)
+    body = source[source.index("def validate_animation_model_contracts(") :]
+
+    json_index = body.index("validate_json_mapping(events, path=events_path)")
+    event_index = body.index("_validate_event_definitions(events, path=events_path)")
 
     assert json_index < event_index
 
 
 def test_event_known_field_sets_match_runtime_scalar_types():
-    source = read(MODEL)
+    source = read(CONTRACT)
 
     assert '_EVENT_STRING_FIELDS = ("string", "audio")' in source
     assert '_EVENT_NUMBER_FIELDS = ("float", "volume", "balance")' in source
@@ -47,10 +41,7 @@ def test_event_known_field_sets_match_runtime_scalar_types():
 
 
 def test_event_entries_require_mappings_and_use_json_paths():
-    source = read(MODEL)
-    helper_start = source.index("def _validate_event_definitions(")
-    next_helper = source.index("def _validate_finite_sequence(", helper_start)
-    helper_source = source[helper_start:next_helper]
+    helper_source = event_definition_source()
 
     assert "event_path = json_path_key(path, event_name)" in helper_source
     assert "if not isinstance(event_metadata, Mapping):" in helper_source
@@ -58,10 +49,7 @@ def test_event_entries_require_mappings_and_use_json_paths():
 
 
 def test_event_int_is_strict_and_cross_runtime_bounded():
-    source = read(MODEL)
-    helper_start = source.index("def _validate_event_definitions(")
-    next_helper = source.index("def _validate_finite_sequence(", helper_start)
-    helper_source = source[helper_start:next_helper]
+    helper_source = event_definition_source()
 
     assert "isinstance(int_value, bool)" in helper_source
     assert "not isinstance(int_value, int)" in helper_source
@@ -70,10 +58,7 @@ def test_event_int_is_strict_and_cross_runtime_bounded():
 
 
 def test_event_numbers_reuse_finite_number_semantics_without_ranges():
-    source = read(MODEL)
-    helper_start = source.index("def _validate_event_definitions(")
-    next_helper = source.index("def _validate_finite_sequence(", helper_start)
-    helper_source = source[helper_start:next_helper]
+    helper_source = event_definition_source()
 
     assert "isinstance(value, bool)" in helper_source
     assert "not isinstance(value, (int, float))" in helper_source
@@ -85,10 +70,7 @@ def test_event_numbers_reuse_finite_number_semantics_without_ranges():
 
 
 def test_event_helper_does_not_require_fields_or_insert_defaults():
-    source = read(MODEL)
-    helper_start = source.index("def _validate_event_definitions(")
-    next_helper = source.index("def _validate_finite_sequence(", helper_start)
-    helper_source = source[helper_start:next_helper]
+    helper_source = event_definition_source()
 
     assert 'if "int" in event_metadata:' in helper_source
     assert "if field_name in event_metadata" in helper_source
