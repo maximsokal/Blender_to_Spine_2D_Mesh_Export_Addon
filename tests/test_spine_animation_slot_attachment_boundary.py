@@ -2,20 +2,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL = (
-    ROOT
-    / "Blender_to_Spine2D_Mesh_Exporter"
-    / "domain"
-    / "spine"
-    / "model.py"
-)
-SERIALIZER = (
-    ROOT
-    / "Blender_to_Spine2D_Mesh_Exporter"
-    / "domain"
-    / "spine"
-    / "serializer.py"
-)
+SPINE = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "domain" / "spine"
+CONTRACT = SPINE / "animation_model_contract.py"
+MODEL = SPINE / "model.py"
+SERIALIZER = SPINE / "serializer.py"
 GROUPED_OVERLAY = (
     ROOT
     / "Blender_to_Spine2D_Mesh_Exporter"
@@ -29,55 +19,43 @@ def read(path: Path) -> str:
 
 
 def slot_attachment_helper_source() -> str:
-    source = read(MODEL)
+    source = read(CONTRACT)
     helper_start = source.index(
         "def _validate_animation_slot_attachment_timelines("
     )
-    next_helper = source.index("def _validate_finite_sequence(", helper_start)
+    next_helper = source.index(
+        "def validate_animation_model_contracts(",
+        helper_start,
+    )
     return source[helper_start:next_helper]
 
 
-def test_slot_attachment_validation_runs_after_recursive_animation_validation():
-    source = read(MODEL)
-    document_start = source.index("class SpineDocument:")
-    document_source = source[document_start:]
+def test_slot_attachment_validation_runs_after_event_and_draw_order_contracts():
+    source = read(CONTRACT)
+    body = source[source.index("def validate_animation_model_contracts(") :]
 
-    json_index = document_source.index(
-        'validate_json_mapping(self.animations, path="document.animations")'
-    )
-    event_index = document_source.index(
-        "_validate_animation_event_timelines("
-    )
-    draw_order_index = document_source.index(
-        "_validate_animation_draw_order_timelines("
-    )
-    attachment_index = document_source.index(
-        "_validate_animation_slot_attachment_timelines("
-    )
+    json_index = body.index("validate_json_mapping(animations, path=path)")
+    event_index = body.index("_validate_animation_event_timelines(")
+    draw_order_index = body.index("_validate_animation_draw_order_timelines(")
+    attachment_index = body.index("_validate_animation_slot_attachment_timelines(")
 
     assert json_index < event_index < draw_order_index < attachment_index
 
 
-def test_attachment_names_use_cross_skin_setup_index():
+def test_model_passes_cross_skin_snapshot_to_public_contract():
     source = read(MODEL)
-    document_start = source.index("class SpineDocument:")
-    document_source = source[document_start:]
+    document_source = source[source.index("class SpineDocument:") :]
+    call = document_source[
+        document_source.index("validate_animation_model_contracts(") :
+        document_source.index("_validate_extras(", document_source.index("validate_animation_model_contracts("))
+    ]
 
-    setup_index_position = document_source.index(
-        "setup_attachment_index = SetupAttachmentNameIndex("
-    )
-    draw_order_position = document_source.index(
-        "_validate_animation_draw_order_timelines("
-    )
-    attachment_position = document_source.index(
-        "_validate_animation_slot_attachment_timelines("
-    )
-
-    assert draw_order_position < setup_index_position < attachment_position
-    assert "tuple(skin.attachments for skin in self.skins)" in document_source
-    assert "setup_attachment_index=setup_attachment_index" in document_source
-    assert "attachment_names_by_slot: dict[str, set[str]] = {}" not in document_source
-    assert "attachment_names_by_slot.setdefault(" not in document_source
+    assert "skin_attachments = tuple(skin.attachments for skin in self.skins)" in document_source
+    assert "skin_attachments=skin_attachments" in call
+    assert "setup_attachment_index=" not in call
+    assert "SetupAttachmentNameIndex" not in source
+    assert "attachment_names_by_slot: dict[str, set[str]] = {}" not in source
+    assert "attachment_names_by_slot.setdefault(" not in source
     assert "self.skins[0]" not in document_source
     assert 'skin.name == "default"' not in document_source
 
