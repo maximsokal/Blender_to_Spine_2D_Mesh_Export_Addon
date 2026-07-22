@@ -8,6 +8,8 @@ MODEL = SPINE / "model.py"
 ANIMATION = SPINE / "animation_model_contract.py"
 SETUP_SLOT = SPINE / "setup_slot_contract.py"
 SETUP_ATTACHMENT = SPINE / "setup_attachment_contract.py"
+CURVE = SPINE / "curve_timeline_contract.py"
+SLOT_COLOR = SPINE / "slot_color_timeline_contract.py"
 
 
 def read(path: Path) -> str:
@@ -86,3 +88,15 @@ def test_setup_indexes_alias_shared_name_helper_only():
         assert "def _require_name(" not in source
         assert "_require_name(" in source
         assert "_is_finite_number" not in source
+
+
+def test_output_timeline_contracts_alias_shared_finite_requirement():
+    for path in (CURVE, SLOT_COLOR):
+        source = read(path)
+        assert (
+            "from .spine_scalar_contract import "
+            "require_finite_number as _require_finite_number"
+            in source
+        )
+        assert "def _require_finite_number(" not in source
+        assert "from math import isfinite" not in source
