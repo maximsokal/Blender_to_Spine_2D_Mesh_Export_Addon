@@ -101,15 +101,17 @@ def test_sequence_time_and_delay_are_strict_finite_numbers():
     assert "time_value <= previous_time" not in source
 
 
-def test_reference_chain_is_fail_closed():
+def test_reference_chain_uses_shared_setup_resolver():
     source = read(CONTRACT)
 
-    assert "skin_name in ambiguous_skin_names" in source
-    assert "skin_name not in skin_by_name" in source
-    assert "slot_name in ambiguous_slot_names" in source
-    assert "slot_name not in known_slot_names" in source
-    assert "slot_attachments.get(attachment_name)" in source
-    assert "references undefined attachment" in source
+    assert "AttachmentReference" in source
+    assert "LinkedMeshResolver" in source
+    assert "resolver.require_skin(skin_name, path=skin_path)" in source
+    assert "reference = AttachmentReference(" in source
+    assert "setup = resolver.get_attachment(" in source
+    assert "setup.attachment" in source
+    assert "def _build_skin_index(" not in source
+    assert "def _resolve_setup_attachment(" not in source
 
 
 def test_serializer_runs_sequence_contract_after_existing_boundaries():
@@ -144,6 +146,8 @@ def test_serializer_runs_sequence_contract_after_existing_boundaries():
     assert "slot_names=tuple(slot.name for slot in document.slots)" in (
         to_dict_source
     )
+    sequence_call = to_dict_source[sequence_index:data_index]
+    assert "linked_mesh_resolver=linked_mesh_resolver" in sequence_call
 
 
 def test_sequence_contract_is_output_boundary_not_model_mutation():
