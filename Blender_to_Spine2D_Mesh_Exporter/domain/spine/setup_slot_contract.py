@@ -6,13 +6,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
 
-
-def _require_name(value: object, field_name: str) -> str:
-    if not isinstance(value, str):
-        raise TypeError(f"{field_name} must be str")
-    if not value.strip():
-        raise ValueError(f"{field_name} cannot be empty")
-    return value
+from .spine_scalar_contract import require_name as _require_name
 
 
 @dataclass(frozen=True, slots=True)
