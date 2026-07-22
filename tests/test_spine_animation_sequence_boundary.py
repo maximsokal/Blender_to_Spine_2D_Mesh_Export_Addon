@@ -90,15 +90,20 @@ def test_delay_inheritance_matches_spine_loader():
     assert "last_delay = delay" in source
 
 
-def test_sequence_time_and_delay_are_strict_finite_numbers():
+def test_sequence_scalars_reuse_shared_strict_requirements():
     source = read(CONTRACT)
 
-    assert "isinstance(value, bool)" in source
-    assert "not isinstance(value, (int, float))" in source
-    assert "not isfinite(value)" in source
+    assert "from .spine_scalar_contract import (" in source
+    assert "require_finite_number as _require_finite_number" in source
+    assert "require_name as _require_name" in source
+    assert "def _require_finite_number(" not in source
+    assert "def _require_name(" not in source
+    assert "from math import isfinite" not in source
     assert 'keyframe.get("time", 0)' in source
     assert "time_value < previous_time" in source
     assert "time_value <= previous_time" not in source
+    assert "_require_name(skin_name" in source
+    assert "_require_name(" in source
 
 
 def test_reference_chain_uses_shared_setup_indices():
