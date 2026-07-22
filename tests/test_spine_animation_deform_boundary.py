@@ -16,6 +16,13 @@ CURVES = (
     / "spine"
     / "curve_timeline_contract.py"
 )
+LINKED = (
+    ROOT
+    / "Blender_to_Spine2D_Mesh_Exporter"
+    / "domain"
+    / "spine"
+    / "linked_mesh_contract.py"
+)
 SERIALIZER = (
     ROOT
     / "Blender_to_Spine2D_Mesh_Exporter"
@@ -39,17 +46,21 @@ def read(path: Path) -> str:
 def test_deform_contract_owns_exact_vertex_attachment_types():
     source = read(CONTRACT)
 
-    assert (
-        '_VERTEX_ATTACHMENT_TYPES = frozenset('
-        '{"mesh", "linkedmesh", "boundingbox", "path", "clipping"}'
-        ')' in source
-    )
+    assert '_VERTEX_ATTACHMENT_TYPES = frozenset(' in source
+    for attachment_type in (
+        "mesh",
+        "linkedmesh",
+        "boundingbox",
+        "path",
+        "clipping",
+    ):
+        assert f'"{attachment_type}"' in source
     assert (
         '_VERTEX_COUNT_ATTACHMENT_TYPES = frozenset('
         '{"boundingbox", "path", "clipping"}'
         ')' in source
     )
-    assert 'attachment.get("type", "region")' in source
+    assert "raw_attachment_type(attachment, path=path)" in source
     assert "non-deformable attachment type" in source
 
 
@@ -74,27 +85,52 @@ def test_mesh_and_vertex_count_attachments_resolve_setup_coordinate_count():
     assert "return vertex_count * 2" in source
 
 
-def test_linked_mesh_resolution_matches_runtime_default_skin_policy():
+def test_linked_mesh_resolution_is_delegated_to_setup_resolver():
+    source = read(CONTRACT)
+    linked_source = read(LINKED)
+
+    assert "from .linked_mesh_contract import (" in source
+    assert "AttachmentReference," in source
+    assert "LinkedMeshResolver," in source
+    assert "is_linked_mesh_attachment," in source
+    assert "raw_attachment_type," in source
+    assert 'resolver = LinkedMeshResolver(skins, path="document.skins")' in source
+    assert "resolved = resolver.resolve(reference)" in source
+    assert "resolved.terminal_attachment" in source
+    assert "resolved.terminal_path" in source
+
+    assert 'if raw_skin_name in (None, ""):' in linked_source
+    assert 'parent_skin_name = _DEFAULT_SKIN_NAME' in linked_source
+    assert "linked mesh parent cycle" in linked_source
+
+
+def test_deform_contract_has_no_duplicate_parent_resolution_pipeline():
     source = read(CONTRACT)
 
-    assert 'attachment.get("parent")' in source
-    assert 'attachment.get("skin")' in source
-    assert 'if raw_parent_skin in (None, ""):' in source
-    assert 'parent_skin_name = "default"' in source
-    assert "linked mesh parent cycle" in source
-    assert "capacity_cache" in source
-    assert "resolving=set()" in source
+    for forbidden in (
+        "def _build_skin_index(",
+        "def _resolve_attachment(",
+        "skin_by_name:",
+        "ambiguous_skin_names:",
+        "resolving:",
+        'raw_parent_skin = attachment.get("skin")',
+        'parent_name = _require_name(parent',
+        'parent_skin_name = "default"',
+        "linked mesh parent cycle",
+    ):
+        assert forbidden not in source
 
 
-def test_animation_reference_chain_is_fail_closed():
+def test_animation_reference_chain_is_fail_closed_through_shared_index():
     source = read(CONTRACT)
+    linked_source = read(LINKED)
 
     assert 'if "attachments" not in animation_metadata:' in source
-    assert "skin_name not in skin_by_name" in source
+    assert "resolver.require_skin(skin_name, path=skin_path)" in source
     assert "slot_name not in known_slot_names" in source
-    assert "slot_attachments.get(attachment_name)" in source
-    assert "references undefined attachment" in source
-    assert "references duplicated skin" in source
+    assert "resolver.get_attachment(reference, path=path)" in source
+    assert "references undefined attachment" in linked_source
+    assert "references duplicated skin" in linked_source
     assert "references duplicated setup slot" in source
 
 
@@ -156,6 +192,7 @@ def test_serializer_runs_deform_contract_after_existing_boundaries():
     validator_index = to_dict_source.index(
         "self._validator.validate_or_raise(document)"
     )
+    linked_index = to_dict_source.index("validate_setup_linked_meshes(")
     color_index = to_dict_source.index(
         "validate_animation_slot_color_timelines("
     )
@@ -165,7 +202,14 @@ def test_serializer_runs_deform_contract_after_existing_boundaries():
     )
     data_index = to_dict_source.index('data: dict[str, Any] = {')
 
-    assert validator_index < color_index < curve_index < deform_index < data_index
+    assert (
+        validator_index
+        < linked_index
+        < color_index
+        < curve_index
+        < deform_index
+        < data_index
+    )
     assert "skins=document.skins" in to_dict_source
     assert "slot_names=tuple(slot.name for slot in document.slots)" in (
         to_dict_source
