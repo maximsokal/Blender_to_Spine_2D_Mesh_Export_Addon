@@ -63,8 +63,29 @@ def test_serializer_keeps_existing_boundary_order():
     assert positions == sorted(positions)
 
 
-def test_model_level_early_validation_is_not_moved_in_this_slice():
+def test_model_level_early_boundaries_share_one_setup_slot_index():
     model_source = read(MODEL)
-    assert "setup_slot_contract" not in model_source
-    assert "def _validate_animation_draw_order_timelines(" in model_source
-    assert "def _validate_animation_slot_attachment_timelines(" in model_source
+    assert "from .setup_slot_contract import SetupSlotIndex" in model_source
+
+    document_source = model_source[model_source.index("class SpineDocument:") :]
+    assert document_source.count(
+        "slot_names = tuple(slot.name for slot in self.slots)"
+    ) == 1
+    assert document_source.count("setup_slot_index = SetupSlotIndex(slot_names)") == 1
+    assert document_source.count("setup_slot_index=setup_slot_index") == 2
+    assert "slot_names=tuple(slot.name for slot in self.slots)" not in document_source
+
+    draw_source = model_source[
+        model_source.index("def _validate_animation_draw_order_timelines(") :
+        model_source.index("def _validate_animation_slot_attachment_timelines(")
+    ]
+    attachment_source = model_source[
+        model_source.index("def _validate_animation_slot_attachment_timelines(") :
+        model_source.index("def _validate_finite_sequence(")
+    ]
+    for helper_source in (draw_source, attachment_source):
+        assert "setup_slot_index: SetupSlotIndex" in helper_source
+        assert "setup_slot_index.require(" in helper_source
+        assert "known_slot_names" not in helper_source
+        assert "ambiguous_slot_names" not in helper_source
+    assert "slot_index_by_name" not in draw_source
