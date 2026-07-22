@@ -98,7 +98,10 @@ def test_deform_capacity_cache_uses_terminal_and_source_references():
 def test_deform_contract_does_not_build_a_second_resolver_when_one_is_supplied():
     source = read(DEFORM)
     resolver_branch_start = source.index("if linked_mesh_resolver is None:")
-    slot_index_start = source.index("known_slot_names:", resolver_branch_start)
+    slot_index_start = source.index(
+        "slot_index = resolve_setup_slot_index(",
+        resolver_branch_start,
+    )
     resolver_branch = source[resolver_branch_start:slot_index_start]
 
     assert resolver_branch.count("LinkedMeshResolver(") == 1
