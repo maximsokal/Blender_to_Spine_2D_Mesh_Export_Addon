@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from math import isfinite
 from typing import Any
 
 from .spine_json_contract import json_path_key
+from .spine_scalar_contract import require_finite_number as _require_finite_number
 
 
 _SLOT_CURVE_CHANNELS: dict[str, int] = {
@@ -58,13 +58,6 @@ def _mapping_key_path(path: str, key: object) -> str:
     if not isinstance(key, str):
         raise TypeError(f"{path} keys must be str")
     return json_path_key(path, key)
-
-
-def _require_finite_number(value: object, field_name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise TypeError(f"{field_name} must be a finite number")
-    if isinstance(value, float) and not isfinite(value):
-        raise ValueError(f"{field_name} must be finite")
 
 
 def validate_curve_value(
