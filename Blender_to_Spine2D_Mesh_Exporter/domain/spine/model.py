@@ -7,6 +7,7 @@ from math import isfinite
 from re import fullmatch
 from typing import Any, Mapping, Tuple
 
+from .setup_slot_contract import SetupSlotIndex
 from .spine_json_contract import json_path_key, validate_json_mapping
 
 JsonMapping = Mapping[str, Any]
@@ -278,20 +279,15 @@ def _validate_animation_event_timelines(
 def _validate_animation_draw_order_timelines(
     animations: Mapping[str, Any],
     *,
-    slot_names: Tuple[str, ...],
+    setup_slot_index: SetupSlotIndex,
     path: str,
 ) -> None:
     """Validate draw-order keyframes as deterministic slot permutations."""
 
-    slot_index_by_name: dict[str, int] = {}
-    ambiguous_slot_names: set[str] = set()
-    for slot_index, slot_name in enumerate(slot_names):
-        if slot_name in slot_index_by_name:
-            ambiguous_slot_names.add(slot_name)
-        else:
-            slot_index_by_name[slot_name] = slot_index
+    if not isinstance(setup_slot_index, SetupSlotIndex):
+        raise TypeError("setup_slot_index must be SetupSlotIndex")
 
-    slot_count = len(slot_names)
+    slot_count = len(setup_slot_index.slot_names)
     for animation_name, animation_metadata in animations.items():
         animation_path = json_path_key(path, animation_name)
         if not isinstance(animation_metadata, Mapping):
@@ -355,17 +351,10 @@ def _validate_animation_draw_order_timelines(
                     )
                 seen_slot_names.add(slot_name)
 
-                if slot_name not in slot_index_by_name:
-                    raise ValueError(
-                        f"{entry_path}.slot references undefined slot '{slot_name}'"
-                    )
-                if slot_name in ambiguous_slot_names:
-                    raise ValueError(
-                        f"{entry_path}.slot references duplicated setup slot "
-                        f"'{slot_name}'"
-                    )
-
-                source_index = slot_index_by_name[slot_name]
+                source_index = setup_slot_index.require(
+                    slot_name,
+                    path=f"{entry_path}.slot",
+                )
                 if source_index <= previous_source_index:
                     raise ValueError(
                         f"{entry_path}.slot must follow setup slot order"
@@ -398,18 +387,14 @@ def _validate_animation_draw_order_timelines(
 def _validate_animation_slot_attachment_timelines(
     animations: Mapping[str, Any],
     *,
-    slot_names: Tuple[str, ...],
+    setup_slot_index: SetupSlotIndex,
     attachment_names_by_slot: Mapping[str, frozenset[str]],
     path: str,
 ) -> None:
     """Validate slot attachment timelines and their setup attachment references."""
 
-    known_slot_names: set[str] = set()
-    ambiguous_slot_names: set[str] = set()
-    for slot_name in slot_names:
-        if slot_name in known_slot_names:
-            ambiguous_slot_names.add(slot_name)
-        known_slot_names.add(slot_name)
+    if not isinstance(setup_slot_index, SetupSlotIndex):
+        raise TypeError("setup_slot_index must be SetupSlotIndex")
 
     for animation_name, animation_metadata in animations.items():
         animation_path = json_path_key(path, animation_name)
@@ -427,14 +412,7 @@ def _validate_animation_slot_attachment_timelines(
         for slot_name, slot_metadata in slot_timelines.items():
             slot_path = json_path_key(slots_path, slot_name)
             _require_name(slot_name, f"{slot_path} slot name")
-            if slot_name not in known_slot_names:
-                raise ValueError(
-                    f"{slot_path} references undefined slot '{slot_name}'"
-                )
-            if slot_name in ambiguous_slot_names:
-                raise ValueError(
-                    f"{slot_path} references duplicated setup slot '{slot_name}'"
-                )
+            setup_slot_index.require(slot_name, path=slot_path)
             if not isinstance(slot_metadata, Mapping):
                 raise TypeError(f"{slot_path} must be a mapping")
 
@@ -757,6 +735,10 @@ class SpineDocument:
                 )
         if not self.bones:
             raise ValueError("SpineDocument must contain at least one bone")
+
+        slot_names = tuple(slot.name for slot in self.slots)
+        setup_slot_index = SetupSlotIndex(slot_names)
+
         validate_json_mapping(self.animations, path="document.animations")
         validate_json_mapping(self.events, path="document.events")
         _validate_event_definitions(self.events, path="document.events")
@@ -767,7 +749,7 @@ class SpineDocument:
         )
         _validate_animation_draw_order_timelines(
             self.animations,
-            slot_names=tuple(slot.name for slot in self.slots),
+            setup_slot_index=setup_slot_index,
             path="document.animations",
         )
 
@@ -779,7 +761,7 @@ class SpineDocument:
                 )
         _validate_animation_slot_attachment_timelines(
             self.animations,
-            slot_names=tuple(slot.name for slot in self.slots),
+            setup_slot_index=setup_slot_index,
             attachment_names_by_slot={
                 slot_name: frozenset(attachment_names)
                 for slot_name, attachment_names in attachment_names_by_slot.items()
