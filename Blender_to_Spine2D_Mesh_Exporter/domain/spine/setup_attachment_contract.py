@@ -7,16 +7,10 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from .spine_scalar_contract import require_name as _require_name
+
 
 _EMPTY_ATTACHMENT_NAMES: frozenset[str] = frozenset()
-
-
-def _require_name(value: object, field_name: str) -> str:
-    if not isinstance(value, str):
-        raise TypeError(f"{field_name} must be str")
-    if not value.strip():
-        raise ValueError(f"{field_name} cannot be empty")
-    return value
 
 
 @dataclass(frozen=True, slots=True)
