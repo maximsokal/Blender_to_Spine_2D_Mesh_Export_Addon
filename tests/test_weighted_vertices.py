@@ -153,3 +153,27 @@ def test_expected_vertex_count_requires_strict_integer_or_none(value):
             (1, 0, 0.0, 0.0, 1.0),
             expected_vertex_count=value,
         )
+
+
+def test_weighted_vertex_requires_tuple_for_immutable_influence_storage():
+    influence = WeightedVertexInfluence(0, 0.0, 0.0, 1.0)
+
+    with pytest.raises(TypeError, match="influences must be tuple"):
+        WeightedVertex([influence])
+
+
+@pytest.mark.parametrize("value", ("invalid", 1, None, object()))
+def test_weighted_vertex_rejects_non_influence_items(value):
+    with pytest.raises(
+        TypeError,
+        match=r"influences\[0\] must be WeightedVertexInfluence",
+    ):
+        WeightedVertex((value,))
+
+
+def test_weighted_vertex_preserves_empty_tuple_diagnostic():
+    with pytest.raises(
+        ValueError,
+        match="WeightedVertex must contain at least one influence",
+    ):
+        WeightedVertex(())
