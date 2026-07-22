@@ -7,6 +7,7 @@ from math import isfinite
 from re import fullmatch
 from typing import Any
 
+from .setup_slot_contract import SetupSlotIndex, resolve_setup_slot_index
 from .spine_json_contract import json_path_key
 
 
@@ -23,14 +24,6 @@ def _is_finite_number(value: object) -> bool:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
     return isinstance(value, int) or isfinite(value)
-
-
-def _require_name(value: object, field_name: str) -> str:
-    if not isinstance(value, str):
-        raise TypeError(f"{field_name} must be str")
-    if not value.strip():
-        raise ValueError(f"{field_name} cannot be empty")
-    return value
 
 
 def _require_hex_color(
@@ -65,6 +58,7 @@ def validate_animation_slot_color_timelines(
     *,
     slot_names: tuple[str, ...],
     path: str,
+    setup_slot_index: SetupSlotIndex | None = None,
 ) -> None:
     """Validate known Spine slot color timelines without normalizing payloads."""
 
@@ -75,13 +69,7 @@ def validate_animation_slot_color_timelines(
     if not isinstance(path, str) or not path:
         raise ValueError("path must be a non-empty string")
 
-    known_slot_names: set[str] = set()
-    ambiguous_slot_names: set[str] = set()
-    for slot_index, slot_name in enumerate(slot_names):
-        _require_name(slot_name, f"slot_names[{slot_index}]")
-        if slot_name in known_slot_names:
-            ambiguous_slot_names.add(slot_name)
-        known_slot_names.add(slot_name)
+    slot_index = resolve_setup_slot_index(slot_names, setup_slot_index)
 
     for animation_name, animation_metadata in animations.items():
         animation_path = json_path_key(path, animation_name)
@@ -98,15 +86,7 @@ def validate_animation_slot_color_timelines(
 
         for slot_name, slot_metadata in slot_timelines.items():
             slot_path = json_path_key(slots_path, slot_name)
-            _require_name(slot_name, f"{slot_path} slot name")
-            if slot_name not in known_slot_names:
-                raise ValueError(
-                    f"{slot_path} references undefined slot '{slot_name}'"
-                )
-            if slot_name in ambiguous_slot_names:
-                raise ValueError(
-                    f"{slot_path} references duplicated setup slot '{slot_name}'"
-                )
+            slot_index.require(slot_name, path=slot_path)
             if not isinstance(slot_metadata, Mapping):
                 raise TypeError(f"{slot_path} must be a mapping")
 
