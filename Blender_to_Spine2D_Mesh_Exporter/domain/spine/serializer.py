@@ -171,7 +171,7 @@ class SpineSerializer:
         if not isinstance(document, SpineDocument):
             raise TypeError("document must be SpineDocument")
         self._validator.validate_or_raise(document)
-        validate_setup_linked_meshes(
+        linked_mesh_resolver = validate_setup_linked_meshes(
             document.skins,
             path="document.skins",
         )
@@ -189,6 +189,7 @@ class SpineSerializer:
             skins=document.skins,
             slot_names=tuple(slot.name for slot in document.slots),
             path="document.animations",
+            linked_mesh_resolver=linked_mesh_resolver,
         )
         validate_animation_sequence_timelines(
             document.animations,
