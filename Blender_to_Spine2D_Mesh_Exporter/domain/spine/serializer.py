@@ -18,7 +18,9 @@ from .model import (
     SpineDocument,
     TransformConstraint,
 )
+from .animation_model_contract import validate_animation_model_contracts
 from .sequence_timeline_contract import validate_animation_sequence_timelines
+from .setup_attachment_contract import SetupAttachmentNameIndex
 from .setup_slot_contract import SetupSlotIndex
 from .slot_color_timeline_contract import (
     validate_animation_slot_color_timelines,
@@ -173,11 +175,23 @@ class SpineSerializer:
             raise TypeError("document must be SpineDocument")
         self._validator.validate_or_raise(document)
         slot_names = tuple(slot.name for slot in document.slots)
+        skin_attachments = tuple(skin.attachments for skin in document.skins)
+        setup_slot_index = SetupSlotIndex(slot_names)
+        setup_attachment_index = SetupAttachmentNameIndex(skin_attachments)
+        validate_animation_model_contracts(
+            document.animations,
+            events=document.events,
+            slot_names=slot_names,
+            skin_attachments=skin_attachments,
+            path="document.animations",
+            events_path="document.events",
+            setup_slot_index=setup_slot_index,
+            setup_attachment_index=setup_attachment_index,
+        )
         linked_mesh_resolver = validate_setup_linked_meshes(
             document.skins,
             path="document.skins",
         )
-        setup_slot_index = SetupSlotIndex(slot_names)
         validate_animation_slot_color_timelines(
             document.animations,
             slot_names=slot_names,
