@@ -6,6 +6,11 @@ from collections.abc import Mapping
 from math import isfinite
 from typing import Any
 
+from .linked_mesh_contract import (
+    AttachmentReference,
+    LinkedMeshResolver,
+    raw_attachment_type,
+)
 from .model import MeshAttachment, Skin
 from .spine_json_contract import json_path_key
 
@@ -51,56 +56,6 @@ def _require_finite_number(value: object, field_name: str) -> float | int:
     return value
 
 
-def _build_skin_index(
-    skins: tuple[Skin, ...],
-) -> tuple[dict[str, Skin], set[str]]:
-    if not isinstance(skins, tuple):
-        raise TypeError("skins must be tuple")
-
-    skin_by_name: dict[str, Skin] = {}
-    ambiguous_skin_names: set[str] = set()
-    for skin_index, skin in enumerate(skins):
-        if not isinstance(skin, Skin):
-            raise TypeError(f"skins[{skin_index}] must be Skin")
-        if skin.name in skin_by_name:
-            ambiguous_skin_names.add(skin.name)
-        else:
-            skin_by_name[skin.name] = skin
-    return skin_by_name, ambiguous_skin_names
-
-
-def _resolve_setup_attachment(
-    *,
-    skin_by_name: Mapping[str, Skin],
-    ambiguous_skin_names: set[str],
-    skin_name: str,
-    slot_name: str,
-    attachment_name: str,
-    path: str,
-) -> MeshAttachment | Mapping[str, Any]:
-    if skin_name in ambiguous_skin_names:
-        raise ValueError(f"{path} references duplicated skin '{skin_name}'")
-    skin = skin_by_name.get(skin_name)
-    if skin is None:
-        raise ValueError(f"{path} references undefined skin '{skin_name}'")
-
-    slot_attachments = skin.attachments.get(slot_name)
-    if slot_attachments is None:
-        raise ValueError(
-            f"{path} references slot '{slot_name}' without attachments "
-            f"in skin '{skin_name}'"
-        )
-    attachment = slot_attachments.get(attachment_name)
-    if attachment is None:
-        raise ValueError(
-            f"{path} references undefined attachment '{attachment_name}' "
-            f"for slot '{slot_name}' in skin '{skin_name}'"
-        )
-    if not isinstance(attachment, (MeshAttachment, Mapping)):
-        raise TypeError(f"{path} setup attachment has an unsupported value type")
-    return attachment
-
-
 def _resolve_setup_sequence(
     attachment: MeshAttachment | Mapping[str, Any],
     *,
@@ -110,9 +65,7 @@ def _resolve_setup_sequence(
         attachment_type = "mesh"
         sequence = attachment.sequence
     else:
-        attachment_type = attachment.get("type", "region")
-        if not isinstance(attachment_type, str):
-            raise TypeError(f"{path}.type must be str")
+        attachment_type = raw_attachment_type(attachment, path=path)
         sequence = attachment.get("sequence")
 
     if attachment_type not in _TEXTURE_REGION_ATTACHMENT_TYPES:
@@ -211,6 +164,7 @@ def validate_animation_sequence_timelines(
     skins: tuple[Skin, ...],
     slot_names: tuple[str, ...],
     path: str,
+    linked_mesh_resolver: LinkedMeshResolver | None = None,
 ) -> None:
     """Validate Spine 4.2 ``animations.attachments`` sequence timelines.
 
@@ -226,7 +180,18 @@ def validate_animation_sequence_timelines(
     if not isinstance(path, str) or not path:
         raise ValueError("path must be a non-empty string")
 
-    skin_by_name, ambiguous_skin_names = _build_skin_index(skins)
+    if linked_mesh_resolver is None:
+        resolver = LinkedMeshResolver(skins, path="document.skins")
+    else:
+        if not isinstance(linked_mesh_resolver, LinkedMeshResolver):
+            raise TypeError(
+                "linked_mesh_resolver must be LinkedMeshResolver or None"
+            )
+        if linked_mesh_resolver.skins is not skins:
+            raise ValueError(
+                "linked_mesh_resolver must be built from the exact skins tuple"
+            )
+        resolver = linked_mesh_resolver
 
     known_slot_names: set[str] = set()
     ambiguous_slot_names: set[str] = set()
@@ -251,14 +216,7 @@ def validate_animation_sequence_timelines(
         for skin_name, skin_metadata in skin_timelines.items():
             skin_path = _mapping_key_path(attachments_path, skin_name)
             _require_name(skin_name, f"{skin_path} skin name")
-            if skin_name in ambiguous_skin_names:
-                raise ValueError(
-                    f"{skin_path} references duplicated skin '{skin_name}'"
-                )
-            if skin_name not in skin_by_name:
-                raise ValueError(
-                    f"{skin_path} references undefined skin '{skin_name}'"
-                )
+            resolver.require_skin(skin_name, path=skin_path)
             if not isinstance(skin_metadata, Mapping):
                 raise TypeError(f"{skin_path} must be a mapping")
 
@@ -291,16 +249,17 @@ def validate_animation_sequence_timelines(
                     if "sequence" not in attachment_metadata:
                         continue
 
-                    attachment = _resolve_setup_attachment(
-                        skin_by_name=skin_by_name,
-                        ambiguous_skin_names=ambiguous_skin_names,
+                    reference = AttachmentReference(
                         skin_name=skin_name,
                         slot_name=slot_name,
                         attachment_name=attachment_name,
+                    )
+                    setup = resolver.get_attachment(
+                        reference,
                         path=attachment_path,
                     )
                     _resolve_setup_sequence(
-                        attachment,
+                        setup.attachment,
                         path=attachment_path,
                     )
                     _validate_sequence_timeline(
