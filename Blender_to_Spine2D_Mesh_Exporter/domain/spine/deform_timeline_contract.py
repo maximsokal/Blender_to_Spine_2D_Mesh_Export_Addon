@@ -169,6 +169,7 @@ def _resolve_deform_capacity(
     setup = resolver.get_attachment(reference, path=path)
     attachment = setup.attachment
     setup_path = setup.path
+    capacity_reference = reference
 
     if isinstance(attachment, Mapping) and is_linked_mesh_attachment(
         attachment,
@@ -177,11 +178,18 @@ def _resolve_deform_capacity(
         resolved = resolver.resolve(reference)
         attachment = resolved.terminal_attachment
         setup_path = resolved.terminal_path
+        capacity_reference = resolved.terminal
+
+        terminal_cached = cache.get(capacity_reference)
+        if terminal_cached is not None:
+            cache[reference] = terminal_cached
+            return terminal_cached
 
     capacity = _deform_capacity_for_attachment(
         attachment,
         path=setup_path,
     )
+    cache[capacity_reference] = capacity
     cache[reference] = capacity
     return capacity
 
@@ -192,6 +200,7 @@ def validate_animation_deform_timelines(
     skins: tuple[Skin, ...],
     slot_names: tuple[str, ...],
     path: str,
+    linked_mesh_resolver: LinkedMeshResolver | None = None,
 ) -> None:
     """Validate Spine 4.2 ``animations.attachments`` deform timelines.
 
@@ -206,7 +215,18 @@ def validate_animation_deform_timelines(
     if not isinstance(path, str) or not path:
         raise ValueError("path must be a non-empty string")
 
-    resolver = LinkedMeshResolver(skins, path="document.skins")
+    if linked_mesh_resolver is None:
+        resolver = LinkedMeshResolver(skins, path="document.skins")
+    else:
+        if not isinstance(linked_mesh_resolver, LinkedMeshResolver):
+            raise TypeError(
+                "linked_mesh_resolver must be LinkedMeshResolver or None"
+            )
+        if linked_mesh_resolver.skins is not skins:
+            raise ValueError(
+                "linked_mesh_resolver must be built from the exact skins tuple"
+            )
+        resolver = linked_mesh_resolver
 
     known_slot_names: set[str] = set()
     ambiguous_slot_names: set[str] = set()
