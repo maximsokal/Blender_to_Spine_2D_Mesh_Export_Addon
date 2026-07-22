@@ -162,6 +162,7 @@ class LinkedMeshResolver:
         if not isinstance(path, str) or not path:
             raise ValueError("path must be a non-empty string")
 
+        self._skins = skins
         self._path = path
         self._skin_by_name: dict[str, Skin] = {}
         self._ambiguous_skin_names: set[str] = set()
@@ -193,6 +194,12 @@ class LinkedMeshResolver:
                         attachment=attachment,
                         path=json_path_key(slot_path, attachment_name),
                     )
+
+    @property
+    def skins(self) -> tuple[Skin, ...]:
+        """Return the exact immutable skin tuple used to build this index."""
+
+        return self._skins
 
     def require_skin(self, skin_name: str, *, path: str) -> Skin:
         """Return one unambiguous setup skin or fail with the caller path."""
@@ -373,10 +380,12 @@ def validate_setup_linked_meshes(
     skins: tuple[Skin, ...],
     *,
     path: str = "document.skins",
-) -> None:
-    """Fail when any setup linked mesh cannot resolve to a terminal mesh."""
+) -> LinkedMeshResolver:
+    """Validate setup links and return the reusable resolver/index."""
 
-    LinkedMeshResolver(skins, path=path).validate_all()
+    resolver = LinkedMeshResolver(skins, path=path)
+    resolver.validate_all()
+    return resolver
 
 
 __all__ = [
