@@ -5,25 +5,19 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.setup_attachment_contract imp
 
 
 def test_document_builds_one_cross_skin_attachment_index(monkeypatch):
-    real_index = SetupAttachmentNameIndex
-    instances = []
+    original_require = SetupAttachmentNameIndex.require
+    calls = []
 
-    class RecordingSetupAttachmentNameIndex:
-        def __init__(self, skin_attachments):
-            self.skin_attachments = skin_attachments
-            self._delegate = real_index(skin_attachments)
-            self.lookups = []
-            instances.append(self)
+    def recording_require(self, slot_name, attachment_name, *, path):
+        calls.append((self, slot_name, attachment_name, path))
+        return original_require(
+            self,
+            slot_name,
+            attachment_name,
+            path=path,
+        )
 
-        def require(self, slot_name, attachment_name, *, path):
-            self.lookups.append((slot_name, attachment_name, path))
-            self._delegate.require(slot_name, attachment_name, path=path)
-
-    monkeypatch.setattr(
-        spine_model,
-        "SetupAttachmentNameIndex",
-        RecordingSetupAttachmentNameIndex,
-    )
+    monkeypatch.setattr(SetupAttachmentNameIndex, "require", recording_require)
 
     default_attachments = {"slot": {"A": {"type": "point"}}}
     alternate_attachments = {"slot": {"B": {"type": "point"}}}
@@ -53,10 +47,11 @@ def test_document_builds_one_cross_skin_attachment_index(monkeypatch):
         "time": 1,
         "name": "B",
     }
-    assert len(instances) == 1
-    assert instances[0].skin_attachments[0] is default_attachments
-    assert instances[0].skin_attachments[1] is alternate_attachments
-    assert instances[0].lookups == [
+    assert len({id(index) for index, *_ in calls}) == 1
+    index = calls[0][0]
+    assert index.skin_attachments[0] is default_attachments
+    assert index.skin_attachments[1] is alternate_attachments
+    assert [call[1:] for call in calls] == [
         (
             "slot",
             "A",
