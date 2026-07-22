@@ -23,6 +23,13 @@ LINKED = (
     / "spine"
     / "linked_mesh_contract.py"
 )
+SETUP_SLOT = (
+    ROOT
+    / "Blender_to_Spine2D_Mesh_Exporter"
+    / "domain"
+    / "spine"
+    / "setup_slot_contract.py"
+)
 SERIALIZER = (
     ROOT
     / "Blender_to_Spine2D_Mesh_Exporter"
@@ -121,17 +128,18 @@ def test_deform_contract_has_no_duplicate_parent_resolution_pipeline():
         assert forbidden not in source
 
 
-def test_animation_reference_chain_is_fail_closed_through_shared_index():
+def test_animation_reference_chain_is_fail_closed_through_shared_indices():
     source = read(CONTRACT)
     linked_source = read(LINKED)
+    setup_slot_source = read(SETUP_SLOT)
 
     assert 'if "attachments" not in animation_metadata:' in source
     assert "resolver.require_skin(skin_name, path=skin_path)" in source
-    assert "slot_name not in known_slot_names" in source
+    assert "slot_index.require(slot_name, path=slot_path)" in source
     assert "resolver.get_attachment(reference, path=path)" in source
     assert "references undefined attachment" in linked_source
     assert "references duplicated skin" in linked_source
-    assert "references duplicated setup slot" in source
+    assert "references duplicated setup slot" in setup_slot_source
 
 
 def test_consumed_vertices_and_offset_preserve_xy_pairs_and_capacity():
@@ -211,9 +219,8 @@ def test_serializer_runs_deform_contract_after_existing_boundaries():
         < data_index
     )
     assert "skins=document.skins" in to_dict_source
-    assert "slot_names=tuple(slot.name for slot in document.slots)" in (
-        to_dict_source
-    )
+    assert "slot_names=slot_names" in to_dict_source
+    assert "setup_slot_index=setup_slot_index" in to_dict_source
     assert 'path="document.animations"' in to_dict_source
 
 
