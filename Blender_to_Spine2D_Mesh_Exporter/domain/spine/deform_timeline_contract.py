@@ -7,12 +7,20 @@ from math import isfinite
 from typing import Any
 
 from .curve_timeline_contract import validate_curve_value
+from .linked_mesh_contract import (
+    AttachmentReference,
+    LinkedMeshResolver,
+    is_linked_mesh_attachment,
+    raw_attachment_type,
+)
 from .model import MeshAttachment, Skin
 from .spine_json_contract import json_path_key
 from .weighted_vertices import decode_weighted_vertices
 
 
-_VERTEX_ATTACHMENT_TYPES = frozenset({"mesh", "linkedmesh", "boundingbox", "path", "clipping"})
+_VERTEX_ATTACHMENT_TYPES = frozenset(
+    {"mesh", "linkedmesh", "boundingbox", "path", "clipping"}
+)
 _VERTEX_COUNT_ATTACHMENT_TYPES = frozenset({"boundingbox", "path", "clipping"})
 
 
@@ -111,145 +119,71 @@ def _raw_attachment_expected_coordinate_count(
     )
 
 
-def _build_skin_index(
-    skins: tuple[Skin, ...],
-) -> tuple[dict[str, Skin], set[str]]:
-    if not isinstance(skins, tuple):
-        raise TypeError("skins must be tuple")
-
-    skin_by_name: dict[str, Skin] = {}
-    ambiguous_skin_names: set[str] = set()
-    for skin_index, skin in enumerate(skins):
-        if not isinstance(skin, Skin):
-            raise TypeError(f"skins[{skin_index}] must be Skin")
-        if skin.name in skin_by_name:
-            ambiguous_skin_names.add(skin.name)
-        else:
-            skin_by_name[skin.name] = skin
-    return skin_by_name, ambiguous_skin_names
-
-
-def _resolve_attachment(
+def _deform_capacity_for_attachment(
+    attachment: MeshAttachment | Mapping[str, Any],
     *,
-    skin_by_name: Mapping[str, Skin],
-    ambiguous_skin_names: set[str],
-    skin_name: str,
-    slot_name: str,
-    attachment_name: str,
     path: str,
-) -> MeshAttachment | Mapping[str, Any]:
-    if skin_name in ambiguous_skin_names:
-        raise ValueError(f"{path} references duplicated skin '{skin_name}'")
-    skin = skin_by_name.get(skin_name)
-    if skin is None:
-        raise ValueError(f"{path} references undefined skin '{skin_name}'")
+) -> int:
+    if isinstance(attachment, MeshAttachment):
+        return _deform_capacity_from_vertices(
+            attachment.vertices,
+            expected_coordinate_count=len(attachment.uvs),
+            path=f"{path}.vertices",
+        )
 
-    slot_attachments = skin.attachments.get(slot_name)
-    if slot_attachments is None:
+    attachment_type = raw_attachment_type(attachment, path=path)
+    if attachment_type not in _VERTEX_ATTACHMENT_TYPES:
         raise ValueError(
-            f"{path} references slot '{slot_name}' without attachments "
-            f"in skin '{skin_name}'"
+            f"{path} has non-deformable attachment type '{attachment_type}'"
         )
-    attachment = slot_attachments.get(attachment_name)
-    if attachment is None:
-        raise ValueError(
-            f"{path} references undefined attachment '{attachment_name}' "
-            f"for slot '{slot_name}' in skin '{skin_name}'"
+    if is_linked_mesh_attachment(attachment, path=path):
+        raise RuntimeError(
+            f"{path} linked mesh must be resolved before deform capacity calculation"
         )
-    if not isinstance(attachment, (MeshAttachment, Mapping)):
-        raise TypeError(f"{path} setup attachment has an unsupported value type")
-    return attachment
+
+    expected_coordinate_count = _raw_attachment_expected_coordinate_count(
+        attachment,
+        attachment_type=attachment_type,
+        path=path,
+    )
+    if "vertices" not in attachment:
+        raise ValueError(f"{path}.vertices is required")
+    return _deform_capacity_from_vertices(
+        attachment["vertices"],
+        expected_coordinate_count=expected_coordinate_count,
+        path=f"{path}.vertices",
+    )
 
 
 def _resolve_deform_capacity(
     *,
-    skin_by_name: Mapping[str, Skin],
-    ambiguous_skin_names: set[str],
-    skin_name: str,
-    slot_name: str,
-    attachment_name: str,
+    resolver: LinkedMeshResolver,
+    reference: AttachmentReference,
     path: str,
-    cache: dict[tuple[str, str, str], int],
-    resolving: set[tuple[str, str, str]],
+    cache: dict[AttachmentReference, int],
 ) -> int:
-    key = (skin_name, slot_name, attachment_name)
-    cached = cache.get(key)
+    cached = cache.get(reference)
     if cached is not None:
         return cached
-    if key in resolving:
-        raise ValueError(f"{path} participates in a linked mesh parent cycle")
 
-    resolving.add(key)
-    try:
-        attachment = _resolve_attachment(
-            skin_by_name=skin_by_name,
-            ambiguous_skin_names=ambiguous_skin_names,
-            skin_name=skin_name,
-            slot_name=slot_name,
-            attachment_name=attachment_name,
-            path=path,
-        )
+    setup = resolver.get_attachment(reference, path=path)
+    attachment = setup.attachment
+    setup_path = setup.path
 
-        if isinstance(attachment, MeshAttachment):
-            capacity = _deform_capacity_from_vertices(
-                attachment.vertices,
-                expected_coordinate_count=len(attachment.uvs),
-                path=f"{path}.vertices",
-            )
-        else:
-            attachment_type = attachment.get("type", "region")
-            if not isinstance(attachment_type, str):
-                raise TypeError(f"{path}.type must be str")
-            if attachment_type not in _VERTEX_ATTACHMENT_TYPES:
-                raise ValueError(
-                    f"{path} has non-deformable attachment type "
-                    f"'{attachment_type}'"
-                )
+    if isinstance(attachment, Mapping) and is_linked_mesh_attachment(
+        attachment,
+        path=setup.path,
+    ):
+        resolved = resolver.resolve(reference)
+        attachment = resolved.terminal_attachment
+        setup_path = resolved.terminal_path
 
-            parent = attachment.get("parent")
-            if attachment_type in {"mesh", "linkedmesh"} and parent is not None:
-                parent_name = _require_name(parent, f"{path}.parent")
-                raw_parent_skin = attachment.get("skin")
-                if raw_parent_skin in (None, ""):
-                    parent_skin_name = "default"
-                else:
-                    parent_skin_name = _require_name(
-                        raw_parent_skin,
-                        f"{path}.skin",
-                    )
-                capacity = _resolve_deform_capacity(
-                    skin_by_name=skin_by_name,
-                    ambiguous_skin_names=ambiguous_skin_names,
-                    skin_name=parent_skin_name,
-                    slot_name=slot_name,
-                    attachment_name=parent_name,
-                    path=(
-                        f"{path}.parent[{parent_skin_name!r}, "
-                        f"{slot_name!r}, {parent_name!r}]"
-                    ),
-                    cache=cache,
-                    resolving=resolving,
-                )
-            else:
-                expected_coordinate_count = (
-                    _raw_attachment_expected_coordinate_count(
-                        attachment,
-                        attachment_type=attachment_type,
-                        path=path,
-                    )
-                )
-                if "vertices" not in attachment:
-                    raise ValueError(f"{path}.vertices is required")
-                capacity = _deform_capacity_from_vertices(
-                    attachment["vertices"],
-                    expected_coordinate_count=expected_coordinate_count,
-                    path=f"{path}.vertices",
-                )
-
-        cache[key] = capacity
-        return capacity
-    finally:
-        resolving.remove(key)
+    capacity = _deform_capacity_for_attachment(
+        attachment,
+        path=setup_path,
+    )
+    cache[reference] = capacity
+    return capacity
 
 
 def validate_animation_deform_timelines(
@@ -272,7 +206,7 @@ def validate_animation_deform_timelines(
     if not isinstance(path, str) or not path:
         raise ValueError("path must be a non-empty string")
 
-    skin_by_name, ambiguous_skin_names = _build_skin_index(skins)
+    resolver = LinkedMeshResolver(skins, path="document.skins")
 
     known_slot_names: set[str] = set()
     ambiguous_slot_names: set[str] = set()
@@ -282,7 +216,7 @@ def validate_animation_deform_timelines(
             ambiguous_slot_names.add(slot_name)
         known_slot_names.add(slot_name)
 
-    capacity_cache: dict[tuple[str, str, str], int] = {}
+    capacity_cache: dict[AttachmentReference, int] = {}
     for animation_name, animation_metadata in animations.items():
         animation_path = _mapping_key_path(path, animation_name)
         if not isinstance(animation_metadata, Mapping):
@@ -298,14 +232,7 @@ def validate_animation_deform_timelines(
         for skin_name, skin_metadata in skin_timelines.items():
             skin_path = _mapping_key_path(attachments_path, skin_name)
             _require_name(skin_name, f"{skin_path} skin name")
-            if skin_name in ambiguous_skin_names:
-                raise ValueError(
-                    f"{skin_path} references duplicated skin '{skin_name}'"
-                )
-            if skin_name not in skin_by_name:
-                raise ValueError(
-                    f"{skin_path} references undefined skin '{skin_name}'"
-                )
+            resolver.require_skin(skin_name, path=skin_path)
             if not isinstance(skin_metadata, Mapping):
                 raise TypeError(f"{skin_path} must be a mapping")
 
@@ -338,15 +265,16 @@ def validate_animation_deform_timelines(
                     if "deform" not in attachment_metadata:
                         continue
 
-                    capacity = _resolve_deform_capacity(
-                        skin_by_name=skin_by_name,
-                        ambiguous_skin_names=ambiguous_skin_names,
+                    reference = AttachmentReference(
                         skin_name=skin_name,
                         slot_name=slot_name,
                         attachment_name=attachment_name,
+                    )
+                    capacity = _resolve_deform_capacity(
+                        resolver=resolver,
+                        reference=reference,
                         path=attachment_path,
                         cache=capacity_cache,
-                        resolving=set(),
                     )
 
                     timeline = attachment_metadata["deform"]
