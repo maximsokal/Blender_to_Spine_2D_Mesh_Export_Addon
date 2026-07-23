@@ -16,6 +16,7 @@ REWRITE_DIRECTORIES = (
 ACTIVE_ROOT_FILES = (
     PACKAGE / "__init__.py",
     PACKAGE / "addon_preferences.py",
+    PACKAGE / "config.py",
     PACKAGE / "single_object_operator.py",
     PACKAGE / "ui.py",
 )
@@ -57,6 +58,22 @@ def test_extension_entry_point_contains_no_legacy_metadata_or_uninstall_ops():
     assert "bl_info" not in entry
     assert "addon_disable" not in preferences
     assert "addon_remove" not in preferences
+
+
+def test_runtime_scene_properties_have_one_blender_52_owner():
+    entry = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
+    config = (PACKAGE / "config.py").read_text(encoding="utf-8")
+    properties = (
+        PACKAGE / "blender_adapter" / "scene_properties.py"
+    ).read_text(encoding="utf-8")
+
+    assert "scene_properties.PROPERTIES" in entry
+    assert "config.PROPERTIES" not in entry
+    assert "PROPERTIES =" not in config
+    assert "def register()" not in config
+    assert "def unregister()" not in config
+    assert 'self["spine2d_' not in config
+    assert 'self["spine2d_' not in properties
 
 
 def test_working_color_space_is_captured_through_blender_52_interop_id():
