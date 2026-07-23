@@ -19,6 +19,10 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.shader_graph_analysis impo
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.shader_graph_error import (
     MaterialGraphAnalysisError,
 )
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.shader_graph_rna import (
+    find_material_output,
+    normalise_render_target,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,6 +75,40 @@ def test_package_import_surface_no_longer_references_removed_config_api():
     assert "from .config import get_texture_size" not in combined
 
 
+def test_shader_target_contract_accepts_only_blender_52_values():
+    assert normalise_render_target(None) == "ALL"
+    assert normalise_render_target("ALL") == "ALL"
+    assert normalise_render_target("CYCLES") == "CYCLES"
+    assert normalise_render_target("EEVEE") == "EEVEE"
+    assert normalise_render_target("BLENDER_EEVEE") == "EEVEE"
+
+    for old_or_invalid in (
+        "BLENDER_EEVEE_NEXT",
+        "EEVEE_NEXT",
+        "MY_CYCLES",
+        "CYCLE",
+        "WORKBENCH",
+    ):
+        with pytest.raises(MaterialGraphAnalysisError, match="Unsupported Blender 5.2"):
+            normalise_render_target(old_or_invalid)
+
+
+def test_material_output_uses_exact_positional_blender_52_target():
+    output = SimpleNamespace(
+        name="Output",
+        type="OUTPUT_MATERIAL",
+        target="CYCLES",
+        is_active_output=True,
+    )
+    calls: list[str] = []
+    tree = SimpleNamespace(
+        get_output_node=lambda target: calls.append(target) or output,
+    )
+
+    assert find_material_output(tree, (output,), "CYCLES") is output
+    assert calls == ["CYCLES"]
+
+
 def test_shader_graph_without_material_output_is_rejected():
     material = SimpleNamespace(
         name="NoOutput",
@@ -103,9 +141,13 @@ def test_material_slot_rejects_boolean_slot_index():
 def test_material_analysis_has_no_root_node_error_fallback():
     resolution = _source("blender_adapter/material_graph_resolution.py")
     analysis = _source("blender_adapter/shader_graph_analysis.py")
+    rna = _source("blender_adapter/shader_graph_rna.py")
 
     assert "historical no-output fallback" not in resolution
     assert "graph_nodes if graph_nodes is not None" not in resolution
     assert "Shader graph analysis failed:" not in resolution
     assert "walker.walk_all_nodes()" not in analysis
     assert "semantic analysis used all nodes" not in analysis
+    assert 'if "CYCLE" in target' not in rna
+    assert 'if "EEVEE" in target' not in rna
+    assert "get_output_node(target=target)" not in rna
