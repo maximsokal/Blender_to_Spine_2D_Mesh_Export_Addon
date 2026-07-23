@@ -72,3 +72,14 @@ def test_working_color_space_is_captured_through_blender_52_interop_id():
     assert "bpy.data" not in resources
     assert 'getattr(bpy, "data", None)' in resources
     assert '"working_space_interop_id"' in resources
+
+
+def test_generated_palette_uses_color_managed_srgb_attribute_writes():
+    materials = (
+        PACKAGE / "blender_adapter" / "bake_materials.py"
+    ).read_text(encoding="utf-8")
+
+    assert "def _assign_generated_display_color(" in materials
+    assert "attribute_value.color_srgb = resolved" in materials
+    assert "attribute.data[mesh_loop_index].color = color" not in materials
+    assert "Blender 5.2 FloatColorAttributeValue.color_srgb is unavailable" in materials
