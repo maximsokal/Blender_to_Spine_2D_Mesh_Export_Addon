@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 import logging
+from math import isfinite
 from typing import Any, Iterable, Iterator, Tuple
 from uuid import uuid4
 
@@ -217,11 +218,44 @@ def _create_generated_color_material(
         ) from exc
 
 
+def _assign_generated_display_color(
+    attribute_value: Any,
+    color: tuple[float, float, float, float],
+) -> None:
+    """Store one display-referred color through Blender 5.2 color management.
+
+    ``FloatColorAttributeValue.color_srgb`` converts the stable generated palette
+    into the active scene-linear working space. Writing ``color`` directly would
+    reinterpret the same numeric tuple in ACEScg, Linear Rec.2020, or another OCIO
+    working space and would change the visible diagnostic palette.
+    """
+
+    if attribute_value is None:
+        raise BakeMaterialError("Generated color attribute value is missing")
+    if not isinstance(color, tuple) or len(color) != 4:
+        raise BakeMaterialError("Generated display color must contain four values")
+    resolved = tuple(float(component) for component in color)
+    if not all(isfinite(component) for component in resolved):
+        raise BakeMaterialError("Generated display color contains a non-finite value")
+    if any(component < 0.0 or component > 1.0 for component in resolved):
+        raise BakeMaterialError("Generated display color must be within [0, 1]")
+    if not hasattr(attribute_value, "color_srgb"):
+        raise BakeMaterialError(
+            "Blender 5.2 FloatColorAttributeValue.color_srgb is unavailable"
+        )
+    try:
+        attribute_value.color_srgb = resolved
+    except Exception as exc:
+        raise BakeMaterialError(
+            f"Unable to write generated display color {resolved!r}"
+        ) from exc
+
+
 def _write_generated_corner_colors(
     target_mesh: Any,
     plan: GeneratedMaterialPlan,
 ) -> Any:
-    """Write one face color to every exact Blender loop mapped from the snapshot."""
+    """Write one color-managed face color to every mapped Blender loop."""
 
     attributes = getattr(target_mesh, "color_attributes", None)
     if attributes is None:
@@ -252,7 +286,10 @@ def _write_generated_corner_colors(
         ):
             for loop_id in face.loop_ids:
                 mesh_loop_index = correspondence.mesh_loop_index_for(loop_id)
-                attribute.data[mesh_loop_index].color = color
+                _assign_generated_display_color(
+                    attribute.data[mesh_loop_index],
+                    color,
+                )
         return attribute
     except Exception as exc:
         try:
