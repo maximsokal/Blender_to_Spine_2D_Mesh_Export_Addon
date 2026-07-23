@@ -38,7 +38,7 @@ def _scene_context(render_engine: str) -> SceneBakeContext:
     )
 
 
-def test_renderer_aliases_normalize_to_blender_52_contract():
+def test_renderer_identifiers_normalize_to_blender_52_contract():
     assert render_engine_contract("CYCLES") == RenderEngineContract(
         "CYCLES",
         "CYCLES",
@@ -53,11 +53,17 @@ def test_renderer_aliases_normalize_to_blender_52_contract():
     )
 
 
-def test_removed_eevee_next_alias_never_leaks_back_to_blender_runtime():
-    contract = render_engine_contract("BLENDER_EEVEE_NEXT")
+def test_pre_blender_52_eevee_identifier_is_rejected():
+    old_identifier = "BLENDER_" + "EEVEE_" + "NEXT"
 
-    assert contract.blender_engine == "BLENDER_EEVEE"
-    assert contract.shader_target == "EEVEE"
+    with pytest.raises(RenderEngineContractError, match="unsupported Blender 5.2"):
+        render_engine_contract(old_identifier)
+
+
+def test_fuzzy_or_partial_renderer_names_are_rejected():
+    for value in ("CYCLE", "MY_CYCLES", "EEVEE_NEXT", "BLENDER_EEVEE_TEST"):
+        with pytest.raises(RenderEngineContractError):
+            render_engine_contract(value)
 
 
 def test_execution_settings_resolve_the_shader_output_target():
@@ -77,7 +83,7 @@ def test_renderer_contract_rejects_scene_mismatch():
         contract.validate_scene(_scene_context("BLENDER_EEVEE"))
 
 
-def test_renderer_contract_accepts_scene_aliases():
+def test_renderer_contract_accepts_internal_eevee_target():
     render_engine_contract("EEVEE").validate_scene(
         _scene_context("BLENDER_EEVEE")
     )
