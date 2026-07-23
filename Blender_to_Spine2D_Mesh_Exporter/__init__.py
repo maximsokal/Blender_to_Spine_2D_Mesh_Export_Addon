@@ -1,22 +1,10 @@
 # pylint: disable=import-error
-"""Main entry point for the Blender to Spine2D Mesh Exporter add-on."""
+"""Main entry point for the Blender 5.2+ extension."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any, Callable, Tuple
-
-
-bl_info = {
-    "name": "Blender to Spine2D Mesh Exporter",
-    "author": "Maxim Sokolenko",
-    "version": (0, 23, 0),
-    "blender": (4, 4, 0),
-    "location": "View3D > UI > Blender to Spine2D Mesh Exporter",
-    "description": "Converts 3D objects into a Spine2D JSON structure",
-    "warning": "",
-    "category": "3D View",
-}
 
 
 logger = logging.getLogger(__package__ or __name__)
@@ -41,7 +29,7 @@ if bpy is not None:
     install_legacy_multi_facade()
 
     from . import addon_preferences, single_object_operator, ui
-    from .blender_adapter import generated_material_ui
+    from .blender_adapter import generated_material_ui, scene_properties
     from .infrastructure.blender_registration import (
         RegistrationCleanupAction,
         RnaPropertyRegistration,
@@ -49,6 +37,7 @@ if bpy is not None:
         rna_property_cleanup_actions,
         unregister_all_best_effort,
     )
+    from .infrastructure.blender_version import require_supported_blender_runtime
 
     # Preserve package-level aliases used by Blender and focused compatibility tests.
     AddonLoggingSettings = addon_preferences.AddonLoggingSettings
@@ -58,11 +47,10 @@ if bpy is not None:
     SPINE2D_OT_RefreshLoggingModules = (
         addon_preferences.SPINE2D_OT_RefreshLoggingModules
     )
-    WM_OT_UninstallAddon = addon_preferences.WM_OT_UninstallAddon
     initialize_logging_preferences = addon_preferences.initialize_logging_preferences
 
-    # Only modules that own live Blender classes/properties are imported during add-on startup.
-    # Legacy implementation modules are loaded by ``legacy_loader`` only after explicit Legacy use.
+    # Only modules that own live Blender classes/properties are imported during startup.
+    # Legacy implementation modules remain lazy behind ``legacy_loader``.
     MODULES = (
         addon_preferences,
         ui,
@@ -76,7 +64,7 @@ if bpy is not None:
             name=name,
             value=prop,
         )
-        for name, prop in config.PROPERTIES
+        for name, prop in scene_properties.PROPERTIES
     )
 
     RegistrationCallback = Callable[[], None]
@@ -101,7 +89,7 @@ if bpy is not None:
             addon_preferences.unregister,
         ),
         (
-            "config RNA properties",
+            "Scene RNA properties",
             _register_config_rna,
             _unregister_config_rna,
         ),
@@ -136,8 +124,9 @@ if bpy is not None:
         )
 
     def register() -> None:
-        """Register the complete add-on or roll back every completed owner."""
+        """Register the complete Blender 5.2+ extension transactionally."""
 
+        require_supported_blender_runtime(bpy)
         config._setup_default_logging()
         logger.debug("Registering Blender_to_Spine2D_Mesh_Exporter")
 
@@ -183,7 +172,7 @@ else:
         return ()
 
     def register() -> None:
-        raise RuntimeError("Blender bpy module is required to register the add-on")
+        raise RuntimeError("Blender bpy module is required to register the extension")
 
     def unregister() -> None:
         return None
