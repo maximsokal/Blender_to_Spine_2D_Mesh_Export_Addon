@@ -1,4 +1,4 @@
-"""Blender 4.4 regressions for Rewrite generated-material execution."""
+"""Blender 5.2+ regressions for Rewrite generated-material execution."""
 
 from __future__ import annotations
 
@@ -49,6 +49,7 @@ def _settings(
     *,
     policy: A1MaterialSourcePolicy,
     color: tuple[float, float, float, float],
+    requested_engine: str = "CYCLES",
 ) -> A1SingleObjectExportSettings:
     return A1SingleObjectExportSettings(
         export=ExportSettings(
@@ -63,7 +64,10 @@ def _settings(
         json_output_stem=stem,
         source_geometry_mode=A1SourceGeometryMode.EVALUATED,
         uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
-        bake_execution=BakeExecutionSettings(samples=1),
+        bake_execution=BakeExecutionSettings(
+            render_engine=requested_engine,
+            samples=1,
+        ),
         material_source_policy=policy,
         generated_material_pattern=A1GeneratedMaterialPattern.SOLID_GRAY,
         generated_gray_color=color,
@@ -107,7 +111,6 @@ def test_generate_if_missing_bakes_materialless_mesh_and_cleans_resources() -> N
         source = _create_quad("GeneratedMissingSource")
         attributes_before = _source_attribute_names(source)
         _assert(len(source.data.materials) == 0, "fixture unexpectedly has materials")
-
         result = export_a1_single_object(
             source,
             _settings(
@@ -174,10 +177,37 @@ def test_force_generated_ignores_source_material_without_mutating_it() -> None:
         _assert(not _temporary_datablock_names(), "forced path leaked temporary datablocks")
 
 
+def test_generated_material_requested_from_eevee_uses_internal_cycles_bake() -> None:
+    _clear_scene()
+    bpy.context.scene.render.engine = "BLENDER_EEVEE"
+    with tempfile.TemporaryDirectory(prefix="spine2d-generated-eevee-") as directory:
+        source = _create_quad("GeneratedEeveeSource")
+        result = export_a1_single_object(
+            source,
+            _settings(
+                Path(directory),
+                "GeneratedEevee",
+                policy=A1MaterialSourcePolicy.GENERATE_IF_MISSING,
+                color=(0.0, 1.0, 0.0, 1.0),
+                requested_engine="BLENDER_EEVEE",
+            ),
+        )
+
+        _assert(result.success, f"EEVEE-requested generated export failed: {result.issues}")
+        _assert_green_generated_texture(result.image_paths[0])
+        _assert(
+            bpy.context.scene.render.engine == "BLENDER_EEVEE",
+            "generated bake did not restore the requested EEVEE scene engine",
+        )
+        _assert(not _temporary_datablock_names(), "EEVEE path leaked temporary datablocks")
+
+
 def main() -> None:
+    _assert(tuple(bpy.app.version[:3]) >= (5, 2, 0), "Blender 5.2+ is required")
     tests = (
         test_generate_if_missing_bakes_materialless_mesh_and_cleans_resources,
         test_force_generated_ignores_source_material_without_mutating_it,
+        test_generated_material_requested_from_eevee_uses_internal_cycles_bake,
     )
     for test in tests:
         test()
