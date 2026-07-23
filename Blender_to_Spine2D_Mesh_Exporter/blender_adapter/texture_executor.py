@@ -1,9 +1,9 @@
-"""Dispatch immutable texture plans to object baking or camera projection.
+"""Dispatch immutable texture plans to Blender 5.2 execution owners.
 
-This module owns no Blender operator access. Every public entry point first builds one typed
-``TextureExecutionRequest`` so invalid domain values fail before filesystem reservations or
-Blender scene/context mutation. The detailed API returns render-derived layout metadata for
-post-render document finalization. The compatibility API intentionally keeps B4 full-frame.
+Every entry point first builds one typed ``TextureExecutionRequest`` so invalid
+domain values fail before filesystem reservations or Blender Scene mutation.
+The detailed staging API retains camera-projection layout metadata required by
+post-render Spine document finalization.
 """
 
 from __future__ import annotations
@@ -23,12 +23,11 @@ from ..infrastructure import (
     AtomicFileTransaction,
     AtomicOutputReservation,
 )
-from .camera_projection_executor import (
+from .camera_projection_output import (
     execute_camera_projection_plan,
-    stage_camera_projection_outputs,
     stage_camera_projection_outputs_detailed,
 )
-from .semantic_bake_executor import (
+from .semantic_bake_output import (
     execute_bake_plan as execute_object_bake_plan,
     stage_bake_plan_outputs as stage_object_bake_outputs,
 )
@@ -125,7 +124,7 @@ def stage_texture_plan_outputs(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> TextureStageResult:
-    """Stage one plan and retain the exact B4 crop/hull layout when applicable."""
+    """Stage one texture plan and retain camera-projection layout metadata."""
 
     request = TextureExecutionRequest.capture(
         source_obj,
@@ -154,49 +153,6 @@ def stage_texture_plan_outputs(
         scene=scene,
     )
     return TextureStageResult(tuple(reservations))
-
-
-def stage_bake_plan_outputs(
-    source_obj: Any,
-    target_snapshot: MeshSnapshot,
-    plan: BakePlan,
-    output_transaction: AtomicFileTransaction,
-    execution_settings: BakeExecutionSettings | None = None,
-    *,
-    context: Any | None = None,
-    scene: Any | None = None,
-) -> Tuple[AtomicOutputReservation, ...]:
-    """Compatibility staging for callers that do not post-finalize projection JSON."""
-
-    request = TextureExecutionRequest.capture(
-        source_obj,
-        target_snapshot,
-        plan,
-        execution_settings,
-    )
-    transaction = _require_transaction(output_transaction)
-    if isinstance(request.plan, CameraProjectionPlan):
-        return tuple(
-            stage_camera_projection_outputs(
-                request.source_object,
-                request.plan,
-                transaction,
-                request.execution_settings,
-                context=context,
-                scene=scene,
-            )
-        )
-    return tuple(
-        stage_object_bake_outputs(
-            request.source_object,
-            request.target_snapshot,
-            request.plan,
-            transaction,
-            request.execution_settings,
-            context=context,
-            scene=scene,
-        )
-    )
 
 
 def execute_bake_plan(
@@ -238,6 +194,5 @@ __all__ = [
     "TextureExecutionRequest",
     "TextureStageResult",
     "execute_bake_plan",
-    "stage_bake_plan_outputs",
     "stage_texture_plan_outputs",
 ]
