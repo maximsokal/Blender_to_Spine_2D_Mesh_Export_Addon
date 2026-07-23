@@ -6,6 +6,7 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     BakeCompositeMode,
+    BakeMaterialPolicy,
     BakeMode,
     BakeSettings,
     BakeStrategyId,
@@ -27,6 +28,10 @@ def test_a1_defaults_to_lighting_independent_diffuse_color_bake(tmp_path: Path):
 
     assert settings.diffuse_mode is BakeMode.DIFFUSE
     assert settings.procedural_mode is BakeMode.DIFFUSE
+    assert (
+        settings.material_policy
+        is BakeMaterialPolicy.IMAGE_DEPENDENCY_DIFFUSE
+    )
 
 
 def test_pure_emission_materials_use_emit_even_with_diffuse_a1_defaults(
