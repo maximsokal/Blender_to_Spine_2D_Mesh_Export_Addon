@@ -139,7 +139,10 @@ def decode_weighted_vertices(
 
         influences: list[WeightedVertexInfluence] = []
         for influence_index in range(influence_count):
-            bone_raw, x_raw, y_raw, weight_raw = stream[index : index + 4]
+            bone_raw = stream[index]
+            x_raw = stream[index + 1]
+            y_raw = stream[index + 2]
+            weight_raw = stream[index + 3]
             location = f"vertex {len(result)}, influence {influence_index}"
 
             resolved_bone = _require_stream_number(
