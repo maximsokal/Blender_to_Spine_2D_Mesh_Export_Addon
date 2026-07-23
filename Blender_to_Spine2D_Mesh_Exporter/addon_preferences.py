@@ -27,11 +27,11 @@ def initialize_logging_preferences(prefs: Any) -> tuple[str, ...]:
 
 
 class SPINE2D_OT_RefreshLoggingModules(bpy.types.Operator):
-    """Rescan addon Python files while preserving configured levels."""
+    """Rescan add-on modules without changing stored per-file log levels."""
 
     bl_idname = "spine2d.refresh_logging_modules"
     bl_label = "Refresh Module List"
-    bl_description = "Rescan every addon Python file used by per-module logging"
+    bl_description = "Rescan every add-on Python file used by per-module logging"
 
     def execute(self, context):
         try:
@@ -43,34 +43,6 @@ class SPINE2D_OT_RefreshLoggingModules(bpy.types.Operator):
         except Exception as exc:
             logger.exception("Unable to refresh logging module list")
             self.report({"ERROR"}, f"Logging refresh failed: {exc}")
-            return {"CANCELLED"}
-
-
-class WM_OT_UninstallAddon(bpy.types.Operator):
-    bl_idname = "b2s.uninstall_addon"
-    bl_label = "Uninstall Addon"
-    module: bpy.props.StringProperty(default=ADDON_ID)
-
-    def execute(self, _context):
-        module_name = getattr(self, "module", None)
-        if not module_name:
-            base = ADDON_ID.split(".")[-1]
-            installed = bpy.context.preferences.addons.keys()
-            candidates = [key for key in installed if key.endswith(base)]
-            module_name = candidates[0] if candidates else ADDON_ID
-
-        logger.debug("Starting addon uninstallation for %s", module_name)
-        try:
-            bpy.ops.preferences.addon_disable(module=module_name)
-        except Exception:
-            logger.exception("Unable to disable addon %s before removal", module_name)
-        try:
-            bpy.ops.preferences.addon_remove(module=module_name)
-            self.report({"INFO"}, "Addon uninstalled successfully.")
-            return {"FINISHED"}
-        except Exception as exc:
-            logger.exception("Unable to remove addon %s", module_name)
-            self.report({"ERROR"}, f"Uninstall failed: {exc}")
             return {"CANCELLED"}
 
 
@@ -144,13 +116,10 @@ class ModelToSpine2DAddonPreferences(bpy.types.AddonPreferences):
         )
 
         layout.separator()
-        layout.label(text="Uninstall this add-on:")
-        try:
-            operator = layout.operator("b2s.uninstall_addon", text="Uninstall")
-            operator.module = ADDON_ID
-        except Exception:
-            logger.exception("Unable to draw uninstall operator")
-            layout.label(text="Uninstall not available", icon="ERROR")
+        layout.label(
+            text="Manage or uninstall this extension in Preferences > Extensions.",
+            icon="INFO",
+        )
 
 
 CLASSES_TO_REGISTER = (
@@ -158,7 +127,6 @@ CLASSES_TO_REGISTER = (
     AddonLoggingSettings,
     SPINE2D_OT_RefreshLoggingModules,
     ModelToSpine2DAddonPreferences,
-    WM_OT_UninstallAddon,
 )
 
 
@@ -198,7 +166,6 @@ __all__ = [
     "CLASSES_TO_REGISTER",
     "ModelToSpine2DAddonPreferences",
     "SPINE2D_OT_RefreshLoggingModules",
-    "WM_OT_UninstallAddon",
     "initialize_logging_preferences",
     "register",
     "unregister",
