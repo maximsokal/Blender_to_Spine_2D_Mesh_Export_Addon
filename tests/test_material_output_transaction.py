@@ -1,10 +1,16 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.material_output_transaction import (
+    MaterialOutputTransactionError,
     preserve_material_output_state,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
+ADAPTER = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "blender_adapter"
 
 
 class _Socket:
@@ -126,6 +132,16 @@ def test_transaction_is_idempotent_when_inner_owner_already_restored_state():
 def test_transaction_rejects_material_without_output():
     material = _Material(_NodeTree(()))
 
-    with pytest.raises(Exception, match="no Material Output"):
+    with pytest.raises(MaterialOutputTransactionError, match="no Material Output"):
         with preserve_material_output_state((material,)):
             pass
+
+
+def test_scene_owner_captures_output_state_before_proxy_preparation():
+    source = (ADAPTER / "scene_material_preparation.py").read_text(encoding="utf-8")
+
+    snapshot_position = source.index("with preserve_material_output_state(materials):")
+    preparation_position = source.index("with temporary_prepare_material_pass(")
+    assert snapshot_position < preparation_position
+    assert "_prepare_proxy_material" not in source
+    assert "_restore_mutation" not in source
