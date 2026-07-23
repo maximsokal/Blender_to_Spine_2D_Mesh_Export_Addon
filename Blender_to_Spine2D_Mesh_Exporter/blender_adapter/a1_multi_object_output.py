@@ -142,7 +142,7 @@ def export_a1_multi_object(
             if grouped_request is not None:
                 if grouped_stage is None:
                     raise RuntimeError(
-                        "grouped B4 request completed without a stage result"
+                        "grouped camera request completed without a stage result"
                     )
                 overlay = apply_staged_grouped_camera_overlay(
                     composition.document,
@@ -200,7 +200,7 @@ def export_a1_multi_object(
             )
         statistics["output_file_count"] = len(committed_paths)
         logger.info(
-            "A1 multi-object export completed (%s, grouped_b4=%s): %s",
+            "A1 multi-object export completed (%s, grouped_camera=%s): %s",
             settings.mode.value,
             grouped_request is not None,
             tuple(str(path) for path in committed_paths),
