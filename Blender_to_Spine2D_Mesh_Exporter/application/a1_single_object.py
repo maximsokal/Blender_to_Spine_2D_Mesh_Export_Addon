@@ -215,6 +215,10 @@ class A1SingleObjectExportSettings:
                 minimum=0.0,
                 maximum=1.0,
             )
+        if float(self.generated_gray_color[3]) != 1.0:
+            raise ValueError(
+                "generated_gray_color[3] must be 1.0 for opaque generated textures"
+            )
 
     def resolved_geometry_settings(self) -> A1GeometryPreparationSettings:
         segmentation = self.geometry.segmentation
