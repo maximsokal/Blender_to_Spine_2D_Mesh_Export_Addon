@@ -85,7 +85,7 @@ def _slot_requires_procedural_mode(
     if slot.kind in {MaterialKind.PROCEDURAL, MaterialKind.SOLID_COLOR}:
         return True
     if slot.kind is MaterialKind.MIXED:
-        if policy is BakeMaterialPolicy.LEGACY_ANY_IMAGE:
+        if policy is BakeMaterialPolicy.IMAGE_DEPENDENCY_DIFFUSE:
             return not slot.has_image_dependency
         return True
     return False
@@ -158,7 +158,7 @@ class CameraCombinedBakeStrategy:
         names = tuple(slot.material_name or f"slot-{slot.slot_index}" for slot in slots)
         raise BakePlanError(
             "camera-dependent appearance requires camera-render projection; Blender "
-            "4.4 object baking exposes no camera-ray bake type: " + str(names)
+            "5.2 object baking exposes no camera-ray bake type: " + str(names)
         )
 
     def material_preparations(
@@ -394,7 +394,7 @@ class BakeStrategyRegistry:
         if (scene_slots or camera_slots) and scene_context is None:
             names = tuple(
                 slot.material_name or f"slot-{slot.slot_index}"
-                for slot in scene_slots + camera_slots
+                for slot in (*scene_slots, *camera_slots)
             )
             raise BakePlanError(
                 "scene-aware materials require an immutable SceneBakeContext: " + str(names)
