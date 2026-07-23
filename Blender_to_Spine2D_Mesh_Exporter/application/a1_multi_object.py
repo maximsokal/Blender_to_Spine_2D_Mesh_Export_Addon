@@ -22,7 +22,7 @@ class A1MultiObjectMode(str, Enum):
     MIXED = "MIXED"
 
 
-class ConnectedB4RenderPolicy(str, Enum):
+class ConnectedCameraRenderPolicy(str, Enum):
     """How connected camera-dependent objects become visible Spine layers."""
 
     INDIVIDUAL_LAYERS = "INDIVIDUAL_LAYERS"
@@ -56,8 +56,8 @@ class A1MultiObjectExportSettings:
     anchor_component_id: str | None = None
     z_tolerance: float = 1e-4
     connected_scale_mode: UniformScaleMode = UniformScaleMode.AVERAGE
-    connected_b4_render_policy: ConnectedB4RenderPolicy = (
-        ConnectedB4RenderPolicy.AUTO_GROUPED_CAMERA
+    connected_camera_render_policy: ConnectedCameraRenderPolicy = (
+        ConnectedCameraRenderPolicy.AUTO_GROUPED_CAMERA
     )
 
     def __post_init__(self) -> None:
@@ -82,11 +82,11 @@ class A1MultiObjectExportSettings:
         if not isinstance(self.connected_scale_mode, UniformScaleMode):
             raise TypeError("connected_scale_mode must be UniformScaleMode")
         if not isinstance(
-            self.connected_b4_render_policy,
-            ConnectedB4RenderPolicy,
+            self.connected_camera_render_policy,
+            ConnectedCameraRenderPolicy,
         ):
             raise TypeError(
-                "connected_b4_render_policy must be ConnectedB4RenderPolicy"
+                "connected_camera_render_policy must be ConnectedCameraRenderPolicy"
             )
 
     @property
@@ -103,5 +103,5 @@ __all__ = [
     "A1MultiObjectExportSettings",
     "A1MultiObjectMode",
     "A1MultiObjectStage",
-    "ConnectedB4RenderPolicy",
+    "ConnectedCameraRenderPolicy",
 ]
