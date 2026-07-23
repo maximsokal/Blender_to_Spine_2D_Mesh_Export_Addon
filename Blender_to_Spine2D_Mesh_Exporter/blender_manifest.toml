@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 
-id = "Blender_to_Spine2D_Mesh_Exporter"
+id = "blender_to_spine2d_mesh_exporter"
 version = "0.23.0"
 name = "Blender to Spine2D Mesh Exporter"
 maintainer = "Maxim Sokolenko"
