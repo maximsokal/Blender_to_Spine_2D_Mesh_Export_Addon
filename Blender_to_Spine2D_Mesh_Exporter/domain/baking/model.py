@@ -30,7 +30,7 @@ class MaterialKind(str, Enum):
 
 
 class BakeMode(str, Enum):
-    """Bake types accepted by Blender 4.4 ``bpy.ops.object.bake``."""
+    """Bake types accepted by Blender 5.2 ``bpy.ops.object.bake``."""
 
     DIFFUSE = "DIFFUSE"
     COMBINED = "COMBINED"
@@ -38,9 +38,9 @@ class BakeMode(str, Enum):
 
 
 class BakeMaterialPolicy(str, Enum):
-    """Legacy compatibility policy used by the surface-color strategy."""
+    """How mixed image/procedural materials select the surface-color bake mode."""
 
-    LEGACY_ANY_IMAGE = "LEGACY_ANY_IMAGE"
+    IMAGE_DEPENDENCY_DIFFUSE = "IMAGE_DEPENDENCY_DIFFUSE"
     CONSERVATIVE_MIXED = "CONSERVATIVE_MIXED"
 
 
@@ -61,7 +61,6 @@ class BakeStrategyId(str, Enum):
     SURFACE_COLOR = "SURFACE_COLOR"
     EMISSION = "EMISSION"
     ALPHA = "ALPHA"
-    LEGACY_SINGLE_PASS = "LEGACY_SINGLE_PASS"
 
 
 class MaterialPreparationMode(str, Enum):
@@ -162,7 +161,7 @@ class MaterialAnalysis:
 
     @property
     def semantic_channels(self) -> Tuple[MaterialSemanticChannel, ...]:
-        """Return precise graph channels, with a legacy fallback for synthetic tests."""
+        """Return graph channels or derive channels for synthetic domain fixtures."""
 
         if self.graph is not None:
             return self.graph.semantic_channels
@@ -234,7 +233,7 @@ class BakeSettings:
     cage_extrusion: float = 0.1
     diffuse_mode: BakeMode = BakeMode.DIFFUSE
     procedural_mode: BakeMode = BakeMode.COMBINED
-    material_policy: BakeMaterialPolicy = BakeMaterialPolicy.LEGACY_ANY_IMAGE
+    material_policy: BakeMaterialPolicy = BakeMaterialPolicy.IMAGE_DEPENDENCY_DIFFUSE
     sequence_start_frame: int = 0
     sequence_frame_count: int = 0
     sequence_frame_digits: int = 4
@@ -446,37 +445,17 @@ class BakePlan:
             raise ValueError("representative_task_index is out of range")
         if not isinstance(self.passes, tuple):
             raise TypeError("passes must be tuple")
+        if not self.passes:
+            raise ValueError("passes must be a non-empty tuple")
         if not isinstance(self.composite, BakeCompositePlan):
             raise TypeError("composite must be BakeCompositePlan")
-
-        if not self.passes:
-            usable_slots = tuple(
-                slot.slot_index
-                for slot in self.material_analysis.slots
-                if slot.kind is not MaterialKind.EMPTY
-            )
-            if not usable_slots:
-                raise ValueError("BakePlan requires at least one usable material slot")
-            object.__setattr__(
-                self,
-                "passes",
-                (
-                    BakePassPlan(
-                        pass_index=0,
-                        strategy_id=BakeStrategyId.LEGACY_SINGLE_PASS,
-                        bake_mode=self.bake_mode,
-                        material_slot_indices=usable_slots,
-                        semantic_channels=(MaterialSemanticChannel.SURFACE_COLOR,),
-                    ),
-                ),
-            )
         if not all(isinstance(item, BakePassPlan) for item in self.passes):
             raise TypeError("passes must contain BakePassPlan values")
         pass_indices = tuple(item.pass_index for item in self.passes)
         if pass_indices != tuple(range(len(self.passes))):
             raise ValueError("bake pass indices must be ordered and dense from zero")
         if self.bake_mode is not self.passes[0].bake_mode:
-            raise ValueError("bake_mode must match the first compatibility bake pass")
+            raise ValueError("bake_mode must match the first bake pass")
         if self.composite.mode is BakeCompositeMode.SINGLE and len(self.passes) != 1:
             raise ValueError("SINGLE composition requires exactly one pass")
 
