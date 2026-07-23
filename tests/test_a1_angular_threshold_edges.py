@@ -55,7 +55,7 @@ def test_180_local_limit_remains_strict_for_opposite_normals():
         split_uv_boundaries=False,
     )
 
-    legacy = segment_mesh_a1(snapshot, settings)
+    seed_cone = segment_mesh_a1(snapshot, settings)
     hybrid = segment_mesh_a1(
         snapshot,
         settings,
@@ -63,7 +63,7 @@ def test_180_local_limit_remains_strict_for_opposite_normals():
         local_angle_limit_degrees=180.0,
     )
 
-    assert _partition(legacy) == ((0, 1, 2),)
+    assert _partition(seed_cone) == ((0, 1, 2),)
     assert _partition(hybrid) == ((0, 1), (2,))
 
 
