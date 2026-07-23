@@ -1,8 +1,8 @@
-"""Temporarily expose semantic channels on copied Blender materials.
+"""Prepare copied Blender 5.2 materials for one typed semantic bake pass.
 
-Only copies owned by :func:`temporary_bake_materials` are changed. The source node
-graphs are never mutated. Every original Material Output link is restored and every
-temporary node is removed in ``finally`` before the next pass starts.
+Only temporary material copies owned by :mod:`bake_materials` are mutated.  The
+selected Material Output, its Surface links, and every temporary proxy node are
+restored deterministically before control leaves the context manager.
 """
 
 from __future__ import annotations
@@ -21,12 +21,14 @@ from ..domain.baking import (
     MaterialPreparationMode,
     MaterialSlotPreparation,
 )
+from .render_engine_contract import render_engine_contract
+
 
 logger = logging.getLogger(__name__)
 
 
 class BakeMaterialPreparationError(RuntimeError):
-    """Raised when a semantic channel cannot be exposed on a copied material."""
+    """Raised when a copied Blender 5.2 material cannot be prepared safely."""
 
 
 class _ProxyKind(str, Enum):
@@ -54,6 +56,7 @@ class _PreparedMutation:
     output_surface_socket: Any
     original_surface_sources: Tuple[Any, ...]
     temporary_nodes: list[Any]
+    output_active_states: Tuple[Tuple[Any, bool], ...]
 
 
 def _node_type(node: Any) -> str:
@@ -91,17 +94,27 @@ def _input_socket(node: Any, name: str, *, index: int | None = None) -> Any | No
         return None
 
 
-def _active_material_output(node_tree: Any) -> Any:
+def _output_socket(node: Any, name: str, *, index: int | None = None) -> Any | None:
+    outputs = getattr(node, "outputs", None)
+    if outputs is None:
+        return None
+    getter = getattr(outputs, "get", None)
+    if callable(getter):
+        try:
+            result = getter(name)
+            if result is not None:
+                return result
+        except Exception:
+            logger.debug("Output socket lookup by name failed", exc_info=True)
+    if index is not None:
+        try:
+            return outputs[index]
+        except Exception:
+            pass
     try:
-        outputs = tuple(
-            node for node in node_tree.nodes if _node_type(node) == "OUTPUT_MATERIAL"
-        )
-    except Exception as exc:
-        raise BakeMaterialPreparationError("Unable to inspect copied material nodes") from exc
-    if not outputs:
-        raise BakeMaterialPreparationError("Copied material has no Material Output node")
-    active = tuple(node for node in outputs if bool(getattr(node, "is_active_output", False)))
-    return active[0] if active else outputs[0]
+        return next(socket for socket in outputs if _socket_name(socket) == name)
+    except Exception:
+        return None
 
 
 def _incoming_links(socket: Any | None) -> Tuple[Any, ...]:
@@ -121,6 +134,76 @@ def _linked_source_node(socket: Any | None) -> Any | None:
 def _linked_source_socket(socket: Any | None) -> Any | None:
     links = _incoming_links(socket)
     return None if not links else getattr(links[0], "from_socket", None)
+
+
+def _material_node_tree(material: Any) -> Any:
+    if material is None:
+        raise BakeMaterialPreparationError("Copied material is missing")
+    node_tree = getattr(material, "node_tree", None)
+    if node_tree is None:
+        raise BakeMaterialPreparationError(
+            "Copied material has no node tree; Blender 5.2 materials must expose one"
+        )
+    if getattr(node_tree, "nodes", None) is None or getattr(node_tree, "links", None) is None:
+        raise BakeMaterialPreparationError("Copied material node tree is incomplete")
+    return node_tree
+
+
+def _output_target(node: Any) -> str:
+    value = str(getattr(node, "target", "ALL") or "ALL").strip().upper()
+    if value not in {"ALL", "CYCLES", "EEVEE"}:
+        raise BakeMaterialPreparationError(
+            f"Material Output '{_node_name(node)}' has unsupported target {value!r}"
+        )
+    return value
+
+
+def _select_material_output(node_tree: Any, render_target: str) -> tuple[Any, Tuple[Any, ...]]:
+    target = render_engine_contract(render_target).shader_target
+    try:
+        outputs = tuple(
+            node for node in node_tree.nodes if _node_type(node) == "OUTPUT_MATERIAL"
+        )
+    except Exception as exc:
+        raise BakeMaterialPreparationError(
+            "Unable to inspect copied material outputs"
+        ) from exc
+    if not outputs:
+        raise BakeMaterialPreparationError("Copied material has no Material Output node")
+
+    exact = tuple(node for node in outputs if _output_target(node) == target)
+    generic = tuple(node for node in outputs if _output_target(node) == "ALL")
+    candidates = exact or generic
+    if not candidates:
+        raise BakeMaterialPreparationError(
+            f"Copied material has no Material Output for render target '{target}'"
+        )
+    active = tuple(
+        node for node in candidates if bool(getattr(node, "is_active_output", False))
+    )
+    return (active[0] if active else candidates[0]), outputs
+
+
+def _activate_material_output(
+    selected: Any,
+    outputs: Tuple[Any, ...],
+) -> Tuple[Tuple[Any, bool], ...]:
+    states = tuple(
+        (output, bool(getattr(output, "is_active_output", False))) for output in outputs
+    )
+    try:
+        for output in outputs:
+            output.is_active_output = output is selected
+    except Exception as exc:
+        for output, original in states:
+            try:
+                output.is_active_output = original
+            except Exception:
+                logger.exception("Failed to roll back Material Output selection")
+        raise BakeMaterialPreparationError(
+            f"Unable to activate Material Output '{_node_name(selected)}'"
+        ) from exc
+    return states
 
 
 def _numeric_default(socket: Any | None, default: float) -> float:
@@ -146,7 +229,7 @@ def _color_default(
         if hasattr(value, "__len__") and not isinstance(value, (str, bytes)):
             resolved = tuple(float(item) for item in value)
             if len(resolved) >= 4:
-                return resolved[0], resolved[1], resolved[2], resolved[3]
+                return resolved[:4]
             if len(resolved) == 3:
                 return resolved[0], resolved[1], resolved[2], 1.0
             if len(resolved) == 1:
@@ -180,11 +263,11 @@ def _color_from_input(
 
 
 def _assign_socket_constant(target_socket: Any, value: Any) -> None:
-    """Assign a scalar or tuple according to the RNA socket default shape."""
-
     current = getattr(target_socket, "default_value", None)
     try:
-        is_sequence = hasattr(current, "__len__") and not isinstance(current, (str, bytes))
+        is_sequence = hasattr(current, "__len__") and not isinstance(
+            current, (str, bytes)
+        )
         if is_sequence:
             length = len(current)
             if isinstance(value, (tuple, list)):
@@ -197,22 +280,17 @@ def _assign_socket_constant(target_socket: Any, value: Any) -> None:
             if length == 4 and not isinstance(value, (tuple, list)):
                 resolved[3] = 1.0
             target_socket.default_value = tuple(resolved)
+        elif isinstance(value, (tuple, list)):
+            target_socket.default_value = float(value[0])
         else:
-            if isinstance(value, (tuple, list)):
-                target_socket.default_value = float(value[0])
-            else:
-                target_socket.default_value = float(value)
+            target_socket.default_value = float(value)
     except Exception as exc:
         raise BakeMaterialPreparationError(
             f"Unable to assign constant to socket '{_socket_name(target_socket)}'"
         ) from exc
 
 
-def _connect_scalar(
-    node_tree: Any,
-    expression: _ScalarExpression,
-    target_socket: Any,
-) -> None:
+def _connect_scalar(node_tree: Any, expression: _ScalarExpression, target_socket: Any) -> None:
     if expression.socket is not None:
         try:
             node_tree.links.new(expression.socket, target_socket)
@@ -224,11 +302,7 @@ def _connect_scalar(
     _assign_socket_constant(target_socket, expression.constant)
 
 
-def _connect_color(
-    node_tree: Any,
-    expression: _ColorExpression,
-    target_socket: Any,
-) -> None:
+def _connect_color(node_tree: Any, expression: _ColorExpression, target_socket: Any) -> None:
     if expression.socket is not None:
         try:
             node_tree.links.new(expression.socket, target_socket)
@@ -397,6 +471,10 @@ def _shader_input_node(node: Any, index: int) -> Any | None:
         return None
 
 
+def _reroute_source_node(node: Any) -> Any | None:
+    return _linked_source_node(_input_socket(node, "Input", index=0))
+
+
 def _opacity_from_shader(
     node_tree: Any,
     shader_node: Any | None,
@@ -415,6 +493,14 @@ def _opacity_from_shader(
     visiting.add(name)
     try:
         node_type = _node_type(shader_node)
+        if node_type == "REROUTE":
+            return _opacity_from_shader(
+                node_tree,
+                _reroute_source_node(shader_node),
+                temporary_nodes,
+                token,
+                visiting,
+            )
         if node_type in {"BSDF_TRANSPARENT", "HOLDOUT"}:
             return _ScalarExpression(constant=0.0)
         if node_type == "BSDF_PRINCIPLED":
@@ -477,6 +563,10 @@ def _opacity_from_shader(
                 temporary_nodes,
                 token,
             )
+        if node_type == "GROUP":
+            raise BakeMaterialPreparationError(
+                f"Shader group '{name}' requires camera projection or a flattened graph"
+            )
         return _ScalarExpression(constant=1.0)
     finally:
         visiting.remove(name)
@@ -489,7 +579,7 @@ def _surface_color_from_shader(
     token: str,
     visiting: set[str],
 ) -> _ColorExpression | None:
-    """Return straight surface color, deliberately excluding shader opacity/emission."""
+    """Return straight surface color, excluding shader opacity and emission."""
 
     if shader_node is None:
         return None
@@ -501,6 +591,14 @@ def _surface_color_from_shader(
     visiting.add(name)
     try:
         node_type = _node_type(shader_node)
+        if node_type == "REROUTE":
+            return _surface_color_from_shader(
+                node_tree,
+                _reroute_source_node(shader_node),
+                temporary_nodes,
+                token,
+                visiting,
+            )
         if node_type in {"BSDF_TRANSPARENT", "HOLDOUT", "EMISSION"}:
             return None
         if node_type == "BSDF_PRINCIPLED":
@@ -527,8 +625,6 @@ def _surface_color_from_shader(
                 token,
                 visiting,
             )
-            # Transparent branches carry no straight color. Selecting the other branch
-            # avoids multiplying RGB by coverage; Alpha is composed independently.
             if color_a is None:
                 return color_b
             if color_b is None:
@@ -567,7 +663,10 @@ def _surface_color_from_shader(
                 temporary_nodes,
                 token,
             )
-
+        if node_type == "GROUP":
+            raise BakeMaterialPreparationError(
+                f"Shader group '{name}' requires camera projection or a flattened graph"
+            )
         for socket_name in ("Base Color", "Color"):
             socket = _input_socket(shader_node, socket_name)
             if socket is not None:
@@ -602,20 +701,17 @@ def _prepare_proxy_material(
     material: Any,
     proxy_kind: _ProxyKind,
     *,
+    render_target: str,
     token: str,
 ) -> _PreparedMutation:
-    try:
-        material.use_nodes = True
-    except Exception as exc:
-        raise BakeMaterialPreparationError("Unable to enable copied material nodes") from exc
-    node_tree = getattr(material, "node_tree", None)
-    if node_tree is None:
-        raise BakeMaterialPreparationError("Copied material has no node tree")
-
-    output = _active_material_output(node_tree)
+    node_tree = _material_node_tree(material)
+    output, outputs = _select_material_output(node_tree, render_target)
+    active_states = _activate_material_output(output, outputs)
     surface_socket = _input_socket(output, "Surface")
     if surface_socket is None:
+        _restore_output_states(active_states)
         raise BakeMaterialPreparationError("Material Output has no Surface input")
+
     original_nodes = tuple(
         getattr(link, "from_node", None)
         for link in _incoming_links(surface_socket)
@@ -631,6 +727,14 @@ def _prepare_proxy_material(
         emission.label = f"Spine2D temporary {proxy_kind.value} output"
         temporary_nodes.append(emission)
 
+        color_input = _input_socket(emission, "Color")
+        strength_input = _input_socket(emission, "Strength")
+        emission_output = _output_socket(emission, "Emission")
+        if color_input is None or strength_input is None or emission_output is None:
+            raise BakeMaterialPreparationError(
+                "Blender 5.2 Emission node exposes unexpected sockets"
+            )
+
         if proxy_kind is _ProxyKind.EXTRACT_ALPHA:
             opacity = _opacity_from_shader(
                 node_tree,
@@ -640,21 +744,13 @@ def _prepare_proxy_material(
                 set(),
             )
             if opacity.socket is not None:
-                try:
-                    node_tree.links.new(opacity.socket, emission.inputs["Color"])
-                except Exception as exc:
-                    raise BakeMaterialPreparationError(
-                        "Unable to connect extracted alpha to Emission Color"
-                    ) from exc
+                node_tree.links.new(opacity.socket, color_input)
             else:
-                _assign_socket_constant(emission.inputs["Color"], opacity.constant)
+                _assign_socket_constant(color_input, opacity.constant)
         elif proxy_kind is _ProxyKind.OPAQUE_ALPHA:
-            _assign_socket_constant(emission.inputs["Color"], 1.0)
+            _assign_socket_constant(color_input, 1.0)
         elif proxy_kind is _ProxyKind.ZERO_COLOR:
-            _assign_socket_constant(
-                emission.inputs["Color"],
-                (0.0, 0.0, 0.0, 1.0),
-            )
+            _assign_socket_constant(color_input, (0.0, 0.0, 0.0, 1.0))
         elif proxy_kind is _ProxyKind.STRAIGHT_SURFACE_COLOR:
             color = _surface_color_from_shader(
                 node_tree,
@@ -664,30 +760,28 @@ def _prepare_proxy_material(
                 set(),
             )
             if color is None:
-                _assign_socket_constant(
-                    emission.inputs["Color"],
-                    (0.0, 0.0, 0.0, 1.0),
-                )
+                _assign_socket_constant(color_input, (0.0, 0.0, 0.0, 1.0))
             else:
-                _connect_color(node_tree, color, emission.inputs["Color"])
+                _connect_color(node_tree, color, color_input)
         else:
             raise BakeMaterialPreparationError(
                 f"Unsupported proxy kind: {proxy_kind.value}"
             )
 
-        _assign_socket_constant(emission.inputs["Strength"], 1.0)
-        node_tree.links.new(emission.outputs["Emission"], surface_socket)
+        _assign_socket_constant(strength_input, 1.0)
+        node_tree.links.new(emission_output, surface_socket)
     except Exception:
-        for node in reversed(temporary_nodes):
-            try:
-                node_tree.nodes.remove(node)
-            except Exception:
-                logger.exception("Failed to remove partially created proxy node")
-        for source in original_sources:
-            try:
-                node_tree.links.new(source, surface_socket)
-            except Exception:
-                logger.exception("Failed to restore copied material after preparation error")
+        partial = _PreparedMutation(
+            node_tree=node_tree,
+            output_surface_socket=surface_socket,
+            original_surface_sources=original_sources,
+            temporary_nodes=temporary_nodes,
+            output_active_states=active_states,
+        )
+        try:
+            _restore_mutation(partial)
+        except Exception:
+            logger.exception("Failed to roll back partial material preparation")
         raise
 
     return _PreparedMutation(
@@ -695,7 +789,18 @@ def _prepare_proxy_material(
         output_surface_socket=surface_socket,
         original_surface_sources=original_sources,
         temporary_nodes=temporary_nodes,
+        output_active_states=active_states,
     )
+
+
+def _restore_output_states(states: Tuple[Tuple[Any, bool], ...]) -> list[str]:
+    failures: list[str] = []
+    for output, original in states:
+        try:
+            output.is_active_output = original
+        except Exception as exc:
+            failures.append(f"restore output '{_node_name(output)}': {exc}")
+    return failures
 
 
 def _restore_mutation(mutation: _PreparedMutation) -> None:
@@ -716,6 +821,7 @@ def _restore_mutation(mutation: _PreparedMutation) -> None:
             mutation.node_tree.links.new(source, mutation.output_surface_socket)
         except Exception as exc:
             failures.append(f"restore original Surface link: {exc}")
+    failures.extend(_restore_output_states(mutation.output_active_states))
     if failures:
         raise BakeMaterialPreparationError(
             "Unable to restore copied material: " + "; ".join(failures)
@@ -760,7 +866,9 @@ def _resolve_proxy_kinds(
     for slot_index, mode in modes.items():
         if slot_index not in used_material_indices:
             continue
-        if mode is MaterialPreparationMode.EXTRACT_ALPHA_TO_EMISSION:
+        if mode is MaterialPreparationMode.ZERO_TO_EMISSION:
+            resolved[slot_index] = _ProxyKind.ZERO_COLOR
+        elif mode is MaterialPreparationMode.EXTRACT_ALPHA_TO_EMISSION:
             resolved[slot_index] = _ProxyKind.EXTRACT_ALPHA
         elif mode is MaterialPreparationMode.OPAQUE_ALPHA_TO_EMISSION:
             resolved[slot_index] = _ProxyKind.OPAQUE_ALPHA
@@ -779,6 +887,7 @@ def temporary_prepare_material_pass(
     pass_plan: BakePassPlan,
     *,
     used_material_indices: Tuple[int, ...],
+    render_target: str,
 ) -> Iterator[None]:
     """Apply and restore one typed strategy preparation on copied materials."""
 
@@ -788,8 +897,12 @@ def temporary_prepare_material_pass(
         raise TypeError("pass_plan must be BakePassPlan")
     if not isinstance(used_material_indices, tuple):
         raise TypeError("used_material_indices must be tuple")
-    if any(not isinstance(index, int) or index < 0 for index in used_material_indices):
+    if any(
+        not isinstance(index, int) or isinstance(index, bool) or index < 0
+        for index in used_material_indices
+    ):
         raise ValueError("used_material_indices must contain non-negative integers")
+    normalized_target = render_engine_contract(render_target).shader_target
 
     proxy_kinds = _resolve_proxy_kinds(pass_plan, used_material_indices)
     if not proxy_kinds:
@@ -810,6 +923,7 @@ def temporary_prepare_material_pass(
                 _prepare_proxy_material(
                     materials[slot_index],
                     proxy_kind,
+                    render_target=normalized_target,
                     token=token,
                 )
             )
@@ -829,3 +943,9 @@ def temporary_prepare_material_pass(
             raise BakeMaterialPreparationError(
                 "One or more copied materials could not be restored"
             ) from restore_errors[0]
+
+
+__all__ = [
+    "BakeMaterialPreparationError",
+    "temporary_prepare_material_pass",
+]
