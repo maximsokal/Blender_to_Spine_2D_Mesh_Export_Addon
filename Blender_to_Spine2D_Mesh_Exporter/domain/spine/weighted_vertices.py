@@ -8,6 +8,9 @@ from typing import Iterable, Sequence, Tuple
 from .spine_scalar_contract import is_finite_number as _is_finite_number
 
 
+_TEXT_OR_BINARY_CONTAINER_TYPES = (str, bytes, bytearray, memoryview)
+
+
 def _require_stream_number(value: object, field_name: str) -> int | float:
     """Return one raw finite stream number without coercing booleans or strings."""
 
@@ -58,7 +61,7 @@ class WeightedVertex:
 def encode_weighted_vertices(vertices: Iterable[WeightedVertex]) -> Tuple[float | int, ...]:
     """Encode typed weighted vertices into Spine's compact numeric stream."""
 
-    if isinstance(vertices, (str, bytes, bytearray, memoryview)):
+    if isinstance(vertices, _TEXT_OR_BINARY_CONTAINER_TYPES):
         raise TypeError("vertices must be an iterable of WeightedVertex values")
     try:
         iterator = iter(vertices)
@@ -97,7 +100,10 @@ def decode_weighted_vertices(
             expected vertex count.
     """
 
-    if isinstance(stream, (str, bytes)) or not isinstance(stream, Sequence):
+    if isinstance(stream, _TEXT_OR_BINARY_CONTAINER_TYPES) or not isinstance(
+        stream,
+        Sequence,
+    ):
         raise TypeError("stream must be a numeric sequence")
     if expected_vertex_count is not None:
         if isinstance(expected_vertex_count, bool) or not isinstance(
