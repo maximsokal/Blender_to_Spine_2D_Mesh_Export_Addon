@@ -1,4 +1,4 @@
-"""Own B4 output reservation, postprocess staging, atomic commit, and results."""
+"""Own Blender 5.2 camera-projection staging, crop, commit, and results."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class CameraProjectionStageResult:
-    """Staged B4 paths plus the exact render-derived projection layout."""
+    """Staged frame paths plus the exact render-derived projection layout."""
 
     reservations: Tuple[AtomicOutputReservation, ...]
     layout: CameraProjectionLayout
@@ -74,7 +74,7 @@ def _reserve_camera_projection_outputs(
     plan: CameraProjectionPlan,
     transaction: AtomicFileTransaction,
 ) -> Tuple[AtomicOutputReservation, ...]:
-    """Reserve every validated B4 frame path in immutable task order."""
+    """Reserve every validated frame path in immutable task order."""
 
     if not isinstance(plan, CameraProjectionPlan):
         raise TypeError("plan must be CameraProjectionPlan")
@@ -94,15 +94,13 @@ def _reserve_camera_projection_outputs(
 def _stage_validated_camera_projection(
     runtime: CameraProjectionRuntime,
     transaction: AtomicFileTransaction,
-    *,
-    apply_crop: bool,
 ) -> CameraProjectionStageResult:
-    """Reserve, render, restore state, then optionally derive and apply crop."""
+    """Reserve, render, restore state, derive crop, and rewrite staged frames."""
 
     if not isinstance(runtime, CameraProjectionRuntime):
         raise TypeError("runtime must be CameraProjectionRuntime")
-    if not isinstance(apply_crop, bool):
-        raise TypeError("apply_crop must be bool")
+    if not isinstance(transaction, AtomicFileTransaction):
+        raise TypeError("transaction must be AtomicFileTransaction")
 
     reservations = _reserve_camera_projection_outputs(
         runtime.plan,
@@ -115,42 +113,11 @@ def _stage_validated_camera_projection(
     layout = process_camera_projection_outputs(
         runtime,
         rendered,
-        apply_crop=apply_crop,
+        apply_crop=True,
     )
     return CameraProjectionStageResult(
         reservations=rendered,
         layout=layout,
-    )
-
-
-def _render_to_reservations(
-    source_obj: Any,
-    plan: CameraProjectionPlan,
-    execution_settings: BakeExecutionSettings,
-    reservations: Tuple[AtomicOutputReservation, ...],
-    *,
-    context: Any | None,
-    scene: Any | None,
-    apply_crop: bool,
-) -> CameraProjectionLayout:
-    """Compatibility execution for already reserved historical callers."""
-
-    runtime = validate_camera_projection_request(
-        source_obj,
-        plan,
-        execution_settings,
-        context=context,
-        scene=scene,
-    )
-    resolved = validate_camera_projection_reservations(
-        runtime.plan,
-        reservations,
-    )
-    render_camera_projection_frames(runtime, resolved)
-    return process_camera_projection_outputs(
-        runtime,
-        resolved,
-        apply_crop=apply_crop,
     )
 
 
@@ -163,7 +130,7 @@ def stage_camera_projection_outputs_detailed(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> CameraProjectionStageResult:
-    """Validate, stage full renders, then build and apply one stable B4 crop."""
+    """Validate and stage camera renders with one stable crop/hull layout."""
 
     transaction = _require_transaction(output_transaction)
     try:
@@ -177,55 +144,13 @@ def stage_camera_projection_outputs_detailed(
         return _stage_validated_camera_projection(
             runtime,
             transaction,
-            apply_crop=True,
         )
     except CameraProjectionExecutionError:
         raise
     except Exception as exc:
         plan_id = _plan_identifier(plan)
         logger.exception(
-            "Unexpected B4 projection failure for '%s'",
-            plan_id,
-        )
-        raise CameraProjectionExecutionError(
-            f"Camera projection failed for '{plan_id}': {exc}"
-        ) from exc
-
-
-def stage_camera_projection_outputs(
-    source_obj: Any,
-    plan: CameraProjectionPlan,
-    output_transaction: AtomicFileTransaction,
-    execution_settings: BakeExecutionSettings | None = None,
-    *,
-    context: Any | None = None,
-    scene: Any | None = None,
-) -> Tuple[AtomicOutputReservation, ...]:
-    """Stage compatibility full-frame output without coverage decode or crop."""
-
-    transaction = _require_transaction(output_transaction)
-    try:
-        runtime = validate_camera_projection_request(
-            source_obj,
-            plan,
-            execution_settings,
-            context=context,
-            scene=scene,
-        )
-        reservations = _reserve_camera_projection_outputs(
-            runtime.plan,
-            transaction,
-        )
-        return render_camera_projection_frames(
-            runtime,
-            reservations,
-        )
-    except CameraProjectionExecutionError:
-        raise
-    except Exception as exc:
-        plan_id = _plan_identifier(plan)
-        logger.exception(
-            "Unexpected full-frame B4 projection failure for '%s'",
+            "Unexpected camera projection failure for '%s'",
             plan_id,
         )
         raise CameraProjectionExecutionError(
@@ -292,7 +217,7 @@ def execute_camera_projection_plan(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> BakeExecutionResult:
-    """Validate before transaction creation, stage, and commit exactly once."""
+    """Validate, stage, crop, commit exactly once, and return typed artifacts."""
 
     try:
         runtime = validate_camera_projection_request(
@@ -308,7 +233,6 @@ def execute_camera_projection_plan(
             staged = _stage_validated_camera_projection(
                 runtime,
                 transaction,
-                apply_crop=True,
             )
             expected_commit_order = tuple(
                 reservation.final_path
@@ -318,7 +242,7 @@ def execute_camera_projection_plan(
 
         if committed_paths != expected_commit_order:
             raise CameraProjectionExecutionError(
-                "Atomic transaction changed B4 output order; "
+                "Atomic transaction changed camera projection output order; "
                 f"expected={expected_commit_order}, got={committed_paths}"
             )
 
@@ -328,7 +252,7 @@ def execute_camera_projection_plan(
             staged.layout,
         )
         logger.info(
-            "Committed %d B4 projection files for '%s'",
+            "Committed %d camera projection files for '%s'",
             len(result.artifacts),
             runtime.plan.source_object_id,
         )
@@ -338,7 +262,7 @@ def execute_camera_projection_plan(
     except Exception as exc:
         plan_id = _plan_identifier(plan)
         logger.exception(
-            "Unable to commit B4 projection outputs for '%s'",
+            "Unable to commit camera projection outputs for '%s'",
             plan_id,
         )
         raise CameraProjectionExecutionError(
@@ -346,19 +270,10 @@ def execute_camera_projection_plan(
         ) from exc
 
 
-# Historical private names retained without duplicate implementation.
-_reserve = _reserve_camera_projection_outputs
-_build_execution_result = build_camera_projection_execution_result
-
-
 __all__ = [
     "CameraProjectionExecutionError",
     "CameraProjectionStageResult",
-    "_build_execution_result",
-    "_render_to_reservations",
-    "_reserve",
     "build_camera_projection_execution_result",
     "execute_camera_projection_plan",
-    "stage_camera_projection_outputs",
     "stage_camera_projection_outputs_detailed",
 ]
