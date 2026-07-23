@@ -8,7 +8,9 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
     ExportSettings,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_scene_capture import (
+    _projection_alpha_threshold,
     _resolve_generated_gray_color,
+    _texture_size,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     A1GeneratedMaterialPattern,
@@ -53,12 +55,10 @@ IDENTITY = (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-GENERATED_UI = (
-    ROOT
-    / "Blender_to_Spine2D_Mesh_Exporter"
-    / "blender_adapter"
-    / "generated_material_ui.py"
-)
+PACKAGE = ROOT / "Blender_to_Spine2D_Mesh_Exporter"
+GENERATED_UI = PACKAGE / "blender_adapter" / "generated_material_ui.py"
+SCENE_CAPTURE = PACKAGE / "blender_adapter" / "a1_ui_scene_capture.py"
+SCENE_PROPERTIES = PACKAGE / "blender_adapter" / "scene_properties.py"
 
 
 def _triangle_snapshot() -> MeshSnapshot:
@@ -139,14 +139,15 @@ def test_scene_capture_appends_opaque_alpha_to_rgb():
     ) == (0.2, 0.3, 0.4, 1.0)
 
 
-def test_scene_capture_normalizes_legacy_rgba_to_opaque():
-    assert _resolve_generated_gray_color(
-        SimpleNamespace(spine2d_generated_gray_color=(0.2, 0.3, 0.4, 0.25))
-    ) == (0.2, 0.3, 0.4, 1.0)
+def test_scene_capture_rejects_legacy_rgba_vector():
+    with pytest.raises(ValueError, match="exactly three RGB values"):
+        _resolve_generated_gray_color(
+            SimpleNamespace(spine2d_generated_gray_color=(0.2, 0.3, 0.4, 0.25))
+        )
 
 
 def test_scene_capture_rejects_invalid_rgb_length():
-    with pytest.raises(ValueError, match="three RGB values"):
+    with pytest.raises(ValueError, match="exactly three RGB values"):
         _resolve_generated_gray_color(
             SimpleNamespace(spine2d_generated_gray_color=(0.2, 0.3))
         )
@@ -159,10 +160,49 @@ def test_scene_capture_rejects_non_finite_rgb():
         )
 
 
-def test_generated_gray_scene_rna_exposes_rgb_without_alpha():
+def test_projection_alpha_reads_registered_rna_value():
+    assert _projection_alpha_threshold(
+        SimpleNamespace(spine2d_projection_alpha_threshold=0.125)
+    ) == 0.125
+
+
+@pytest.mark.parametrize("value", [True, -0.1, 1.1, float("nan"), float("inf")])
+def test_projection_alpha_rejects_invalid_values(value):
+    with pytest.raises(ValueError, match="projection_alpha_threshold"):
+        _projection_alpha_threshold(
+            SimpleNamespace(spine2d_projection_alpha_threshold=value)
+        )
+
+
+@pytest.mark.parametrize("value", [63, 65, 4097, True, "invalid"])
+def test_texture_size_rejects_values_outside_blender_52_rna_contract(value):
+    with pytest.raises(ValueError, match="spine2d_texture_size|Texture size"):
+        _texture_size(SimpleNamespace(spine2d_texture_size=value))
+
+
+def test_generated_gray_scene_rna_exposes_display_rgb_without_alpha():
     source = GENERATED_UI.read_text(encoding="utf-8")
 
+    assert 'subtype="COLOR_GAMMA"' in source
     assert "size=3" in source
     assert "default=(0.5, 0.5, 0.5)" in source
     assert "setattr(scene, GENERATED_GRAY_COLOR_PROPERTY, (0.5, 0.5, 0.5))" in source
     assert "size=4" not in source
+
+
+def test_scene_capture_contains_no_id_property_or_legacy_rgba_fallback():
+    source = SCENE_CAPTURE.read_text(encoding="utf-8")
+
+    assert 'getattr(scene, "get"' not in source
+    assert "legacy four-component" not in source
+    assert "len(values) != 3" in source
+
+
+def test_projection_alpha_is_a_registered_blender_52_float_property():
+    source = SCENE_PROPERTIES.read_text(encoding="utf-8")
+    section = source.split('"spine2d_projection_alpha_threshold"', 1)[1]
+
+    assert "bpy.props.FloatProperty(" in section
+    assert "default=1.0 / 255.0" in section
+    assert "min=0.0" in section
+    assert "max=1.0" in section
