@@ -1,4 +1,4 @@
-"""Regressions for strict Blender 5.2 material-analysis ownership."""
+"""Regressions for strict Blender 5.2 material-analysis and preparation ownership."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import bake_material_preparation
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.material_analysis_error import (
     MaterialAnalysisError,
 )
@@ -19,18 +20,35 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.material_object_analysis i
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.material_slot_analysis import (
     analyse_material_slot,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
+    BakeEvaluationScope,
+    BakeMode,
+    BakePassPlan,
+    BakeStrategyId,
+    MaterialPreparationMode,
+    MaterialSemanticChannel,
+    MaterialSlotPreparation,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ADAPTER = (
-    ROOT
-    / "Blender_to_Spine2D_Mesh_Exporter"
-    / "blender_adapter"
-)
+ADAPTER = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "blender_adapter"
 
 
 def _source(name: str) -> str:
     return (ADAPTER / name).read_text(encoding="utf-8")
+
+
+def _pass_with_mode(mode: MaterialPreparationMode) -> BakePassPlan:
+    return BakePassPlan(
+        pass_index=0,
+        strategy_id=BakeStrategyId.ALPHA,
+        bake_mode=BakeMode.EMIT,
+        material_slot_indices=(0,),
+        semantic_channels=(MaterialSemanticChannel.ALPHA,),
+        evaluation_scope=BakeEvaluationScope.LOCAL,
+        material_preparations=(MaterialSlotPreparation(0, mode),),
+    )
 
 
 def test_material_render_target_is_explicit_and_exact():
@@ -112,3 +130,41 @@ def test_scene_material_preparation_has_exact_target_and_public_owner():
     assert "render_target: str," in source
     assert 'render_target: str = "CYCLES"' not in source
     assert "B2/B3" not in source
+
+
+def test_material_preparation_uses_blender_52_node_tree_without_use_nodes():
+    source = _source("bake_material_preparation.py")
+
+    assert ".use_nodes" not in source
+    assert "def _material_node_tree(" in source
+    assert "Blender 5.2 materials must expose one" in source
+    assert "render_target: str," in source
+    assert 'render_target: str = "CYCLES"' not in source
+
+
+def test_all_typed_material_preparation_modes_have_explicit_routing():
+    expected = {
+        MaterialPreparationMode.ZERO_TO_EMISSION: "ZERO_COLOR",
+        MaterialPreparationMode.EXTRACT_ALPHA_TO_EMISSION: "EXTRACT_ALPHA",
+        MaterialPreparationMode.OPAQUE_ALPHA_TO_EMISSION: "OPAQUE_ALPHA",
+    }
+    for mode, proxy_name in expected.items():
+        resolved = bake_material_preparation._resolve_proxy_kinds(
+            _pass_with_mode(mode),
+            (0,),
+        )
+        assert resolved[0].value == proxy_name
+
+    assert bake_material_preparation._resolve_proxy_kinds(
+        _pass_with_mode(MaterialPreparationMode.PRESERVE),
+        (0,),
+    ) == {}
+
+
+def test_material_output_target_selection_is_exact_not_fuzzy():
+    source = _source("bake_material_preparation.py")
+
+    assert 'value not in {"ALL", "CYCLES", "EEVEE"}' in source
+    assert 'if "CYCLE" in value' not in source
+    assert 'if "EEVEE" in value' not in source
+    assert "get_output_node" not in source
