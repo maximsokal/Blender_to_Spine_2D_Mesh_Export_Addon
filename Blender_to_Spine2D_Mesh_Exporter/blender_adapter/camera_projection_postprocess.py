@@ -1,4 +1,4 @@
-"""Shared single/grouped B4 coverage, layout, and staged-image postprocessing."""
+"""Shared Blender 5.2 projection coverage, layout, and image postprocessing."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from ..domain.baking.projection_layout import (
     CameraProjectionLayout,
     CameraProjectionLayoutError,
     ProjectionAlphaUnionAccumulator,
-    build_full_frame_layout,
 )
 from ..infrastructure import AtomicOutputReservation
 from .camera_projection_error import CameraProjectionExecutionError
@@ -32,7 +31,6 @@ from .camera_projection_validation import CameraProjectionRuntime
 
 logger = logging.getLogger(__name__)
 
-
 ProjectionImagePlan: TypeAlias = (
     CameraProjectionPlan | GroupedCameraProjectionPlan
 )
@@ -40,7 +38,7 @@ ProjectionImagePlan: TypeAlias = (
 
 @dataclass(frozen=True, slots=True)
 class ProjectionPostprocessRequest:
-    """Blender-state-independent data required for one B4 output postprocess."""
+    """Blender-state-independent data for one projection output postprocess."""
 
     owner_id: str
     bpy_module: Any
@@ -123,7 +121,7 @@ def validate_projection_postprocess_reservations(
     request: ProjectionPostprocessRequest,
     reservations: Iterable[AtomicOutputReservation],
 ) -> Tuple[AtomicOutputReservation, ...]:
-    """Require one correctly ordered staged path for every postprocess frame."""
+    """Require one correctly ordered staged path for every projection frame."""
 
     if not isinstance(request, ProjectionPostprocessRequest):
         raise TypeError("request must be ProjectionPostprocessRequest")
@@ -157,7 +155,7 @@ def validate_projection_postprocess_reservations(
 def build_camera_projection_postprocess_request(
     runtime: CameraProjectionRuntime,
 ) -> ProjectionPostprocessRequest:
-    """Adapt the validated single-object B4 runtime to the shared engine."""
+    """Adapt one validated camera runtime to the shared postprocess request."""
 
     if not isinstance(runtime, CameraProjectionRuntime):
         raise TypeError("runtime must be CameraProjectionRuntime")
@@ -172,32 +170,20 @@ def build_camera_projection_postprocess_request(
     )
 
 
-def _coerce_postprocess_request(
-    value: ProjectionPostprocessRequest | CameraProjectionRuntime,
-) -> ProjectionPostprocessRequest:
-    if isinstance(value, ProjectionPostprocessRequest):
-        return value
-    if isinstance(value, CameraProjectionRuntime):
-        return build_camera_projection_postprocess_request(value)
-    raise TypeError(
-        "value must be ProjectionPostprocessRequest or CameraProjectionRuntime"
-    )
-
-
 def build_projection_union_accumulator(
-    value: ProjectionPostprocessRequest | CameraProjectionRuntime,
+    request: ProjectionPostprocessRequest,
 ) -> ProjectionAlphaUnionAccumulator:
-    """Create one fixed-size sequence union from a validated B4 policy."""
+    """Create one fixed-size sequence coverage union for a validated request."""
 
-    request = _coerce_postprocess_request(value)
+    if not isinstance(request, ProjectionPostprocessRequest):
+        raise TypeError("request must be ProjectionPostprocessRequest")
     execution_settings = request.execution_settings
-    alpha_threshold = float(
-        execution_settings.projection_alpha_threshold
-    )
     return ProjectionAlphaUnionAccumulator(
         width=request.settings.width,
         height=request.settings.height,
-        alpha_threshold=alpha_threshold,
+        alpha_threshold=float(
+            execution_settings.projection_alpha_threshold
+        ),
         padding_pixels=request.settings.margin_pixels,
         contour_mode=execution_settings.projection_contour_mode,
         simplify_tolerance_pixels=float(
@@ -212,12 +198,17 @@ def log_projection_layout(
     layout: CameraProjectionLayout,
     accumulator: ProjectionAlphaUnionAccumulator,
 ) -> None:
-    """Log the complete shared B4 crop, coverage, contour, and output policy."""
+    """Log the complete crop, contour, coverage, and output policy."""
 
     if not isinstance(request, ProjectionPostprocessRequest):
         raise TypeError("request must be ProjectionPostprocessRequest")
+    if not isinstance(layout, CameraProjectionLayout):
+        raise TypeError("layout must be CameraProjectionLayout")
+    if not isinstance(accumulator, ProjectionAlphaUnionAccumulator):
+        raise TypeError("accumulator must be ProjectionAlphaUnionAccumulator")
+
     logger.info(
-        "B4 union layout '%s': full=%dx%d crop=(%d,%d)-(%d,%d) "
+        "Projection union layout '%s': full=%dx%d crop=(%d,%d)-(%d,%d) "
         "size=%dx%d contour=%s vertices=%d source_vertices=%d "
         "outer_components=%d contour_fallback=%r coverage=%s "
         "raw_nonzero=%d strong=%d final_visible=%d components=%d->%d "
@@ -262,27 +253,16 @@ def log_projection_layout(
 def process_projection_outputs(
     request: ProjectionPostprocessRequest,
     reservations: Tuple[AtomicOutputReservation, ...],
-    *,
-    apply_crop: bool,
 ) -> CameraProjectionLayout:
-    """Decode completed renders and postprocess them outside Blender state scope."""
+    """Decode staged renders, build one union layout, and crop every frame."""
 
     if not isinstance(request, ProjectionPostprocessRequest):
         raise TypeError("request must be ProjectionPostprocessRequest")
-    if not isinstance(apply_crop, bool):
-        raise TypeError("apply_crop must be bool")
 
     resolved = validate_projection_postprocess_reservations(
         request,
         reservations,
     )
-    if not apply_crop:
-        return build_full_frame_layout(
-            request.settings.width,
-            request.settings.height,
-            frame_count=len(request.frame_tasks),
-        )
-
     accumulator = build_projection_union_accumulator(request)
     for task, reservation in zip(
         request.frame_tasks,
@@ -301,7 +281,7 @@ def process_projection_outputs(
         )
         del coverage
         logger.debug(
-            "Merged B4 projection '%s' frame %d into alpha coverage union: "
+            "Merged projection '%s' frame %d into alpha coverage union: "
             "new_nonzero=%d raw_nonzero_total=%d",
             request.owner_id,
             task.task_index,
@@ -327,42 +307,13 @@ def process_projection_outputs(
     return layout
 
 
-def log_camera_projection_layout(
-    runtime: CameraProjectionRuntime,
-    layout: CameraProjectionLayout,
-    accumulator: ProjectionAlphaUnionAccumulator,
-) -> None:
-    """Compatibility wrapper for historical single-B4 diagnostics."""
-
-    request = build_camera_projection_postprocess_request(runtime)
-    log_projection_layout(request, layout, accumulator)
-
-
-def process_camera_projection_outputs(
-    runtime: CameraProjectionRuntime,
-    reservations: Tuple[AtomicOutputReservation, ...],
-    *,
-    apply_crop: bool,
-) -> CameraProjectionLayout:
-    """Preserve the single-B4 wrapper over the shared postprocess engine."""
-
-    request = build_camera_projection_postprocess_request(runtime)
-    return process_projection_outputs(
-        request,
-        reservations,
-        apply_crop=apply_crop,
-    )
-
-
 __all__ = [
     "CameraProjectionExecutionError",
     "ProjectionImagePlan",
     "ProjectionPostprocessRequest",
     "build_camera_projection_postprocess_request",
     "build_projection_union_accumulator",
-    "log_camera_projection_layout",
     "log_projection_layout",
-    "process_camera_projection_outputs",
     "process_projection_outputs",
     "validate_projection_postprocess_reservations",
 ]
