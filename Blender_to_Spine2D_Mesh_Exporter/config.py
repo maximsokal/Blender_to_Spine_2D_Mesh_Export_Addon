@@ -1,5 +1,5 @@
 # pylint: disable=import-error
-"""Central Blender settings, per-module logging, and diagnostics configuration."""
+"""Logging, diagnostics, and shared numeric defaults for Blender 5.2+."""
 
 from __future__ import annotations
 
@@ -44,17 +44,6 @@ class ShortNameFormatter(logging.Formatter):
 logger = logging.getLogger(__name__)
 
 
-def _update_ui_for_paths(_self: Any, context: bpy.types.Context) -> None:
-    """Force UI refresh for path-dependent labels."""
-
-    window_manager = getattr(context, "window_manager", None)
-    for window in getattr(window_manager, "windows", ()):
-        screen = getattr(window, "screen", None)
-        for area in getattr(screen, "areas", ()):
-            if getattr(area, "type", None) == "VIEW_3D":
-                area.tag_redraw()
-
-
 def _update_logging_config(_self: Any, _context: bpy.types.Context) -> None:
     """Apply one preference change without overwriting other module levels."""
 
@@ -85,17 +74,17 @@ class LoggingModuleSettings(bpy.types.PropertyGroup):
 
 
 class AddonLoggingSettings(bpy.types.PropertyGroup):
-    """Logging and failed-work diagnostics settings stored in addon preferences."""
+    """Logging and failed-work diagnostics stored in extension preferences."""
 
     enable_file_logging: bpy.props.BoolProperty(
         name="Enable file logging",
-        description="Write addon logs to the configured file",
+        description="Write extension logs to the configured file",
         default=False,
         update=_update_logging_config,
     )
     log_file_path: bpy.props.StringProperty(
         name="Log file path",
-        description="File used for addon logs",
+        description="File used for extension logs",
         subtype="FILE_PATH",
         default="",
         update=_update_logging_config,
@@ -127,7 +116,7 @@ class AddonLoggingSettings(bpy.types.PropertyGroup):
 
 
 def discover_logging_modules() -> tuple[str, ...]:
-    """Discover every addon Python module, including nested Rewrite modules."""
+    """Discover every extension Python module, including nested Rewrite modules."""
 
     return discover_python_modules(
         _PACKAGE_DIRECTORY,
@@ -136,7 +125,7 @@ def discover_logging_modules() -> tuple[str, ...]:
 
 
 def synchronize_logging_preferences(prefs: Any) -> tuple[str, ...]:
-    """Reconcile persisted levels with the current source tree without losing choices."""
+    """Reconcile persisted levels with source files without losing choices."""
 
     global _LOGGING_PREFERENCES_SYNCING
     logging_settings = getattr(prefs, "logging_settings", None)
@@ -182,7 +171,7 @@ def _logging_formatter_config() -> dict[str, object]:
 
 
 def _setup_default_logging() -> None:
-    """Install an ERROR-only package logger before preferences become available."""
+    """Install an ERROR-only package logger before preferences are available."""
 
     logging_config = {
         "version": 1,
@@ -206,7 +195,7 @@ def _setup_default_logging() -> None:
     try:
         logging.config.dictConfig(logging_config)
     except Exception as exc:
-        print(f"Error setting up default addon logging: {exc}")
+        print(f"Error setting up default extension logging: {exc}")
 
 
 def _addon_preferences() -> Any | None:
@@ -339,16 +328,9 @@ def calc_uniform_scale(
     return (width + height) / 2.0
 
 
-def set_frames_for_render(self: Any, value: int) -> None:
-    max_frame = int(getattr(bpy.context.scene, "frame_end", 0))
-    self["spine2d_frames_for_render"] = min(max(0, int(value)), max_frame)
-
-
-def get_frames_for_render(self: Any) -> int:
-    return int(self.get("spine2d_frames_for_render", 0))
-
-
 def get_default_output_dir() -> str:
+    """Resolve the saved blend directory or the user home directory."""
+
     try:
         filepath = getattr(bpy.data, "filepath", None)
         if isinstance(filepath, str) and filepath:
@@ -358,106 +340,14 @@ def get_default_output_dir() -> str:
     return os.path.expanduser("~")
 
 
-def set_texture_size(self: Any, value: int) -> None:
-    global TEXTURE_WIDTH, TEXTURE_HEIGHT
-    try:
-        resolved = min(4096, max(64, int(value)))
-        if resolved % 2:
-            resolved -= 1
-        self["spine2d_texture_size"] = resolved
-        TEXTURE_WIDTH = resolved
-        TEXTURE_HEIGHT = resolved
-        logger.debug("Texture size set to %s", resolved)
-    except (TypeError, ValueError):
-        logger.exception("Unable to set texture size from %r", value)
-
-
-def get_texture_size(self: Any) -> int:
-    return int(self.get("spine2d_texture_size", 1024))
-
-
-PROPERTIES = [
-    (
-        "spine2d_angle_limit",
-        bpy.props.IntProperty(
-            name="Angle Limit",
-            description="Angle limit for cutting (1–89°)",
-            default=30,
-            min=1,
-            max=89,
-        ),
-    ),
-    (
-        "spine2d_seam_maker_mode",
-        bpy.props.EnumProperty(
-            name="Seam Maker",
-            description="Seam placement mode",
-            items=(
-                ("AUTO", "Auto", "Automatic placement"),
-                ("CUSTOM", "Custom", "Use user-defined seams"),
-            ),
-            default="AUTO",
-        ),
-    ),
-    (
-        "spine2d_frames_for_render",
-        bpy.props.IntProperty(
-            name="Frames for render",
-            description="0 for current frame; >0 for a sequence from playback",
-            get=get_frames_for_render,
-            set=set_frames_for_render,
-            min=0,
-        ),
-    ),
-    (
-        "spine2d_texture_size",
-        bpy.props.IntProperty(
-            name="Texture size",
-            description="Texture dimensions from 64 to 4096",
-            get=get_texture_size,
-            set=set_texture_size,
-        ),
-    ),
-    (
-        "spine2d_images_path",
-        bpy.props.StringProperty(
-            name="Images Subfolder",
-            description="Subfolder for textures, relative to the JSON path",
-            default="images/",
-        ),
-    ),
-    (
-        "spine2d_json_path",
-        bpy.props.StringProperty(
-            name="JSON",
-            description="Folder for saving the JSON file",
-            default="",
-            subtype="DIR_PATH",
-            update=_update_ui_for_paths,
-        ),
-    ),
-]
-
-
-def register() -> None:
-    logger.debug("Registering config.py properties")
-    for name, prop in PROPERTIES:
-        setattr(bpy.types.Scene, name, prop)
-
-
-def unregister() -> None:
-    logger.debug("Unregistering config.py properties")
-    for name, _prop in PROPERTIES:
-        if hasattr(bpy.types.Scene, name):
-            delattr(bpy.types.Scene, name)
-
-
 __all__ = [
     "ADDON_DISPLAY_NAME",
     "AddonLoggingSettings",
     "LoggingModuleSettings",
     "PACKAGE_LOGGER_ROOT",
+    "calc_uniform_scale",
     "discover_logging_modules",
+    "get_default_output_dir",
     "setup_logging",
     "synchronize_logging_preferences",
 ]
