@@ -1,4 +1,4 @@
-"""Decode staged B4 images, extract alpha coverage, and rewrite stable crops."""
+"""Decode, crop, and rewrite Blender 5.2 projection images."""
 
 from __future__ import annotations
 
@@ -22,16 +22,30 @@ logger = logging.getLogger(__name__)
 
 
 def remove_image(bpy_module: Any, image: Any | None) -> None:
+    """Best-effort unlink and remove one temporary Blender Image."""
+
     if image is None:
         return
     try:
-        bpy_module.data.images.remove(image)
+        bpy_module.data.images.remove(image, do_unlink=True)
     except Exception:
         logger.exception("Failed to remove temporary projection image")
 
 
 def read_image_pixels(image: Any, width: int, height: int) -> array:
-    actual = tuple(int(value) for value in image.size[:2])
+    if image is None:
+        raise CameraProjectionExecutionError("image cannot be None")
+    if not isinstance(width, int) or isinstance(width, bool) or width <= 0:
+        raise ValueError("width must be a positive integer")
+    if not isinstance(height, int) or isinstance(height, bool) or height <= 0:
+        raise ValueError("height must be a positive integer")
+
+    try:
+        actual = tuple(int(value) for value in image.size[:2])
+    except Exception as exc:
+        raise CameraProjectionExecutionError(
+            "Unable to inspect rendered image dimensions"
+        ) from exc
     if actual != (width, height):
         raise CameraProjectionExecutionError(
             f"Rendered image size {actual} does not match planned {(width, height)}"
@@ -88,39 +102,6 @@ def read_staged_alpha_coverage(
         remove_image(bpy_module, image)
 
 
-def read_staged_alpha_mask(
-    bpy_module: Any,
-    staged_path,
-    *,
-    width: int,
-    height: int,
-    threshold: float,
-) -> bytes:
-    """Compatibility wrapper returning a binary mask from decoded coverage."""
-
-    if (
-        isinstance(threshold, bool)
-        or not isinstance(threshold, (int, float))
-        or not isfinite(float(threshold))
-        or not 0.0 <= float(threshold) <= 1.0
-    ):
-        raise ValueError("threshold must be finite and in [0, 1]")
-
-    coverage = read_staged_alpha_coverage(
-        bpy_module,
-        staged_path,
-        width=width,
-        height=height,
-    )
-    resolved = float(threshold)
-    if resolved == 0.0:
-        return bytes([1]) * len(coverage)
-    return bytes(
-        1 if float(value) / 255.0 >= resolved else 0
-        for value in coverage
-    )
-
-
 def crop_pixel_buffer(
     pixels: array,
     *,
@@ -128,6 +109,8 @@ def crop_pixel_buffer(
     full_height: int,
     layout: CameraProjectionLayout,
 ) -> array:
+    if not isinstance(layout, CameraProjectionLayout):
+        raise TypeError("layout must be CameraProjectionLayout")
     if len(pixels) != full_width * full_height * 4:
         raise CameraProjectionExecutionError(
             "rendered pixel buffer has invalid length"
@@ -151,6 +134,34 @@ def crop_pixel_buffer(
     return result
 
 
+def _image_color_space_name(image: Any) -> str:
+    try:
+        value = str(image.colorspace_settings.name or "").strip()
+    except Exception as exc:
+        raise CameraProjectionExecutionError(
+            "Unable to read staged image color space"
+        ) from exc
+    if not value:
+        raise CameraProjectionExecutionError(
+            "Staged image color space name is empty"
+        )
+    return value
+
+
+def _image_alpha_mode(image: Any) -> str:
+    try:
+        value = str(image.alpha_mode or "").strip().upper()
+    except Exception as exc:
+        raise CameraProjectionExecutionError(
+            "Unable to read staged image alpha mode"
+        ) from exc
+    if not value:
+        raise CameraProjectionExecutionError(
+            "Staged image alpha mode is empty"
+        )
+    return value
+
+
 def rewrite_staged_image_with_crop(
     bpy_module: Any,
     plan: CameraProjectionPlan | GroupedCameraProjectionPlan,
@@ -158,7 +169,7 @@ def rewrite_staged_image_with_crop(
     layout: CameraProjectionLayout,
     output_policy: ResolvedProjectionOutputPolicy,
 ) -> None:
-    """Crop one single/grouped staged frame with explicit HDR and alpha semantics."""
+    """Crop one staged frame with explicit dynamic-range and alpha semantics."""
 
     if not isinstance(
         plan,
@@ -195,9 +206,8 @@ def rewrite_staged_image_with_crop(
             plan.settings.width,
             plan.settings.height,
         )
-        source_alpha_mode = str(
-            getattr(loaded, "alpha_mode", "STRAIGHT") or "STRAIGHT"
-        )
+        source_alpha_mode = _image_alpha_mode(loaded)
+        source_color_space = _image_color_space_name(loaded)
         cropped_pixels = crop_pixel_buffer(
             pixels,
             full_width=plan.settings.width,
@@ -209,15 +219,6 @@ def rewrite_staged_image_with_crop(
             source_alpha_mode=source_alpha_mode,
             target=output_policy.alpha_representation,
         )
-
-        color_space = None
-        try:
-            color_space = str(loaded.colorspace_settings.name)
-        except Exception:
-            logger.debug(
-                "Unable to read source image color space",
-                exc_info=True,
-            )
 
         remove_image(bpy_module, loaded)
         loaded = None
@@ -232,15 +233,12 @@ def rewrite_staged_image_with_crop(
             alpha=True,
             float_buffer=output_policy.float_buffer,
         )
-        if color_space:
-            try:
-                cropped.colorspace_settings.name = color_space
-            except Exception:
-                logger.debug(
-                    "Unable to restore cropped image color space",
-                    exc_info=True,
-                )
-
+        try:
+            cropped.colorspace_settings.name = source_color_space
+        except Exception as exc:
+            raise CameraProjectionExecutionError(
+                f"Unable to restore cropped image color space '{source_color_space}'"
+            ) from exc
         try:
             cropped.alpha_mode = output_policy.blender_alpha_mode
         except Exception as exc:
@@ -249,16 +247,25 @@ def rewrite_staged_image_with_crop(
                 f"'{output_policy.blender_alpha_mode}'"
             ) from exc
 
-        cropped.pixels.foreach_set(cropped_pixels)
-        cropped.update()
-        cropped.file_format = plan.settings.texture_format.value
-        cropped.filepath_raw = str(reservation.staged_path)
-        cropped.save()
+        try:
+            cropped.pixels.foreach_set(cropped_pixels)
+            cropped.update()
+            cropped.file_format = plan.settings.texture_format.value
+            cropped.filepath_raw = str(reservation.staged_path)
+            cropped.save()
+        except Exception as exc:
+            raise CameraProjectionExecutionError(
+                "Unable to write cropped projection pixels or save the staged image"
+            ) from exc
 
-        if (
-            not reservation.staged_path.is_file()
-            or reservation.staged_path.stat().st_size <= 0
-        ):
+        try:
+            exists = reservation.staged_path.is_file()
+            size = reservation.staged_path.stat().st_size if exists else 0
+        except Exception as exc:
+            raise CameraProjectionExecutionError(
+                "Unable to inspect cropped staged projection output"
+            ) from exc
+        if not exists or size <= 0:
             raise CameraProjectionExecutionError(
                 "Cropped projection output is missing or empty: "
                 f"{reservation.staged_path}"
@@ -279,7 +286,6 @@ __all__ = [
     "crop_pixel_buffer",
     "read_image_pixels",
     "read_staged_alpha_coverage",
-    "read_staged_alpha_mask",
     "remove_image",
     "rewrite_staged_image_with_crop",
 ]
