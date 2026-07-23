@@ -1,4 +1,4 @@
-"""Own grouped B4 reservation, reversible staging, postprocess, and stage result."""
+"""Own grouped Blender 5.2 projection reservation, staging, and layout."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class GroupedCameraProjectionStageResult:
-    """Caller-owned grouped reservations plus the exact shared B4 layout."""
+    """Caller-owned grouped reservations plus one exact shared layout."""
 
     reservations: Tuple[AtomicOutputReservation, ...]
     layout: CameraProjectionLayout
@@ -144,7 +144,7 @@ def stage_grouped_camera_projection_outputs(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> GroupedCameraProjectionStageResult:
-    """Validate before reserve and stage into the caller-owned atomic transaction."""
+    """Validate and stage into the caller-owned atomic transaction."""
 
     runtime = validate_grouped_camera_projection_request(
         source_objects,
@@ -164,7 +164,7 @@ def stage_grouped_camera_projection_outputs(
     except Exception as exc:
         plan_id = _plan_identifier(plan)
         logger.exception(
-            "Unexpected grouped B4 failure for '%s'",
+            "Unexpected grouped projection failure for '%s'",
             plan_id,
         )
         raise CameraProjectionExecutionError(
@@ -172,14 +172,9 @@ def stage_grouped_camera_projection_outputs(
         ) from exc
 
 
-# Historical private name retained by the compatibility facade.
-_reserve_group_outputs = reserve_grouped_camera_projection_outputs
-
-
 __all__ = [
     "CameraProjectionExecutionError",
     "GroupedCameraProjectionStageResult",
-    "_reserve_group_outputs",
     "require_grouped_transaction",
     "reserve_grouped_camera_projection_outputs",
     "stage_grouped_camera_projection_outputs",
