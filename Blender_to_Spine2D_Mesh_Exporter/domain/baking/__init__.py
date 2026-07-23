@@ -42,6 +42,13 @@ from .model import (
     TextureFormat,
     build_bake_plan,
 )
+from .generated_materials import (
+    A1GeneratedMaterialPattern,
+    A1MaterialSourcePolicy,
+    ColorRGBA,
+    GeneratedBakePlan,
+    GeneratedMaterialPlan,
+)
 from .output_naming import (
     predict_bake_output_paths,
     sanitize_filename_stem,
@@ -107,6 +114,8 @@ from .strategies import (
 )
 
 __all__ = [
+    "A1GeneratedMaterialPattern",
+    "A1MaterialSourcePolicy",
     "AlphaBakeStrategy",
     "BakeArtifact",
     "BakeCompositeMode",
@@ -130,7 +139,10 @@ __all__ = [
     "CameraProjectionMode",
     "CameraProjectionPlan",
     "ColorManagementSnapshot",
+    "ColorRGBA",
     "EmissionBakeStrategy",
+    "GeneratedBakePlan",
+    "GeneratedMaterialPlan",
     "GroupedCameraProjectionPlan",
     "GroupedCameraProjectionPlanError",
     "ImageDependency",
