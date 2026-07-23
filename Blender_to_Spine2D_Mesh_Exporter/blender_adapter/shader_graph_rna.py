@@ -1,4 +1,4 @@
-"""Blender RNA and socket compatibility primitives for shader-graph analysis."""
+"""Strict Blender 5.2 RNA primitives for shader-graph analysis."""
 
 from __future__ import annotations
 
@@ -81,14 +81,21 @@ def socket_identifier(socket: Any) -> str:
 
 
 def normalise_render_target(value: str | None) -> str:
+    """Normalize only ShaderNodeTree targets valid in Blender 5.2+.
+
+    ``BLENDER_EEVEE`` is Blender's Scene render-engine identifier and maps to
+    the ShaderNodeTree target ``EEVEE``. Removed identifiers and partial names
+    are rejected rather than guessed.
+    """
+
     target = str(value or "ALL").strip().upper()
     if target in VALID_RENDER_TARGETS:
         return target
-    if "CYCLE" in target:
-        return "CYCLES"
-    if "EEVEE" in target:
+    if target == "BLENDER_EEVEE":
         return "EEVEE"
-    return "ALL"
+    raise MaterialGraphAnalysisError(
+        f"Unsupported Blender 5.2 shader render target: {value!r}"
+    )
 
 
 def iter_collection(value: Any, *, label: str) -> tuple[Any, ...]:
@@ -134,45 +141,36 @@ def find_material_output(
     nodes: tuple[Any, ...],
     render_target: str,
 ) -> Any | None:
-    """Resolve the effective Material Output for one render backend."""
+    """Resolve the effective Material Output for one Blender 5.2 target."""
 
     target = normalise_render_target(render_target)
     getter = getattr(node_tree, "get_output_node", None)
     if callable(getter):
-        candidates = (target, "ALL") if target != "ALL" else ("ALL",)
-        for candidate_target in candidates:
-            try:
-                candidate = getter(candidate_target)
-            except TypeError:
-                try:
-                    candidate = getter(target=candidate_target)
-                except Exception:
-                    logger.debug(
-                        "Material Output lookup failed for target %s",
-                        candidate_target,
-                        exc_info=True,
-                    )
-                    continue
-            except Exception:
-                logger.debug(
-                    "Material Output lookup failed for target %s",
-                    candidate_target,
-                    exc_info=True,
+        try:
+            candidate = getter(target)
+        except Exception as exc:
+            raise MaterialGraphAnalysisError(
+                f"ShaderNodeTree.get_output_node({target!r}) failed"
+            ) from exc
+        if candidate is not None:
+            if node_type(candidate) != "OUTPUT_MATERIAL":
+                raise MaterialGraphAnalysisError(
+                    "ShaderNodeTree.get_output_node returned a non-Material Output node"
                 )
-                continue
-            if (
-                candidate is not None
-                and node_type(candidate) == "OUTPUT_MATERIAL"
-                and not is_temporary_node(candidate)
-            ):
-                return candidate
+            if is_temporary_node(candidate):
+                raise MaterialGraphAnalysisError(
+                    "ShaderNodeTree.get_output_node returned a temporary bake node"
+                )
+            return candidate
 
     outputs = tuple(node for node in nodes if node_type(node) == "OUTPUT_MATERIAL")
     if not outputs:
         return None
     exact = tuple(node for node in outputs if node_output_target(node) == target)
     generic = tuple(node for node in outputs if node_output_target(node) == "ALL")
-    candidates = exact or generic or outputs
+    candidates = exact or generic
+    if not candidates:
+        return None
     active = tuple(
         node for node in candidates if bool(getattr(node, "is_active_output", False))
     )
@@ -252,7 +250,7 @@ def same_socket(first: Any | None, second: Any | None) -> bool:
 
 
 def matching_socket(collection: Any, reference: Any) -> Any | None:
-    """Resolve a group interface socket across Blender API versions."""
+    """Resolve a group instance socket to its node-tree interface socket."""
 
     if collection is None or reference is None:
         return None
