@@ -10,13 +10,13 @@ import pytest
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.bake_execution_error import (
     BakeExecutionError,
 )
-from Blender_to_Spine2D_Mesh_Export_Addon.blender_adapter.camera_projection_error import (
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_error import (
     CameraProjectionExecutionError,
 )
-from Blender_to_Spine2D_Mesh_Export_Addon.blender_adapter.camera_projection_execution import (
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_execution import (
     _call_render_operator,
 )
-from Blender_to_Spine2D_Mesh_Export_Addon.blender_adapter.semantic_bake_execution import (
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.semantic_bake_execution import (
     _call_bake_operator,
 )
 
