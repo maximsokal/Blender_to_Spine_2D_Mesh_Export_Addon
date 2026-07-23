@@ -1,4 +1,4 @@
-"""Validate grouped B4 requests before reservation or Blender Scene mutation."""
+"""Validate grouped Blender 5.2 projection requests before mutation."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class GroupedCameraProjectionRuntime:
-    """Fully validated runtime values for one depth-correct grouped B4 render."""
+    """Fully validated runtime values for one depth-correct grouped render."""
 
     source_objects: Tuple[Any, ...]
     plan: GroupedCameraProjectionPlan
@@ -77,7 +77,7 @@ def object_name(obj: Any) -> str:
     ).strip()
     if not value:
         raise CameraProjectionExecutionError(
-            "grouped B4 source has an empty name"
+            "grouped projection source has an empty name"
         )
     return value
 
@@ -224,7 +224,7 @@ def validate_grouped_camera_projection_request(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> GroupedCameraProjectionRuntime:
-    """Validate the complete grouped B4 request before output reservation."""
+    """Validate the complete grouped request before output reservation."""
 
     if not isinstance(plan, GroupedCameraProjectionPlan):
         raise TypeError("plan must be GroupedCameraProjectionPlan")
@@ -242,13 +242,13 @@ def validate_grouped_camera_projection_request(
     source_identities = tuple(rna_identity(obj) for obj in source_objects)
     if len(source_identities) != len(set(source_identities)):
         raise CameraProjectionExecutionError(
-            "grouped B4 source_objects contain duplicate Blender objects"
+            "grouped projection source_objects contain duplicate Blender objects"
         )
 
     names = tuple(object_name(obj) for obj in source_objects)
     if names != plan.source_object_ids:
         raise CameraProjectionExecutionError(
-            "grouped B4 source object order differs from the immutable plan; "
+            "grouped projection source object order differs from the immutable plan; "
             f"expected={plan.source_object_ids}, actual={names}"
         )
 
@@ -287,20 +287,20 @@ def validate_grouped_camera_projection_request(
         else:
             if source_runtime.bpy_module is not resolved_bpy:
                 raise CameraProjectionExecutionError(
-                    "grouped B4 sources resolved through different bpy modules"
+                    "grouped projection sources resolved through different bpy modules"
                 )
             if current_scene_identity != expected_scene_identity:
                 raise CameraProjectionExecutionError(
-                    "grouped B4 sources resolved to different Blender scenes"
+                    "grouped projection sources resolved to different Blender scenes"
                 )
             if source_runtime.renderer != expected_renderer:
                 raise CameraProjectionExecutionError(
-                    "grouped B4 sources resolved to different render engines"
+                    "grouped projection sources resolved to different render engines"
                 )
 
         if source_runtime.output_policy != grouped_output_policy:
             raise CameraProjectionExecutionError(
-                "grouped B4 output policy differs from a source camera plan"
+                "grouped projection output policy differs from a source camera plan"
             )
 
     if (
@@ -310,7 +310,7 @@ def validate_grouped_camera_projection_request(
         or expected_renderer is None
     ):
         raise CameraProjectionExecutionError(
-            "grouped B4 runtime did not resolve Blender state"
+            "grouped projection runtime did not resolve Blender state"
         )
 
     return GroupedCameraProjectionRuntime(
@@ -360,35 +360,6 @@ def validate_grouped_camera_projection_reservations(
     return resolved
 
 
-def validate_grouped_projection_runtime(
-    source_objects: Tuple[Any, ...],
-    plan: GroupedCameraProjectionPlan,
-    *,
-    context: Any | None,
-    scene: Any | None,
-) -> tuple[Any, Any, Any]:
-    """Compatibility wrapper for the historical private runtime helper."""
-
-    if not isinstance(plan, GroupedCameraProjectionPlan):
-        raise TypeError("plan must be GroupedCameraProjectionPlan")
-    scene_context = plan.representative_plan.scene_context
-    if scene_context is None:
-        raise CameraProjectionExecutionError(
-            "representative camera plan is missing SceneBakeContext"
-        )
-    settings = BakeExecutionSettings(
-        render_engine=scene_context.render_engine,
-    )
-    runtime = validate_grouped_camera_projection_request(
-        source_objects,
-        plan,
-        settings,
-        context=context,
-        scene=scene,
-    )
-    return runtime.bpy_module, runtime.context, runtime.scene
-
-
 __all__ = [
     "CameraProjectionExecutionError",
     "GroupedCameraProjectionRuntime",
@@ -396,5 +367,4 @@ __all__ = [
     "rna_identity",
     "validate_grouped_camera_projection_request",
     "validate_grouped_camera_projection_reservations",
-    "validate_grouped_projection_runtime",
 ]
