@@ -39,6 +39,8 @@ def _validate_color(value: ColorRGBA, field_name: str) -> None:
         numeric = float(component)
         if not isfinite(numeric) or numeric < 0.0 or numeric > 1.0:
             raise ValueError(f"{field_name}[{index}] must be finite in the range [0, 1]")
+    if float(value[3]) != 1.0:
+        raise ValueError(f"{field_name}[3] must be 1.0 for opaque generated textures")
 
 
 @dataclass(frozen=True, slots=True)
