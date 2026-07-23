@@ -1,18 +1,15 @@
-"""Blender-compatible RNA reads used by material analysis."""
+"""Strict Blender 5.2 RNA reads used by material analysis."""
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from .material_analysis_error import MaterialAnalysisError
+from .shader_graph_error import MaterialGraphAnalysisError
 from .shader_graph_rna import (
     is_temporary_node,
     normalise_render_target,
 )
-
-
-logger = logging.getLogger(__name__)
 
 
 def material_name(material: Any) -> str:
@@ -22,7 +19,7 @@ def material_name(material: Any) -> str:
         getattr(material, "name_full", None)
         or getattr(material, "name", None)
         or ""
-    )
+    ).strip()
     if not value:
         raise MaterialAnalysisError("Material name is empty")
     return value
@@ -35,24 +32,31 @@ def object_name(obj: Any) -> str:
         getattr(obj, "name_full", None)
         or getattr(obj, "name", None)
         or ""
-    )
+    ).strip()
     if not value:
         raise MaterialAnalysisError("object name is empty")
     return value
 
 
 def node_type(node: Any) -> str:
-    """Return Blender's node type identifier or the historical UNKNOWN fallback."""
+    """Return Blender's node type identifier or UNKNOWN for malformed nodes."""
 
-    value = str(getattr(node, "type", "") or "")
+    value = str(getattr(node, "type", "") or "").strip()
     return value or "UNKNOWN"
 
 
 def material_root_nodes(material: Any, *, resolved_name: str) -> tuple[Any, ...]:
-    """Freeze one material's root node collection with the historical error contract."""
+    """Freeze one Blender 5.2 material root node collection exactly once."""
 
+    if not isinstance(resolved_name, str) or not resolved_name.strip():
+        raise ValueError("resolved_name must be a non-empty string")
+    node_tree = getattr(material, "node_tree", None)
+    if node_tree is None:
+        raise MaterialAnalysisError(
+            f"Material '{resolved_name}' has no node tree"
+        )
     try:
-        return tuple(material.node_tree.nodes)
+        return tuple(node_tree.nodes)
     except Exception as exc:
         raise MaterialAnalysisError(
             f"Unable to iterate nodes of material '{resolved_name}'"
@@ -62,32 +66,32 @@ def material_root_nodes(material: Any, *, resolved_name: str) -> tuple[Any, ...]
 def object_material_slots(obj: Any) -> tuple[Any, ...]:
     """Freeze material slots once so dense slot order cannot change mid-analysis."""
 
-    return tuple(getattr(obj, "material_slots", ()))
-
-
-def render_target_from_engine(render_engine: str | None) -> str:
-    """Translate Blender render-engine identifiers to ShaderNodeTree targets."""
-
-    return normalise_render_target(render_engine)
-
-
-def resolve_render_target(render_target: str | None) -> str:
-    """Resolve an explicit target or the active Blender Scene renderer."""
-
-    if render_target is not None:
-        return normalise_render_target(render_target)
     try:
-        import bpy  # pylint: disable=import-error,import-outside-toplevel
+        return tuple(obj.material_slots)
+    except Exception as exc:
+        raise MaterialAnalysisError(
+            f"Unable to iterate material slots of object '{object_name(obj)}'"
+        ) from exc
 
-        scene = getattr(getattr(bpy, "context", None), "scene", None)
-        engine = getattr(getattr(scene, "render", None), "engine", None)
-        return render_target_from_engine(engine)
-    except Exception:
-        logger.debug(
-            "Unable to resolve active Blender render target; using ALL",
-            exc_info=True,
+
+def require_render_target(render_target: str) -> str:
+    """Require one explicit ShaderNodeTree target from the renderer contract.
+
+    Material analysis no longer reads the mutable active Scene and never falls
+    back to ``ALL`` when renderer resolution fails. The caller must pass the
+    immutable target selected during source preparation.
+    """
+
+    if not isinstance(render_target, str) or not render_target.strip():
+        raise MaterialAnalysisError(
+            "render_target must be an explicit non-empty Blender 5.2 shader target"
         )
-        return "ALL"
+    try:
+        return normalise_render_target(render_target)
+    except MaterialGraphAnalysisError as exc:
+        raise MaterialAnalysisError(
+            f"Invalid Blender 5.2 material render target {render_target!r}: {exc}"
+        ) from exc
 
 
 __all__ = [
@@ -98,6 +102,5 @@ __all__ = [
     "normalise_render_target",
     "object_material_slots",
     "object_name",
-    "render_target_from_engine",
-    "resolve_render_target",
+    "require_render_target",
 ]
