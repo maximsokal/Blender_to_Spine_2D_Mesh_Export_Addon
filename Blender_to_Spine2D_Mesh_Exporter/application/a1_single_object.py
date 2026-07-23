@@ -20,6 +20,10 @@ from ..domain.baking import (
     TextureFormat,
     sanitize_filename_stem,
 )
+from ..domain.baking.generated_materials import (
+    A1GeneratedMaterialPattern,
+    A1MaterialSourcePolicy,
+)
 from ..domain.geometry import MeshSnapshot, ModifierLineagePolicy
 from ..domain.spine import LegacyAttachmentSequence
 from ..domain.spine.legacy_rig_contracts import UniformScaleMode
@@ -43,7 +47,7 @@ class A1SourceUvBoundaryMode(str, Enum):
     """Select which pre-unwrap UV layout may influence A1 segmentation.
 
     ``DISABLED`` is the Rewrite default because A1 generates a new shared
-    ``SpineBakeUV`` layout after segmentation and decomposition.  The source
+    ``SpineBakeUV`` layout after segmentation and decomposition. The source
     Blender active UV layer therefore must not silently change export topology.
 
     ``EXPLICIT_LAYER`` opts into source-UV discontinuity cuts using the exact
@@ -111,6 +115,18 @@ class A1SingleObjectExportSettings:
         A1SourceUvBoundaryMode.DISABLED
     )
     source_uv_boundary_layer_name: str | None = None
+    material_source_policy: A1MaterialSourcePolicy = (
+        A1MaterialSourcePolicy.REQUIRE_SOURCE
+    )
+    generated_material_pattern: A1GeneratedMaterialPattern = (
+        A1GeneratedMaterialPattern.SOLID_GRAY
+    )
+    generated_gray_color: Tuple[float, float, float, float] = (
+        0.5,
+        0.5,
+        0.5,
+        1.0,
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.export, ExportSettings):
@@ -176,6 +192,29 @@ class A1SingleObjectExportSettings:
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be bool")
         require_integer(self.json_indent, "json_indent", minimum=0, maximum=16)
+        if not isinstance(self.material_source_policy, A1MaterialSourcePolicy):
+            raise TypeError(
+                "material_source_policy must be A1MaterialSourcePolicy"
+            )
+        if not isinstance(
+            self.generated_material_pattern,
+            A1GeneratedMaterialPattern,
+        ):
+            raise TypeError(
+                "generated_material_pattern must be A1GeneratedMaterialPattern"
+            )
+        if (
+            not isinstance(self.generated_gray_color, tuple)
+            or len(self.generated_gray_color) != 4
+        ):
+            raise ValueError("generated_gray_color must contain four values")
+        for index, value in enumerate(self.generated_gray_color):
+            require_finite_number(
+                value,
+                f"generated_gray_color[{index}]",
+                minimum=0.0,
+                maximum=1.0,
+            )
 
     def resolved_geometry_settings(self) -> A1GeometryPreparationSettings:
         segmentation = self.geometry.segmentation
