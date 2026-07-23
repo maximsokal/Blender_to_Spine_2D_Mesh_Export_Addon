@@ -95,7 +95,9 @@ class A1SingleObjectExportSettings:
     geometry: A1GeometryPreparationSettings = A1GeometryPreparationSettings()
     uv: UvUnwrapSettings = UvUnwrapSettings()
     texture_format: TextureFormat = TextureFormat.PNG
-    material_policy: BakeMaterialPolicy = BakeMaterialPolicy.LEGACY_ANY_IMAGE
+    material_policy: BakeMaterialPolicy = (
+        BakeMaterialPolicy.IMAGE_DEPENDENCY_DIFFUSE
+    )
     diffuse_mode: BakeMode = BakeMode.DIFFUSE
     # A1 exports albedo-like Spine textures. COMBINED depends on scene lighting and
     # can return an opaque black image in headless/empty scenes even though Blender
