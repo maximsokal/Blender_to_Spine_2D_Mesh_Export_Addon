@@ -38,10 +38,10 @@ def _segment_indices(result):
     )
 
 
-def test_geometry_preparation_defaults_to_legacy_seed_cone():
+def test_geometry_preparation_defaults_to_seed_cone():
     settings = A1GeometryPreparationSettings()
 
-    assert settings.angular_mode is A1AngularMode.LEGACY_SEED_CONE
+    assert settings.angular_mode is A1AngularMode.SEED_CONE
     assert settings.local_angle_limit_degrees is None
 
 
@@ -77,3 +77,12 @@ def test_geometry_preparation_requires_typed_angular_mode():
         A1GeometryPreparationSettings(
             angular_mode="SEED_CONE_AND_LOCAL_DIHEDRAL",
         )
+
+
+def test_removed_legacy_seed_cone_value_is_rejected():
+    with pytest.raises(ValueError, match="Unsupported A1 angular mode"):
+        from Blender_to_Spine2D_Mesh_Exporter.domain.geometry.a1_segmentation import (
+            _resolve_angular_mode,
+        )
+
+        _resolve_angular_mode("LEGACY_SEED_CONE")
