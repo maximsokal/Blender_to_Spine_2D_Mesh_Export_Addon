@@ -177,3 +177,72 @@ def test_weighted_vertex_preserves_empty_tuple_diagnostic():
         match="WeightedVertex must contain at least one influence",
     ):
         WeightedVertex(())
+
+
+@pytest.mark.parametrize("value", (None, 1, 1.5, object()))
+def test_encoder_rejects_non_iterable_vertex_sources(value):
+    with pytest.raises(
+        TypeError,
+        match="vertices must be an iterable of WeightedVertex values",
+    ):
+        encode_weighted_vertices(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ("", "vertex", b"", b"vertex", bytearray(), memoryview(b"")),
+)
+def test_encoder_rejects_text_and_binary_vertex_sources(value):
+    with pytest.raises(
+        TypeError,
+        match="vertices must be an iterable of WeightedVertex values",
+    ):
+        encode_weighted_vertices(value)
+
+
+def test_encoder_accepts_one_shot_generator_without_materializing_it_first():
+    vertices = (
+        WeightedVertex((WeightedVertexInfluence(0, 1.0, 2.0, 1.0),)),
+        WeightedVertex((WeightedVertexInfluence(1, 3.0, 4.0, 1.0),)),
+    )
+    source = (vertex for vertex in vertices)
+
+    assert encode_weighted_vertices(source) == (
+        1,
+        0,
+        1.0,
+        2.0,
+        1.0,
+        1,
+        1,
+        3.0,
+        4.0,
+        1.0,
+    )
+    assert tuple(source) == ()
+
+
+def test_encoder_reports_bad_generator_item_at_exact_index():
+    valid = WeightedVertex((WeightedVertexInfluence(0, 0.0, 0.0, 1.0),))
+
+    def source():
+        yield valid
+        yield "invalid"
+
+    with pytest.raises(TypeError, match=r"vertices\[1\] must be WeightedVertex"):
+        encode_weighted_vertices(source())
+
+
+def test_encoder_preserves_iterator_runtime_failures():
+    valid = WeightedVertex((WeightedVertexInfluence(0, 0.0, 0.0, 1.0),))
+
+    def source():
+        yield valid
+        raise RuntimeError("source iteration failed")
+
+    with pytest.raises(RuntimeError, match="source iteration failed"):
+        encode_weighted_vertices(source())
+
+
+def test_encoder_keeps_empty_generic_iterables_valid():
+    assert encode_weighted_vertices(iter(())) == ()
