@@ -122,6 +122,11 @@ def test_nested_registration_owners_use_common_transaction_helpers():
             "register_rna_properties_transactionally",
             "unregister_all_best_effort",
         },
+        "blender_adapter/generated_material_ui.py": {
+            "register_classes_transactionally",
+            "register_rna_properties_transactionally",
+            "unregister_all_best_effort",
+        },
     }
     for name, expected_calls in expectations.items():
         tree = _tree(name)
@@ -167,6 +172,7 @@ def test_root_owns_config_properties_and_orders_registration_dependencies():
         "addon preferences",
         "config RNA properties",
         "UI",
+        "generated material UI",
         "single-object operator",
     ]
 
