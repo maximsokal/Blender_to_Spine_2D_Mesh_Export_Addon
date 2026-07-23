@@ -43,14 +43,14 @@ class RenderEngineContract:
 
 
 def render_engine_contract(value: str) -> RenderEngineContract:
-    """Normalize Blender 5.2+ and ShaderNodeTree renderer identifiers."""
+    """Normalize only renderer identifiers valid in the Blender 5.2+ pipeline."""
 
     if not isinstance(value, str) or not value.strip():
         raise ValueError("render engine must be a non-empty string")
     normalized = value.strip().upper()
-    if "CYCLE" in normalized:
+    if normalized == "CYCLES":
         return RenderEngineContract("CYCLES", "CYCLES")
-    if "EEVEE" in normalized:
+    if normalized in {"BLENDER_EEVEE", "EEVEE"}:
         return RenderEngineContract("BLENDER_EEVEE", "EEVEE")
     raise RenderEngineContractError(
         f"unsupported Blender 5.2+ render engine for texture export: {value!r}"
