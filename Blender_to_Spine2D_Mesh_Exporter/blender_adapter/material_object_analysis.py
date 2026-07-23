@@ -1,4 +1,4 @@
-"""Analyze Blender object material slots in stable dense order."""
+"""Analyze Blender 5.2 object material slots in stable dense order."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .material_analysis_error import MaterialAnalysisError
 from .material_analysis_rna import (
     object_material_slots,
     object_name,
-    resolve_render_target,
+    require_render_target,
 )
 from .material_slot_analysis import analyse_material_slot
 
@@ -21,10 +21,10 @@ logger = logging.getLogger(__name__)
 def analyse_object_materials(
     obj: Any,
     *,
+    render_target: str,
     source_object_id: str | None = None,
-    render_target: str | None = None,
 ) -> ObjectMaterialAnalysis:
-    """Analyze all material slots of one Blender mesh object in stable order."""
+    """Analyze every slot against one explicit immutable renderer target."""
 
     if obj is None:
         raise MaterialAnalysisError("obj cannot be None")
@@ -33,7 +33,9 @@ def analyse_object_materials(
 
     resolved_object_name = object_name(obj)
     resolved_source_object_id = source_object_id or resolved_object_name
-    target = resolve_render_target(render_target)
+    if not isinstance(resolved_source_object_id, str) or not resolved_source_object_id.strip():
+        raise MaterialAnalysisError("source_object_id must be a non-empty string")
+    target = require_render_target(render_target)
 
     try:
         material_slots = object_material_slots(obj)
@@ -50,7 +52,8 @@ def analyse_object_materials(
             slots=analyses,
         )
         logger.debug(
-            "Analyzed %d material slots for '%s' target=%s: kinds=%s channels=%s",
+            "Analyzed %d Blender 5.2 material slots for '%s' target=%s: "
+            "kinds=%s channels=%s",
             len(result.slots),
             resolved_object_name,
             target,
@@ -65,11 +68,13 @@ def analyse_object_materials(
         raise
     except Exception as exc:
         logger.exception(
-            "Failed to analyze materials for '%s'",
+            "Failed to analyze materials for '%s' target=%s",
             resolved_object_name,
+            target,
         )
         raise MaterialAnalysisError(
-            f"Failed to analyze materials for '{resolved_object_name}': {exc}"
+            f"Failed to analyze materials for '{resolved_object_name}' and "
+            f"target '{target}': {exc}"
         ) from exc
 
 
