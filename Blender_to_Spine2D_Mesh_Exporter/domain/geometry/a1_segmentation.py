@@ -1,10 +1,9 @@
-"""A1-compatible seed-normal segmentation without legacy overlap bugs.
+"""A1 seed-normal segmentation without overlap or face-loss bugs.
 
-The legacy angular pass compares every candidate face with the normal and material
-of the seed face, not with the immediately adjacent face. Reproducing that rule
-is important for compatibility on smoothly curving strips. The optional hybrid
-mode keeps that seed cone and additionally rejects traversal across a locally
-sharp dihedral edge.
+The seed-cone angular pass compares every candidate face with the normal and
+material of the seed face, not with the immediately adjacent face. The optional
+hybrid mode keeps that seed cone and additionally rejects traversal across a
+locally sharp dihedral edge.
 """
 
 from __future__ import annotations
@@ -36,7 +35,7 @@ class A1SegmentationError(ValueError):
 class A1AngularMode(str, Enum):
     """Angular growth policies available to the A1 segmentation pass."""
 
-    LEGACY_SEED_CONE = "LEGACY_SEED_CONE"
+    SEED_CONE = "SEED_CONE"
     SEED_CONE_AND_LOCAL_DIHEDRAL = "SEED_CONE_AND_LOCAL_DIHEDRAL"
 
 
@@ -82,8 +81,8 @@ def _resolve_local_angle_limit(
     resolved = float(value)
     if resolved < 0.0 or resolved > 180.0:
         raise ValueError("local_angle_limit_degrees must be in the range [0, 180]")
-    # Validate the value even in legacy mode so a later mode switch cannot reveal
-    # a dormant invalid setting. Legacy behavior itself does not consume it.
+    # Validate the value even in seed-cone mode so a later mode switch cannot
+    # reveal a dormant invalid setting. Seed-cone behavior itself does not use it.
     if not isinstance(angular_mode, A1AngularMode):
         raise TypeError("angular_mode must be A1AngularMode")
     return resolved
@@ -109,9 +108,8 @@ def _seed_normal_groups(
         seed_normal = seed_face.normal
         seed_material = seed_face.material_index
 
-        # The legacy code skipped zero-length normals entirely, which could drop
-        # faces from export. A valid rewrite must never lose geometry, so an
-        # invalid-normal face becomes its own deterministic segment.
+        # Invalid normals must never make geometry disappear. A face whose normal
+        # cannot be compared becomes its own deterministic segment.
         if _normal_angle_degrees(seed_normal, seed_normal) is None:
             remaining.remove(seed_id)
             groups.append((seed_id,))
@@ -190,20 +188,19 @@ def segment_mesh_a1(
     snapshot: MeshSnapshot,
     settings: SegmentationSettings | None = None,
     *,
-    angular_mode: A1AngularMode | str = A1AngularMode.LEGACY_SEED_CONE,
+    angular_mode: A1AngularMode | str = A1AngularMode.SEED_CONE,
     local_angle_limit_degrees: float | None = None,
 ) -> SegmentationPlan:
     """Segment a snapshot using deterministic A1 seed-cone semantics.
 
-    ``LEGACY_SEED_CONE`` is the default and preserves the existing A1 output:
-    every candidate is compared only with the seed normal. The optional
-    ``SEED_CONE_AND_LOCAL_DIHEDRAL`` mode additionally requires each traversed
-    face edge to satisfy ``local_angle_limit_degrees`` (or the global angle limit
-    when no separate local limit is supplied).
+    ``SEED_CONE`` is the default: every candidate is compared only with the
+    seed normal. ``SEED_CONE_AND_LOCAL_DIHEDRAL`` additionally requires each
+    traversed face edge to satisfy ``local_angle_limit_degrees`` or the global
+    angle limit when no separate local limit is supplied.
 
-    Non-angular boundaries are calculated by :func:`segment_mesh`. Each resulting
-    primary component is then partitioned by the selected angular policy. Every
-    face is assigned exactly once.
+    Non-angular boundaries are calculated by :func:`segment_mesh`. Each
+    resulting primary component is then partitioned by the selected angular
+    policy. Every face is assigned exactly once.
     """
 
     MeshSnapshotValidator().validate_or_raise(snapshot)
