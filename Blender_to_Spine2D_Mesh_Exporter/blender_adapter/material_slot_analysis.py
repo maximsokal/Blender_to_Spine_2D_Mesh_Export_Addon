@@ -1,10 +1,11 @@
-"""Analyze one Blender material slot into the immutable baking domain."""
+"""Analyze one Blender 5.2+ material slot into the immutable baking domain."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from ..domain.baking import MaterialAnalysis, MaterialKind
+from .material_analysis_error import MaterialAnalysisError
 from .material_analysis_rna import (
     material_name,
     material_root_nodes,
@@ -20,7 +21,7 @@ def analyse_material_slot(
     *,
     render_target: str | None = None,
 ) -> MaterialAnalysis:
-    """Analyze one Blender material slot without modifying its material."""
+    """Analyze one Blender 5.2+ material slot without modifying its material."""
 
     if not isinstance(slot_index, int) or slot_index < 0:
         raise ValueError("slot_index must be a non-negative integer")
@@ -34,13 +35,10 @@ def analyse_material_slot(
 
     resolved_material_name = material_name(material)
     node_tree = getattr(material, "node_tree", None)
-    use_nodes = bool(getattr(material, "use_nodes", node_tree is not None))
-    if not use_nodes or node_tree is None:
-        return MaterialAnalysis(
-            slot_index=slot_index,
-            material_name=resolved_material_name,
-            kind=MaterialKind.SOLID_COLOR,
-            issues=("Material has no node tree; diffuse_color fallback is required",),
+    if node_tree is None:
+        raise MaterialAnalysisError(
+            f"Material '{resolved_material_name}' has no node tree; "
+            "Blender 5.2+ materials must expose a valid node graph"
         )
 
     root_nodes = material_root_nodes(
