@@ -40,7 +40,7 @@ class A1GeometryPreparationSettings:
     segmentation: SegmentationSettings = SegmentationSettings()
     decomposition: DecompositionSettings = DecompositionSettings()
     triangulation: TriangulationSettings = TriangulationSettings()
-    angular_mode: A1AngularMode = A1AngularMode.LEGACY_SEED_CONE
+    angular_mode: A1AngularMode = A1AngularMode.SEED_CONE
     local_angle_limit_degrees: float | None = None
 
     def __post_init__(self) -> None:
