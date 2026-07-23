@@ -228,20 +228,28 @@ def _resolve_generated_material_pattern(
 
 
 def _resolve_generated_gray_color(scene: Any) -> ColorRGBA:
+    """Read RGB Scene RNA and normalize legacy RGBA values to opaque RGBA."""
+
     raw = getattr(
         scene,
         "spine2d_generated_gray_color",
-        _DEFAULT_GENERATED_GRAY,
+        _DEFAULT_GENERATED_GRAY[:3],
     )
     try:
-        values = tuple(raw[index] for index in range(4))
+        values = tuple(raw)
     except Exception as exc:
         raise ValueError(
-            "spine2d_generated_gray_color must contain four numeric values"
+            "spine2d_generated_gray_color must contain three numeric RGB values"
         ) from exc
 
+    if len(values) not in {3, 4}:
+        raise ValueError(
+            "spine2d_generated_gray_color must contain three RGB values "
+            "(legacy four-component values are also accepted)"
+        )
+
     resolved: list[float] = []
-    for index, value in enumerate(values):
+    for index, value in enumerate(values[:3]):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise TypeError(
                 f"spine2d_generated_gray_color[{index}] must be numeric"
@@ -256,11 +264,7 @@ def _resolve_generated_gray_color(scene: Any) -> ColorRGBA:
                 f"spine2d_generated_gray_color[{index}] must be in [0, 1]"
             )
         resolved.append(numeric)
-    if resolved[3] != 1.0:
-        raise ValueError(
-            "spine2d_generated_gray_color[3] must be 1.0 for opaque generated textures"
-        )
-    return tuple(resolved)
+    return resolved[0], resolved[1], resolved[2], 1.0
 
 
 def _capture_scene_profile(
