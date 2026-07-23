@@ -69,6 +69,20 @@ def test_rewrite_does_not_use_retired_mesh_edge_flags():
     assert _occurrences(".use_edge_sharp") == ()
 
 
+def test_rewrite_does_not_use_legacy_mesh_color_normal_or_tessface_api():
+    forbidden = (
+        ".vertex_colors",
+        ".uv_textures",
+        ".tessfaces",
+        ".use_auto_smooth",
+        ".calc_normals(",
+        ".calc_normals_split(",
+        ".calc_tessface(",
+    )
+    for token in forbidden:
+        assert _occurrences(token) == (), token
+
+
 def test_rewrite_does_not_use_legacy_uv_loop_data_coordinates():
     assert _occurrences("uv_layers.active.data") == ()
     assert _occurrences("layer.data[mesh_loop_index].uv") == ()
@@ -78,6 +92,13 @@ def test_rewrite_does_not_use_legacy_uv_loop_data_coordinates():
 def test_rewrite_does_not_use_old_node_tree_group_interface_collections():
     assert _occurrences("node_tree.inputs") == ()
     assert _occurrences("node_tree.outputs") == ()
+
+
+def test_rewrite_does_not_use_removed_opengl_or_old_operator_override_surface():
+    assert _occurrences("import bgl") == ()
+    assert _occurrences("from bgl import") == ()
+    assert _occurrences(".cycles_visibility") == ()
+    assert _occurrences("bpy.context.copy()") == ()
 
 
 def test_extension_entry_point_contains_no_legacy_metadata_or_uninstall_ops():
