@@ -41,6 +41,7 @@ if bpy is not None:
     install_legacy_multi_facade()
 
     from . import addon_preferences, single_object_operator, ui
+    from .blender_adapter import generated_material_ui
     from .infrastructure.blender_registration import (
         RegistrationCleanupAction,
         RnaPropertyRegistration,
@@ -62,7 +63,12 @@ if bpy is not None:
 
     # Only modules that own live Blender classes/properties are imported during add-on startup.
     # Legacy implementation modules are loaded by ``legacy_loader`` only after explicit Legacy use.
-    MODULES = (addon_preferences, ui, single_object_operator)
+    MODULES = (
+        addon_preferences,
+        ui,
+        generated_material_ui,
+        single_object_operator,
+    )
 
     CONFIG_RNA_PROPERTIES = tuple(
         RnaPropertyRegistration(
@@ -103,6 +109,11 @@ if bpy is not None:
             "UI",
             ui.register,
             ui.unregister,
+        ),
+        (
+            "generated material UI",
+            generated_material_ui.register,
+            generated_material_ui.unregister,
         ),
         (
             "single-object operator",
