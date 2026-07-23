@@ -13,14 +13,14 @@ class RenderEngineContractError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class RenderEngineContract:
-    """One immutable Blender engine and ShaderNodeTree output target."""
+    """One immutable Blender 5.2+ engine and ShaderNodeTree output target."""
 
     blender_engine: str
     shader_target: str
 
     def __post_init__(self) -> None:
-        if self.blender_engine not in {"CYCLES", "BLENDER_EEVEE_NEXT"}:
-            raise ValueError("blender_engine must be CYCLES or BLENDER_EEVEE_NEXT")
+        if self.blender_engine not in {"CYCLES", "BLENDER_EEVEE"}:
+            raise ValueError("blender_engine must be CYCLES or BLENDER_EEVEE")
         if self.shader_target not in {"CYCLES", "EEVEE"}:
             raise ValueError("shader_target must be CYCLES or EEVEE")
         expected_target = "CYCLES" if self.blender_engine == "CYCLES" else "EEVEE"
@@ -43,7 +43,7 @@ class RenderEngineContract:
 
 
 def render_engine_contract(value: str) -> RenderEngineContract:
-    """Normalize Blender and ShaderNodeTree engine identifiers."""
+    """Normalize Blender 5.2+ and ShaderNodeTree renderer identifiers."""
 
     if not isinstance(value, str) or not value.strip():
         raise ValueError("render engine must be a non-empty string")
@@ -51,9 +51,9 @@ def render_engine_contract(value: str) -> RenderEngineContract:
     if "CYCLE" in normalized:
         return RenderEngineContract("CYCLES", "CYCLES")
     if "EEVEE" in normalized:
-        return RenderEngineContract("BLENDER_EEVEE_NEXT", "EEVEE")
+        return RenderEngineContract("BLENDER_EEVEE", "EEVEE")
     raise RenderEngineContractError(
-        f"unsupported Blender render engine for texture export: {value!r}"
+        f"unsupported Blender 5.2+ render engine for texture export: {value!r}"
     )
 
 
