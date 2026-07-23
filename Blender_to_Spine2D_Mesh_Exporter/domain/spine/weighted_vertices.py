@@ -58,8 +58,17 @@ class WeightedVertex:
 def encode_weighted_vertices(vertices: Iterable[WeightedVertex]) -> Tuple[float | int, ...]:
     """Encode typed weighted vertices into Spine's compact numeric stream."""
 
+    if isinstance(vertices, (str, bytes, bytearray, memoryview)):
+        raise TypeError("vertices must be an iterable of WeightedVertex values")
+    try:
+        iterator = iter(vertices)
+    except TypeError as exc:
+        raise TypeError(
+            "vertices must be an iterable of WeightedVertex values"
+        ) from exc
+
     encoded: list[float | int] = []
-    for vertex_index, vertex in enumerate(vertices):
+    for vertex_index, vertex in enumerate(iterator):
         if not isinstance(vertex, WeightedVertex):
             raise TypeError(f"vertices[{vertex_index}] must be WeightedVertex")
         encoded.append(len(vertex.influences))
