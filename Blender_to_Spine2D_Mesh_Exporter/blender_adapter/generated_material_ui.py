@@ -46,7 +46,7 @@ class SPINE2D_OT_ResetGeneratedMaterials(bpy.types.Operator):
             GENERATED_MATERIAL_PATTERN_PROPERTY,
             A1GeneratedMaterialPattern.SOLID_GRAY.value,
         )
-        setattr(scene, GENERATED_GRAY_COLOR_PROPERTY, (0.5, 0.5, 0.5, 1.0))
+        setattr(scene, GENERATED_GRAY_COLOR_PROPERTY, (0.5, 0.5, 0.5))
         self.report({"INFO"}, "Generated material settings have been reset.")
         return {"FINISHED"}
 
@@ -207,10 +207,10 @@ RNA_PROPERTIES = (
         name=GENERATED_GRAY_COLOR_PROPERTY,
         value=bpy.props.FloatVectorProperty(
             name="Generated Gray",
-            description="Opaque fallback color used by Solid Gray",
+            description="Opaque fallback RGB used by Solid Gray",
             subtype="COLOR",
-            size=4,
-            default=(0.5, 0.5, 0.5, 1.0),
+            size=3,
+            default=(0.5, 0.5, 0.5),
             min=0.0,
             max=1.0,
         ),
