@@ -1,338 +1,226 @@
+"""Build and validate the Blender 5.2+ extension with Blender's official CLI."""
+
 from __future__ import annotations
 
-import ast
+import argparse
 import logging
-import pathlib
+import os
+from pathlib import Path
 import shutil
+import subprocess
 import sys
-import tempfile
-from dataclasses import dataclass
-from typing import Union
-
-import libcst as cst
-import libcst.matchers as m
-from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
-from libcst.metadata import MetadataWrapper, ParentNodeProvider
+import tomllib
 
 
-MODULE_NAME = "Blender_to_Spine2D_Mesh_Exporter"
-
-REQUIRES = ["black", "isort", "fake-bpy-module-4.1", "libcst"]
-
-CLEANER_SKIP = {}
-
-INCLUDE_ONLY = {
-    "uv_operations.py",
-    "utils.py",
-    "ui.py",
-    "texture_baker_integration.py",
-    "texture_baker.py",
-    "seam_marker.py",
-    "plane_cut.py",
-    "multi_object_export.py",
-    "main.py",
-    "json_merger.py",
-    "json_export.py",
-    "config.py",
-    "__init__.py",
-}
-ADDITIONAL_FILES = {"blender_manifest.toml"}
-
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-log = logging.getLogger("prepare_package")
+LOGGER = logging.getLogger("prepare_package")
+EXTENSION_DIRECTORY_NAME = "Blender_to_Spine2D_Mesh_Exporter"
+MINIMUM_BLENDER_VERSION = (5, 2, 0)
 
 
-@dataclass(slots=True)
-class Args:
-    src: pathlib.Path
-    out: pathlib.Path
+class PackageBuildError(RuntimeError):
+    """Raised when the Blender extension package cannot be validated or built."""
 
 
-def parse(argv: list[str]) -> Args:
-    import argparse
-
-    p = argparse.ArgumentParser()
-    p.add_argument("--src", type=pathlib.Path, required=True)
-    p.add_argument("--out", type=pathlib.Path, required=True)
-    ns = p.parse_args(argv)
-    return Args(ns.src.resolve(), ns.out.resolve())
-
-
-def patch_logging_levels(source: str) -> str:
-    import re
-
-    source = re.sub(r'("level"\s*:\s*")[A-Z]+(" )', r"\1ERROR\2", source, flags=re.I)
-    source = re.sub(
-        r"(basicConfig\s*\([^)]*level\s*=\s*logging\.)[A-Z]+",
-        r"\1ERROR",
-        source,
-        flags=re.I,
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Validate and build the Blender 5.2+ extension archive."
     )
+    parser.add_argument(
+        "--blender",
+        type=Path,
+        default=None,
+        help="Path to the Blender 5.2+ executable. Defaults to BLENDER_EXECUTABLE or PATH.",
+    )
+    parser.add_argument(
+        "--source-dir",
+        type=Path,
+        default=None,
+        help="Extension source directory containing __init__.py and blender_manifest.toml.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output .zip path. Defaults to dist/<id>-<version>.zip.",
+    )
+    return parser.parse_args(argv)
+
+
+def _resolve_blender_executable(explicit: Path | None) -> Path:
+    candidates: list[str] = []
+    if explicit is not None:
+        candidates.append(str(explicit.expanduser()))
+    environment = str(os.environ.get("BLENDER_EXECUTABLE", "") or "").strip()
+    if environment:
+        candidates.append(environment)
+    discovered = shutil.which("blender")
+    if discovered:
+        candidates.append(discovered)
+
+    for candidate in candidates:
+        path = Path(candidate).expanduser().resolve(strict=False)
+        if path.is_file():
+            return path
+    raise PackageBuildError(
+        "Blender 5.2+ executable was not found. Pass --blender, set "
+        "BLENDER_EXECUTABLE, or add Blender to PATH."
+    )
+
+
+def _resolve_source_directory(explicit: Path | None) -> Path:
+    repository_root = Path(__file__).resolve().parents[1]
+    source = (
+        explicit.expanduser().resolve(strict=False)
+        if explicit is not None
+        else repository_root / EXTENSION_DIRECTORY_NAME
+    )
+    if not source.is_dir():
+        raise PackageBuildError(f"Extension source directory does not exist: {source}")
+    for required_name in ("__init__.py", "blender_manifest.toml"):
+        required = source / required_name
+        if not required.is_file():
+            raise PackageBuildError(
+                f"Extension source is missing required file: {required}"
+            )
     return source
 
 
-def run_formatters(py_file: pathlib.Path) -> None:
-    import subprocess, sys, logging
-
-    for tool in ("isort", "black"):
-        cmd = [sys.executable, "-m", tool, str(py_file), "--quiet"]
-        try:
-            subprocess.check_call(cmd)
-        except FileNotFoundError:
-            logging.warning("[%s] not installed; skipping %s", tool, py_file.name)
-        except subprocess.CalledProcessError as exc:
-            logging.error("[%s] failed on %s: %s", tool, py_file.name, exc)
-
-
-class BlenderCSTCleaner(VisitorBasedCodemodCommand):
-    METADATA_DEPENDENCIES = (ParentNodeProvider,)
-
-    def __init__(self, context: CodemodContext):
-        super().__init__(context)
-        self.is_in_blender_class = False
-        self.is_in_register_func = False
-
-    def visit_ClassDef(self, node: cst.ClassDef) -> bool:
-        blender_types = (
-            "Operator",
-            "Panel",
-            "PropertyGroup",
-            "AddonPreferences",
-            "Menu",
-        )
-        for base in node.bases:
-            if m.matches(
-                base.value,
-                m.Attribute(
-                    value=m.Attribute(value=m.Name("bpy"), attr=m.Name("types"))
-                ),
-            ):
-                if (
-                    isinstance(base.value, cst.Attribute)
-                    and base.value.attr.value in blender_types
-                ):
-                    self.is_in_blender_class = True
-                    break
-        return True
-
-    def leave_ClassDef(
-        self, original_node: cst.ClassDef, updated_node: cst.ClassDef
-    ) -> cst.ClassDef:
-        self.is_in_blender_class = False
-        return updated_node
-
-    def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
-        if node.name.value in ("register", "unregister"):
-            self.is_in_register_func = True
-        return True
-
-    def leave_FunctionDef(
-        self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef
-    ) -> cst.FunctionDef:
-        self.is_in_register_func = False
-        return updated_node
-
-    @m.leave(m.SimpleStatementLine(body=[m.Expr(value=m.SimpleString())]))
-    def filter_docstring(
-        self,
-        original_node: cst.SimpleStatementLine,
-        updated_node: cst.SimpleStatementLine,
-    ) -> Union[cst.BaseStatement, cst.RemovalSentinel]:
-        parent = self.get_metadata(ParentNodeProvider, original_node)
-        is_module_level = isinstance(parent, cst.Module)
-
-        if self.is_in_blender_class or self.is_in_register_func or is_module_level:
-            return updated_node
-
-        if isinstance(parent, cst.IndentedBlock):
-            grandparent = self.get_metadata(ParentNodeProvider, parent)
-            if isinstance(grandparent, (cst.FunctionDef, cst.ClassDef)):
-                if grandparent.body.body and grandparent.body.body[0] == original_node:
-                    if self.is_in_blender_class or self.is_in_register_func:
-                        return updated_node
-
-        return cst.RemoveFromParent()
-
-    @m.leave(m.Assert())
-    def remove_asserts(
-        self, original_node: cst.Assert, updated_node: cst.Assert
-    ) -> cst.RemovalSentinel:
-        return cst.RemoveFromParent()
-
-    @m.leave(
-        m.Expr(
-            value=m.Call(
-                func=m.OneOf(m.Name("print"), m.Attribute(attr=m.Name("debug")))
-            )
-        )
-    )
-    def remove_debug_and_print_calls(
-        self, original_node: cst.Expr, updated_node: cst.Expr
-    ) -> Union[cst.Expr, cst.RemovalSentinel]:
-        return cst.RemoveFromParent()
-
-    @m.leave(m.EmptyLine(comment=m.Comment()))
-    def remove_comment_lines(
-        self, original_node: cst.EmptyLine, updated_node: cst.EmptyLine
-    ) -> cst.RemovalSentinel:
-        return cst.RemoveFromParent()
-
-
-def _validate_structure(source: str, filename: str):
+def _read_manifest(source: Path) -> dict[str, object]:
+    manifest_path = source / "blender_manifest.toml"
     try:
-        tree = ast.parse(source, filename=filename)
-    except SyntaxError as e:
-        log.error(f"AST parsing failed for {filename}: {e}")
-        raise
-
-    has_register = any(
-        isinstance(node, ast.FunctionDef) and node.name == "register"
-        for node in ast.walk(tree)
-    )
-    has_unregister = any(
-        isinstance(node, ast.FunctionDef) and node.name == "unregister"
-        for node in ast.walk(tree)
-    )
-
-    if not has_register and not has_unregister:
-        if filename != "__init__.py":
-            log.warning(
-                f"Structural warning in {filename}: No register() or unregister() function found."
-            )
-
-    blender_classes = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            for base in node.bases:
-                if (
-                    isinstance(base, ast.Attribute)
-                    and isinstance(base.value, ast.Attribute)
-                    and isinstance(base.value.value, ast.Name)
-                    and base.value.value.id == "bpy"
-                    and base.value.attr == "types"
-                ):
-                    blender_classes.append(node.name)
-
-    if not blender_classes and filename not in (
-        "utils.py",
-        "config.py",
-        "__init__.py",
-    ):
-        log.warning(
-            f"Structural warning in {filename}: No Blender-specific classes (Operator, Panel, etc.) found."
-        )
-
-
-def process_file(src_path: pathlib.Path, dst_path: pathlib.Path) -> None:
-    log.info(f"Processing: {src_path.name}")
-    run_formatters(src_path)
-    raw_source = src_path.read_text(encoding="utf-8")
-
-    log.info(f"1. Validating original source: {src_path.name}")
-    try:
-        compile(raw_source, f"<raw> {src_path.name}", "exec")
-        _validate_structure(raw_source, src_path.name)
-        log.info("   ✅ Original source is valid.")
+        with manifest_path.open("rb") as stream:
+            manifest = tomllib.load(stream)
     except Exception as exc:
-        log.error(f"   ❌ Initial validation FAILED for {src_path.name}: {exc}")
-        raise
+        raise PackageBuildError(f"Unable to read {manifest_path}: {exc}") from exc
 
-    cleaned_source = raw_source
-    if src_path.name not in CLEANER_SKIP:
-        log.info(f"2. Cleaning with BlenderCSTCleaner: {src_path.name}")
-        try:
-            tree = cst.parse_module(raw_source)
-            wrapper = MetadataWrapper(tree)
-            context = cst.codemod.CodemodContext()
-            cleaner = BlenderCSTCleaner(context)
-            modified_tree = wrapper.visit(cleaner)
-            cleaned_source = modified_tree.code
-            log.info("   ✅ Successfully cleaned.")
-        except Exception as e:
-            log.warning(
-                f"   ⚠️ LibCST failed on {src_path.name}: {e}. Using raw source."
-            )
-            cleaned_source = raw_source
+    minimum = str(manifest.get("blender_version_min", "") or "").strip()
+    if minimum != "5.2.0":
+        raise PackageBuildError(
+            "blender_manifest.toml must declare blender_version_min = \"5.2.0\"; "
+            f"found {minimum!r}"
+        )
+    for key in ("id", "version"):
+        value = str(manifest.get(key, "") or "").strip()
+        if not value:
+            raise PackageBuildError(f"Manifest field {key!r} must be non-empty")
+    return manifest
+
+
+def _resolve_output_path(
+    explicit: Path | None,
+    manifest: dict[str, object],
+) -> Path:
+    repository_root = Path(__file__).resolve().parents[1]
+    if explicit is None:
+        extension_id = str(manifest["id"])
+        version = str(manifest["version"])
+        output = repository_root / "dist" / f"{extension_id}-{version}.zip"
     else:
-        log.info(f"2. Skipping cleaning for {src_path.name}.")
+        output = explicit.expanduser().resolve(strict=False)
+    if output.suffix.casefold() != ".zip":
+        raise PackageBuildError(f"Output path must end with .zip: {output}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    return output
 
-    final_source = patch_logging_levels(cleaned_source)
 
-    log.info(f"3. Validating final source: {src_path.name}")
+def _run_command(command: list[str], *, label: str) -> None:
+    LOGGER.info("%s: %s", label, subprocess.list2cmdline(command))
     try:
-        compile(final_source, src_path.name, "exec")
-        _validate_structure(final_source, src_path.name)
-        log.info("   ✅ Final source is valid.")
-    except Exception as exc:
-        log.error(f"   ❌ Final validation FAILED for {src_path.name}: {exc}")
-        raise
-
-    dst_path.write_text(final_source, encoding="utf-8")
-
-
-def main():
-    log.info("--- Running full cleanup before build ---")
-    project_root = pathlib.Path(__file__).parent.parent
-    for folder_name in ("build", "dist"):
-        folder_path = project_root / folder_name
-        if folder_path.exists():
-            log.info(f"Removing folder: {folder_path}")
-            shutil.rmtree(folder_path, ignore_errors=True)
-    temp_dir = pathlib.Path(tempfile.gettempdir())
-    for item in temp_dir.iterdir():
-        if item.is_dir() and item.name.startswith("pkg_tmp_"):
-            log.info(f"Removing temp build folder: {item}")
-            shutil.rmtree(item, ignore_errors=True)
-    log.info("--- Cleanup finished ---")
-
-    args = parse(sys.argv[1:])
-    tmp = pathlib.Path(tempfile.mkdtemp(prefix="pkg_tmp_"))
-
-    module_source_dir = args.src / MODULE_NAME
-    if not module_source_dir.is_dir():
-        log.error(f"Source module directory not found: {module_source_dir}")
-        sys.exit(1)
-
-    try:
-        target_dir_in_tmp = tmp / MODULE_NAME
-        target_dir_in_tmp.mkdir()
-        log.info(f"Created temporary subdirectory: {target_dir_in_tmp}")
-
-        log.info(
-            f"Copying source files from {module_source_dir} to {target_dir_in_tmp}"
+        completed = subprocess.run(
+            command,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
-        files_to_copy = INCLUDE_ONLY | ADDITIONAL_FILES
-        copied_py_files = []
-
-        for filename in files_to_copy:
-            src_file = module_source_dir / filename
-            if src_file.exists():
-                dest_file = target_dir_in_tmp / filename
-                shutil.copy2(src_file, dest_file)
-                if dest_file.suffix == ".py":
-                    copied_py_files.append(dest_file)
-            else:
-                log.warning(f"Source file not found, skipping: {src_file}")
-
-        for py_file in copied_py_files:
-            process_file(py_file, py_file)
-
-        log.info(f"Creating archive: {args.out}")
-        archive_base_name = args.out.with_suffix("")
-
-        shutil.make_archive(
-            base_name=str(archive_base_name),
-            format="zip",
-            root_dir=tmp,
-            base_dir=MODULE_NAME,
+    except OSError as exc:
+        raise PackageBuildError(f"Unable to execute {label}: {exc}") from exc
+    if completed.stdout:
+        LOGGER.info("%s", completed.stdout.rstrip())
+    if completed.returncode != 0:
+        raise PackageBuildError(
+            f"{label} failed with exit code {completed.returncode}"
         )
 
-        log.info(f"Successfully created {args.out}")
 
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-        log.info("Build finished.")
+def _validate_blender_version(blender: Path) -> None:
+    command = [str(blender), "--background", "--python-expr", (
+        "import bpy,sys; "
+        "version=tuple(bpy.app.version[:3]); "
+        "print('BLENDER_VERSION=' + '.'.join(map(str, version))); "
+        "sys.exit(0 if version >= (5, 2, 0) else 9)"
+    )]
+    _run_command(command, label="Blender 5.2 runtime validation")
+
+
+def build_extension(
+    *,
+    blender: Path,
+    source: Path,
+    output: Path,
+) -> Path:
+    """Validate source and build one extension archive without mutating source files."""
+
+    _validate_blender_version(blender)
+    _run_command(
+        [
+            str(blender),
+            "--command",
+            "extension",
+            "validate",
+            str(source),
+        ],
+        label="Extension manifest validation",
+    )
+    if output.exists():
+        try:
+            output.unlink()
+        except OSError as exc:
+            raise PackageBuildError(
+                f"Unable to replace existing archive {output}: {exc}"
+            ) from exc
+    _run_command(
+        [
+            str(blender),
+            "--command",
+            "extension",
+            "build",
+            "--source-dir",
+            str(source),
+            "--output-filepath",
+            str(output),
+        ],
+        label="Extension package build",
+    )
+    if not output.is_file() or output.stat().st_size <= 0:
+        raise PackageBuildError(
+            f"Blender reported success but no non-empty archive was created: {output}"
+        )
+    return output
+
+
+def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    try:
+        blender = _resolve_blender_executable(args.blender)
+        source = _resolve_source_directory(args.source_dir)
+        manifest = _read_manifest(source)
+        output = _resolve_output_path(args.output, manifest)
+        built = build_extension(
+            blender=blender,
+            source=source,
+            output=output,
+        )
+        LOGGER.info("Blender 5.2+ extension archive created: %s", built)
+        return 0
+    except PackageBuildError:
+        LOGGER.exception("Extension package build failed")
+        return 1
+    except Exception:
+        LOGGER.exception("Unexpected extension package build failure")
+        return 2
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
