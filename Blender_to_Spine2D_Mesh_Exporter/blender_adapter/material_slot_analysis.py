@@ -1,4 +1,4 @@
-"""Analyze one Blender 5.2+ material slot into the immutable baking domain."""
+"""Analyze one Blender 5.2 material slot into the immutable baking domain."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from .material_analysis_error import MaterialAnalysisError
 from .material_analysis_rna import (
     material_name,
     material_root_nodes,
-    resolve_render_target,
+    require_render_target,
 )
 from .material_graph_resolution import resolve_material_graph
 from .material_node_classification import classify_material_nodes
@@ -20,12 +20,13 @@ def analyse_material_slot(
     slot_index: int,
     material: Any | None,
     *,
-    render_target: str | None = None,
+    render_target: str,
 ) -> MaterialAnalysis:
-    """Analyze one Blender 5.2+ material slot without modifying its material."""
+    """Analyze one Blender 5.2 material slot for one explicit renderer target."""
 
     if not isinstance(slot_index, int) or isinstance(slot_index, bool) or slot_index < 0:
         raise ValueError("slot_index must be a non-negative integer")
+    target = require_render_target(render_target)
     if material is None:
         return MaterialAnalysis(
             slot_index=slot_index,
@@ -47,7 +48,6 @@ def analyse_material_slot(
             material,
             resolved_name=resolved_material_name,
         )
-        target = resolve_render_target(render_target)
         graph_resolution = resolve_material_graph(
             material,
             root_nodes,
@@ -62,12 +62,13 @@ def analyse_material_slot(
     except MaterialGraphAnalysisError as exc:
         raise MaterialAnalysisError(
             f"Unable to analyze material '{resolved_material_name}' for slot "
-            f"{slot_index}: {exc}"
+            f"{slot_index} and target '{target}': {exc}"
         ) from exc
     except Exception as exc:
         raise MaterialAnalysisError(
             f"Unexpected Blender 5.2 material analysis failure for "
-            f"'{resolved_material_name}' in slot {slot_index}: {exc}"
+            f"'{resolved_material_name}' in slot {slot_index} and target "
+            f"'{target}': {exc}"
         ) from exc
 
     issues = tuple(
