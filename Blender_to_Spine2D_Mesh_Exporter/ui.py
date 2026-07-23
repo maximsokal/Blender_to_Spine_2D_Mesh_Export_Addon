@@ -1,12 +1,11 @@
-# ui.py
 # pylint: disable=import-error
-"""Blender UI and operators for the Spine2D mesh exporter."""
+"""Blender 5.2+ Rewrite UI and multi-object export operator."""
 
 from __future__ import annotations
 
 import logging
 import os
-from typing import Set
+from typing import Callable, Set
 
 import bpy
 
@@ -20,33 +19,13 @@ from .infrastructure.blender_registration import (
     rna_property_cleanup_actions,
     unregister_all_best_effort,
 )
-from .multi_object_export import export_selected_objects
+
 
 logger = logging.getLogger(__name__)
-logger.debug("[LOG] Loading ui.py")
-
-MULTI_BACKEND_PROPERTY = "spine2d_multi_export_backend"
-DEFAULT_MULTI_BACKEND = "REWRITE"
-_MULTI_BACKENDS = frozenset({"REWRITE", "LEGACY"})
-
-
-def resolve_multi_backend(scene: bpy.types.Scene) -> str:
-    """Resolve the multi-object backend and fail closed to Rewrite."""
-
-    raw_value = getattr(scene, MULTI_BACKEND_PROPERTY, DEFAULT_MULTI_BACKEND)
-    backend = str(raw_value).strip().upper()
-    if backend in _MULTI_BACKENDS:
-        return backend
-    logger.warning(
-        "Unknown multi export backend %r; using %s",
-        raw_value,
-        DEFAULT_MULTI_BACKEND,
-    )
-    return DEFAULT_MULTI_BACKEND
 
 
 class SPINE2D_OT_ResetSettings(bpy.types.Operator):
-    """Resets the addon settings to their default values."""
+    """Reset Rewrite export settings to their defaults."""
 
     bl_idname = "spine2d.reset_settings"
     bl_label = "Reset Spine2D Settings"
@@ -57,61 +36,72 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene = context.scene
             scene.spine2d_texture_size = 1024
             scene.spine2d_json_path = get_default_output_dir()
-            scene.spine2d_images_path = "./images/"
+            scene.spine2d_images_path = "images/"
             scene.spine2d_control_icons = True
             scene.spine2d_export_preview_animation = True
-            setattr(scene, MULTI_BACKEND_PROPERTY, DEFAULT_MULTI_BACKEND)
             scene.spine2d_angle_limit = 30
             scene.spine2d_angular_mode = "LEGACY_SEED_CONE"
             scene.spine2d_local_angle_limit = 30.0
             scene.spine2d_seam_maker_mode = "AUTO"
             scene.spine2d_frames_for_render = 0
             scene.spine2d_bake_frame_start = 0
-            self.report({"INFO"}, "Spine2D settings have been reset.")
+            self.report({"INFO"}, "Spine2D Rewrite settings have been reset.")
             return {"FINISHED"}
         except Exception as exc:
-            logger.exception("[UI] Reset failed")
+            logger.exception("Unable to reset Spine2D Rewrite settings")
             self.report({"ERROR"}, f"Reset error: {exc}")
             return {"CANCELLED"}
 
 
 class OBJECT_OT_Spine2DRefreshInfo(bpy.types.Operator):
-    """Recalculates and caches expensive UI data."""
+    """Recalculate and cache object information displayed by the panel."""
 
     bl_idname = "object.spine2d_refresh_info"
     bl_label = "Refresh Object Info"
 
     @classmethod
     def poll(cls, context: bpy.types.Context) -> bool:
-        return bool(context.active_object and context.active_object.type == "MESH")
+        active = context.active_object
+        return bool(active is not None and active.type == "MESH")
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
         obj = context.active_object
-        if obj is None:
+        if obj is None or obj.type != "MESH" or obj.data is None:
+            self.report({"ERROR"}, "A valid active Mesh object is required")
             return {"CANCELLED"}
+        try:
+            obj["_spine2d_vertex_count"] = len(obj.data.vertices)
+            inverted, correct = OBJECT_PT_Spine2DMeshPanel._face_orientation_stats(obj)
+            obj["_spine2d_face_stats"] = {
+                "inverted": inverted,
+                "correct": correct,
+            }
 
-        obj["_spine2d_vertex_count"] = len(obj.data.vertices)
-        inverted, correct = OBJECT_PT_Spine2DMeshPanel._face_orientation_stats(obj)
-        obj["_spine2d_face_stats"] = {"inverted": inverted, "correct": correct}
-
-        for material in obj.data.materials:
-            if material is None:
-                continue
-            try:
-                if hasattr(material, "preview_ensure"):
+            for material in obj.data.materials:
+                if material is None:
+                    continue
+                icon_id = 0
+                try:
                     material.preview_ensure()
-                preview = getattr(material, "preview", None)
-                material["_spine2d_icon_id"] = getattr(preview, "icon_id", 0) or 0
-            except Exception:
-                logger.exception("[UI] Material preview failed for %s", material.name)
-                material["_spine2d_icon_id"] = 0
+                    preview = material.preview
+                    icon_id = int(getattr(preview, "icon_id", 0) or 0)
+                except Exception:
+                    logger.exception(
+                        "Unable to generate material preview for '%s'",
+                        material.name,
+                    )
+                material["_spine2d_icon_id"] = icon_id
 
-        self.report({"INFO"}, "Object info cache has been updated.")
-        return {"FINISHED"}
+            self.report({"INFO"}, "Object info cache has been updated.")
+            return {"FINISHED"}
+        except Exception as exc:
+            logger.exception("Unable to refresh Spine2D object information")
+            self.report({"ERROR"}, f"Refresh error: {exc}")
+            return {"CANCELLED"}
 
 
 class Spine2DConnectSettings(bpy.types.PropertyGroup):
-    """Per-object setting for the connected multi-object subgroup."""
+    """Per-object setting for the connected Rewrite multi-object subgroup."""
 
     enabled: bpy.props.BoolProperty(
         name="Connect",
@@ -121,7 +111,7 @@ class Spine2DConnectSettings(bpy.types.PropertyGroup):
 
 
 class Spine2DBakeSettings(bpy.types.PropertyGroup):
-    """Per-object sequence-baking settings."""
+    """Per-object Rewrite sequence-baking settings."""
 
     frames_for_render: bpy.props.IntProperty(
         name="Frames for render",
@@ -138,6 +128,8 @@ class Spine2DBakeSettings(bpy.types.PropertyGroup):
 
 
 class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
+    """Main Blender 5.2+ Rewrite exporter panel."""
+
     bl_label = "Blender to Spine2D Mesh Exporter"
     bl_idname = "OBJECT_PT_spine2d_mesh"
     bl_space_type = "VIEW_3D"
@@ -145,121 +137,41 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
     bl_category = "Blender to Spine2D Mesh Exporter"
 
     @staticmethod
-    def _scale_applied(obj: bpy.types.Object, tol: float = 1e-4) -> bool:
-        return all(abs(value - 1.0) < tol for value in obj.scale)
-
-    def draw(self, context: bpy.types.Context) -> None:
-        layout = self.layout
-        scene = context.scene
-        obj = context.active_object
-
-        try:
-            if not bpy.data.filepath:
-                layout.label(text="Blend file not saved!", icon="ERROR")
-                layout.label(text="Please save your .blend first.")
-                layout.enabled = False
-                return
-
-            header = layout.row(align=True)
-            header.label(text="Settings:")
-            header.operator("spine2d.reset_settings", text="Reset")
-
-            self._draw_foldout(
-                layout,
-                scene,
-                prop_name="spine2d_show_settings",
-                title="Export",
-                draw_content=self._draw_export_settings,
-            )
-            self._draw_foldout(
-                layout,
-                scene,
-                prop_name="spine2d_show_cut_settings",
-                title="Cut",
-                draw_content=self._draw_cut_settings,
-            )
-            self._draw_foldout(
-                layout,
-                scene,
-                prop_name="spine2d_show_bake_settings",
-                title="Bake",
-                draw_content=self._draw_bake_settings,
-            )
-
-            layout.separator()
-            info_box = layout.box()
-            row = info_box.row(align=True)
-            row.label(text="Info:")
-            row.operator(
-                "object.spine2d_refresh_info",
-                text="Refresh",
-                icon="FILE_REFRESH",
-            )
-            export_allowed = self._populate_info_box(info_box, obj)
-
-            row = layout.row()
-            row.enabled = export_allowed
-            selected_meshes = [
-                candidate
-                for candidate in context.selected_objects
-                if candidate.type == "MESH"
-            ]
-            if len(selected_meshes) <= 1:
-                row.operator("object.save_uv_as_json", text="Export Current Object")
-            else:
-                row.operator(
-                    "object.spine2d_multi_export",
-                    text="Export Selected Objects",
-                )
-        except Exception:
-            logger.exception("[ERROR in draw panel]")
-            layout.label(text="UI error (see console)", icon="ERROR")
-
-    def _populate_info_box(
-        self,
-        box: bpy.types.UILayout,
-        obj: bpy.types.Object,
-    ) -> bool:
-        if obj is None:
-            box.label(text="No active object", icon="ERROR")
-            return False
-        if obj.type != "MESH":
-            box.label(text="Active object is not a Mesh", icon="ERROR")
-            return False
-
-        vertex_count = obj.get("_spine2d_vertex_count")
-        if vertex_count is None:
-            box.label(text="Vertex count: Press Refresh", icon="QUESTION")
-        else:
-            box.label(text=f"Vertex count: {vertex_count}", icon="INFO")
-
-        export_ok = True
-        if not self._scale_applied(obj):
-            box.label(
-                text="Scale is not applied (Apply > All Transforms)",
-                icon="ERROR",
-            )
-            export_ok = False
-
-        self._list_materials(box, obj)
-        stats = obj.get("_spine2d_face_stats")
-        if stats:
-            inverted = int(stats.get("inverted", 0))
-            correct = int(stats.get("correct", 0))
-            if inverted == 0:
-                box.label(text="All faces oriented correctly", icon="INFO")
-            else:
-                box.label(
-                    text=f"Inverted faces: {inverted} / {inverted + correct}",
-                    icon="ERROR",
-                )
-        else:
-            box.label(text="Face orientation: Press Refresh", icon="QUESTION")
-        return export_ok
+    def _scale_applied(obj: bpy.types.Object, tolerance: float = 1e-4) -> bool:
+        return all(abs(float(value) - 1.0) < tolerance for value in obj.scale)
 
     @staticmethod
-    def _list_materials(box: bpy.types.UILayout, obj: bpy.types.Object) -> None:
-        materials = [material for material in obj.data.materials if material]
+    def _face_orientation_stats(obj: bpy.types.Object) -> tuple[int, int]:
+        try:
+            mesh = obj.data
+            matrix_world = obj.matrix_world
+            normal_matrix = matrix_world.to_3x3().inverted_safe().transposed()
+            origin = matrix_world.translation
+            inverted = 0
+            correct = 0
+            for polygon in mesh.polygons:
+                center_world = matrix_world @ polygon.center
+                normal_world = (normal_matrix @ polygon.normal).normalized()
+                direction = center_world - origin
+                if direction.length_squared <= 1e-16:
+                    continue
+                if direction.normalized().dot(normal_world) < 0.0:
+                    inverted += 1
+                else:
+                    correct += 1
+            return inverted, correct
+        except Exception:
+            logger.exception("Unable to calculate face orientation statistics")
+            return 0, 0
+
+    @staticmethod
+    def _list_materials(
+        box: bpy.types.UILayout,
+        obj: bpy.types.Object,
+    ) -> None:
+        materials = tuple(
+            material for material in getattr(obj.data, "materials", ()) if material
+        )
         if not materials:
             box.label(text="No materials", icon="ERROR")
             return
@@ -274,52 +186,78 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             else:
                 row.label(text=material.name, icon="MATERIAL")
 
-    @staticmethod
-    def _face_orientation_stats(obj: bpy.types.Object) -> tuple[int, int]:
-        try:
-            mesh = obj.data
-            matrix_world = obj.matrix_world
-            matrix_3x3 = matrix_world.to_3x3()
-            origin = matrix_world.translation
-            inverted = 0
-            correct = 0
-            for polygon in mesh.polygons:
-                center_world = matrix_world @ polygon.center
-                normal_world = (matrix_3x3 @ polygon.normal).normalized()
-                direction = center_world - origin
-                if direction.length == 0.0:
-                    continue
-                if direction.normalized().dot(normal_world) < 0:
-                    inverted += 1
-                else:
-                    correct += 1
-            return inverted, correct
-        except Exception:
-            logger.exception("[_face_orientation_stats] failed")
-            return 0, 0
+    def _populate_info_box(
+        self,
+        box: bpy.types.UILayout,
+        obj: bpy.types.Object | None,
+    ) -> bool:
+        if obj is None:
+            box.label(text="No active object", icon="ERROR")
+            return False
+        if obj.type != "MESH" or obj.data is None:
+            box.label(text="Active object is not a valid Mesh", icon="ERROR")
+            return False
+
+        vertex_count = obj.get("_spine2d_vertex_count")
+        if vertex_count is None:
+            box.label(text="Vertex count: Press Refresh", icon="QUESTION")
+        else:
+            box.label(text=f"Vertex count: {vertex_count}", icon="INFO")
+
+        export_allowed = True
+        if not self._scale_applied(obj):
+            box.label(
+                text="Scale is not applied (Apply > All Transforms)",
+                icon="ERROR",
+            )
+            export_allowed = False
+
+        self._list_materials(box, obj)
+        statistics = obj.get("_spine2d_face_stats")
+        if statistics:
+            inverted = int(statistics.get("inverted", 0))
+            correct = int(statistics.get("correct", 0))
+            if inverted == 0:
+                box.label(text="All faces oriented correctly", icon="INFO")
+            else:
+                box.label(
+                    text=f"Inverted faces: {inverted} / {inverted + correct}",
+                    icon="ERROR",
+                )
+        else:
+            box.label(text="Face orientation: Press Refresh", icon="QUESTION")
+        return export_allowed
 
     def _draw_foldout(
         self,
-        layout,
-        scene,
+        layout: bpy.types.UILayout,
+        scene: bpy.types.Scene,
         *,
-        prop_name: str,
+        property_name: str,
         title: str,
-        draw_content,
+        draw_content: Callable[[bpy.types.UILayout], None],
     ) -> None:
         box = layout.box()
         row = box.row()
-        icon = "TRIA_DOWN" if getattr(scene, prop_name) else "TRIA_RIGHT"
-        row.prop(scene, prop_name, icon=icon, text="", icon_only=True, emboss=False)
+        expanded = bool(getattr(scene, property_name))
+        row.prop(
+            scene,
+            property_name,
+            icon="TRIA_DOWN" if expanded else "TRIA_RIGHT",
+            text="",
+            icon_only=True,
+            emboss=False,
+        )
         row.label(text=title)
-        if getattr(scene, prop_name):
-            draw_content(box.column(align=True), scene)
+        if expanded:
+            draw_content(box.column(align=True))
 
     def _draw_export_settings(
         self,
         column: bpy.types.UILayout,
-        scene: bpy.types.Scene,
+        context: bpy.types.Context,
     ) -> None:
+        scene = context.scene
         column.prop(scene, "spine2d_texture_size", text="Texture size")
         column.separator()
         column.prop(scene, "spine2d_json_path", text="JSON")
@@ -341,26 +279,21 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         row.label(text="Preview animation")
         row.prop(scene, "spine2d_export_preview_animation", text="")
 
-        selected_meshes = [
+        selected_meshes = tuple(
             candidate
-            for candidate in bpy.context.selected_objects
+            for candidate in context.selected_objects
             if candidate.type == "MESH"
-        ]
+        )
         if len(selected_meshes) > 1:
             column.separator()
-            column.prop(
-                scene,
-                MULTI_BACKEND_PROPERTY,
-                text="Multi Export Engine",
-            )
             column.label(text="Connect objects:")
             for selected_object in selected_meshes:
                 row = column.row(align=True)
                 row.label(text=selected_object.name, icon="MESH_DATA")
                 row.prop(selected_object.spine2d_connect_settings, "enabled", text="")
 
+    @staticmethod
     def _draw_cut_settings(
-        self,
         column: bpy.types.UILayout,
         scene: bpy.types.Scene,
     ) -> None:
@@ -371,7 +304,6 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
                 icon="INFO",
             )
             return
-
         column.separator()
         column.prop(scene, "spine2d_angle_limit", text="Seed angle limit")
         column.prop(scene, "spine2d_angular_mode", text="Angular mode")
@@ -385,38 +317,26 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
                 text="Local edge angle limit",
             )
 
+    @staticmethod
     def _draw_bake_settings(
-        self,
         column: bpy.types.UILayout,
-        scene: bpy.types.Scene,
+        context: bpy.types.Context,
     ) -> None:
-        selected_meshes = [
+        scene = context.scene
+        selected_meshes = tuple(
             candidate
-            for candidate in bpy.context.selected_objects
+            for candidate in context.selected_objects
             if candidate.type == "MESH"
-        ]
+        )
         if len(selected_meshes) > 1:
             for selected_object in selected_meshes:
                 box = column.box()
                 box.label(text=selected_object.name, icon="MESH_DATA")
-                box.prop(
-                    selected_object.spine2d_bake_settings,
-                    "frames_for_render",
-                    text="Frames",
-                )
-                box.prop(
-                    selected_object.spine2d_bake_settings,
-                    "bake_frame_start",
-                    text="Start",
-                )
-                start = max(
-                    0,
-                    int(selected_object.spine2d_bake_settings.bake_frame_start),
-                )
-                frames = max(
-                    0,
-                    int(selected_object.spine2d_bake_settings.frames_for_render),
-                )
+                settings = selected_object.spine2d_bake_settings
+                box.prop(settings, "frames_for_render", text="Frames")
+                box.prop(settings, "bake_frame_start", text="Start")
+                start = max(0, int(settings.bake_frame_start))
+                frames = max(0, int(settings.frames_for_render))
                 last = start if frames == 0 else start + frames - 1
                 box.label(text=f"Last frame: {last}")
             return
@@ -429,17 +349,87 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         column.label(text=f"Last frame: {last}")
         column.label(text=f"Playback end: {scene.frame_end}")
 
+    def draw(self, context: bpy.types.Context) -> None:
+        layout = self.layout
+        scene = context.scene
+        obj = context.active_object
+
+        try:
+            if not bpy.data.filepath:
+                layout.label(text="Blend file not saved!", icon="ERROR")
+                layout.label(text="Please save your .blend first.")
+                layout.enabled = False
+                return
+
+            header = layout.row(align=True)
+            header.label(text="Rewrite settings:")
+            header.operator("spine2d.reset_settings", text="Reset")
+
+            self._draw_foldout(
+                layout,
+                scene,
+                property_name="spine2d_show_settings",
+                title="Export",
+                draw_content=lambda column: self._draw_export_settings(column, context),
+            )
+            self._draw_foldout(
+                layout,
+                scene,
+                property_name="spine2d_show_cut_settings",
+                title="Cut",
+                draw_content=lambda column: self._draw_cut_settings(column, scene),
+            )
+            self._draw_foldout(
+                layout,
+                scene,
+                property_name="spine2d_show_bake_settings",
+                title="Bake",
+                draw_content=lambda column: self._draw_bake_settings(column, context),
+            )
+
+            layout.separator()
+            info_box = layout.box()
+            row = info_box.row(align=True)
+            row.label(text="Info:")
+            row.operator(
+                "object.spine2d_refresh_info",
+                text="Refresh",
+                icon="FILE_REFRESH",
+            )
+            export_allowed = self._populate_info_box(info_box, obj)
+
+            row = layout.row()
+            row.enabled = export_allowed
+            selected_meshes = tuple(
+                candidate
+                for candidate in context.selected_objects
+                if candidate.type == "MESH"
+            )
+            if len(selected_meshes) <= 1:
+                row.operator("object.save_uv_as_json", text="Export Current Object")
+            else:
+                row.operator(
+                    "object.spine2d_multi_export",
+                    text="Export Selected Objects",
+                )
+        except Exception:
+            logger.exception("Unable to draw the Spine2D Rewrite panel")
+            layout.label(text="UI error (see console)", icon="ERROR")
+
 
 class OBJECT_OT_Spine2DMultiExport(bpy.types.Operator):
-    """Exports selected Mesh objects into one Spine JSON."""
+    """Export selected Mesh objects through the Rewrite pipeline."""
 
     bl_idname = "object.spine2d_multi_export"
     bl_label = "Export Selected Objects"
+    bl_description = "Export selected Mesh objects with the Rewrite pipeline"
 
-    def _report_rewrite_result(self, result) -> Set[str]:
+    def _report_result(self, result) -> Set[str]:
         for issue in result.issues:
-            severity = issue.severity.value
-            self.report({severity}, f"{issue.code}: {issue.message}")
+            self.report(
+                {issue.severity.value},
+                f"{issue.code}: {issue.message}",
+            )
         if result.success:
             destination = result.output_files[0] if result.output_files else "completed"
             self.report({"INFO"}, f"Export finished → {destination}")
@@ -449,27 +439,12 @@ class OBJECT_OT_Spine2DMultiExport(bpy.types.Operator):
         return {"CANCELLED"}
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
-        scene = context.scene
-        backend = resolve_multi_backend(scene)
         try:
-            if backend == "LEGACY":
-                texture_size = max(2, int(scene.spine2d_texture_size))
-                output_path = export_selected_objects(
-                    texture_size,
-                    texture_size,
-                    scene.spine2d_json_path,
-                )
-                if output_path:
-                    self.report({"INFO"}, f"Legacy export finished → {output_path}")
-                    return {"FINISHED"}
-                self.report({"ERROR"}, "Legacy export failed (see console)")
-                return {"CANCELLED"}
-
             result = export_selected_objects_a1(context)
-            return self._report_rewrite_result(result)
+            return self._report_result(result)
         except Exception as exc:
-            logger.exception("[UI] Multi-export failed with an unhandled exception")
-            self.report({"ERROR"}, f"Multi-export failed: {exc}")
+            logger.exception("Rewrite multi-object export failed")
+            self.report({"ERROR"}, f"Multi-object export failed: {exc}")
             return {"CANCELLED"}
 
 
@@ -479,7 +454,7 @@ SCENE_PROPERTIES = (
         bpy.props.BoolProperty(
             name="Show Settings",
             default=False,
-            description="Show/hide Spine2D export settings",
+            description="Show or hide Spine2D export settings",
         ),
     ),
     (
@@ -487,7 +462,7 @@ SCENE_PROPERTIES = (
         bpy.props.BoolProperty(
             name="Show Cut Settings",
             default=False,
-            description="Show/hide cutting parameters",
+            description="Show or hide cutting parameters",
         ),
     ),
     (
@@ -495,24 +470,24 @@ SCENE_PROPERTIES = (
         bpy.props.BoolProperty(
             name="Show Bake Settings",
             default=False,
-            description="Show/hide baking parameters",
+            description="Show or hide baking parameters",
         ),
     ),
     (
         "spine2d_angular_mode",
         bpy.props.EnumProperty(
             name="Angular mode",
-            description="Choose seed-normal compatibility or add a local dihedral guard",
+            description="Choose seed-normal segmentation or add a local dihedral guard",
             items=(
                 (
                     "LEGACY_SEED_CONE",
-                    "Seed cone (legacy)",
-                    "Compare every candidate only with the segment seed normal",
+                    "Seed cone",
+                    "Compare every candidate with the segment seed normal",
                 ),
                 (
                     "SEED_CONE_AND_LOCAL_DIHEDRAL",
                     "Seed cone + local dihedral",
-                    "Keep the seed cone and reject traversal across locally sharp edges",
+                    "Also reject traversal across locally sharp edges",
                 ),
             ),
             default="LEGACY_SEED_CONE",
@@ -554,27 +529,8 @@ SCENE_PROPERTIES = (
             default=True,
         ),
     ),
-    (
-        MULTI_BACKEND_PROPERTY,
-        bpy.props.EnumProperty(
-            name="Multi Export Engine",
-            description="Select the rewritten transactional exporter or the legacy fallback",
-            items=(
-                (
-                    "REWRITE",
-                    "Rewrite",
-                    "Typed in-memory composition with atomic JSON and texture commit",
-                ),
-                (
-                    "LEGACY",
-                    "Legacy",
-                    "Previous intermediate-JSON exporter kept as an explicit fallback",
-                ),
-            ),
-            default=DEFAULT_MULTI_BACKEND,
-        ),
-    ),
 )
+
 
 CLASSES = (
     Spine2DBakeSettings,
@@ -607,7 +563,7 @@ RNA_PROPERTIES = tuple(
 
 
 def register() -> None:
-    """Register all UI classes and properties as one transaction."""
+    """Register all Rewrite UI classes and RNA properties transactionally."""
 
     registered_classes = register_classes_transactionally(
         CLASSES,
@@ -617,21 +573,21 @@ def register() -> None:
     try:
         register_rna_properties_transactionally(RNA_PROPERTIES)
     except Exception as exc:
-        logger.exception("[ERROR] UI RNA registration failed")
+        logger.exception("Rewrite UI RNA registration failed")
         unregister_all_best_effort(
             class_cleanup_actions(
                 registered_classes,
                 unregister_class=bpy.utils.unregister_class,
             ),
-            operation="UI registration rollback",
+            operation="Rewrite UI registration rollback",
             primary_error=exc,
         )
         raise
-    logger.debug("UI: Panel & operators registered.")
+    logger.debug("Rewrite UI registered")
 
 
 def unregister() -> None:
-    """Remove every UI property and class before reporting aggregate failures."""
+    """Remove every Rewrite UI property and class before reporting failures."""
 
     try:
         unregister_all_best_effort(
@@ -642,20 +598,23 @@ def unregister() -> None:
                     unregister_class=bpy.utils.unregister_class,
                 ),
             ),
-            operation="UI unregistration",
+            operation="Rewrite UI unregistration",
         )
     except Exception:
-        logger.exception("[ERROR] UI unregistration failed")
+        logger.exception("Rewrite UI unregistration failed")
         raise
-    logger.debug("UI: Panel & operators unregistered.")
+    logger.debug("Rewrite UI unregistered")
 
 
 __all__ = [
     "CLASSES",
-    "DEFAULT_MULTI_BACKEND",
-    "MULTI_BACKEND_PROPERTY",
+    "OBJECT_OT_Spine2DMultiExport",
+    "OBJECT_OT_Spine2DRefreshInfo",
+    "OBJECT_PT_Spine2DMeshPanel",
     "RNA_PROPERTIES",
+    "SPINE2D_OT_ResetSettings",
+    "Spine2DBakeSettings",
+    "Spine2DConnectSettings",
     "register",
-    "resolve_multi_backend",
     "unregister",
 ]
