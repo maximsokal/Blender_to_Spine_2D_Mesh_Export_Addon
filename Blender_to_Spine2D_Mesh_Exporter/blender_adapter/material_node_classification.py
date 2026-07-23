@@ -1,4 +1,4 @@
-"""Legacy material-kind and image-dependency classification."""
+"""Classify reachable Blender 5.2 material nodes and image dependencies."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ ImageDependencySortKey = tuple[str, str, str, str, int, str, str, int, int]
 
 @dataclass(frozen=True, slots=True)
 class MaterialNodeClassification:
-    """Typed result of classifying one already-selected node set."""
+    """Typed result of classifying one already-resolved reachable node set."""
 
     kind: MaterialKind
     node_types: Tuple[str, ...]
@@ -57,23 +57,6 @@ class MaterialNodeClassification:
         ):
             raise TypeError("issues must be a tuple of non-empty strings")
 
-    def as_legacy_tuple(
-        self,
-    ) -> tuple[
-        MaterialKind,
-        tuple[str, ...],
-        tuple[ImageDependency, ...],
-        tuple[str, ...],
-    ]:
-        """Return the historical private ``_classify_nodes`` result."""
-
-        return (
-            self.kind,
-            self.node_types,
-            self.image_dependencies,
-            self.issues,
-        )
-
 
 def read_image_dependency(
     node: Any,
@@ -84,36 +67,39 @@ def read_image_dependency(
     node_name_value = str(getattr(node, "name", "") or "TEX_IMAGE")
     if image is None:
         return None, f"Image Texture node '{node_name_value}' has no image"
-
     image_name = str(
         getattr(image, "name_full", None)
         or getattr(image, "name", None)
         or ""
-    )
+    ).strip()
     if not image_name:
         return None, f"Image Texture node '{node_name_value}' references an unnamed image"
-
-    source = str(getattr(image, "source", "FILE") or "FILE")
+    source = str(getattr(image, "source", "FILE") or "FILE").strip().upper()
     filepath_value = (
         getattr(image, "filepath_raw", None)
         or getattr(image, "filepath", None)
     )
     filepath = None if filepath_value in (None, "") else str(filepath_value)
-    frame_duration = int(getattr(image, "frame_duration", 1) or 1)
+    try:
+        frame_duration = int(getattr(image, "frame_duration", 1) or 1)
+    except (TypeError, ValueError, OverflowError) as exc:
+        return None, (
+            f"Image Texture node '{node_name_value}' has invalid frame duration"
+        )
     return (
         ImageDependency(
             image_name=image_name,
             source=source,
             filepath=filepath,
             frame_duration=max(1, frame_duration),
-            generated=source.upper() == "GENERATED",
+            generated=source == "GENERATED",
         ),
         None,
     )
 
 
 def image_dependency_key(dependency: ImageDependency) -> ImageDependencyKey:
-    """Return the historical dependency deduplication key."""
+    """Return the stable dependency deduplication key."""
 
     if not isinstance(dependency, ImageDependency):
         raise TypeError("dependency must be ImageDependency")
@@ -150,10 +136,13 @@ def image_dependency_sort_key(
 def classify_material_nodes(
     nodes: tuple[Any, ...],
 ) -> MaterialNodeClassification:
-    """Classify one already-resolved reachable or compatibility node set."""
+    """Classify one already-resolved reachable Blender 5.2 node set."""
 
     if not isinstance(nodes, tuple):
-        nodes = tuple(nodes)
+        try:
+            nodes = tuple(nodes)
+        except Exception as exc:
+            raise TypeError("nodes must be iterable") from exc
 
     relevant_nodes = tuple(
         node
@@ -206,26 +195,12 @@ def classify_material_nodes(
     )
 
 
-def classify_nodes_legacy(
-    nodes: tuple[Any, ...],
-) -> tuple[
-    MaterialKind,
-    tuple[str, ...],
-    tuple[ImageDependency, ...],
-    tuple[str, ...],
-]:
-    """Compatibility wrapper retaining the private ``_classify_nodes`` tuple."""
-
-    return classify_material_nodes(nodes).as_legacy_tuple()
-
-
 __all__ = [
     "ImageDependencyKey",
     "ImageDependencySortKey",
     "MaterialNodeClassification",
     "PROCEDURAL_NODE_TYPES",
     "classify_material_nodes",
-    "classify_nodes_legacy",
     "image_dependency_key",
     "image_dependency_sort_key",
     "read_image_dependency",
