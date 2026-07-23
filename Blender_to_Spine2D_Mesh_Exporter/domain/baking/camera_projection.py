@@ -1,8 +1,8 @@
 """Immutable planning for camera-rendered Spine projection textures.
 
 Camera-dependent shaders and volume cannot be represented by Blender's object UV bake
-operator.  This module routes the complete object through a deterministic active-camera
-render and a full-frame Spine quad while preserving the existing frame/output contract.
+operator. This module routes the complete object through a deterministic active-camera
+render and a full-frame Spine quad while preserving the frame/output contract.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from .model import (
 
 
 class CameraProjectionMode(str, Enum):
-    """Geometry policy used by the first B4 implementation."""
+    """Geometry policy used by camera-render projection."""
 
     FULL_FRAME_QUAD = "FULL_FRAME_QUAD"
 
@@ -101,11 +101,12 @@ def requires_camera_projection(analysis: ObjectMaterialAnalysis) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class CameraProjectionPlan(BakePlan):
-    """Compatibility-preserving BakePlan subtype executed by the render pipeline.
+    """BakePlan subtype executed by the camera-render pipeline.
 
-    The inherited ``bake_mode`` and one synthetic pass keep frame/output consumers stable;
-    they are never passed to ``bpy.ops.object.bake``.  Execution dispatches by this concrete
-    type and calls ``bpy.ops.render.render`` instead.
+    The inherited ``bake_mode`` and explicit synthetic pass preserve one typed
+    frame/output plan. They are never passed to ``bpy.ops.object.bake``;
+    execution dispatches by this concrete type and invokes
+    ``bpy.ops.render.render`` instead.
     """
 
     projection_mode: CameraProjectionMode = CameraProjectionMode.FULL_FRAME_QUAD
@@ -113,7 +114,7 @@ class CameraProjectionPlan(BakePlan):
     isolate_source_to_camera: bool = True
 
     def __post_init__(self) -> None:
-        # ``dataclass(slots=True)`` returns a replacement class object.  Zero-argument
+        # ``dataclass(slots=True)`` returns a replacement class object. Zero-argument
         # ``super()`` may therefore capture the pre-replacement class in CPython; calling
         # the concrete base validator is deterministic for this frozen slots subclass.
         BakePlan.__post_init__(self)
