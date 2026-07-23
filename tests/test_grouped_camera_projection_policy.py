@@ -8,7 +8,7 @@ import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.grouped_camera_projectio
 from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
-    ConnectedB4RenderPolicy,
+    ConnectedCameraRenderPolicy,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.grouped_camera_projection_policy import (
     GroupedCameraProjectionPolicyError,
@@ -158,16 +158,19 @@ def _camera_plan(tmp_path: Path, object_id):
     return plan
 
 
-def _settings(tmp_path, policy=ConnectedB4RenderPolicy.AUTO_GROUPED_CAMERA):
+def _settings(
+    tmp_path,
+    policy=ConnectedCameraRenderPolicy.AUTO_GROUPED_CAMERA,
+):
     return A1MultiObjectExportSettings(
         output_directory=tmp_path,
         output_stem="Combined",
         mode=A1MultiObjectMode.CONNECTED,
-        connected_b4_render_policy=policy,
+        connected_camera_render_policy=policy,
     )
 
 
-def test_auto_groups_only_complete_compatible_b4_set(monkeypatch, tmp_path):
+def test_auto_groups_only_complete_compatible_camera_set(monkeypatch, tmp_path):
     monkeypatch.setattr(policy_module, "PreparedA1Object", FakePrepared)
     prepared = (
         FakePrepared("A", _camera_plan(tmp_path, "A")),
@@ -195,13 +198,13 @@ def test_individual_policy_never_groups(monkeypatch, tmp_path):
     assert (
         resolve_grouped_camera_projection_request(
             prepared,
-            _settings(tmp_path, ConnectedB4RenderPolicy.INDIVIDUAL_LAYERS),
+            _settings(tmp_path, ConnectedCameraRenderPolicy.INDIVIDUAL_LAYERS),
         )
         is None
     )
 
 
-def test_auto_falls_back_when_one_connected_component_is_not_b4(monkeypatch, tmp_path):
+def test_auto_falls_back_when_one_connected_component_is_not_camera(monkeypatch, tmp_path):
     monkeypatch.setattr(policy_module, "PreparedA1Object", FakePrepared)
     camera = FakePrepared("A", _camera_plan(tmp_path, "A"))
     local = FakePrepared("B", SimpleNamespace(source_object_id="B"))
@@ -215,7 +218,7 @@ def test_auto_falls_back_when_one_connected_component_is_not_b4(monkeypatch, tmp
     )
 
 
-def test_required_rejects_mixed_b4_and_local_components(monkeypatch, tmp_path):
+def test_required_rejects_mixed_camera_and_local_components(monkeypatch, tmp_path):
     monkeypatch.setattr(policy_module, "PreparedA1Object", FakePrepared)
     camera = FakePrepared("A", _camera_plan(tmp_path, "A"))
     local = FakePrepared("B", SimpleNamespace(source_object_id="B"))
@@ -225,7 +228,7 @@ def test_required_rejects_mixed_b4_and_local_components(monkeypatch, tmp_path):
             (camera, local),
             _settings(
                 tmp_path,
-                ConnectedB4RenderPolicy.GROUPED_CAMERA_REQUIRED,
+                ConnectedCameraRenderPolicy.GROUPED_CAMERA_REQUIRED,
             ),
         )
 
@@ -266,6 +269,6 @@ def test_required_rejects_different_image_directories(monkeypatch, tmp_path):
             prepared,
             _settings(
                 tmp_path,
-                ConnectedB4RenderPolicy.GROUPED_CAMERA_REQUIRED,
+                ConnectedCameraRenderPolicy.GROUPED_CAMERA_REQUIRED,
             ),
         )
