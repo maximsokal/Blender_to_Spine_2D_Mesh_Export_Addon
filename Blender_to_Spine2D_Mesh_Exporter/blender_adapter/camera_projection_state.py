@@ -1,4 +1,4 @@
-"""Reversible Blender render state and Scene mutation helpers for B4."""
+"""Reversible Blender 5.2 camera-projection render state."""
 
 from __future__ import annotations
 
@@ -33,12 +33,12 @@ class _SceneValue:
 class _ObjectVisibility:
     obj: Any
     hide_render: bool
-    visible_camera: bool | None
+    visible_camera: bool
 
 
 @dataclass(frozen=True, slots=True)
 class ProjectionRuntimeState:
-    """Scene, frame, and visibility values restored after one B4 render scope."""
+    """Scene, frame, and visibility values restored after one render scope."""
 
     scene_values: Tuple[_SceneValue, ...]
     frame_current: int
@@ -65,18 +65,14 @@ class ProjectionRuntimeState:
 
         visibility: list[_ObjectVisibility] = []
         for obj in objects:
+            object_name = str(getattr(obj, "name", "Object") or "Object")
             try:
-                hide_render = bool(getattr(obj, "hide_render", False))
-            except Exception:
-                hide_render = False
-            try:
-                visible_camera = (
-                    bool(obj.visible_camera)
-                    if hasattr(obj, "visible_camera")
-                    else None
-                )
-            except Exception:
-                visible_camera = None
+                hide_render = bool(obj.hide_render)
+                visible_camera = bool(obj.visible_camera)
+            except Exception as exc:
+                raise CameraProjectionExecutionError(
+                    f"Unable to capture Blender 5.2 visibility for '{object_name}'"
+                ) from exc
             visibility.append(
                 _ObjectVisibility(
                     obj=obj,
@@ -85,9 +81,15 @@ class ProjectionRuntimeState:
                 )
             )
 
+        try:
+            frame_current = int(scene.frame_current)
+        except Exception as exc:
+            raise CameraProjectionExecutionError(
+                "Unable to capture Scene frame_current"
+            ) from exc
         return cls(
             scene_values=tuple(values),
-            frame_current=int(getattr(scene, "frame_current", 0) or 0),
+            frame_current=frame_current,
             visibility=tuple(visibility),
         )
 
@@ -101,24 +103,18 @@ class ProjectionRuntimeState:
                 failures.append(f"{entry.path}: {exc}")
 
         for entry in self.visibility:
-            name = str(getattr(entry.obj, "name", "Object"))
+            object_name = str(getattr(entry.obj, "name", "Object") or "Object")
             try:
                 entry.obj.hide_render = entry.hide_render
             except Exception as exc:
-                failures.append(f"{name}.hide_render: {exc}")
-
-            if entry.visible_camera is not None:
-                try:
-                    entry.obj.visible_camera = entry.visible_camera
-                except Exception as exc:
-                    failures.append(f"{name}.visible_camera: {exc}")
+                failures.append(f"{object_name}.hide_render: {exc}")
+            try:
+                entry.obj.visible_camera = entry.visible_camera
+            except Exception as exc:
+                failures.append(f"{object_name}.visible_camera: {exc}")
 
         try:
-            setter = getattr(scene, "frame_set", None)
-            if callable(setter):
-                setter(self.frame_current)
-            else:
-                scene.frame_current = self.frame_current
+            scene.frame_set(self.frame_current)
         except Exception as exc:
             failures.append(f"frame_current: {exc}")
 
@@ -179,7 +175,7 @@ def _set_if_available(root: Any, path: str, value: Any) -> None:
 def preserve_camera_projection_state(
     scene: Any,
 ) -> Iterator[ProjectionRuntimeState]:
-    """Restore all captured B4 state even when render execution fails."""
+    """Restore all captured Blender 5.2 state even when rendering fails."""
 
     state = ProjectionRuntimeState.capture(scene)
     primary_error: BaseException | None = None
@@ -223,28 +219,23 @@ def configure_camera_visibility(
         )
 
     for obj in objects:
+        object_name = str(getattr(obj, "name", "Object") or "Object")
         if obj is source_obj:
             try:
                 obj.hide_render = False
-                if hasattr(obj, "visible_camera"):
-                    obj.visible_camera = True
+                obj.visible_camera = True
             except Exception as exc:
                 raise CameraProjectionExecutionError(
                     "Unable to make source object camera-visible"
                 ) from exc
             continue
 
-        if (
-            isolate
-            and str(getattr(obj, "type", "") or "") in _RENDERABLE_TYPES
-            and hasattr(obj, "visible_camera")
-        ):
+        if isolate and str(getattr(obj, "type", "") or "") in _RENDERABLE_TYPES:
             try:
                 obj.visible_camera = False
             except Exception as exc:
                 raise CameraProjectionExecutionError(
-                    "Unable to isolate camera visibility for "
-                    f"'{getattr(obj, 'name', obj)}'"
+                    f"Unable to isolate camera visibility for '{object_name}'"
                 ) from exc
 
 
@@ -254,7 +245,7 @@ def configure_scene_for_camera_projection(
     execution_settings: BakeExecutionSettings,
     staged_path: Path,
 ) -> None:
-    """Apply one frame's validated B4 render settings."""
+    """Apply one frame's validated Blender 5.2 render settings."""
 
     if scene is None:
         raise CameraProjectionExecutionError("scene cannot be None")
