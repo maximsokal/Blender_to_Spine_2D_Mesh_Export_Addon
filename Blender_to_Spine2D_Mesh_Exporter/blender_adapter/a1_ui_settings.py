@@ -60,6 +60,9 @@ def _settings_from_profiles(
         bake_execution=scene.bake_execution,
         include_control_icons=scene.include_control_icons,
         include_preview_animation=scene.include_preview_animation,
+        material_source_policy=scene.material_source_policy,
+        generated_material_pattern=scene.generated_material_pattern,
+        generated_gray_color=scene.generated_gray_color,
     )
 
 
