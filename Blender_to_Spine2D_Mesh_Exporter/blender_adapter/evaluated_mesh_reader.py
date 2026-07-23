@@ -1,8 +1,10 @@
-"""Read an evaluated modifier stack through temporary lineage attributes.
+"""Read Blender 5.2 evaluated geometry through temporary lineage attributes.
 
-No operator is used.  The original object and Mesh datablock are never modified:
-all lineage attributes are stamped on a temporary object/data copy, evaluated by
-the dependency graph, converted to a MeshSnapshot, and removed in ``finally``.
+The original Object and Mesh are never mutated. A private object/data copy is
+linked to a temporary collection, stamped with lineage attributes, evaluated,
+converted with ``Object.to_mesh()``, and released with ``to_mesh_clear()`` in
+``finally``. UV seams and sharp edges are read from Blender's generic edge
+attributes rather than retired ``MeshEdge`` flags.
 """
 
 from __future__ import annotations
@@ -33,6 +35,12 @@ from ..domain.geometry import (
     analyse_evaluated_lineage,
     require_valid_evaluated_lineage,
 )
+from .mesh_edge_attributes import (
+    MeshEdgeAttributeError,
+    SHARP_EDGE_ATTRIBUTE,
+    UV_SEAM_ATTRIBUTE,
+    read_boolean_edge_attribute,
+)
 from .mesh_reader import (
     MeshReadError,
     _active_render_uv_name,
@@ -40,6 +48,7 @@ from .mesh_reader import (
     _resolve_uv_layers,
     _vector_tuple,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +68,14 @@ class EvaluatedMeshSnapshotResult:
     lineage_report: EvaluatedLineageReport
     modifier_stack: Tuple[Tuple[str, str], ...]
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.snapshot, MeshSnapshot):
+            raise TypeError("snapshot must be MeshSnapshot")
+        if not isinstance(self.lineage_report, EvaluatedLineageReport):
+            raise TypeError("lineage_report must be EvaluatedLineageReport")
+        if not isinstance(self.modifier_stack, tuple):
+            raise TypeError("modifier_stack must be tuple")
+
 
 class EvaluatedMeshReadError(MeshReadError):
     """Raised when evaluated geometry or lineage cannot be read safely."""
@@ -76,11 +93,24 @@ def _new_attribute_names() -> LineageAttributeNames:
     )
 
 
-def _create_int_attribute(mesh: Any, name: str, domain: str) -> Any:
+def _mesh_attributes(mesh: Any) -> Any:
     attributes = getattr(mesh, "attributes", None)
     if attributes is None:
-        raise EvaluatedMeshReadError("Mesh attributes API is unavailable")
-    if attributes.get(name) is not None:
+        raise EvaluatedMeshReadError(
+            "Blender 5.2 Mesh.attributes API is unavailable"
+        )
+    return attributes
+
+
+def _create_int_attribute(mesh: Any, name: str, domain: str) -> Any:
+    attributes = _mesh_attributes(mesh)
+    try:
+        existing = attributes.get(name)
+    except Exception as exc:
+        raise EvaluatedMeshReadError(
+            f"Unable to check temporary lineage attribute '{name}'"
+        ) from exc
+    if existing is not None:
         raise EvaluatedMeshReadError(f"Temporary lineage attribute collision: {name}")
     try:
         return attributes.new(name=name, type="INT", domain=domain)
@@ -93,32 +123,42 @@ def _create_int_attribute(mesh: Any, name: str, domain: str) -> Any:
 def _stamp_lineage_attributes(mesh: Any, names: LineageAttributeNames) -> None:
     """Stamp index+1 values; zero remains the generated/unknown sentinel."""
 
-    vertex_attr = _create_int_attribute(mesh, names.vertex, "POINT")
-    edge_attr = _create_int_attribute(mesh, names.edge, "EDGE")
-    face_attr = _create_int_attribute(mesh, names.face, "FACE")
-    corner_face_attr = _create_int_attribute(mesh, names.corner_face, "CORNER")
-    corner_index_attr = _create_int_attribute(mesh, names.corner_index, "CORNER")
+    vertex_attribute = _create_int_attribute(mesh, names.vertex, "POINT")
+    edge_attribute = _create_int_attribute(mesh, names.edge, "EDGE")
+    face_attribute = _create_int_attribute(mesh, names.face, "FACE")
+    corner_face_attribute = _create_int_attribute(mesh, names.corner_face, "CORNER")
+    corner_index_attribute = _create_int_attribute(mesh, names.corner_index, "CORNER")
 
     try:
         for vertex in mesh.vertices:
-            vertex_attr.data[int(vertex.index)].value = int(vertex.index) + 1
+            index = int(vertex.index)
+            vertex_attribute.data[index].value = index + 1
         for edge in mesh.edges:
-            edge_attr.data[int(edge.index)].value = int(edge.index) + 1
+            index = int(edge.index)
+            edge_attribute.data[index].value = index + 1
         for polygon in mesh.polygons:
-            face_attr.data[int(polygon.index)].value = int(polygon.index) + 1
+            polygon_index = int(polygon.index)
+            face_attribute.data[polygon_index].value = polygon_index + 1
             for corner_index in range(int(polygon.loop_total)):
                 loop_index = int(polygon.loop_start) + corner_index
-                corner_face_attr.data[loop_index].value = int(polygon.index) + 1
-                corner_index_attr.data[loop_index].value = corner_index + 1
+                corner_face_attribute.data[loop_index].value = polygon_index + 1
+                corner_index_attribute.data[loop_index].value = corner_index + 1
     except Exception as exc:
         raise EvaluatedMeshReadError("Unable to stamp source lineage attributes") from exc
 
 
 def _decode_attribute_value(raw_value: Any) -> int | None:
-    value = int(raw_value)
-    if value == 0:
-        return None
-    return value - 1
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise EvaluatedMeshReadError(
+            f"Lineage attribute contains non-integer value {raw_value!r}"
+        ) from exc
+    if value < 0:
+        raise EvaluatedMeshReadError(
+            f"Lineage attribute contains negative encoded value {value}"
+        )
+    return None if value == 0 else value - 1
 
 
 def _read_int_attribute(
@@ -128,20 +168,34 @@ def _read_int_attribute(
     expected_domain: str,
     expected_length: int,
 ) -> Tuple[int | None, ...]:
-    attributes = getattr(mesh, "attributes", None)
-    attribute = attributes.get(name) if attributes is not None else None
+    attributes = _mesh_attributes(mesh)
+    try:
+        attribute = attributes.get(name)
+    except Exception as exc:
+        raise EvaluatedMeshReadError(
+            f"Unable to read lineage attribute '{name}'"
+        ) from exc
     if attribute is None:
         return tuple(None for _ in range(expected_length))
-    if str(getattr(attribute, "domain", "")) != expected_domain:
+
+    domain = str(getattr(attribute, "domain", "") or "")
+    data_type = str(getattr(attribute, "data_type", "") or "")
+    if domain != expected_domain:
         raise EvaluatedMeshReadError(
-            f"Lineage attribute '{name}' changed domain from {expected_domain} to "
-            f"{getattr(attribute, 'domain', None)}"
+            f"Lineage attribute '{name}' changed domain from {expected_domain} "
+            f"to {domain or None}"
         )
-    if str(getattr(attribute, "data_type", "INT")) != "INT":
+    if data_type != "INT":
         raise EvaluatedMeshReadError(
-            f"Lineage attribute '{name}' is no longer an INT attribute"
+            f"Lineage attribute '{name}' changed data type from INT to "
+            f"{data_type or None}"
         )
-    data = tuple(attribute.data)
+    try:
+        data = tuple(attribute.data)
+    except Exception as exc:
+        raise EvaluatedMeshReadError(
+            f"Unable to iterate lineage attribute '{name}'"
+        ) from exc
     if len(data) != expected_length:
         raise EvaluatedMeshReadError(
             f"Lineage attribute '{name}' length {len(data)} does not match "
@@ -150,7 +204,49 @@ def _read_int_attribute(
     return tuple(_decode_attribute_value(item.value) for item in data)
 
 
-def _remove_object_and_mesh(bpy_module: Any, obj: Any, mesh: Any) -> None:
+def _read_edge_flags(mesh: Any) -> tuple[tuple[bool, ...], tuple[bool, ...]]:
+    try:
+        return (
+            read_boolean_edge_attribute(
+                mesh,
+                UV_SEAM_ATTRIBUTE,
+                missing_value=False,
+            ),
+            read_boolean_edge_attribute(
+                mesh,
+                SHARP_EDGE_ATTRIBUTE,
+                missing_value=False,
+            ),
+        )
+    except MeshEdgeAttributeError as exc:
+        raise EvaluatedMeshReadError(
+            f"Unable to read evaluated edge attributes: {exc}"
+        ) from exc
+
+
+def _require_lineage_value(
+    values: Tuple[int | None, ...],
+    index: int,
+    *,
+    label: str,
+) -> int:
+    if index < 0 or index >= len(values):
+        raise EvaluatedMeshReadError(
+            f"{label} index {index} is outside lineage data range"
+        )
+    value = values[index]
+    if value is None:
+        raise EvaluatedMeshReadError(
+            f"{label} {index} has unknown lineage after validation"
+        )
+    return int(value)
+
+
+def _remove_temporary_object_and_mesh(
+    bpy_module: Any,
+    obj: Any | None,
+    mesh: Any | None,
+) -> None:
     if obj is not None:
         try:
             bpy_module.data.objects.remove(obj, do_unlink=True)
@@ -158,10 +254,233 @@ def _remove_object_and_mesh(bpy_module: Any, obj: Any, mesh: Any) -> None:
             logger.exception("Failed to remove temporary evaluated object")
     if mesh is not None:
         try:
-            if getattr(mesh, "users", 0) == 0:
+            if int(getattr(mesh, "users", 0) or 0) == 0:
                 bpy_module.data.meshes.remove(mesh)
         except Exception:
-            logger.exception("Failed to remove temporary evaluated mesh datablock")
+            logger.exception("Failed to remove temporary evaluated Mesh datablock")
+
+
+def _remove_temporary_collection(
+    bpy_module: Any,
+    collection: Any | None,
+) -> None:
+    if collection is None:
+        return
+    try:
+        bpy_module.data.collections.remove(collection, do_unlink=True)
+    except Exception:
+        logger.exception("Failed to remove temporary evaluation collection")
+
+
+def _build_snapshot_from_evaluated_mesh(
+    *,
+    evaluated_mesh: Any,
+    source_mesh: Any,
+    source_object: Any,
+    object_name: str,
+    source_object_id: str,
+    snapshot_id: str,
+    names: LineageAttributeNames,
+    modifier_stack: Tuple[Tuple[str, str], ...],
+    uv_layer_names: Iterable[str] | None,
+    lineage_policy: ModifierLineagePolicy,
+) -> EvaluatedMeshSnapshotResult:
+    vertex_lineage = _read_int_attribute(
+        evaluated_mesh,
+        names.vertex,
+        expected_domain="POINT",
+        expected_length=len(evaluated_mesh.vertices),
+    )
+    edge_lineage = _read_int_attribute(
+        evaluated_mesh,
+        names.edge,
+        expected_domain="EDGE",
+        expected_length=len(evaluated_mesh.edges),
+    )
+    face_lineage = _read_int_attribute(
+        evaluated_mesh,
+        names.face,
+        expected_domain="FACE",
+        expected_length=len(evaluated_mesh.polygons),
+    )
+    corner_face_lineage = _read_int_attribute(
+        evaluated_mesh,
+        names.corner_face,
+        expected_domain="CORNER",
+        expected_length=len(evaluated_mesh.loops),
+    )
+    corner_index_lineage = _read_int_attribute(
+        evaluated_mesh,
+        names.corner_index,
+        expected_domain="CORNER",
+        expected_length=len(evaluated_mesh.loops),
+    )
+
+    source_face_corner_counts = tuple(
+        int(polygon.loop_total) for polygon in source_mesh.polygons
+    )
+    lineage_report = analyse_evaluated_lineage(
+        source_vertex_count=len(source_mesh.vertices),
+        source_edge_count=len(source_mesh.edges),
+        source_face_corner_counts=source_face_corner_counts,
+        vertex_source_indices=vertex_lineage,
+        edge_source_indices=edge_lineage,
+        face_source_indices=face_lineage,
+        corner_source_face_indices=corner_face_lineage,
+        corner_source_corner_indices=corner_index_lineage,
+        policy=lineage_policy,
+    )
+    require_valid_evaluated_lineage(lineage_report)
+
+    resolved_uv_layers = _resolve_uv_layers(evaluated_mesh, uv_layer_names)
+    resolved_uv_names = tuple(str(layer.name) for layer in resolved_uv_layers)
+    active_layer = getattr(evaluated_mesh.uv_layers, "active", None)
+    active_uv_name = (
+        str(active_layer.name)
+        if active_layer is not None and active_layer.name in resolved_uv_names
+        else None
+    )
+    render_uv_name = _active_render_uv_name(resolved_uv_layers, active_layer)
+    seam_values, sharp_values = _read_edge_flags(evaluated_mesh)
+
+    vertices: list[MeshVertex] = []
+    for vertex in evaluated_mesh.vertices:
+        vertex_index = int(vertex.index)
+        vertices.append(
+            MeshVertex(
+                id=VertexId(vertex_index),
+                source_id=SourceVertexId(
+                    source_object_id,
+                    _require_lineage_value(
+                        vertex_lineage,
+                        vertex_index,
+                        label="Evaluated vertex",
+                    ),
+                ),
+                position=_vector_tuple(
+                    vertex.co,
+                    3,
+                    f"evaluated.vertices[{vertex_index}].co",
+                ),
+                normal=_vector_tuple(
+                    vertex.normal,
+                    3,
+                    f"evaluated.vertices[{vertex_index}].normal",
+                ),
+            )
+        )
+
+    edges: list[MeshEdge] = []
+    for edge in evaluated_mesh.edges:
+        edge_index = int(edge.index)
+        if edge_index < 0 or edge_index >= len(seam_values):
+            raise EvaluatedMeshReadError(
+                f"Evaluated edge index {edge_index} is outside attribute data range"
+            )
+        source_edge_index = edge_lineage[edge_index]
+        edges.append(
+            MeshEdge(
+                id=EdgeId(edge_index),
+                source_id=(
+                    None
+                    if source_edge_index is None
+                    else SourceEdgeId(source_object_id, int(source_edge_index))
+                ),
+                vertex_ids=(
+                    VertexId(int(edge.vertices[0])),
+                    VertexId(int(edge.vertices[1])),
+                ),
+                seam=seam_values[edge_index],
+                sharp=sharp_values[edge_index],
+            )
+        )
+
+    loops: list[MeshLoop] = []
+    faces: list[MeshFace] = []
+    for polygon in evaluated_mesh.polygons:
+        polygon_index = int(polygon.index)
+        source_face_index = _require_lineage_value(
+            face_lineage,
+            polygon_index,
+            label="Evaluated face",
+        )
+        polygon_loop_ids: list[LoopId] = []
+        for local_corner_index in range(int(polygon.loop_total)):
+            loop_index = int(polygon.loop_start) + local_corner_index
+            mesh_loop = evaluated_mesh.loops[loop_index]
+            source_loop_face = _require_lineage_value(
+                corner_face_lineage,
+                loop_index,
+                label="Evaluated loop face",
+            )
+            source_corner_index = _require_lineage_value(
+                corner_index_lineage,
+                loop_index,
+                label="Evaluated loop corner",
+            )
+            loop_id = LoopId(loop_index)
+            polygon_loop_ids.append(loop_id)
+            loops.append(
+                MeshLoop(
+                    id=loop_id,
+                    source_id=SourceLoopId(
+                        source_object_id,
+                        source_loop_face,
+                        source_corner_index,
+                    ),
+                    vertex_id=VertexId(int(mesh_loop.vertex_index)),
+                    edge_id=EdgeId(int(mesh_loop.edge_index)),
+                    uvs=tuple(
+                        LoopUV(
+                            layer_name=str(layer.name),
+                            coordinate=_vector_tuple(
+                                layer.data[loop_index].uv,
+                                2,
+                                f"evaluated.uv_layers[{layer.name}]"
+                                f".data[{loop_index}].uv",
+                            ),
+                        )
+                        for layer in resolved_uv_layers
+                    ),
+                )
+            )
+        faces.append(
+            MeshFace(
+                id=FaceId(polygon_index),
+                source_id=SourceFaceId(source_object_id, source_face_index),
+                loop_ids=tuple(polygon_loop_ids),
+                material_index=max(
+                    0,
+                    int(getattr(polygon, "material_index", 0)),
+                ),
+                normal=_vector_tuple(
+                    polygon.normal,
+                    3,
+                    f"evaluated.polygons[{polygon_index}].normal",
+                ),
+                smooth=bool(getattr(polygon, "use_smooth", False)),
+            )
+        )
+
+    snapshot = MeshSnapshot(
+        snapshot_id=snapshot_id,
+        source_object_id=source_object_id,
+        object_name=object_name,
+        vertices=tuple(vertices),
+        edges=tuple(edges),
+        loops=tuple(loops),
+        faces=tuple(faces),
+        uv_layer_names=resolved_uv_names,
+        active_uv_layer=active_uv_name,
+        world_matrix=_matrix_tuple(source_object.matrix_world),
+        render_uv_layer=render_uv_name,
+    )
+    MeshSnapshotValidator().validate_or_raise(snapshot)
+    return EvaluatedMeshSnapshotResult(
+        snapshot=snapshot,
+        lineage_report=lineage_report,
+        modifier_stack=modifier_stack,
+    )
 
 
 def read_evaluated_mesh_snapshot(
@@ -174,7 +493,7 @@ def read_evaluated_mesh_snapshot(
     uv_layer_names: Iterable[str] | None = None,
     lineage_policy: ModifierLineagePolicy = ModifierLineagePolicy.STRICT_PRESERVE,
 ) -> EvaluatedMeshSnapshotResult:
-    """Evaluate modifiers on a temporary copy and return validated immutable data."""
+    """Evaluate a Blender 5.2 modifier stack and return immutable geometry."""
 
     if obj is None or getattr(obj, "type", None) != "MESH":
         raise EvaluatedMeshReadError("obj must be a Blender MESH object")
@@ -236,193 +555,30 @@ def read_evaluated_mesh_snapshot(
         if evaluated_mesh is None:
             raise EvaluatedMeshReadError("evaluated_object.to_mesh() returned None")
 
-        vertex_lineage = _read_int_attribute(
-            evaluated_mesh,
-            names.vertex,
-            expected_domain="POINT",
-            expected_length=len(evaluated_mesh.vertices),
-        )
-        edge_lineage = _read_int_attribute(
-            evaluated_mesh,
-            names.edge,
-            expected_domain="EDGE",
-            expected_length=len(evaluated_mesh.edges),
-        )
-        face_lineage = _read_int_attribute(
-            evaluated_mesh,
-            names.face,
-            expected_domain="FACE",
-            expected_length=len(evaluated_mesh.polygons),
-        )
-        corner_face_lineage = _read_int_attribute(
-            evaluated_mesh,
-            names.corner_face,
-            expected_domain="CORNER",
-            expected_length=len(evaluated_mesh.loops),
-        )
-        corner_index_lineage = _read_int_attribute(
-            evaluated_mesh,
-            names.corner_index,
-            expected_domain="CORNER",
-            expected_length=len(evaluated_mesh.loops),
-        )
-
-        source_face_corner_counts = tuple(
-            int(polygon.loop_total) for polygon in source_mesh.polygons
-        )
-        lineage_report = analyse_evaluated_lineage(
-            source_vertex_count=len(source_mesh.vertices),
-            source_edge_count=len(source_mesh.edges),
-            source_face_corner_counts=source_face_corner_counts,
-            vertex_source_indices=vertex_lineage,
-            edge_source_indices=edge_lineage,
-            face_source_indices=face_lineage,
-            corner_source_face_indices=corner_face_lineage,
-            corner_source_corner_indices=corner_index_lineage,
-            policy=lineage_policy,
-        )
-        require_valid_evaluated_lineage(lineage_report)
-
-        resolved_uv_layers = _resolve_uv_layers(evaluated_mesh, uv_layer_names)
-        resolved_uv_names = tuple(layer.name for layer in resolved_uv_layers)
-        active_layer = getattr(evaluated_mesh.uv_layers, "active", None)
-        active_uv_name = (
-            active_layer.name
-            if active_layer is not None and active_layer.name in resolved_uv_names
-            else None
-        )
-        render_uv_name = _active_render_uv_name(resolved_uv_layers, active_layer)
-
-        vertices = tuple(
-            MeshVertex(
-                id=VertexId(int(vertex.index)),
-                source_id=SourceVertexId(
-                    resolved_source_object_id,
-                    int(vertex_lineage[int(vertex.index)]),
-                ),
-                position=_vector_tuple(
-                    vertex.co, 3, f"evaluated.vertices[{vertex.index}].co"
-                ),
-                normal=_vector_tuple(
-                    vertex.normal, 3, f"evaluated.vertices[{vertex.index}].normal"
-                ),
-            )
-            for vertex in evaluated_mesh.vertices
-        )
-        edges = tuple(
-            MeshEdge(
-                id=EdgeId(int(edge.index)),
-                source_id=(
-                    None
-                    if edge_lineage[int(edge.index)] is None
-                    else SourceEdgeId(
-                        resolved_source_object_id,
-                        int(edge_lineage[int(edge.index)]),
-                    )
-                ),
-                vertex_ids=(
-                    VertexId(int(edge.vertices[0])),
-                    VertexId(int(edge.vertices[1])),
-                ),
-                seam=bool(getattr(edge, "use_seam", False)),
-                sharp=bool(getattr(edge, "use_edge_sharp", False)),
-            )
-            for edge in evaluated_mesh.edges
-        )
-
-        loops: list[MeshLoop] = []
-        faces: list[MeshFace] = []
-        for polygon in evaluated_mesh.polygons:
-            polygon_index = int(polygon.index)
-            source_face_index = face_lineage[polygon_index]
-            if source_face_index is None:
-                raise EvaluatedMeshReadError(
-                    f"Evaluated face {polygon_index} has unknown lineage after validation"
-                )
-            polygon_loop_ids: list[LoopId] = []
-            for local_corner_index in range(int(polygon.loop_total)):
-                loop_index = int(polygon.loop_start) + local_corner_index
-                mesh_loop = evaluated_mesh.loops[loop_index]
-                source_loop_face = corner_face_lineage[loop_index]
-                source_corner_index = corner_index_lineage[loop_index]
-                if source_loop_face is None or source_corner_index is None:
-                    raise EvaluatedMeshReadError(
-                        f"Evaluated loop {loop_index} has unknown lineage after validation"
-                    )
-                loop_id = LoopId(loop_index)
-                polygon_loop_ids.append(loop_id)
-                loops.append(
-                    MeshLoop(
-                        id=loop_id,
-                        source_id=SourceLoopId(
-                            resolved_source_object_id,
-                            int(source_loop_face),
-                            int(source_corner_index),
-                        ),
-                        vertex_id=VertexId(int(mesh_loop.vertex_index)),
-                        edge_id=EdgeId(int(mesh_loop.edge_index)),
-                        uvs=tuple(
-                            LoopUV(
-                                layer_name=layer.name,
-                                coordinate=_vector_tuple(
-                                    layer.data[loop_index].uv,
-                                    2,
-                                    f"evaluated.uv_layers[{layer.name}]"
-                                    f".data[{loop_index}].uv",
-                                ),
-                            )
-                            for layer in resolved_uv_layers
-                        ),
-                    )
-                )
-            faces.append(
-                MeshFace(
-                    id=FaceId(polygon_index),
-                    source_id=SourceFaceId(
-                        resolved_source_object_id,
-                        int(source_face_index),
-                    ),
-                    loop_ids=tuple(polygon_loop_ids),
-                    material_index=max(0, int(getattr(polygon, "material_index", 0))),
-                    normal=_vector_tuple(
-                        polygon.normal,
-                        3,
-                        f"evaluated.polygons[{polygon_index}].normal",
-                    ),
-                    smooth=bool(getattr(polygon, "use_smooth", False)),
-                )
-            )
-
-        snapshot = MeshSnapshot(
-            snapshot_id=resolved_snapshot_id,
-            source_object_id=resolved_source_object_id,
+        result = _build_snapshot_from_evaluated_mesh(
+            evaluated_mesh=evaluated_mesh,
+            source_mesh=source_mesh,
+            source_object=obj,
             object_name=object_name,
-            vertices=vertices,
-            edges=edges,
-            loops=tuple(loops),
-            faces=tuple(faces),
-            uv_layer_names=resolved_uv_names,
-            active_uv_layer=active_uv_name,
-            world_matrix=_matrix_tuple(obj.matrix_world),
-            render_uv_layer=render_uv_name,
+            source_object_id=resolved_source_object_id,
+            snapshot_id=resolved_snapshot_id,
+            names=names,
+            modifier_stack=modifier_stack,
+            uv_layer_names=uv_layer_names,
+            lineage_policy=lineage_policy,
         )
-        MeshSnapshotValidator().validate_or_raise(snapshot)
         logger.info(
-            "Evaluated '%s' with %d modifiers: %d vertices, %d edges, %d faces "
-            "active_uv=%s render_uv=%s",
+            "Evaluated Blender 5.2 Mesh '%s' with %d modifiers: %d vertices, "
+            "%d edges, %d faces active_uv=%s render_uv=%s",
             object_name,
             len(modifier_stack),
-            len(snapshot.vertices),
-            len(snapshot.edges),
-            len(snapshot.faces),
-            snapshot.active_uv_layer,
-            snapshot.render_uv_layer,
+            len(result.snapshot.vertices),
+            len(result.snapshot.edges),
+            len(result.snapshot.faces),
+            result.snapshot.active_uv_layer,
+            result.snapshot.render_uv_layer,
         )
-        return EvaluatedMeshSnapshotResult(
-            snapshot=snapshot,
-            lineage_report=lineage_report,
-            modifier_stack=modifier_stack,
-        )
+        return result
     except EvaluatedMeshReadError:
         raise
     except Exception as exc:
@@ -435,17 +591,18 @@ def read_evaluated_mesh_snapshot(
             try:
                 evaluated_object.to_mesh_clear()
             except Exception:
-                logger.exception("Failed to clear evaluated to_mesh result")
-        _remove_object_and_mesh(bpy, temporary_object, temporary_mesh)
-        if temporary_collection is not None:
-            try:
-                if temporary_collection.name in resolved_scene.collection.children:
-                    resolved_scene.collection.children.unlink(temporary_collection)
-            except Exception:
-                # Collection removal below uses do_unlink and is the authoritative
-                # cleanup; explicit unlink is only an early release attempt.
-                logger.debug("Temporary collection was already unlinked", exc_info=True)
-            try:
-                bpy.data.collections.remove(temporary_collection)
-            except Exception:
-                logger.exception("Failed to remove temporary evaluation collection")
+                logger.exception("Failed to clear evaluated Object.to_mesh result")
+        _remove_temporary_object_and_mesh(
+            bpy,
+            temporary_object,
+            temporary_mesh,
+        )
+        _remove_temporary_collection(bpy, temporary_collection)
+
+
+__all__ = [
+    "EvaluatedMeshReadError",
+    "EvaluatedMeshSnapshotResult",
+    "LineageAttributeNames",
+    "read_evaluated_mesh_snapshot",
+]
