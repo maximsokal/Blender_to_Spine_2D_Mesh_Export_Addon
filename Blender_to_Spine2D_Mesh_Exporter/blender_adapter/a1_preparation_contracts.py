@@ -19,6 +19,7 @@ from ..application import (
     IssueSeverity,
 )
 from ..domain.baking import BakePlan, ObjectMaterialAnalysis
+from ..domain.baking.generated_materials import GeneratedBakePlan
 from ..domain.geometry import MeshSnapshot
 from ..domain.spine import LegacyRigBuildResult, SpineDocument
 from ..domain.uv import UvUnwrapResult
@@ -173,6 +174,8 @@ class PreparedA1Object:
 
     @property
     def bake_target_snapshot(self) -> MeshSnapshot:
+        if isinstance(self.bake_plan, GeneratedBakePlan):
+            return self.bake_plan.generated_material.target_snapshot
         return self.unwrap_result.snapshot
 
     @property
