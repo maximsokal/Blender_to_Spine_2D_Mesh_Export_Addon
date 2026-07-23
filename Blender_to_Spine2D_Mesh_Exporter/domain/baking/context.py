@@ -155,6 +155,7 @@ class ColorManagementSnapshot:
     look: str
     exposure: float
     gamma: float
+    working_space_interop_id: str = "lin_rec709_scene"
 
     def __post_init__(self) -> None:
         _validate_name(self.view_transform, "view_transform")
@@ -167,6 +168,14 @@ class ColorManagementSnapshot:
             minimum=0.0,
             minimum_inclusive=False,
         )
+        _validate_name(
+            self.working_space_interop_id,
+            "working_space_interop_id",
+        )
+
+    @property
+    def uses_linear_rec709(self) -> bool:
+        return self.working_space_interop_id == "lin_rec709_scene"
 
 
 @dataclass(frozen=True, slots=True)
