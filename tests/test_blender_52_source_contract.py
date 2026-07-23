@@ -1,8 +1,9 @@
-"""Static regressions for Blender APIs removed or changed before Blender 5.2."""
+"""Static regressions for APIs and runtime bridges retired before Blender 5.2."""
 
 from __future__ import annotations
 
 from pathlib import Path
+import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,12 +36,18 @@ def _occurrences(token: str) -> tuple[str, ...]:
         source = path.read_text(encoding="utf-8")
         for line_number, line in enumerate(source.splitlines(), start=1):
             if token in line:
-                findings.append(f"{path.relative_to(ROOT)}:{line_number}: {line.strip()}")
+                findings.append(
+                    f"{path.relative_to(ROOT)}:{line_number}: {line.strip()}"
+                )
     return tuple(findings)
 
 
-def test_rewrite_contains_no_removed_eevee_next_runtime_id():
+def test_rewrite_contains_no_removed_or_fuzzy_renderer_identifiers():
     assert _occurrences("BLENDER_EEVEE_NEXT") == ()
+    assert _occurrences('if "CYCLE" in normalized') == ()
+    assert _occurrences('if "EEVEE" in normalized') == ()
+    assert _occurrences('if "CYCLE" in target') == ()
+    assert _occurrences('if "EEVEE" in target') == ()
 
 
 def test_rewrite_does_not_use_deprecated_material_or_world_use_nodes():
@@ -51,6 +58,28 @@ def test_rewrite_does_not_use_removed_scene_compositor_node_tree():
     assert _occurrences("scene.node_tree") == ()
 
 
+def test_rewrite_does_not_use_removed_action_fcurve_collections():
+    assert _occurrences(".fcurves") == ()
+    assert _occurrences("action.groups") == ()
+    assert _occurrences("action.pose_markers") == ()
+
+
+def test_rewrite_does_not_use_retired_mesh_edge_flags():
+    assert _occurrences(".use_seam") == ()
+    assert _occurrences(".use_edge_sharp") == ()
+
+
+def test_rewrite_does_not_use_legacy_uv_loop_data_coordinates():
+    assert _occurrences("uv_layers.active.data") == ()
+    assert _occurrences("layer.data[mesh_loop_index].uv") == ()
+    assert _occurrences("layer.data[loop_index].uv") == ()
+
+
+def test_rewrite_does_not_use_old_node_tree_group_interface_collections():
+    assert _occurrences("node_tree.inputs") == ()
+    assert _occurrences("node_tree.outputs") == ()
+
+
 def test_extension_entry_point_contains_no_legacy_metadata_or_uninstall_ops():
     entry = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
     preferences = (PACKAGE / "addon_preferences.py").read_text(encoding="utf-8")
@@ -58,6 +87,16 @@ def test_extension_entry_point_contains_no_legacy_metadata_or_uninstall_ops():
     assert "bl_info" not in entry
     assert "addon_disable" not in preferences
     assert "addon_remove" not in preferences
+
+
+def test_runtime_surface_contains_no_legacy_import_bridge():
+    assert _occurrences("legacy_loader") == ()
+    assert _occurrences("legacy_multi_facade") == ()
+    assert _occurrences("load_legacy_single_backend") == ()
+    assert _occurrences("MULTI_BACKEND_PROPERTY") == ()
+    assert _occurrences("resolve_multi_backend") == ()
+    assert _occurrences("a1_ui_rna") == ()
+    assert not (PACKAGE / "blender_adapter" / "a1_ui_rna.py").exists()
 
 
 def test_runtime_scene_properties_have_one_blender_52_owner():
@@ -74,6 +113,8 @@ def test_runtime_scene_properties_have_one_blender_52_owner():
     assert "def unregister()" not in config
     assert 'self["spine2d_' not in config
     assert 'self["spine2d_' not in properties
+    assert "config.get_texture_size" not in entry
+    assert _occurrences('getattr(scene, "get"') == ()
 
 
 def test_working_color_space_is_captured_through_blender_52_interop_id():
@@ -105,3 +146,26 @@ def test_generated_palette_uses_display_rgb_and_color_managed_attribute_writes()
     assert "attribute_value.color_srgb = resolved" in materials
     assert "attribute.data[mesh_loop_index].color = color" not in materials
     assert "Blender 5.2 FloatColorAttributeValue.color_srgb is unavailable" in materials
+
+
+def test_blender_52_package_excludes_every_pre_rewrite_module():
+    with (PACKAGE / "blender_manifest.toml").open("rb") as stream:
+        manifest = tomllib.load(stream)
+    excluded = frozenset(manifest["build"]["paths_exclude_pattern"])
+
+    required = {
+        "/Legacy/",
+        "/legacy_loader.py",
+        "/legacy_multi_facade.py",
+        "/json_export.py",
+        "/json_merger.py",
+        "/main.py",
+        "/multi_object_export.py",
+        "/plane_cut.py",
+        "/seam_marker.py",
+        "/texture_baker.py",
+        "/texture_baker_integration.py",
+        "/utils.py",
+        "/uv_operations.py",
+    }
+    assert required <= excluded
