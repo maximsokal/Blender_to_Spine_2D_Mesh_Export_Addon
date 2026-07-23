@@ -21,7 +21,10 @@ from ..infrastructure import (
 )
 from .camera_projection_error import CameraProjectionExecutionError
 from .camera_projection_execution import render_camera_projection_frames
-from .camera_projection_postprocess import process_camera_projection_outputs
+from .camera_projection_postprocess import (
+    build_camera_projection_postprocess_request,
+    process_projection_outputs,
+)
 from .camera_projection_validation import (
     CameraProjectionRuntime,
     validate_camera_projection_request,
@@ -110,10 +113,10 @@ def _stage_validated_camera_projection(
         runtime,
         reservations,
     )
-    layout = process_camera_projection_outputs(
-        runtime,
+    request = build_camera_projection_postprocess_request(runtime)
+    layout = process_projection_outputs(
+        request,
         rendered,
-        apply_crop=True,
     )
     return CameraProjectionStageResult(
         reservations=rendered,
