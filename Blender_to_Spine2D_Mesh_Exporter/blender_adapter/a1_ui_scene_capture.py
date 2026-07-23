@@ -92,6 +92,10 @@ class _SceneExportProfile:
                 raise ValueError(
                     f"generated_gray_color[{index}] must be finite in [0, 1]"
                 )
+        if float(self.generated_gray_color[3]) != 1.0:
+            raise ValueError(
+                "generated_gray_color[3] must be 1.0 for opaque generated textures"
+            )
 
 
 def _load_bpy() -> Any:
@@ -252,6 +256,10 @@ def _resolve_generated_gray_color(scene: Any) -> ColorRGBA:
                 f"spine2d_generated_gray_color[{index}] must be in [0, 1]"
             )
         resolved.append(numeric)
+    if resolved[3] != 1.0:
+        raise ValueError(
+            "spine2d_generated_gray_color[3] must be 1.0 for opaque generated textures"
+        )
     return tuple(resolved)
 
 
