@@ -8,7 +8,7 @@ def _scene(**overrides):
     values = {
         "spine2d_seam_maker_mode": "AUTO",
         "spine2d_angle_limit": 30,
-        "spine2d_angular_mode": "LEGACY_SEED_CONE",
+        "spine2d_angular_mode": "SEED_CONE",
         "spine2d_local_angle_limit": 30.0,
     }
     values.update(overrides)
@@ -27,7 +27,7 @@ def test_angular_scene_properties_are_registered_symmetrically():
     assert len(names) == len(set(names))
 
 
-def test_reset_restores_legacy_angular_contract():
+def test_reset_restores_seed_cone_contract():
     operator = SimpleNamespace(report=MagicMock())
     context = SimpleNamespace(scene=SimpleNamespace())
 
@@ -38,11 +38,11 @@ def test_reset_restores_legacy_angular_contract():
         result = ui.SPINE2D_OT_ResetSettings.execute(operator, context)
 
     assert result == {"FINISHED"}
-    assert context.scene.spine2d_angular_mode == "LEGACY_SEED_CONE"
+    assert context.scene.spine2d_angular_mode == "SEED_CONE"
     assert context.scene.spine2d_local_angle_limit == 30.0
 
 
-def test_legacy_cut_ui_does_not_draw_local_limit():
+def test_seed_cone_cut_ui_does_not_draw_local_limit():
     column = MagicMock()
 
     ui.OBJECT_PT_Spine2DMeshPanel._draw_cut_settings(
