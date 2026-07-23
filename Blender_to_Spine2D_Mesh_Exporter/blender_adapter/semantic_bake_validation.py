@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Tuple
 
 from ..domain.baking import BakeExecutionSettings, BakePlan
+from ..domain.baking.generated_materials import GeneratedBakePlan
 from ..domain.geometry import MeshSnapshot, MeshSnapshotValidator
 from ..infrastructure import AtomicOutputReservation
 from .bake_execution_error import BakeExecutionError
@@ -25,6 +26,14 @@ def _load_bpy() -> Any:
     except Exception as exc:
         raise BakeExecutionError("Blender bpy module is unavailable") from exc
     return bpy
+
+
+def _planned_material_slots(plan: BakePlan) -> set[int]:
+    return {
+        slot_index
+        for pass_plan in plan.passes
+        for slot_index in pass_plan.material_slot_indices
+    }
 
 
 def _validate_execution_input(
@@ -51,6 +60,28 @@ def _validate_execution_input(
             f"Target snapshot is missing bake UV layer '{plan.settings.uv_layer_name}'"
         )
 
+    if isinstance(plan, GeneratedBakePlan):
+        if target_snapshot != plan.generated_material.target_snapshot:
+            raise BakeExecutionError(
+                "Generated bake target does not match GeneratedMaterialPlan.target_snapshot"
+            )
+        face_material_indices = tuple(
+            int(face.material_index) for face in target_snapshot.faces
+        )
+        if not face_material_indices:
+            raise BakeExecutionError(
+                "Generated target snapshot contains no material references"
+            )
+        if set(face_material_indices) != {0}:
+            raise BakeExecutionError(
+                "Generated target snapshot must reference only synthetic slot zero"
+            )
+        if 0 not in _planned_material_slots(plan):
+            raise BakeExecutionError(
+                "Generated BakePlan does not cover synthetic material slot zero"
+            )
+        return (0,), face_material_indices
+
     source_slots = tuple(getattr(source_obj, "material_slots", ()))
     if len(source_slots) != len(plan.material_analysis.slots):
         raise BakeExecutionError(
@@ -70,11 +101,7 @@ def _validate_execution_input(
             f"but source object has only {len(source_slots)} slots"
         )
 
-    planned_slots = {
-        slot_index
-        for pass_plan in plan.passes
-        for slot_index in pass_plan.material_slot_indices
-    }
+    planned_slots = _planned_material_slots(plan)
     missing_plans = tuple(
         index for index in used_material_indices if index not in planned_slots
     )
@@ -175,6 +202,8 @@ def validate_semantic_bake_request(
     )
     if not isinstance(resolved_settings, BakeExecutionSettings):
         raise TypeError("execution_settings must be BakeExecutionSettings or None")
+    if isinstance(plan, GeneratedBakePlan) and resolved_settings.render_engine != "CYCLES":
+        resolved_settings = replace(resolved_settings, render_engine="CYCLES")
 
     used_material_indices, face_material_indices = _validate_execution_input(
         source_obj,
