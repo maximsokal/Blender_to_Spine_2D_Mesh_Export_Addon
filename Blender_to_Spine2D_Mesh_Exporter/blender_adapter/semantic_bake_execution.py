@@ -98,11 +98,6 @@ def _bake_pass_to_buffer(
             f"{task.image_name}__pass_{pass_plan.pass_index}_{pass_plan.strategy_id.value}",
             force_float_buffer=True,
         )
-        try:
-            image.alpha_mode = "STRAIGHT"
-        except Exception:
-            logger.debug("Pass image alpha_mode is not writable", exc_info=True)
-
         with prepared_materials.prepare_pass(pass_plan):
             prepared_materials.assign_image(image)
             logger.info(
@@ -187,10 +182,6 @@ def _bake_composed_frame(
                 runtime.plan.settings.texture_format is TextureFormat.OPEN_EXR
             ),
         )
-        try:
-            final_image.alpha_mode = "STRAIGHT"
-        except Exception:
-            logger.debug("Final image alpha_mode is not writable", exc_info=True)
         write_bake_image_pixels(final_image, composed)
         _save_bake_image(final_image, reservation, runtime.plan)
     finally:
