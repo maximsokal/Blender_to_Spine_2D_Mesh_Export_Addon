@@ -1,4 +1,4 @@
-"""Render validated B4 frame tasks into caller-owned staged reservations."""
+"""Render validated Blender 5.2 camera-projection tasks into staged files."""
 
 from __future__ import annotations
 
@@ -22,12 +22,45 @@ from .camera_projection_validation import (
 logger = logging.getLogger(__name__)
 
 
-def call_public_render_operator(bpy_module: Any) -> None:
-    """Route rendering through the stable public failure-injection hook."""
+def _call_render_operator(bpy_module: Any) -> None:
+    """Invoke Blender 5.2 still rendering through the physical execution owner."""
 
-    from . import bake_executor as public_executor
-
-    public_executor._call_render_operator(bpy_module)
+    if bpy_module is None:
+        raise CameraProjectionExecutionError("bpy_module cannot be None")
+    try:
+        operator = bpy_module.ops.render.render
+    except Exception as exc:
+        raise CameraProjectionExecutionError(
+            "bpy.ops.render.render is unavailable"
+        ) from exc
+    poll = getattr(operator, "poll", None)
+    if callable(poll):
+        try:
+            available = bool(poll())
+        except Exception as exc:
+            raise CameraProjectionExecutionError(
+                "bpy.ops.render.render.poll() failed"
+            ) from exc
+        if not available:
+            raise CameraProjectionExecutionError(
+                "bpy.ops.render.render.poll() returned False"
+            )
+    try:
+        result = operator(write_still=True)
+    except Exception as exc:
+        raise CameraProjectionExecutionError(
+            "bpy.ops.render.render(write_still=True) failed"
+        ) from exc
+    try:
+        finished = "FINISHED" in result
+    except Exception as exc:
+        raise CameraProjectionExecutionError(
+            f"bpy.ops.render.render returned an invalid result: {result!r}"
+        ) from exc
+    if not finished:
+        raise CameraProjectionExecutionError(
+            f"bpy.ops.render.render did not finish: {result!r}"
+        )
 
 
 def _require_nonempty_staged_output(reservation: AtomicOutputReservation) -> None:
@@ -51,7 +84,7 @@ def render_camera_projection_frames(
     runtime: CameraProjectionRuntime,
     reservations: Tuple[AtomicOutputReservation, ...],
 ) -> Tuple[AtomicOutputReservation, ...]:
-    """Render every full-frame B4 task and restore Scene state before returning."""
+    """Render every full-frame task and restore Scene state before returning."""
 
     if not isinstance(runtime, CameraProjectionRuntime):
         raise TypeError("runtime must be CameraProjectionRuntime")
@@ -85,7 +118,7 @@ def render_camera_projection_frames(
                 reservation.staged_path,
             )
             logger.info(
-                "Rendering B4 projection '%s' frame %d/%d camera='%s' "
+                "Rendering camera projection '%s' frame %d/%d camera='%s' "
                 "dynamic_range=%s tone_mapping=%s alpha=%s",
                 runtime.plan.source_object_id,
                 task.task_index + 1,
@@ -95,7 +128,7 @@ def render_camera_projection_frames(
                 runtime.output_policy.tone_mapping.value,
                 runtime.output_policy.alpha_representation.value,
             )
-            call_public_render_operator(runtime.bpy_module)
+            _call_render_operator(runtime.bpy_module)
             _require_nonempty_staged_output(reservation)
 
     return resolved
@@ -103,6 +136,6 @@ def render_camera_projection_frames(
 
 __all__ = [
     "CameraProjectionExecutionError",
-    "call_public_render_operator",
+    "_call_render_operator",
     "render_camera_projection_frames",
 ]
