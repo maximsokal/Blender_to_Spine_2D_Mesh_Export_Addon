@@ -13,6 +13,7 @@ from .material_analysis_rna import (
 )
 from .material_graph_resolution import resolve_material_graph
 from .material_node_classification import classify_material_nodes
+from .shader_graph_error import MaterialGraphAnalysisError
 
 
 def analyse_material_slot(
@@ -23,7 +24,7 @@ def analyse_material_slot(
 ) -> MaterialAnalysis:
     """Analyze one Blender 5.2+ material slot without modifying its material."""
 
-    if not isinstance(slot_index, int) or slot_index < 0:
+    if not isinstance(slot_index, int) or isinstance(slot_index, bool) or slot_index < 0:
         raise ValueError("slot_index must be a non-negative integer")
     if material is None:
         return MaterialAnalysis(
@@ -41,24 +42,37 @@ def analyse_material_slot(
             "Blender 5.2+ materials must expose a valid node graph"
         )
 
-    root_nodes = material_root_nodes(
-        material,
-        resolved_name=resolved_material_name,
-    )
-    target = resolve_render_target(render_target)
-    graph_resolution = resolve_material_graph(
-        material,
-        root_nodes,
-        render_target=target,
-        material_name=resolved_material_name,
-    )
-    classification = classify_material_nodes(
-        graph_resolution.classification_nodes
-    )
+    try:
+        root_nodes = material_root_nodes(
+            material,
+            resolved_name=resolved_material_name,
+        )
+        target = resolve_render_target(render_target)
+        graph_resolution = resolve_material_graph(
+            material,
+            root_nodes,
+            render_target=target,
+            material_name=resolved_material_name,
+        )
+        classification = classify_material_nodes(
+            graph_resolution.classification_nodes
+        )
+    except MaterialAnalysisError:
+        raise
+    except MaterialGraphAnalysisError as exc:
+        raise MaterialAnalysisError(
+            f"Unable to analyze material '{resolved_material_name}' for slot "
+            f"{slot_index}: {exc}"
+        ) from exc
+    except Exception as exc:
+        raise MaterialAnalysisError(
+            f"Unexpected Blender 5.2 material analysis failure for "
+            f"'{resolved_material_name}' in slot {slot_index}: {exc}"
+        ) from exc
+
     issues = tuple(
         dict.fromkeys(classification.issues + graph_resolution.issues)
     )
-
     return MaterialAnalysis(
         slot_index=slot_index,
         material_name=resolved_material_name,
