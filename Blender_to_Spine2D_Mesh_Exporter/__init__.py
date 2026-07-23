@@ -1,5 +1,5 @@
 # pylint: disable=import-error
-"""Main entry point for the Blender 5.2+ extension."""
+"""Main entry point for the Blender 5.2+ Rewrite extension."""
 
 from __future__ import annotations
 
@@ -23,12 +23,7 @@ else:
 
 
 if bpy is not None:
-    from . import config
-    from .legacy_loader import install_legacy_multi_facade
-
-    install_legacy_multi_facade()
-
-    from . import addon_preferences, single_object_operator, ui
+    from . import addon_preferences, config, single_object_operator, ui
     from .blender_adapter import generated_material_ui, scene_properties
     from .infrastructure.blender_registration import (
         RegistrationCleanupAction,
@@ -39,7 +34,6 @@ if bpy is not None:
     )
     from .infrastructure.blender_version import require_supported_blender_runtime
 
-    # Preserve package-level aliases used by Blender and focused compatibility tests.
     AddonLoggingSettings = addon_preferences.AddonLoggingSettings
     CLASSES_TO_REGISTER = addon_preferences.CLASSES_TO_REGISTER
     LoggingModuleSettings = addon_preferences.LoggingModuleSettings
@@ -49,8 +43,8 @@ if bpy is not None:
     )
     initialize_logging_preferences = addon_preferences.initialize_logging_preferences
 
-    # Only modules that own live Blender classes/properties are imported during startup.
-    # Legacy implementation modules remain lazy behind ``legacy_loader``.
+    # Only owners of the Blender 5.2+ Rewrite runtime are imported at startup.
+    # Legacy implementation modules are deliberately outside this extension surface.
     MODULES = (
         addon_preferences,
         ui,
@@ -124,11 +118,11 @@ if bpy is not None:
         )
 
     def register() -> None:
-        """Register the complete Blender 5.2+ extension transactionally."""
+        """Register the complete Blender 5.2+ Rewrite extension transactionally."""
 
         require_supported_blender_runtime(bpy)
         config._setup_default_logging()
-        logger.debug("Registering Blender_to_Spine2D_Mesh_Exporter")
+        logger.debug("Registering Blender_to_Spine2D_Mesh_Exporter Rewrite")
 
         completed: list[RegistrationStep] = []
         try:
@@ -142,21 +136,21 @@ if bpy is not None:
             config.setup_logging()
             logger.info("User logging and diagnostics preferences applied")
         except Exception as exc:
-            logger.exception("Addon registration failed")
+            logger.exception("Rewrite extension registration failed")
             unregister_all_best_effort(
                 _registration_cleanup_actions(tuple(completed)),
-                operation="addon registration rollback",
+                operation="Rewrite extension registration rollback",
                 primary_error=exc,
             )
             raise
 
     def unregister() -> None:
-        """Run every owner cleanup in reverse order before reporting failures."""
+        """Run every Rewrite owner cleanup in reverse order before reporting failures."""
 
-        logger.debug("Unregistering Blender_to_Spine2D_Mesh_Exporter")
+        logger.debug("Unregistering Blender_to_Spine2D_Mesh_Exporter Rewrite")
         unregister_all_best_effort(
             _registration_cleanup_actions(REGISTRATION_STEPS),
-            operation="addon unregistration",
+            operation="Rewrite extension unregistration",
         )
 
 else:
