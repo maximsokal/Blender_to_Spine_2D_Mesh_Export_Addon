@@ -1,4 +1,4 @@
-"""Render validated grouped B4 frame tasks inside one reversible Scene scope."""
+"""Render validated grouped Blender 5.2 projection tasks reversibly."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Tuple
 
 from ..infrastructure import AtomicOutputReservation
 from .camera_projection_error import CameraProjectionExecutionError
-from .camera_projection_execution import call_public_render_operator
+from .camera_projection_execution import _call_render_operator
 from .camera_projection_state import (
     configure_scene_for_camera_projection,
     preserve_camera_projection_state,
@@ -43,7 +43,7 @@ def require_nonempty_grouped_staged_output(
 
     if not exists or size <= 0:
         raise CameraProjectionExecutionError(
-            "Grouped B4 staged output is missing or empty: "
+            "Grouped projection staged output is missing or empty: "
             f"{reservation.staged_path}"
         )
 
@@ -85,7 +85,7 @@ def render_grouped_camera_projection_frames(
                 reservation.staged_path,
             )
             logger.info(
-                "Rendering grouped B4 '%s' frame %d/%d camera='%s' "
+                "Rendering grouped projection '%s' frame %d/%d camera='%s' "
                 "sources=%s dynamic_range=%s tone_mapping=%s alpha=%s",
                 runtime.plan.group_id,
                 task.task_index + 1,
@@ -96,7 +96,7 @@ def render_grouped_camera_projection_frames(
                 runtime.output_policy.tone_mapping.value,
                 runtime.output_policy.alpha_representation.value,
             )
-            call_public_render_operator(runtime.bpy_module)
+            _call_render_operator(runtime.bpy_module)
             require_nonempty_grouped_staged_output(reservation)
 
     return resolved
