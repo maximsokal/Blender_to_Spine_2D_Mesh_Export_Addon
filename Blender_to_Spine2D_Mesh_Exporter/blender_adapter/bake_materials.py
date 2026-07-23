@@ -1,11 +1,10 @@
-"""Copy source materials and prepare isolated active image nodes for baking."""
+"""Copy Blender 5.2+ materials and prepare isolated active bake image nodes."""
 
 from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
 import logging
-from math import isfinite
 from typing import Any, Iterable, Iterator, Tuple
 from uuid import uuid4
 
@@ -83,90 +82,41 @@ def _clear_material_slots(mesh: Any) -> None:
         raise BakeMaterialError("Unable to clear target material slots") from exc
 
 
+def _material_node_tree(material: Any, *, label: str) -> Any:
+    """Return the mandatory Blender 5.2+ material node tree."""
+
+    if material is None:
+        raise BakeMaterialError(f"{label} material is missing")
+    node_tree = getattr(material, "node_tree", None)
+    if node_tree is None:
+        raise BakeMaterialError(
+            f"{label} material has no node tree; Blender 5.2+ materials must expose one"
+        )
+    nodes = getattr(node_tree, "nodes", None)
+    links = getattr(node_tree, "links", None)
+    if nodes is None or links is None:
+        raise BakeMaterialError(f"{label} material node tree is incomplete")
+    return node_tree
+
+
 def _create_placeholder_material(bpy_module: Any, slot_index: int, token: str) -> Any:
     material = bpy_module.data.materials.new(
         name=f"__Spine2D_EmptySlot_{slot_index}_{token}"
     )
-    material.use_nodes = True
     try:
-        material.diffuse_color = (1.0, 1.0, 1.0, 1.0)
-    except Exception:
-        logger.debug("Placeholder diffuse_color is not writable", exc_info=True)
-    return material
-
-
-def _material_diffuse_rgba(
-    material: Any,
-    slot_index: int,
-) -> tuple[float, float, float, float]:
-    value = getattr(material, "diffuse_color", (0.8, 0.8, 0.8, 1.0))
-    try:
-        resolved = tuple(float(value[index]) for index in range(4))
-    except Exception as exc:
-        raise BakeMaterialError(
-            f"Unable to read diffuse_color from non-node material slot {slot_index}"
-        ) from exc
-    if not all(isfinite(component) for component in resolved):
-        raise BakeMaterialError(
-            f"Non-node material slot {slot_index} has non-finite diffuse_color"
-        )
-    return resolved
-
-
-def _input_socket(node: Any, name: str) -> Any | None:
-    inputs = getattr(node, "inputs", None)
-    getter = getattr(inputs, "get", None)
-    if callable(getter):
+        _material_node_tree(material, label=f"Placeholder slot {slot_index}")
         try:
-            return getter(name)
+            material.diffuse_color = (1.0, 1.0, 1.0, 1.0)
         except Exception:
-            return None
-    return None
-
-
-def _configure_non_node_fallback(
-    copied: Any,
-    source_material: Any,
-    slot_index: int,
-) -> None:
-    """Represent an opaque legacy diffuse_color on the owned material copy."""
-
-    rgba = _material_diffuse_rgba(source_material, slot_index)
-    if rgba[3] < 0.999999:
-        raise BakeMaterialError(
-            f"Non-node material slot {slot_index} uses diffuse alpha {rgba[3]:.6f}; "
-            "enable material nodes so opacity can be analyzed and baked explicitly"
-        )
-    try:
-        copied.use_nodes = True
-        node_tree = copied.node_tree
-        if node_tree is None:
-            raise RuntimeError("node_tree was not created")
-        node_tree.nodes.clear()
-        output = node_tree.nodes.new(type="ShaderNodeOutputMaterial")
-        output.name = "Material Output"
-        principled = node_tree.nodes.new(type="ShaderNodeBsdfPrincipled")
-        principled.name = "Legacy Diffuse Color"
-        base_color = _input_socket(principled, "Base Color")
-        roughness = _input_socket(principled, "Roughness")
-        metallic = _input_socket(principled, "Metallic")
-        alpha = _input_socket(principled, "Alpha")
-        if base_color is None:
-            raise RuntimeError("Principled Base Color input is unavailable")
-        base_color.default_value = rgba
-        if roughness is not None:
-            roughness.default_value = 1.0
-        if metallic is not None:
-            metallic.default_value = 0.0
-        if alpha is not None:
-            alpha.default_value = 1.0
-        node_tree.links.new(principled.outputs["BSDF"], output.inputs["Surface"])
-    except BakeMaterialError:
+            logger.debug("Placeholder diffuse_color is not writable", exc_info=True)
+        return material
+    except Exception:
+        try:
+            if getattr(material, "users", 0) == 0:
+                bpy_module.data.materials.remove(material)
+        except Exception:
+            logger.exception("Failed to remove invalid placeholder material")
         raise
-    except Exception as exc:
-        raise BakeMaterialError(
-            f"Unable to materialize diffuse_color fallback for slot {slot_index}"
-        ) from exc
 
 
 def _copy_material(
@@ -177,7 +127,7 @@ def _copy_material(
 ) -> Any:
     if source_material is None:
         return _create_placeholder_material(bpy_module, slot_index, token)
-    source_uses_nodes = bool(getattr(source_material, "use_nodes", False))
+    _material_node_tree(source_material, label=f"Source slot {slot_index}")
     try:
         copied = source_material.copy()
     except Exception as exc:
@@ -185,36 +135,20 @@ def _copy_material(
             f"Unable to copy source material in slot {slot_index}"
         ) from exc
     copied.name = f"__Spine2D_Bake_{slot_index}_{token}"
-    if not source_uses_nodes:
-        try:
-            _configure_non_node_fallback(copied, source_material, slot_index)
-        except Exception:
-            try:
-                if getattr(copied, "users", 0) == 0:
-                    bpy_module.data.materials.remove(copied)
-            except Exception:
-                logger.exception("Failed to remove invalid non-node material copy")
-            raise
-    return copied
-
-
-def _ensure_node_tree(material: Any, slot_index: int) -> Any:
     try:
-        material.use_nodes = True
-    except Exception as exc:
-        raise BakeMaterialError(
-            f"Unable to enable nodes for copied material in slot {slot_index}"
-        ) from exc
-    node_tree = getattr(material, "node_tree", None)
-    if node_tree is None:
-        raise BakeMaterialError(
-            f"Copied material in slot {slot_index} has no node tree"
-        )
-    return node_tree
+        _material_node_tree(copied, label=f"Copied slot {slot_index}")
+        return copied
+    except Exception:
+        try:
+            if getattr(copied, "users", 0) == 0:
+                bpy_module.data.materials.remove(copied)
+        except Exception:
+            logger.exception("Failed to remove invalid copied material")
+        raise
 
 
 def _create_active_bake_node(material: Any, slot_index: int, token: str) -> Any:
-    node_tree = _ensure_node_tree(material, slot_index)
+    node_tree = _material_node_tree(material, label=f"Bake slot {slot_index}")
     nodes = node_tree.nodes
     try:
         for node in nodes:
@@ -242,10 +176,7 @@ def _create_generated_color_material(
         name=f"{plan.material_name}_{token}"
     )
     try:
-        material.use_nodes = True
-        node_tree = material.node_tree
-        if node_tree is None:
-            raise RuntimeError("generated material node_tree was not created")
+        node_tree = _material_node_tree(material, label="Generated color")
         node_tree.nodes.clear()
         output = node_tree.nodes.new(type="ShaderNodeOutputMaterial")
         output.name = "Material Output"
