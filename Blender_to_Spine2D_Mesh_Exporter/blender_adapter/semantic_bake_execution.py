@@ -1,4 +1,4 @@
-"""Execute already validated semantic bake requests into caller-owned reservations."""
+"""Execute validated Blender 5.2 semantic bake requests into staged reservations."""
 
 from __future__ import annotations
 
@@ -36,12 +36,44 @@ from .semantic_bake_validation import (
 logger = logging.getLogger(__name__)
 
 
-def _call_public_bake_operator(bpy_module: Any, bake_type: str) -> None:
-    """Use the stable facade so existing failure-injection tests remain valid."""
+def _call_bake_operator(bpy_module: Any, bake_type: str) -> None:
+    """Invoke Blender 5.2 object baking through the physical execution owner."""
 
-    from . import bake_executor as public_executor
-
-    public_executor._call_bake_operator(bpy_module, bake_type)
+    if bpy_module is None:
+        raise BakeExecutionError("bpy_module cannot be None")
+    if not isinstance(bake_type, str) or not bake_type.strip():
+        raise ValueError("bake_type must be a non-empty string")
+    resolved_type = bake_type.strip().upper()
+    try:
+        operator = bpy_module.ops.object.bake
+    except Exception as exc:
+        raise BakeExecutionError("bpy.ops.object.bake is unavailable") from exc
+    poll = getattr(operator, "poll", None)
+    if callable(poll):
+        try:
+            available = bool(poll())
+        except Exception as exc:
+            raise BakeExecutionError(
+                "bpy.ops.object.bake.poll() failed"
+            ) from exc
+        if not available:
+            raise BakeExecutionError("bpy.ops.object.bake.poll() returned False")
+    try:
+        result = operator(type=resolved_type)
+    except Exception as exc:
+        raise BakeExecutionError(
+            f"bpy.ops.object.bake(type={resolved_type!r}) failed"
+        ) from exc
+    try:
+        finished = "FINISHED" in result
+    except Exception as exc:
+        raise BakeExecutionError(
+            f"bpy.ops.object.bake returned an invalid result: {result!r}"
+        ) from exc
+    if not finished:
+        raise BakeExecutionError(
+            f"bpy.ops.object.bake did not finish: {result!r}"
+        )
 
 
 def _bake_pass_to_buffer(
@@ -84,7 +116,7 @@ def _bake_pass_to_buffer(
                 pass_plan.bake_mode.value,
                 pass_plan.material_slot_indices,
             )
-            _call_public_bake_operator(
+            _call_bake_operator(
                 runtime.bpy_module,
                 pass_plan.bake_mode.value,
             )
@@ -117,7 +149,7 @@ def _bake_single_frame(
         )
         with prepared_materials.prepare_pass(pass_plan):
             prepared_materials.assign_image(image)
-            _call_public_bake_operator(
+            _call_bake_operator(
                 runtime.bpy_module,
                 pass_plan.bake_mode.value,
             )
@@ -197,7 +229,7 @@ def run_semantic_bake(
     runtime: SemanticBakeRuntime,
     reservations: Tuple[AtomicOutputReservation, ...],
 ) -> None:
-    """Write every planned frame to pre-reserved staged paths without committing."""
+    """Write every planned frame to reserved staged paths without committing."""
 
     if not isinstance(runtime, SemanticBakeRuntime):
         raise TypeError("runtime must be SemanticBakeRuntime")
@@ -276,4 +308,8 @@ def run_semantic_bake(
                             )
 
 
-__all__ = ["BakeExecutionError", "run_semantic_bake"]
+__all__ = [
+    "BakeExecutionError",
+    "_call_bake_operator",
+    "run_semantic_bake",
+]
