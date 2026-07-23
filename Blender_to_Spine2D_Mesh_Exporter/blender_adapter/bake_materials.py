@@ -10,7 +10,10 @@ from typing import Any, Iterable, Iterator, Tuple
 from uuid import uuid4
 
 from ..domain.baking import BakePassPlan
+from ..domain.baking.generated_materials import GeneratedMaterialPlan
+from .mesh_writer import build_mesh_topology_correspondence
 from .render_engine_contract import render_engine_contract
+
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +95,10 @@ def _create_placeholder_material(bpy_module: Any, slot_index: int, token: str) -
     return material
 
 
-def _material_diffuse_rgba(material: Any, slot_index: int) -> tuple[float, float, float, float]:
+def _material_diffuse_rgba(
+    material: Any,
+    slot_index: int,
+) -> tuple[float, float, float, float]:
     value = getattr(material, "diffuse_color", (0.8, 0.8, 0.8, 1.0))
     try:
         resolved = tuple(float(value[index]) for index in range(4))
@@ -225,6 +231,124 @@ def _create_active_bake_node(material: Any, slot_index: int, token: str) -> Any:
         ) from exc
 
 
+def _create_generated_color_material(
+    bpy_module: Any,
+    plan: GeneratedMaterialPlan,
+    token: str,
+) -> Any:
+    """Create one owned Emission material reading the generated CORNER color."""
+
+    material = bpy_module.data.materials.new(
+        name=f"{plan.material_name}_{token}"
+    )
+    try:
+        material.use_nodes = True
+        node_tree = material.node_tree
+        if node_tree is None:
+            raise RuntimeError("generated material node_tree was not created")
+        node_tree.nodes.clear()
+        output = node_tree.nodes.new(type="ShaderNodeOutputMaterial")
+        output.name = "Material Output"
+        emission = node_tree.nodes.new(type="ShaderNodeEmission")
+        emission.name = "Spine2D Generated Emission"
+        try:
+            color_node = node_tree.nodes.new(type="ShaderNodeVertexColor")
+            color_node.layer_name = plan.color_attribute_name
+        except Exception:
+            color_node = node_tree.nodes.new(type="ShaderNodeAttribute")
+            color_node.attribute_name = plan.color_attribute_name
+        color_output = color_node.outputs.get("Color")
+        emission_input = emission.inputs.get("Color")
+        emission_output = emission.outputs.get("Emission")
+        surface_input = output.inputs.get("Surface")
+        if (
+            color_output is None
+            or emission_input is None
+            or emission_output is None
+            or surface_input is None
+        ):
+            raise RuntimeError("generated material nodes expose unexpected sockets")
+        node_tree.links.new(color_output, emission_input)
+        node_tree.links.new(emission_output, surface_input)
+        try:
+            material.diffuse_color = plan.face_colors[0]
+        except Exception:
+            logger.debug("Generated diffuse_color is not writable", exc_info=True)
+        return material
+    except Exception as exc:
+        try:
+            if getattr(material, "users", 0) == 0:
+                bpy_module.data.materials.remove(material)
+        except Exception:
+            logger.exception("Failed to remove invalid generated material")
+        raise BakeMaterialError(
+            f"Unable to create generated color material: {exc}"
+        ) from exc
+
+
+def _write_generated_corner_colors(
+    target_mesh: Any,
+    plan: GeneratedMaterialPlan,
+) -> Any:
+    """Write one face color to every exact Blender loop mapped from the snapshot."""
+
+    attributes = getattr(target_mesh, "color_attributes", None)
+    if attributes is None:
+        raise BakeMaterialError("Target mesh has no color_attributes collection")
+    existing = attributes.get(plan.color_attribute_name)
+    if existing is not None:
+        try:
+            attributes.remove(existing)
+        except Exception as exc:
+            raise BakeMaterialError(
+                f"Unable to replace color attribute '{plan.color_attribute_name}'"
+            ) from exc
+    try:
+        attribute = attributes.new(
+            name=plan.color_attribute_name,
+            type="FLOAT_COLOR",
+            domain="CORNER",
+        )
+        correspondence = build_mesh_topology_correspondence(
+            plan.target_snapshot,
+            target_mesh,
+            stage="generated-color-write",
+        )
+        for face, color in zip(
+            plan.target_snapshot.faces,
+            plan.face_colors,
+            strict=True,
+        ):
+            for loop_id in face.loop_ids:
+                mesh_loop_index = correspondence.mesh_loop_index_for(loop_id)
+                attribute.data[mesh_loop_index].color = color
+        return attribute
+    except Exception as exc:
+        try:
+            created = attributes.get(plan.color_attribute_name)
+            if created is not None:
+                attributes.remove(created)
+        except Exception:
+            logger.exception("Failed to remove partial generated color attribute")
+        if isinstance(exc, BakeMaterialError):
+            raise
+        raise BakeMaterialError(
+            f"Unable to write generated CORNER colors: {exc}"
+        ) from exc
+
+
+def _remove_color_attribute(mesh: Any, attribute: Any | None) -> None:
+    if attribute is None:
+        return
+    attributes = getattr(mesh, "color_attributes", None)
+    if attributes is None:
+        return
+    try:
+        attributes.remove(attribute)
+    except Exception:
+        logger.exception("Failed to remove generated color attribute")
+
+
 def _apply_face_material_indices(
     target_mesh: Any,
     face_material_indices: Iterable[int],
@@ -286,17 +410,24 @@ def temporary_bake_materials(
     used_material_indices: Iterable[int],
     face_material_indices: Iterable[int],
     render_target: str = "CYCLES",
+    generated_material: GeneratedMaterialPlan | None = None,
 ) -> Iterator[PreparedBakeMaterials]:
-    """Copy source slots, restore polygon bindings, and create active bake nodes."""
+    """Prepare source copies or one generated material on an isolated target."""
 
     if source_obj is None or target_obj is None:
         raise BakeMaterialError("source_obj and target_obj are required")
+    if generated_material is not None and not isinstance(
+        generated_material,
+        GeneratedMaterialPlan,
+    ):
+        raise TypeError("generated_material must be GeneratedMaterialPlan or None")
+
     normalized_target = render_engine_contract(render_target).shader_target
     source_slots = tuple(getattr(source_obj, "material_slots", ()))
     used = tuple(sorted(set(used_material_indices)))
     if any(not isinstance(index, int) or index < 0 for index in used):
         raise ValueError("used_material_indices must contain non-negative integers")
-    if used and max(used) >= len(source_slots):
+    if generated_material is None and used and max(used) >= len(source_slots):
         raise BakeMaterialError(
             f"Target faces reference material slot {max(used)}, but source object has "
             f"only {len(source_slots)} slots"
@@ -310,38 +441,70 @@ def temporary_bake_materials(
     copied_materials: list[Any] = []
     image_nodes: list[Any] = []
     placeholder_indices: list[int] = []
+    generated_attribute = None
 
     try:
         _clear_material_slots(target_mesh)
-        for slot_index, slot in enumerate(source_slots):
-            source_material = getattr(slot, "material", None)
-            copied_material = _copy_material(
+        if generated_material is not None:
+            if used != (0,):
+                raise BakeMaterialError(
+                    "Generated material execution requires only synthetic slot zero"
+                )
+            generated_copy = _create_generated_color_material(
                 bpy_module,
-                source_material,
-                slot_index,
+                generated_material,
                 token,
             )
-            copied_materials.append(copied_material)
-            if source_material is None:
-                placeholder_indices.append(slot_index)
-            target_mesh.materials.append(copied_material)
-            if slot_index in used:
-                if source_material is None:
-                    raise BakeMaterialError(
-                        f"Target geometry uses empty source material slot {slot_index}"
-                    )
-                image_nodes.append(
-                    _create_active_bake_node(copied_material, slot_index, token)
+            copied_materials.append(generated_copy)
+            target_mesh.materials.append(generated_copy)
+            _apply_face_material_indices(
+                target_mesh,
+                face_material_indices,
+                material_slot_count=1,
+            )
+            generated_attribute = _write_generated_corner_colors(
+                target_mesh,
+                generated_material,
+            )
+            image_nodes.append(
+                _create_active_bake_node(generated_copy, 0, token)
+            )
+        else:
+            for slot_index, slot in enumerate(source_slots):
+                source_material = getattr(slot, "material", None)
+                copied_material = _copy_material(
+                    bpy_module,
+                    source_material,
+                    slot_index,
+                    token,
                 )
+                copied_materials.append(copied_material)
+                if source_material is None:
+                    placeholder_indices.append(slot_index)
+                target_mesh.materials.append(copied_material)
+                if slot_index in used:
+                    if source_material is None:
+                        raise BakeMaterialError(
+                            f"Target geometry uses empty source material slot {slot_index}"
+                        )
+                    image_nodes.append(
+                        _create_active_bake_node(
+                            copied_material,
+                            slot_index,
+                            token,
+                        )
+                    )
 
-        _apply_face_material_indices(
-            target_mesh,
-            face_material_indices,
-            material_slot_count=len(copied_materials),
-        )
+            _apply_face_material_indices(
+                target_mesh,
+                face_material_indices,
+                material_slot_count=len(copied_materials),
+            )
+
         if not image_nodes:
-            raise BakeMaterialError("No used material slots received active bake nodes")
-
+            raise BakeMaterialError(
+                "No used material slots received active bake nodes"
+            )
         prepared = PreparedBakeMaterials(
             materials=tuple(copied_materials),
             image_nodes=tuple(image_nodes),
@@ -351,6 +514,7 @@ def temporary_bake_materials(
         )
         yield prepared
     finally:
+        _remove_color_attribute(target_mesh, generated_attribute)
         try:
             _clear_material_slots(target_mesh)
         except Exception:
