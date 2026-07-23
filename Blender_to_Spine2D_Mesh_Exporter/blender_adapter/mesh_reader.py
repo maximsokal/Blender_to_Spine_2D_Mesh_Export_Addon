@@ -32,6 +32,7 @@ from .mesh_edge_attributes import (
     UV_SEAM_ATTRIBUTE,
     read_boolean_edge_attribute,
 )
+from .mesh_uv_attributes import MeshUvAttributeError, read_uv_coordinate
 
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,30 @@ def _edge_boolean_attributes(mesh: Any) -> tuple[tuple[bool, ...], tuple[bool, .
         raise MeshReadError(f"Unable to read mesh edge attributes: {exc}") from exc
 
 
+def _loop_uvs(
+    resolved_uv_layers: tuple[Any, ...],
+    *,
+    mesh_loop_index: int,
+    mesh_loop_count: int,
+) -> tuple[LoopUV, ...]:
+    try:
+        return tuple(
+            LoopUV(
+                layer_name=str(layer.name),
+                coordinate=read_uv_coordinate(
+                    layer,
+                    mesh_loop_index,
+                    expected_length=mesh_loop_count,
+                ),
+            )
+            for layer in resolved_uv_layers
+        )
+    except MeshUvAttributeError as exc:
+        raise MeshReadError(
+            f"Unable to read UV coordinates for mesh loop {mesh_loop_index}: {exc}"
+        ) from exc
+
+
 def read_source_mesh_snapshot(
     obj: Any,
     *,
@@ -157,6 +182,7 @@ def read_source_mesh_snapshot(
         )
         render_uv_name = _active_render_uv_name(resolved_uv_layers, active_layer)
         seam_values, sharp_values = _edge_boolean_attributes(mesh)
+        mesh_loop_count = len(mesh.loops)
 
         vertices = tuple(
             MeshVertex(
@@ -211,17 +237,6 @@ def read_source_mesh_snapshot(
                 mesh_loop = mesh.loops[mesh_loop_index]
                 loop_id = LoopId(mesh_loop_index)
                 polygon_loop_ids.append(loop_id)
-                loop_uvs = tuple(
-                    LoopUV(
-                        layer_name=str(layer.name),
-                        coordinate=_vector_tuple(
-                            layer.data[mesh_loop_index].uv,
-                            2,
-                            f"uv_layers[{layer.name}].data[{mesh_loop_index}].uv",
-                        ),
-                    )
-                    for layer in resolved_uv_layers
-                )
                 domain_loops.append(
                     MeshLoop(
                         id=loop_id,
@@ -232,7 +247,11 @@ def read_source_mesh_snapshot(
                         ),
                         vertex_id=VertexId(int(mesh_loop.vertex_index)),
                         edge_id=EdgeId(int(mesh_loop.edge_index)),
-                        uvs=loop_uvs,
+                        uvs=_loop_uvs(
+                            resolved_uv_layers,
+                            mesh_loop_index=mesh_loop_index,
+                            mesh_loop_count=mesh_loop_count,
+                        ),
                     )
                 )
 
