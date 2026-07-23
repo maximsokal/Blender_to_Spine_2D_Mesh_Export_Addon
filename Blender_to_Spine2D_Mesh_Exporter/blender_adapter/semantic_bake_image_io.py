@@ -64,6 +64,30 @@ def _activate_uv_layer(mesh: Any, layer_name: str) -> None:
         )
 
 
+def _configure_image_alpha_mode(image: Any, *, color_mode: str) -> None:
+    """Require straight alpha for every RGBA semantic-bake image."""
+
+    if image is None:
+        raise BakeExecutionError("image cannot be None")
+    if not isinstance(color_mode, str) or not color_mode.strip():
+        raise ValueError("color_mode must be a non-empty string")
+    resolved_mode = color_mode.strip().upper()
+    if resolved_mode not in {"RGB", "RGBA", "BW"}:
+        raise BakeExecutionError(f"Unsupported Blender image color mode: {color_mode!r}")
+    if resolved_mode != "RGBA":
+        return
+    try:
+        image.alpha_mode = "STRAIGHT"
+    except Exception as exc:
+        raise BakeExecutionError(
+            "Unable to configure Blender 5.2 bake image alpha_mode='STRAIGHT'"
+        ) from exc
+    if str(getattr(image, "alpha_mode", "") or "").upper() != "STRAIGHT":
+        raise BakeExecutionError(
+            "Blender did not keep bake image alpha_mode='STRAIGHT'"
+        )
+
+
 def _create_bake_image(
     bpy_module: Any,
     plan: BakePlan,
@@ -99,6 +123,10 @@ def _create_bake_image(
         )
         image.generated_color = execution_settings.generated_color
         image.file_format = plan.settings.texture_format.value
+        _configure_image_alpha_mode(
+            image,
+            color_mode=execution_settings.color_mode,
+        )
         return image
     except Exception as exc:
         if image is not None:
@@ -106,6 +134,8 @@ def _create_bake_image(
                 bpy_module.data.images.remove(image, do_unlink=True)
             except Exception:
                 logger.exception("Failed to remove partially configured bake image")
+        if isinstance(exc, BakeExecutionError):
+            raise
         raise BakeExecutionError(
             f"Unable to create bake image '{image_name}'"
         ) from exc
@@ -176,6 +206,7 @@ def _save_bake_image(
 
 __all__ = [
     "_activate_uv_layer",
+    "_configure_image_alpha_mode",
     "_create_bake_image",
     "_remove_image",
     "_save_bake_image",
