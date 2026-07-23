@@ -185,9 +185,9 @@ def _resolve_geometry_settings(scene: Any) -> A1GeometryPreparationSettings:
         getattr(
             scene,
             "spine2d_angular_mode",
-            A1AngularMode.LEGACY_SEED_CONE.value,
+            A1AngularMode.SEED_CONE.value,
         )
-        or A1AngularMode.LEGACY_SEED_CONE.value
+        or A1AngularMode.SEED_CONE.value
     ).strip().upper()
     try:
         angular_mode = A1AngularMode(raw_mode)
@@ -197,7 +197,7 @@ def _resolve_geometry_settings(scene: Any) -> A1GeometryPreparationSettings:
             f"Unsupported Spine2D angular mode {raw_mode!r}; supported={supported}"
         ) from exc
 
-    if angular_mode is A1AngularMode.LEGACY_SEED_CONE:
+    if angular_mode is A1AngularMode.SEED_CONE:
         local_angle_limit = None
     else:
         raw_local_limit = getattr(scene, "spine2d_local_angle_limit", None)
