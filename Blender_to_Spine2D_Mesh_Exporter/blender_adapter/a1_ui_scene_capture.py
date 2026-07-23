@@ -1,4 +1,4 @@
-"""Capture one immutable Rewrite export profile from mutable Blender Scene RNA."""
+"""Capture one immutable Rewrite export profile from Blender 5.2 Scene RNA."""
 
 from __future__ import annotations
 
@@ -50,12 +50,25 @@ class _SceneExportProfile:
             or not self.images_relative_path
         ):
             raise ValueError("images_relative_path must be a non-empty string")
-        if not isinstance(self.texture_size, int) or self.texture_size <= 0:
-            raise ValueError("texture_size must be a positive integer")
+        if (
+            not isinstance(self.texture_size, int)
+            or isinstance(self.texture_size, bool)
+            or self.texture_size < 64
+            or self.texture_size > 4096
+            or self.texture_size % 2
+        ):
+            raise ValueError(
+                "texture_size must be an even integer between 64 and 4096"
+            )
         if self.seam_mode not in {"AUTO", "CUSTOM"}:
             raise ValueError("seam_mode must be AUTO or CUSTOM")
-        if not isinstance(self.angle_limit_degrees, (int, float)):
+        if isinstance(self.angle_limit_degrees, bool) or not isinstance(
+            self.angle_limit_degrees,
+            (int, float),
+        ):
             raise TypeError("angle_limit_degrees must be numeric")
+        if not isfinite(float(self.angle_limit_degrees)):
+            raise ValueError("angle_limit_degrees must be finite")
         if not isinstance(self.geometry, A1GeometryPreparationSettings):
             raise TypeError("geometry must be A1GeometryPreparationSettings")
         if not isinstance(self.bake_execution, BakeExecutionSettings):
@@ -88,7 +101,8 @@ class _SceneExportProfile:
                 raise TypeError(
                     f"generated_gray_color[{index}] must be numeric"
                 )
-            if not isfinite(float(value)) or value < 0.0 or value > 1.0:
+            numeric = float(value)
+            if not isfinite(numeric) or numeric < 0.0 or numeric > 1.0:
                 raise ValueError(
                     f"generated_gray_color[{index}] must be finite in [0, 1]"
                 )
@@ -129,34 +143,41 @@ def _resolve_images_relative_path(scene: Any) -> str:
 
 
 def _texture_size(scene: Any) -> int:
-    value = int(getattr(scene, "spine2d_texture_size", 1024))
-    if value <= 0:
-        raise ValueError(f"Texture size must be positive, got {value}")
+    raw = getattr(scene, "spine2d_texture_size", 1024)
+    if isinstance(raw, bool):
+        raise ValueError("spine2d_texture_size must be an integer, not bool")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("spine2d_texture_size must be an integer") from exc
+    if value < 64 or value > 4096 or value % 2:
+        raise ValueError(
+            f"Texture size must be an even integer in [64, 4096], got {value}"
+        )
     return value
 
 
 def _projection_alpha_threshold(scene: Any) -> float:
-    property_name = "spine2d_projection_alpha_threshold"
-    raw_value = getattr(scene, property_name, None)
-    if raw_value is None:
-        getter = getattr(scene, "get", None)
-        if callable(getter):
-            raw_value = getter(
-                property_name,
-                _DEFAULT_PROJECTION_ALPHA_THRESHOLD,
-            )
-    if raw_value is None:
-        raw_value = _DEFAULT_PROJECTION_ALPHA_THRESHOLD
+    raw_value = getattr(
+        scene,
+        "spine2d_projection_alpha_threshold",
+        _DEFAULT_PROJECTION_ALPHA_THRESHOLD,
+    )
     if isinstance(raw_value, bool):
         raise ValueError(
             "spine2d_projection_alpha_threshold must be numeric, not bool"
         )
     try:
-        return float(raw_value)
-    except (TypeError, ValueError) as exc:
+        value = float(raw_value)
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(
             "spine2d_projection_alpha_threshold must be numeric"
         ) from exc
+    if not isfinite(value) or value < 0.0 or value > 1.0:
+        raise ValueError(
+            "spine2d_projection_alpha_threshold must be finite in [0, 1]"
+        )
+    return value
 
 
 def _resolve_geometry_settings(scene: Any) -> A1GeometryPreparationSettings:
@@ -228,7 +249,7 @@ def _resolve_generated_material_pattern(
 
 
 def _resolve_generated_gray_color(scene: Any) -> ColorRGBA:
-    """Read RGB Scene RNA and normalize legacy RGBA values to opaque RGBA."""
+    """Read exactly three display-RGB values and append opaque alpha."""
 
     raw = getattr(
         scene,
@@ -241,15 +262,13 @@ def _resolve_generated_gray_color(scene: Any) -> ColorRGBA:
         raise ValueError(
             "spine2d_generated_gray_color must contain three numeric RGB values"
         ) from exc
-
-    if len(values) not in {3, 4}:
+    if len(values) != 3:
         raise ValueError(
-            "spine2d_generated_gray_color must contain three RGB values "
-            "(legacy four-component values are also accepted)"
+            "spine2d_generated_gray_color must contain exactly three RGB values"
         )
 
     resolved: list[float] = []
-    for index, value in enumerate(values[:3]):
+    for index, value in enumerate(values):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise TypeError(
                 f"spine2d_generated_gray_color[{index}] must be numeric"
