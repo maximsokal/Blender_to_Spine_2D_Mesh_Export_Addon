@@ -83,6 +83,19 @@ PROPERTIES = (
         ),
     ),
     (
+        "spine2d_projection_alpha_threshold",
+        bpy.props.FloatProperty(
+            name="Projection Alpha Threshold",
+            description=(
+                "Minimum rendered alpha included in camera-projection crop bounds"
+            ),
+            default=1.0 / 255.0,
+            min=0.0,
+            max=1.0,
+            precision=6,
+        ),
+    ),
+    (
         "spine2d_texture_size",
         bpy.props.IntProperty(
             name="Texture size",
