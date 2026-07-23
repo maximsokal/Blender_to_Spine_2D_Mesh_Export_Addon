@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
 from ..application import A1GeometryPreparationSettings
 from ..domain.baking import BakeExecutionSettings
+from ..domain.baking.generated_materials import (
+    A1GeneratedMaterialPattern,
+    A1MaterialSourcePolicy,
+    ColorRGBA,
+)
 from ..domain.geometry import A1AngularMode
 
 
 _DEFAULT_PROJECTION_ALPHA_THRESHOLD = 1.0 / 255.0
+_DEFAULT_GENERATED_GRAY: ColorRGBA = (0.5, 0.5, 0.5, 1.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +34,13 @@ class _SceneExportProfile:
     bake_execution: BakeExecutionSettings
     include_control_icons: bool
     include_preview_animation: bool
+    material_source_policy: A1MaterialSourcePolicy = (
+        A1MaterialSourcePolicy.REQUIRE_SOURCE
+    )
+    generated_material_pattern: A1GeneratedMaterialPattern = (
+        A1GeneratedMaterialPattern.SOLID_GRAY
+    )
+    generated_gray_color: ColorRGBA = _DEFAULT_GENERATED_GRAY
 
     def __post_init__(self) -> None:
         if not isinstance(self.output_directory, Path):
@@ -50,6 +64,34 @@ class _SceneExportProfile:
             raise TypeError("include_control_icons must be bool")
         if not isinstance(self.include_preview_animation, bool):
             raise TypeError("include_preview_animation must be bool")
+        if not isinstance(
+            self.material_source_policy,
+            A1MaterialSourcePolicy,
+        ):
+            raise TypeError(
+                "material_source_policy must be A1MaterialSourcePolicy"
+            )
+        if not isinstance(
+            self.generated_material_pattern,
+            A1GeneratedMaterialPattern,
+        ):
+            raise TypeError(
+                "generated_material_pattern must be A1GeneratedMaterialPattern"
+            )
+        if (
+            not isinstance(self.generated_gray_color, tuple)
+            or len(self.generated_gray_color) != 4
+        ):
+            raise ValueError("generated_gray_color must contain four values")
+        for index, value in enumerate(self.generated_gray_color):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(
+                    f"generated_gray_color[{index}] must be numeric"
+                )
+            if not isfinite(float(value)) or value < 0.0 or value > 1.0:
+                raise ValueError(
+                    f"generated_gray_color[{index}] must be finite in [0, 1]"
+                )
 
 
 def _load_bpy() -> Any:
@@ -145,6 +187,74 @@ def _resolve_geometry_settings(scene: Any) -> A1GeometryPreparationSettings:
     )
 
 
+def _resolve_material_source_policy(scene: Any) -> A1MaterialSourcePolicy:
+    raw = str(
+        getattr(
+            scene,
+            "spine2d_material_source_policy",
+            A1MaterialSourcePolicy.REQUIRE_SOURCE.value,
+        )
+        or A1MaterialSourcePolicy.REQUIRE_SOURCE.value
+    ).strip().upper()
+    try:
+        return A1MaterialSourcePolicy(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"Unsupported generated material source policy: {raw!r}"
+        ) from exc
+
+
+def _resolve_generated_material_pattern(
+    scene: Any,
+) -> A1GeneratedMaterialPattern:
+    raw = str(
+        getattr(
+            scene,
+            "spine2d_generated_material_pattern",
+            A1GeneratedMaterialPattern.SOLID_GRAY.value,
+        )
+        or A1GeneratedMaterialPattern.SOLID_GRAY.value
+    ).strip().upper()
+    try:
+        return A1GeneratedMaterialPattern(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"Unsupported generated material pattern: {raw!r}"
+        ) from exc
+
+
+def _resolve_generated_gray_color(scene: Any) -> ColorRGBA:
+    raw = getattr(
+        scene,
+        "spine2d_generated_gray_color",
+        _DEFAULT_GENERATED_GRAY,
+    )
+    try:
+        values = tuple(raw[index] for index in range(4))
+    except Exception as exc:
+        raise ValueError(
+            "spine2d_generated_gray_color must contain four numeric values"
+        ) from exc
+
+    resolved: list[float] = []
+    for index, value in enumerate(values):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(
+                f"spine2d_generated_gray_color[{index}] must be numeric"
+            )
+        numeric = float(value)
+        if not isfinite(numeric):
+            raise ValueError(
+                f"spine2d_generated_gray_color[{index}] must be finite"
+            )
+        if numeric < 0.0 or numeric > 1.0:
+            raise ValueError(
+                f"spine2d_generated_gray_color[{index}] must be in [0, 1]"
+            )
+        resolved.append(numeric)
+    return tuple(resolved)
+
+
 def _capture_scene_profile(
     scene: Any,
     *,
@@ -189,6 +299,9 @@ def _capture_scene_profile(
         include_preview_animation=bool(
             getattr(scene, "spine2d_export_preview_animation", True)
         ),
+        material_source_policy=_resolve_material_source_policy(scene),
+        generated_material_pattern=_resolve_generated_material_pattern(scene),
+        generated_gray_color=_resolve_generated_gray_color(scene),
     )
 
 
@@ -196,8 +309,11 @@ __all__ = [
     "_SceneExportProfile",
     "_capture_scene_profile",
     "_projection_alpha_threshold",
+    "_resolve_generated_gray_color",
+    "_resolve_generated_material_pattern",
     "_resolve_geometry_settings",
     "_resolve_images_relative_path",
+    "_resolve_material_source_policy",
     "_resolve_output_directory",
     "_texture_size",
 ]
