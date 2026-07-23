@@ -6,6 +6,7 @@ import logging
 from typing import Any, Tuple
 
 from ..domain.baking import TextureFormat
+from ..domain.baking.generated_materials import GeneratedBakePlan
 from ..infrastructure import AtomicOutputReservation
 from .bake_compositor import (
     BakePixelBuffer,
@@ -223,12 +224,18 @@ def run_semantic_bake(
                 ),
                 context=runtime.context,
             ):
+                generated_material = (
+                    runtime.plan.generated_material
+                    if isinstance(runtime.plan, GeneratedBakePlan)
+                    else None
+                )
                 with temporary_bake_materials(
                     runtime.source_object,
                     temporary.object,
                     used_material_indices=runtime.used_material_indices,
                     face_material_indices=runtime.face_material_indices,
                     render_target=runtime.renderer.shader_target,
+                    generated_material=generated_material,
                 ) as prepared_materials:
                     with activate_object_for_operator(
                         temporary.object,
