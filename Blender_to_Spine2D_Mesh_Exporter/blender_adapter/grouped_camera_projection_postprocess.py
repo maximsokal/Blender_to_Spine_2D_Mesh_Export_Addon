@@ -1,4 +1,4 @@
-"""Adapt grouped B4 runtime values to the shared projection postprocess engine."""
+"""Adapt grouped Blender 5.2 projection values to the shared postprocess engine."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def log_grouped_camera_projection_layout(
     if not isinstance(layout, CameraProjectionLayout):
         raise TypeError("layout must be CameraProjectionLayout")
     logger.info(
-        "Grouped B4 layout '%s': sources=%d source_ids=%s camera='%s' "
+        "Grouped projection layout '%s': sources=%d source_ids=%s camera='%s' "
         "crop=%dx%d contour=%s vertices=%d components=%d coverage=%s "
         "final_visible=%d dynamic_range=%s tone_mapping=%s alpha=%s",
         runtime.plan.group_id,
@@ -74,7 +74,7 @@ def process_grouped_camera_projection_outputs(
     runtime: GroupedCameraProjectionRuntime,
     reservations: Tuple[AtomicOutputReservation, ...],
 ) -> CameraProjectionLayout:
-    """Build grouped coverage/layout only after reversible rendering has returned."""
+    """Build grouped coverage/layout after reversible rendering has returned."""
 
     if not isinstance(runtime, GroupedCameraProjectionRuntime):
         raise TypeError("runtime must be GroupedCameraProjectionRuntime")
@@ -86,7 +86,6 @@ def process_grouped_camera_projection_outputs(
     layout = process_projection_outputs(
         request,
         resolved,
-        apply_crop=True,
     )
     log_grouped_camera_projection_layout(runtime, layout)
     return layout
