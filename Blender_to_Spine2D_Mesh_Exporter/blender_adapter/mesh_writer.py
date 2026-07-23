@@ -1,8 +1,8 @@
-"""Materialize immutable mesh snapshots as temporary Blender datablocks.
+"""Materialize immutable snapshots as temporary Blender 5.2 Mesh datablocks.
 
-This adapter uses the direct data API only. It never changes the user's active
-object, selection, or mode. The returned object exists only inside the context
-manager and all created datablocks are removed in ``finally``.
+The adapter uses direct data and generic Attribute APIs only. It never changes
+the user's active object, selection, or mode. Every created Object, Mesh, and
+Collection is removed in ``finally``.
 """
 
 from __future__ import annotations
@@ -14,6 +14,14 @@ from typing import Any, Iterator
 from uuid import uuid4
 
 from ..domain.geometry import FaceId, LoopId, MeshSnapshot, MeshSnapshotValidator
+from .mesh_edge_attributes import (
+    MeshEdgeAttributeError,
+    SHARP_EDGE_ATTRIBUTE,
+    UV_SEAM_ATTRIBUTE,
+    write_boolean_edge_attribute,
+)
+from .mesh_uv_attributes import MeshUvAttributeError, write_uv_coordinate
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +41,10 @@ class TemporaryMeshObject:
 class MeshTopologyCorrespondence:
     """Exact snapshot-face/loop mapping for one materialized Blender mesh.
 
-    Blender is allowed to reorder polygons or cyclically rotate polygon corners
-    while preserving the same oriented face. Every later property/UV write must
-    therefore use this explicit mapping instead of assuming ``zip`` or
-    ``polygon.loop_start + source_corner`` remains identical to the snapshot.
-    Reversed winding is rejected because it changes the exported triangle
-    orientation and loop-edge semantics.
+    Blender may reorder polygons or cyclically rotate polygon corners while
+    preserving the oriented face. Every property/UV write therefore uses this
+    explicit mapping instead of positional ``zip`` assumptions. Reversed winding
+    is rejected because it changes exported triangle and loop-edge semantics.
     """
 
     snapshot_id: str
@@ -82,20 +88,22 @@ class MeshTopologyCorrespondence:
     def polygon_index_for(self, face_id: FaceId) -> int:
         if type(face_id) is not FaceId:
             raise TypeError("face_id must be FaceId")
-        mapping = dict(self.face_to_polygon_index)
         try:
-            return mapping[face_id]
+            return dict(self.face_to_polygon_index)[face_id]
         except KeyError as exc:
-            raise KeyError(f"No Blender polygon mapped for face {face_id.index}") from exc
+            raise KeyError(
+                f"No Blender polygon mapped for face {face_id.index}"
+            ) from exc
 
     def mesh_loop_index_for(self, loop_id: LoopId) -> int:
         if type(loop_id) is not LoopId:
             raise TypeError("loop_id must be LoopId")
-        mapping = dict(self.loop_to_mesh_index)
         try:
-            return mapping[loop_id]
+            return dict(self.loop_to_mesh_index)[loop_id]
         except KeyError as exc:
-            raise KeyError(f"No Blender loop mapped for loop {loop_id.index}") from exc
+            raise KeyError(
+                f"No Blender loop mapped for loop {loop_id.index}"
+            ) from exc
 
 
 def _load_bpy() -> Any:
@@ -140,7 +148,7 @@ def _rotation_offsets(
     expected: tuple[int, ...],
     actual: tuple[int, ...],
 ) -> tuple[int, ...]:
-    """Return every oriented cyclic offset that maps ``expected`` to ``actual``."""
+    """Return every oriented cyclic offset mapping ``expected`` to ``actual``."""
 
     if len(expected) != len(actual) or not expected:
         return ()
@@ -191,12 +199,7 @@ def build_mesh_topology_correspondence(
     *,
     stage: str = "materialization",
 ) -> MeshTopologyCorrespondence:
-    """Map snapshot faces and loops to a generated Blender mesh exactly.
-
-    Polygon collection reordering and oriented cyclic corner rotations are
-    supported. Missing, ambiguous, reversed, or edge-inconsistent faces are
-    rejected before UV or material data can be attached to the wrong corner.
-    """
+    """Map snapshot faces and loops to a generated Blender mesh exactly."""
 
     if not isinstance(snapshot, MeshSnapshot):
         raise TypeError("snapshot must be MeshSnapshot")
@@ -341,27 +344,59 @@ def build_mesh_topology_correspondence(
 
 
 def _verify_generated_topology(snapshot: MeshSnapshot, mesh: Any) -> None:
-    """Backward-compatible validation wrapper for existing callers/tests."""
+    """Validation wrapper retained for focused topology tests."""
 
     build_mesh_topology_correspondence(snapshot, mesh)
 
 
-def _write_edge_flags(snapshot: MeshSnapshot, mesh: Any) -> None:
+def _write_edge_attributes(snapshot: MeshSnapshot, mesh: Any) -> None:
+    """Write Blender 5.2 `uv_seam` and `sharp_edge` BOOLEAN/EDGE attributes."""
+
     source_by_vertices = {
         _edge_key(edge.vertex_ids[0].index, edge.vertex_ids[1].index): edge
         for edge in snapshot.edges
     }
+    edge_count = len(mesh.edges)
+    seams = [False] * edge_count
+    sharp_edges = [False] * edge_count
     for mesh_edge in mesh.edges:
+        edge_index = int(mesh_edge.index)
+        if edge_index < 0 or edge_index >= edge_count:
+            raise MeshWriteError(
+                f"Generated mesh edge index {edge_index} is outside [0, {edge_count})"
+            )
         key = _edge_key(int(mesh_edge.vertices[0]), int(mesh_edge.vertices[1]))
         source_edge = source_by_vertices.get(key)
         if source_edge is None:
             raise MeshWriteError(
                 f"Generated mesh contains unexpected edge between vertices {key}"
             )
-        if hasattr(mesh_edge, "use_seam"):
-            mesh_edge.use_seam = source_edge.seam
-        if hasattr(mesh_edge, "use_edge_sharp"):
-            mesh_edge.use_edge_sharp = source_edge.sharp
+        seams[edge_index] = source_edge.seam
+        sharp_edges[edge_index] = source_edge.sharp
+
+    try:
+        write_boolean_edge_attribute(
+            mesh,
+            UV_SEAM_ATTRIBUTE,
+            tuple(seams),
+            omit_when_all_false=True,
+        )
+        write_boolean_edge_attribute(
+            mesh,
+            SHARP_EDGE_ATTRIBUTE,
+            tuple(sharp_edges),
+            omit_when_all_false=True,
+        )
+    except MeshEdgeAttributeError as exc:
+        raise MeshWriteError(
+            f"Unable to write Blender 5.2 edge attributes: {exc}"
+        ) from exc
+
+
+def _write_edge_flags(snapshot: MeshSnapshot, mesh: Any) -> None:
+    """Publicly retained name delegating to Blender 5.2 generic attributes."""
+
+    _write_edge_attributes(snapshot, mesh)
 
 
 def _write_face_properties(
@@ -429,17 +464,34 @@ def _write_uv_layers(
         stage="UV-layer-write",
     )
     loop_map = snapshot.loop_by_id()
+    mesh_loop_count = len(mesh.loops)
     for layer_name in snapshot.uv_layer_names:
         layer = mesh.uv_layers.get(layer_name)
         if layer is None:
-            layer = mesh.uv_layers.new(name=layer_name)
+            try:
+                layer = mesh.uv_layers.new(name=layer_name)
+            except Exception as exc:
+                raise MeshWriteError(
+                    f"Unable to create UV layer '{layer_name}'"
+                ) from exc
         for source_loop_id, mesh_loop_index in resolved.loop_to_mesh_index:
             coordinate = loop_map[source_loop_id].uv(layer_name)
             if coordinate is None:
                 raise MeshWriteError(
                     f"Loop {source_loop_id.index} is missing UV layer '{layer_name}'"
                 )
-            layer.data[mesh_loop_index].uv = coordinate
+            try:
+                write_uv_coordinate(
+                    layer,
+                    mesh_loop_index,
+                    coordinate,
+                    expected_length=mesh_loop_count,
+                )
+            except MeshUvAttributeError as exc:
+                raise MeshWriteError(
+                    f"Unable to write UV layer '{layer_name}' loop "
+                    f"{mesh_loop_index}: {exc}"
+                ) from exc
 
     _write_uv_roles(snapshot, mesh)
 
@@ -449,11 +501,6 @@ def _remove_collection(bpy_module: Any, collection: Any | None) -> None:
         return
     try:
         bpy_module.data.collections.remove(collection, do_unlink=True)
-    except TypeError:
-        try:
-            bpy_module.data.collections.remove(collection)
-        except Exception:
-            logger.exception("Failed to remove temporary collection")
     except Exception:
         logger.exception("Failed to remove temporary collection")
 
@@ -470,7 +517,7 @@ def _remove_object_and_mesh(
             logger.exception("Failed to remove temporary mesh object")
     if mesh is not None:
         try:
-            if getattr(mesh, "users", 0) == 0:
+            if int(getattr(mesh, "users", 0) or 0) == 0:
                 bpy_module.data.meshes.remove(mesh)
         except Exception:
             logger.exception("Failed to remove temporary Mesh datablock")
@@ -483,13 +530,7 @@ def temporary_mesh_object(
     scene: Any | None = None,
     name_prefix: str = "__Spine2D_UV",
 ) -> Iterator[TemporaryMeshObject]:
-    """Create and clean an isolated Blender Object for one MeshSnapshot.
-
-    Only failures raised while creating or populating temporary Blender datablocks
-    are converted to :class:`MeshWriteError`. Exceptions raised by the caller inside
-    the ``with`` block retain their original type and traceback while cleanup still
-    runs in ``finally``.
-    """
+    """Create and clean an isolated Blender 5.2 Object for one MeshSnapshot."""
 
     if not isinstance(snapshot, MeshSnapshot):
         raise TypeError("snapshot must be MeshSnapshot")
@@ -531,7 +572,7 @@ def temporary_mesh_object(
                 mesh,
                 stage="materialization",
             )
-            _write_edge_flags(snapshot, mesh)
+            _write_edge_attributes(snapshot, mesh)
             _write_face_properties(snapshot, mesh, correspondence)
             _write_uv_layers(snapshot, mesh, correspondence)
             _set_world_matrix(obj, snapshot.world_matrix)
@@ -550,3 +591,12 @@ def temporary_mesh_object(
     finally:
         _remove_object_and_mesh(bpy_module, obj, mesh)
         _remove_collection(bpy_module, collection)
+
+
+__all__ = [
+    "MeshTopologyCorrespondence",
+    "MeshWriteError",
+    "TemporaryMeshObject",
+    "build_mesh_topology_correspondence",
+    "temporary_mesh_object",
+]
