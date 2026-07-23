@@ -3,8 +3,8 @@
 The original Object and Mesh are never mutated. A private object/data copy is
 linked to a temporary collection, stamped with lineage attributes, evaluated,
 converted with ``Object.to_mesh()``, and released with ``to_mesh_clear()`` in
-``finally``. UV seams and sharp edges are read from Blender's generic edge
-attributes rather than retired ``MeshEdge`` flags.
+``finally``. UV coordinates, seams, and sharp edges are read from Blender 5.2
+attribute collections rather than retired MeshUVLoop/MeshEdge properties.
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ from .mesh_reader import (
     _resolve_uv_layers,
     _vector_tuple,
 )
+from .mesh_uv_attributes import MeshUvAttributeError, read_uv_coordinate
 
 
 logger = logging.getLogger(__name__)
@@ -242,6 +243,30 @@ def _require_lineage_value(
     return int(value)
 
 
+def _evaluated_loop_uvs(
+    layers: tuple[Any, ...],
+    *,
+    loop_index: int,
+    loop_count: int,
+) -> tuple[LoopUV, ...]:
+    try:
+        return tuple(
+            LoopUV(
+                layer_name=str(layer.name),
+                coordinate=read_uv_coordinate(
+                    layer,
+                    loop_index,
+                    expected_length=loop_count,
+                ),
+            )
+            for layer in layers
+        )
+    except MeshUvAttributeError as exc:
+        raise EvaluatedMeshReadError(
+            f"Unable to read evaluated UV coordinates for loop {loop_index}: {exc}"
+        ) from exc
+
+
 def _remove_temporary_object_and_mesh(
     bpy_module: Any,
     obj: Any | None,
@@ -342,6 +367,7 @@ def _build_snapshot_from_evaluated_mesh(
     )
     render_uv_name = _active_render_uv_name(resolved_uv_layers, active_layer)
     seam_values, sharp_values = _read_edge_flags(evaluated_mesh)
+    evaluated_loop_count = len(evaluated_mesh.loops)
 
     vertices: list[MeshVertex] = []
     for vertex in evaluated_mesh.vertices:
@@ -430,17 +456,10 @@ def _build_snapshot_from_evaluated_mesh(
                     ),
                     vertex_id=VertexId(int(mesh_loop.vertex_index)),
                     edge_id=EdgeId(int(mesh_loop.edge_index)),
-                    uvs=tuple(
-                        LoopUV(
-                            layer_name=str(layer.name),
-                            coordinate=_vector_tuple(
-                                layer.data[loop_index].uv,
-                                2,
-                                f"evaluated.uv_layers[{layer.name}]"
-                                f".data[{loop_index}].uv",
-                            ),
-                        )
-                        for layer in resolved_uv_layers
+                    uvs=_evaluated_loop_uvs(
+                        resolved_uv_layers,
+                        loop_index=loop_index,
+                        loop_count=evaluated_loop_count,
                     ),
                 )
             )
