@@ -1,4 +1,4 @@
-"""Validate B4 camera projection requests before reservation or Scene mutation."""
+"""Validate Blender 5.2 camera-projection requests before any mutation."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from .view_layer_contract import validate_source_view_layer_for_camera_projectio
 
 @dataclass(frozen=True, slots=True)
 class CameraProjectionRuntime:
-    """Fully validated immutable runtime values required by B4 execution."""
+    """Fully validated immutable values required by camera projection."""
 
     source_object: Any
     plan: CameraProjectionPlan
@@ -91,14 +91,14 @@ def _validate_projection_plan_tasks(plan: CameraProjectionPlan) -> None:
         )
 
 
-def validate_projection_runtime(
+def _resolve_projection_runtime_context(
     source_obj: Any,
     plan: CameraProjectionPlan,
     *,
     context: Any | None,
     scene: Any | None,
 ) -> tuple[Any, Any, Any]:
-    """Compatibility runtime validation without execution-policy resolution."""
+    """Resolve and validate the exact Blender Context and Scene for one request."""
 
     if source_obj is None or getattr(source_obj, "type", None) != "MESH":
         raise CameraProjectionExecutionError(
@@ -154,7 +154,7 @@ def validate_camera_projection_request(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> CameraProjectionRuntime:
-    """Resolve and validate the complete B4 request before output reservation."""
+    """Resolve and validate the complete request before output reservation."""
 
     if source_obj is None:
         raise ValueError("source_obj cannot be None")
@@ -190,11 +190,13 @@ def validate_camera_projection_request(
         resolved_settings.projection_output_policy,
         plan.settings.texture_format,
     )
-    bpy_module, resolved_context, resolved_scene = validate_projection_runtime(
-        source_obj,
-        plan,
-        context=context,
-        scene=scene,
+    bpy_module, resolved_context, resolved_scene = (
+        _resolve_projection_runtime_context(
+            source_obj,
+            plan,
+            context=context,
+            scene=scene,
+        )
     )
 
     return CameraProjectionRuntime(
@@ -213,7 +215,7 @@ def validate_camera_projection_reservations(
     plan: CameraProjectionPlan,
     reservations: Iterable[AtomicOutputReservation],
 ) -> Tuple[AtomicOutputReservation, ...]:
-    """Require one correctly ordered reservation for every B4 frame task."""
+    """Require one correctly ordered reservation for every projection task."""
 
     if not isinstance(plan, CameraProjectionPlan):
         raise TypeError("plan must be CameraProjectionPlan")
@@ -247,8 +249,6 @@ def validate_camera_projection_reservations(
 __all__ = [
     "CameraProjectionExecutionError",
     "CameraProjectionRuntime",
-    "_load_bpy",
     "validate_camera_projection_request",
     "validate_camera_projection_reservations",
-    "validate_projection_runtime",
 ]
