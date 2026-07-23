@@ -1,8 +1,8 @@
-"""Transactional Blender UV unwrap on an isolated temporary mesh.
+"""Transactional Blender 5.2 UV unwrap on an isolated temporary mesh.
 
-All context-sensitive UV operators are confined to this module. The source object
-is never activated or modified. Operators are invoked once per stage, never from
-geometry loops.
+All context-sensitive UV operators are confined to this module. The source
+Object is never activated or modified. Operators are invoked once per stage,
+never inside geometry loops, and Edit Mode is always left in ``finally``.
 """
 
 from __future__ import annotations
@@ -24,12 +24,14 @@ from ..domain.uv import (
     calculate_uv_statistics,
 )
 from .context_state import BlenderContextError, activate_object_for_operator
+from .mesh_uv_attributes import MeshUvAttributeError, read_uv_coordinate
 from .mesh_writer import (
     MeshTopologyCorrespondence,
     MeshWriteError,
     build_mesh_topology_correspondence,
     temporary_mesh_object,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +49,17 @@ class UvOperatorPlan:
     def __post_init__(self) -> None:
         if self.unwrap_operator not in {"smart_project", "unwrap"}:
             raise ValueError("unwrap_operator must be 'smart_project' or 'unwrap'")
+        if not isinstance(self.unwrap_arguments, Mapping):
+            raise TypeError("unwrap_arguments must be a mapping")
+        if self.pack_arguments is not None and not isinstance(
+            self.pack_arguments,
+            Mapping,
+        ):
+            raise TypeError("pack_arguments must be a mapping or None")
 
 
 def build_uv_operator_plan(settings: UvUnwrapSettings) -> UvOperatorPlan:
-    """Translate typed settings to documented Blender UV operator arguments."""
+    """Translate typed settings to Blender 5.2 UV operator arguments."""
 
     if not isinstance(settings, UvUnwrapSettings):
         raise TypeError("settings must be UvUnwrapSettings")
@@ -119,12 +128,10 @@ def _require_finished(result: Any, operator_name: str) -> None:
         finished = "FINISHED" in result
     except Exception as exc:
         raise UvUnwrapError(
-            f"Operator bpy.ops.uv.{operator_name} returned an invalid result: {result!r}"
+            f"Operator {operator_name} returned an invalid result: {result!r}"
         ) from exc
     if not finished:
-        raise UvUnwrapError(
-            f"Operator bpy.ops.uv.{operator_name} did not finish: {result!r}"
-        )
+        raise UvUnwrapError(f"Operator {operator_name} did not finish: {result!r}")
 
 
 def _call_operator(
@@ -141,19 +148,29 @@ def _call_operator(
         raise UvUnwrapError(
             f"bpy.ops.uv.{operator_name} failed with arguments {dict(arguments)!r}"
         ) from exc
-    _require_finished(result, operator_name)
+    _require_finished(result, f"bpy.ops.uv.{operator_name}")
 
 
 def _set_mode(bpy_module: Any, mode: str) -> None:
+    if not isinstance(mode, str) or not mode.strip():
+        raise ValueError("mode must be a non-empty string")
+    resolved_mode = mode.strip().upper()
     operator = bpy_module.ops.object.mode_set
     poll = getattr(operator, "poll", None)
     if callable(poll) and not poll():
-        raise UvUnwrapError(f"bpy.ops.object.mode_set cannot enter {mode}")
+        raise UvUnwrapError(
+            f"bpy.ops.object.mode_set cannot enter {resolved_mode}"
+        )
     try:
-        result = operator(mode=mode)
+        result = operator(mode=resolved_mode)
     except Exception as exc:
-        raise UvUnwrapError(f"Unable to switch temporary object to {mode}") from exc
-    _require_finished(result, f"object.mode_set({mode})")
+        raise UvUnwrapError(
+            f"Unable to switch temporary object to {resolved_mode}"
+        ) from exc
+    _require_finished(
+        result,
+        f"bpy.ops.object.mode_set(mode={resolved_mode!r})",
+    )
 
 
 def _select_all_mesh_and_uv(bpy_module: Any) -> None:
@@ -165,7 +182,7 @@ def _select_all_mesh_and_uv(bpy_module: Any) -> None:
         mesh_result = mesh_operator(action="SELECT")
     except Exception as exc:
         raise UvUnwrapError("bpy.ops.mesh.select_all failed") from exc
-    _require_finished(mesh_result, "mesh.select_all")
+    _require_finished(mesh_result, "bpy.ops.mesh.select_all")
 
     uv_operator = bpy_module.ops.uv.select_all
     uv_poll = getattr(uv_operator, "poll", None)
@@ -175,37 +192,36 @@ def _select_all_mesh_and_uv(bpy_module: Any) -> None:
         uv_result = uv_operator(action="SELECT")
     except Exception as exc:
         raise UvUnwrapError("bpy.ops.uv.select_all failed") from exc
-    _require_finished(uv_result, "select_all")
+    _require_finished(uv_result, "bpy.ops.uv.select_all")
 
 
 def _activate_target_uv_layer(mesh: Any, layer_name: str) -> Any:
+    if not isinstance(layer_name, str) or not layer_name.strip():
+        raise ValueError("layer_name must be a non-empty string")
+    resolved_name = layer_name.strip()
     layers = getattr(mesh, "uv_layers", None)
     if layers is None:
         raise UvUnwrapError("Temporary mesh has no UV layer collection")
-    layer = layers.get(layer_name)
+    try:
+        layer = layers.get(resolved_name)
+    except Exception as exc:
+        raise UvUnwrapError(
+            f"Unable to find target UV layer '{resolved_name}'"
+        ) from exc
     if layer is None:
         try:
-            layer = layers.new(name=layer_name)
+            layer = layers.new(name=resolved_name)
         except Exception as exc:
             raise UvUnwrapError(
-                f"Unable to create target UV layer '{layer_name}'"
+                f"Unable to create target UV layer '{resolved_name}'"
             ) from exc
     try:
         layers.active = layer
-    except Exception:
-        try:
-            layer_index = next(
-                index for index, candidate in enumerate(layers) if candidate == layer
-            )
-            layers.active_index = layer_index
-        except Exception as exc:
-            raise UvUnwrapError(
-                f"Unable to activate target UV layer '{layer_name}'"
-            ) from exc
-    try:
         layer.active_render = True
-    except Exception:
-        logger.debug("UV layer active_render is not writable", exc_info=True)
+    except Exception as exc:
+        raise UvUnwrapError(
+            f"Unable to activate Blender 5.2 UV layer '{resolved_name}'"
+        ) from exc
     return layer
 
 
@@ -227,20 +243,29 @@ def _capture_uv_layout(
             "Topology correspondence belongs to a different snapshot"
         )
 
-    layer = mesh.uv_layers.get(layer_name)
+    try:
+        layer = mesh.uv_layers.get(layer_name)
+    except Exception as exc:
+        raise UvUnwrapError(
+            f"Unable to find result UV layer '{layer_name}'"
+        ) from exc
     if layer is None:
         raise UvUnwrapError(f"Result UV layer '{layer_name}' is missing")
 
+    mesh_loop_count = len(mesh.loops)
     coordinates: list[UvLoopCoordinate] = []
     loop_map = snapshot.loop_by_id()
     for loop_id, mesh_loop_index in resolved.loop_to_mesh_index:
         try:
-            uv_value = layer.data[mesh_loop_index].uv
-            coordinate = (float(uv_value[0]), float(uv_value[1]))
-        except Exception as exc:
+            coordinate = read_uv_coordinate(
+                layer,
+                mesh_loop_index,
+                expected_length=mesh_loop_count,
+            )
+        except MeshUvAttributeError as exc:
             raise UvUnwrapError(
-                f"Unable to read UV for loop {loop_id.index} "
-                f"from Blender loop {mesh_loop_index}"
+                f"Unable to read UV for loop {loop_id.index} from Blender "
+                f"loop {mesh_loop_index}: {exc}"
             ) from exc
         coordinates.append(
             UvLoopCoordinate(
@@ -263,6 +288,50 @@ def _capture_uv_layout(
     )
 
 
+def _execute_uv_operator_plan(
+    bpy_module: Any,
+    plan: UvOperatorPlan,
+) -> None:
+    """Run Blender UV operators and always leave the temporary Object in Object Mode."""
+
+    _set_mode(bpy_module, "EDIT")
+    primary_error: BaseException | None = None
+    try:
+        _select_all_mesh_and_uv(bpy_module)
+        uv_operators = bpy_module.ops.uv
+        unwrap_operator = getattr(uv_operators, plan.unwrap_operator, None)
+        if unwrap_operator is None:
+            raise UvUnwrapError(
+                f"bpy.ops.uv.{plan.unwrap_operator} is unavailable"
+            )
+        _call_operator(
+            unwrap_operator,
+            plan.unwrap_operator,
+            plan.unwrap_arguments,
+        )
+        if plan.pack_arguments is not None:
+            pack_operator = getattr(uv_operators, "pack_islands", None)
+            if pack_operator is None:
+                raise UvUnwrapError("bpy.ops.uv.pack_islands is unavailable")
+            _call_operator(
+                pack_operator,
+                "pack_islands",
+                plan.pack_arguments,
+            )
+    except BaseException as exc:
+        primary_error = exc
+        raise
+    finally:
+        try:
+            _set_mode(bpy_module, "OBJECT")
+        except Exception:
+            if primary_error is None:
+                raise
+            logger.exception(
+                "Unable to leave Edit Mode while handling a UV operator failure"
+            )
+
+
 def unwrap_snapshot_uv(
     snapshot: MeshSnapshot,
     settings: UvUnwrapSettings | None = None,
@@ -270,7 +339,7 @@ def unwrap_snapshot_uv(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> UvUnwrapResult:
-    """Unwrap one immutable snapshot without changing its source Blender object."""
+    """Unwrap one immutable snapshot without changing its source Blender Object."""
 
     if not isinstance(snapshot, MeshSnapshot):
         raise TypeError("snapshot must be MeshSnapshot")
@@ -296,30 +365,14 @@ def unwrap_snapshot_uv(
                 temporary.object,
                 context=resolved_context,
             ):
-                _set_mode(bpy_module, "EDIT")
-                _select_all_mesh_and_uv(bpy_module)
-                uv_operators = bpy_module.ops.uv
-                unwrap_operator = getattr(uv_operators, plan.unwrap_operator, None)
-                if unwrap_operator is None:
-                    raise UvUnwrapError(
-                        f"bpy.ops.uv.{plan.unwrap_operator} is unavailable"
-                    )
-                _call_operator(
-                    unwrap_operator,
-                    plan.unwrap_operator,
-                    plan.unwrap_arguments,
-                )
-                if plan.pack_arguments is not None:
-                    _call_operator(
-                        uv_operators.pack_islands,
-                        "pack_islands",
-                        plan.pack_arguments,
-                    )
-                _set_mode(bpy_module, "OBJECT")
+                _execute_uv_operator_plan(bpy_module, plan)
 
-            update = getattr(temporary.mesh, "update", None)
-            if callable(update):
-                update()
+            try:
+                temporary.mesh.update()
+            except Exception as exc:
+                raise UvUnwrapError(
+                    "Unable to update temporary Mesh after UV operators"
+                ) from exc
             try:
                 correspondence = build_mesh_topology_correspondence(
                     snapshot,
@@ -343,8 +396,8 @@ def unwrap_snapshot_uv(
                 resolved_settings.layer_name,
             )
             logger.info(
-                "Unwrapped snapshot '%s' using %s: %d loops, bounds "
-                "U[%s, %s] V[%s, %s]",
+                "Unwrapped Blender 5.2 snapshot '%s' using %s: %d loops, "
+                "bounds U[%s, %s] V[%s, %s]",
                 snapshot.snapshot_id,
                 resolved_settings.method.value,
                 statistics.loop_count,
@@ -369,3 +422,11 @@ def unwrap_snapshot_uv(
         raise UvUnwrapError(
             f"UV unwrap failed for snapshot '{snapshot.snapshot_id}': {exc}"
         ) from exc
+
+
+__all__ = [
+    "UvOperatorPlan",
+    "UvUnwrapError",
+    "build_uv_operator_plan",
+    "unwrap_snapshot_uv",
+]
