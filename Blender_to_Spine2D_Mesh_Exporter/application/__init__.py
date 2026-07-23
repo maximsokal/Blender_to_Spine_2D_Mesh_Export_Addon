@@ -19,6 +19,10 @@ from .a1_document_assembly import (
     A1DocumentAssemblySettings,
     assemble_a1_document,
 )
+from .a1_generated_materials import (
+    build_generated_material_plan,
+    generated_palette_color,
+)
 from .a1_geometry_preparation import (
     A1GeometryPreparationError,
     A1GeometryPreparationResult,
@@ -136,8 +140,10 @@ __all__ = [
     "build_a1_z_group_assignment",
     "build_camera_projection_mesh_snapshot",
     "build_camera_projection_quad_snapshot",
+    "build_generated_material_plan",
     "calculate_a1_main_position_pixels",
     "calculate_a1_mesh_bounds",
+    "generated_palette_color",
     "preflight_a1_output_namespace",
     "prepare_a1_geometry_regions",
     "project_triangulated_disk_attachment",
