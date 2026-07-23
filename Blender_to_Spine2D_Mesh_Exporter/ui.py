@@ -40,7 +40,7 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene.spine2d_control_icons = True
             scene.spine2d_export_preview_animation = True
             scene.spine2d_angle_limit = 30
-            scene.spine2d_angular_mode = "LEGACY_SEED_CONE"
+            scene.spine2d_angular_mode = "SEED_CONE"
             scene.spine2d_local_angle_limit = 30.0
             scene.spine2d_seam_maker_mode = "AUTO"
             scene.spine2d_frames_for_render = 0
@@ -480,7 +480,7 @@ SCENE_PROPERTIES = (
             description="Choose seed-normal segmentation or add a local dihedral guard",
             items=(
                 (
-                    "LEGACY_SEED_CONE",
+                    "SEED_CONE",
                     "Seed cone",
                     "Compare every candidate with the segment seed normal",
                 ),
@@ -490,7 +490,7 @@ SCENE_PROPERTIES = (
                     "Also reject traversal across locally sharp edges",
                 ),
             ),
-            default="LEGACY_SEED_CONE",
+            default="SEED_CONE",
         ),
     ),
     (
