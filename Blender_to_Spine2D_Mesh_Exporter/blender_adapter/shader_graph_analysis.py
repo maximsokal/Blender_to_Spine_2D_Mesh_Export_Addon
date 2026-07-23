@@ -1,4 +1,4 @@
-"""Orchestrate renderer-specific recursive Blender shader-graph analysis."""
+"""Orchestrate strict Blender 5.2+ recursive shader-graph analysis."""
 
 from __future__ import annotations
 
@@ -45,7 +45,12 @@ def analyse_material_graph_detailed(
     *,
     render_target: str = "ALL",
 ) -> MaterialGraphAnalysisResult:
-    """Analyze a material and retain adapter-private reachable live nodes."""
+    """Analyze nodes reachable from the effective Blender 5.2 Material Output.
+
+    Orphan nodes are diagnostic editor content, not an executable shader program.
+    A material without an output for the requested renderer is therefore rejected
+    before bake planning instead of being classified from every node in the tree.
+    """
 
     if material is None:
         raise MaterialGraphAnalysisError("material cannot be None")
@@ -56,34 +61,38 @@ def analyse_material_graph_detailed(
             f"Material '{resolved_material_name}' has no node tree"
         )
 
-    target = normalise_render_target(render_target)
-    nodes = iter_nodes(node_tree)
-    output = find_material_output(node_tree, nodes, target)
-    walker = RecursiveShaderGraphWalker(
-        resolved_material_name,
-        node_tree,
-    )
-    if output is None:
-        walker.issues.append(
-            f"Material Output for render target '{target}' was not found; "
-            "semantic analysis used all nodes"
-        )
-        walker.walk_all_nodes()
-    else:
-        walker.walk_material_output(output)
+    try:
+        target = normalise_render_target(render_target)
+        nodes = iter_nodes(node_tree)
+        output = find_material_output(node_tree, nodes, target)
+        if output is None:
+            raise MaterialGraphAnalysisError(
+                f"Material '{resolved_material_name}' has no Material Output "
+                f"for render target '{target}'"
+            )
 
-    traversal = walker.build_result()
-    semantic_channels = derive_semantic_channels(traversal)
-    dependencies = derive_material_dependencies(material, traversal)
-    snapshot, live_nodes = build_material_graph_snapshot(
-        material_name=resolved_material_name,
-        active_output_node_id=(
-            None if output is None else node_name(output)
-        ),
-        traversal=traversal,
-        semantic_channels=semantic_channels,
-        dependencies=dependencies,
-    )
+        walker = RecursiveShaderGraphWalker(
+            resolved_material_name,
+            node_tree,
+        )
+        walker.walk_material_output(output)
+        traversal = walker.build_result()
+        semantic_channels = derive_semantic_channels(traversal)
+        dependencies = derive_material_dependencies(material, traversal)
+        snapshot, live_nodes = build_material_graph_snapshot(
+            material_name=resolved_material_name,
+            active_output_node_id=node_name(output),
+            traversal=traversal,
+            semantic_channels=semantic_channels,
+            dependencies=dependencies,
+        )
+    except MaterialGraphAnalysisError:
+        raise
+    except Exception as exc:
+        raise MaterialGraphAnalysisError(
+            f"Unable to analyze Blender 5.2 shader graph for material "
+            f"'{resolved_material_name}': {exc}"
+        ) from exc
 
     logger.debug(
         "Analyzed recursive shader graph '%s' target=%s: nodes=%d "
@@ -106,7 +115,7 @@ def analyse_material_graph(
     *,
     render_target: str = "ALL",
 ) -> MaterialGraphSnapshot:
-    """Analyze reachable nodes, recursively expanding used Shader Node Groups."""
+    """Analyze only the shader program reachable from Material Output."""
 
     return analyse_material_graph_detailed(
         material,
