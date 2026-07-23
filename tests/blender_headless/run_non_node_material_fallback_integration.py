@@ -1,4 +1,4 @@
-"""Blender 4.4 regression for legacy non-node diffuse-color materials."""
+"""Blender 5.2+ regressions replacing the retired non-node material fallback."""
 
 from __future__ import annotations
 
@@ -21,91 +21,72 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
 from run_bake_integration import (  # noqa: E402
     _assert,
     _clear_scene,
+    _create_emission_material,
     _create_quad,
+    _material_fingerprint,
     _temporary_datablock_names,
 )
-from run_camera_projection_integration import _read_pixels, _settings  # noqa: E402
+from run_camera_projection_integration import _settings  # noqa: E402
 
 
-def test_opaque_non_node_diffuse_color_is_baked_from_copy() -> None:
+def test_blender_52_node_material_is_baked_from_an_owned_copy() -> None:
     _clear_scene()
     bpy.context.scene.render.engine = "CYCLES"
-    with tempfile.TemporaryDirectory(prefix="spine2d-non-node-material-") as directory:
-        source = _create_quad("LegacyDiffuseSource")
-        material = bpy.data.materials.new(name="LegacyDiffuseMaterial")
-        material.use_nodes = False
-        material.diffuse_color = (0.03, 0.82, 0.12, 1.0)
-        original_color = tuple(float(value) for value in material.diffuse_color)
-        source.data.materials.append(material)
+    with tempfile.TemporaryDirectory(prefix="spine2d-node-material-") as directory:
+        source = _create_quad("NodeMaterialSource")
+        material = _create_emission_material(source)
+        before = _material_fingerprint(material)
 
+        _assert(material.node_tree is not None, "Blender 5.2 material has no node tree")
         result = export_a1_single_object(
             source,
-            _settings(Path(directory), "LegacyDiffuse"),
+            _settings(Path(directory), "NodeMaterial"),
         )
-        _assert(result.success, f"opaque legacy material export failed: {result.issues}")
-        pixels = _read_pixels(result.image_paths[0])
-        covered = [
-            (
-                float(pixels[offset]),
-                float(pixels[offset + 1]),
-                float(pixels[offset + 2]),
-            )
-            for offset in range(0, len(pixels), 4)
-            if float(pixels[offset + 3]) > 0.5
-        ]
-        _assert(len(covered) > 20, "legacy diffuse bake has too few covered pixels")
-        mean = tuple(
-            sum(value[index] for value in covered) / len(covered)
-            for index in range(3)
-        )
-        _assert(mean[1] > 0.65, f"legacy green diffuse color was lost: {mean}")
-        _assert(mean[1] > mean[0] * 4.0, f"legacy color became red/gray: {mean}")
-        _assert(mean[1] > mean[2] * 3.0, f"legacy color became blue/gray: {mean}")
-        _assert(not material.use_nodes, "source legacy material was converted to nodes")
+
+        _assert(result.success, f"Blender 5.2 node material export failed: {result.issues}")
         _assert(
-            tuple(float(value) for value in material.diffuse_color) == original_color,
-            "source legacy diffuse_color changed",
+            _material_fingerprint(material) == before,
+            "source Blender 5.2 material graph was mutated",
         )
-        _assert(not _temporary_datablock_names(), "legacy fallback leaked temporary data")
+        _assert(not _temporary_datablock_names(), "node material export leaked temporary data")
 
 
-def test_transparent_non_node_material_fails_explicitly() -> None:
+def test_material_graph_without_output_fails_without_source_mutation() -> None:
     _clear_scene()
     bpy.context.scene.render.engine = "CYCLES"
-    with tempfile.TemporaryDirectory(prefix="spine2d-non-node-alpha-") as directory:
-        source = _create_quad("LegacyAlphaSource")
-        material = bpy.data.materials.new(name="LegacyAlphaMaterial")
-        material.use_nodes = False
-        material.diffuse_color = (0.3, 0.7, 0.1, 0.35)
+    with tempfile.TemporaryDirectory(prefix="spine2d-invalid-node-material-") as directory:
+        source = _create_quad("InvalidNodeMaterialSource")
+        material = bpy.data.materials.new(name="InvalidNodeMaterial")
+        _assert(material.node_tree is not None, "Blender 5.2 material has no node tree")
+        material.node_tree.nodes.clear()
         source.data.materials.append(material)
+        before = _material_fingerprint(material)
 
         result = export_a1_single_object(
             source,
-            _settings(Path(directory), "LegacyAlpha"),
+            _settings(Path(directory), "InvalidNodeMaterial"),
         )
-        _assert(not result.success, "transparent non-node material lost alpha silently")
+
+        _assert(not result.success, "material without an output node exported silently")
         errors = tuple(issue for issue in result.issues if issue.severity.value == "ERROR")
-        _assert(errors, f"failed legacy export has no error issue: {result.issues}")
+        _assert(errors, f"invalid material export has no error issue: {result.issues}")
         _assert(
-            any(
-                "enable material nodes so opacity can be analyzed" in issue.message
-                for issue in errors
-            ),
-            f"transparent legacy error is not actionable: {errors}",
+            _material_fingerprint(material) == before,
+            "failed material analysis mutated the source graph",
         )
-        _assert(not material.use_nodes, "failed export mutated source legacy material")
-        _assert(not _temporary_datablock_names(), "failed legacy export leaked temporary data")
+        _assert(not _temporary_datablock_names(), "invalid material export leaked temporary data")
 
 
 def main() -> None:
+    _assert(tuple(bpy.app.version[:3]) >= (5, 2, 0), "Blender 5.2+ is required")
     tests = (
-        test_opaque_non_node_diffuse_color_is_baked_from_copy,
-        test_transparent_non_node_material_fails_explicitly,
+        test_blender_52_node_material_is_baked_from_an_owned_copy,
+        test_material_graph_without_output_fails_without_source_mutation,
     )
     for test in tests:
         test()
         print(f"[PASS] {test.__name__}")
-    print(f"Non-node material fallback integration passed: {len(tests)} tests")
+    print(f"Blender 5.2 material contract integration passed: {len(tests)} tests")
 
 
 if __name__ == "__main__":
