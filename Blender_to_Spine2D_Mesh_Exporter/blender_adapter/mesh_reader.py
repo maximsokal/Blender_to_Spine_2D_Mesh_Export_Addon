@@ -1,9 +1,7 @@
-"""Read a Blender source mesh into an immutable domain snapshot.
+"""Read a Blender 5.2 source mesh into an immutable domain snapshot.
 
-This adapter deliberately reads the original Mesh datablock without operators or
-BMesh allocation. Evaluated modifier topology will be handled by a separate adapter
-because preserving source lineage through topology-changing modifiers requires an
-explicit attribute propagation strategy.
+The adapter uses the direct Mesh and generic Attribute APIs. It does not invoke
+operators or allocate a BMesh, and it never mutates the source datablock.
 """
 
 from __future__ import annotations
@@ -28,6 +26,13 @@ from ..domain.geometry import (
     SourceVertexId,
     VertexId,
 )
+from .mesh_edge_attributes import (
+    MeshEdgeAttributeError,
+    SHARP_EDGE_ATTRIBUTE,
+    UV_SEAM_ATTRIBUTE,
+    read_boolean_edge_attribute,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -54,14 +59,26 @@ def _matrix_tuple(matrix: Any) -> tuple[float, ...]:
 
 
 def _resolve_uv_layers(
-    mesh: Any, requested_names: Iterable[str] | None
+    mesh: Any,
+    requested_names: Iterable[str] | None,
 ) -> tuple[Any, ...]:
-    available = tuple(mesh.uv_layers)
+    try:
+        available = tuple(mesh.uv_layers)
+    except Exception as exc:
+        raise MeshReadError("Unable to inspect Blender UV layers") from exc
     if requested_names is None:
         return available
 
-    requested = tuple(requested_names)
-    available_by_name = {layer.name: layer for layer in available}
+    try:
+        requested = tuple(requested_names)
+    except Exception as exc:
+        raise TypeError("requested_names must be iterable or None") from exc
+    if any(not isinstance(name, str) or not name for name in requested):
+        raise ValueError("requested_names must contain non-empty strings")
+    if len(requested) != len(set(requested)):
+        raise ValueError("requested_names cannot contain duplicates")
+
+    available_by_name = {str(layer.name): layer for layer in available}
     missing = [name for name in requested if name not in available_by_name]
     if missing:
         raise MeshReadError("Requested UV layers are missing: " + ", ".join(missing))
@@ -87,6 +104,25 @@ def _active_render_uv_name(
     return None
 
 
+def _edge_boolean_attributes(mesh: Any) -> tuple[tuple[bool, ...], tuple[bool, ...]]:
+    """Read Blender 5.2 `uv_seam` and `sharp_edge` generic attributes."""
+
+    try:
+        seams = read_boolean_edge_attribute(
+            mesh,
+            UV_SEAM_ATTRIBUTE,
+            missing_value=False,
+        )
+        sharp_edges = read_boolean_edge_attribute(
+            mesh,
+            SHARP_EDGE_ATTRIBUTE,
+            missing_value=False,
+        )
+        return seams, sharp_edges
+    except MeshEdgeAttributeError as exc:
+        raise MeshReadError(f"Unable to read mesh edge attributes: {exc}") from exc
+
+
 def read_source_mesh_snapshot(
     obj: Any,
     *,
@@ -94,7 +130,7 @@ def read_source_mesh_snapshot(
     source_object_id: str | None = None,
     uv_layer_names: Iterable[str] | None = None,
 ) -> MeshSnapshot:
-    """Convert one original ``bpy.types.Object`` mesh without changing Blender state."""
+    """Convert one original Blender 5.2 Mesh without changing Blender state."""
 
     if obj is None:
         raise MeshReadError("obj cannot be None")
@@ -112,44 +148,59 @@ def read_source_mesh_snapshot(
 
     try:
         resolved_uv_layers = _resolve_uv_layers(mesh, uv_layer_names)
-        resolved_uv_names = tuple(layer.name for layer in resolved_uv_layers)
+        resolved_uv_names = tuple(str(layer.name) for layer in resolved_uv_layers)
         active_layer = getattr(mesh.uv_layers, "active", None)
         active_uv_name = (
-            active_layer.name
+            str(active_layer.name)
             if active_layer is not None and active_layer.name in resolved_uv_names
             else None
         )
         render_uv_name = _active_render_uv_name(resolved_uv_layers, active_layer)
+        seam_values, sharp_values = _edge_boolean_attributes(mesh)
 
         vertices = tuple(
             MeshVertex(
                 id=VertexId(int(vertex.index)),
                 source_id=SourceVertexId(
-                    resolved_source_object_id, int(vertex.index)
+                    resolved_source_object_id,
+                    int(vertex.index),
                 ),
                 position=_vector_tuple(
-                    vertex.co, 3, f"vertices[{vertex.index}].co"
+                    vertex.co,
+                    3,
+                    f"vertices[{vertex.index}].co",
                 ),
                 normal=_vector_tuple(
-                    vertex.normal, 3, f"vertices[{vertex.index}].normal"
+                    vertex.normal,
+                    3,
+                    f"vertices[{vertex.index}].normal",
                 ),
             )
             for vertex in mesh.vertices
         )
 
-        edges = tuple(
-            MeshEdge(
-                id=EdgeId(int(edge.index)),
-                source_id=SourceEdgeId(resolved_source_object_id, int(edge.index)),
-                vertex_ids=(
-                    VertexId(int(edge.vertices[0])),
-                    VertexId(int(edge.vertices[1])),
-                ),
-                seam=bool(getattr(edge, "use_seam", False)),
-                sharp=bool(getattr(edge, "use_edge_sharp", False)),
+        edges: list[MeshEdge] = []
+        for edge in mesh.edges:
+            edge_index = int(edge.index)
+            if edge_index < 0 or edge_index >= len(seam_values):
+                raise MeshReadError(
+                    f"Mesh edge index {edge_index} is outside attribute data range"
+                )
+            edges.append(
+                MeshEdge(
+                    id=EdgeId(edge_index),
+                    source_id=SourceEdgeId(
+                        resolved_source_object_id,
+                        edge_index,
+                    ),
+                    vertex_ids=(
+                        VertexId(int(edge.vertices[0])),
+                        VertexId(int(edge.vertices[1])),
+                    ),
+                    seam=seam_values[edge_index],
+                    sharp=sharp_values[edge_index],
+                )
             )
-            for edge in mesh.edges
-        )
 
         domain_loops: list[MeshLoop] = []
         domain_faces: list[MeshFace] = []
@@ -162,7 +213,7 @@ def read_source_mesh_snapshot(
                 polygon_loop_ids.append(loop_id)
                 loop_uvs = tuple(
                     LoopUV(
-                        layer_name=layer.name,
+                        layer_name=str(layer.name),
                         coordinate=_vector_tuple(
                             layer.data[mesh_loop_index].uv,
                             2,
@@ -189,11 +240,13 @@ def read_source_mesh_snapshot(
                 MeshFace(
                     id=FaceId(int(polygon.index)),
                     source_id=SourceFaceId(
-                        resolved_source_object_id, int(polygon.index)
+                        resolved_source_object_id,
+                        int(polygon.index),
                     ),
                     loop_ids=tuple(polygon_loop_ids),
                     material_index=max(
-                        0, int(getattr(polygon, "material_index", 0))
+                        0,
+                        int(getattr(polygon, "material_index", 0)),
                     ),
                     normal=_vector_tuple(
                         polygon.normal,
@@ -209,7 +262,7 @@ def read_source_mesh_snapshot(
             source_object_id=resolved_source_object_id,
             object_name=object_name,
             vertices=vertices,
-            edges=edges,
+            edges=tuple(edges),
             loops=tuple(domain_loops),
             faces=tuple(domain_faces),
             uv_layer_names=resolved_uv_names,
@@ -219,8 +272,8 @@ def read_source_mesh_snapshot(
         )
         MeshSnapshotValidator().validate_or_raise(snapshot)
         logger.debug(
-            "Read source mesh snapshot '%s': %d vertices, %d edges, %d loops, "
-            "%d faces active_uv=%s render_uv=%s",
+            "Read Blender 5.2 source mesh snapshot '%s': %d vertices, %d edges, "
+            "%d loops, %d faces active_uv=%s render_uv=%s",
             snapshot.snapshot_id,
             len(snapshot.vertices),
             len(snapshot.edges),
