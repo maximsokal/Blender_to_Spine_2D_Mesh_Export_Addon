@@ -21,6 +21,20 @@ def _require_stream_number(value: object, field_name: str) -> int | float:
     return value
 
 
+def _read_stream_item(
+    stream: Sequence[float | int],
+    index: int,
+    *,
+    truncated_message: str,
+) -> float | int:
+    """Read one indexed item and normalize premature exhaustion as truncation."""
+
+    try:
+        return stream[index]
+    except IndexError as exc:
+        raise ValueError(truncated_message) from exc
+
+
 @dataclass(frozen=True, slots=True)
 class WeightedVertexInfluence:
     bone_index: int
@@ -119,8 +133,17 @@ def decode_weighted_vertices(
     stream_length = len(stream)
 
     while index < stream_length:
+        vertex_index = len(result)
+        count_truncated_message = (
+            f"Weighted vertex {vertex_index} is truncated: expected influence count "
+            f"at stream index {index}"
+        )
         raw_count = _require_stream_number(
-            stream[index],
+            _read_stream_item(
+                stream,
+                index,
+                truncated_message=count_truncated_message,
+            ),
             f"Influence count at stream index {index}",
         )
         influence_count = int(raw_count)
@@ -131,19 +154,36 @@ def decode_weighted_vertices(
         index += 1
 
         required_values = influence_count * 4
+        vertex_truncated_message = (
+            f"Weighted vertex {vertex_index} is truncated: expected "
+            f"{required_values} influence values"
+        )
         if index + required_values > stream_length:
-            raise ValueError(
-                f"Weighted vertex {len(result)} is truncated: expected "
-                f"{required_values} influence values"
-            )
+            raise ValueError(vertex_truncated_message)
 
         influences: list[WeightedVertexInfluence] = []
         for influence_index in range(influence_count):
-            bone_raw = stream[index]
-            x_raw = stream[index + 1]
-            y_raw = stream[index + 2]
-            weight_raw = stream[index + 3]
-            location = f"vertex {len(result)}, influence {influence_index}"
+            bone_raw = _read_stream_item(
+                stream,
+                index,
+                truncated_message=vertex_truncated_message,
+            )
+            x_raw = _read_stream_item(
+                stream,
+                index + 1,
+                truncated_message=vertex_truncated_message,
+            )
+            y_raw = _read_stream_item(
+                stream,
+                index + 2,
+                truncated_message=vertex_truncated_message,
+            )
+            weight_raw = _read_stream_item(
+                stream,
+                index + 3,
+                truncated_message=vertex_truncated_message,
+            )
+            location = f"vertex {vertex_index}, influence {influence_index}"
 
             resolved_bone = _require_stream_number(
                 bone_raw,
