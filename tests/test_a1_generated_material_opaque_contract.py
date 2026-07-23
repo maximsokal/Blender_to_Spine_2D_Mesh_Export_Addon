@@ -52,6 +52,15 @@ IDENTITY = (
 )
 
 
+ROOT = Path(__file__).resolve().parents[1]
+GENERATED_UI = (
+    ROOT
+    / "Blender_to_Spine2D_Mesh_Exporter"
+    / "blender_adapter"
+    / "generated_material_ui.py"
+)
+
+
 def _triangle_snapshot() -> MeshSnapshot:
     source = "Hero"
     vertices = tuple(
@@ -124,14 +133,36 @@ def test_a1_settings_reject_translucent_generated_gray(tmp_path: Path):
         )
 
 
-def test_scene_capture_accepts_opaque_rgba():
+def test_scene_capture_appends_opaque_alpha_to_rgb():
     assert _resolve_generated_gray_color(
-        SimpleNamespace(spine2d_generated_gray_color=(0.2, 0.3, 0.4, 1.0))
+        SimpleNamespace(spine2d_generated_gray_color=(0.2, 0.3, 0.4))
     ) == (0.2, 0.3, 0.4, 1.0)
 
 
-def test_scene_capture_rejects_translucent_rgba():
-    with pytest.raises(ValueError, match="opaque generated textures"):
+def test_scene_capture_normalizes_legacy_rgba_to_opaque():
+    assert _resolve_generated_gray_color(
+        SimpleNamespace(spine2d_generated_gray_color=(0.2, 0.3, 0.4, 0.25))
+    ) == (0.2, 0.3, 0.4, 1.0)
+
+
+def test_scene_capture_rejects_invalid_rgb_length():
+    with pytest.raises(ValueError, match="three RGB values"):
         _resolve_generated_gray_color(
-            SimpleNamespace(spine2d_generated_gray_color=(0.2, 0.3, 0.4, 0.5))
+            SimpleNamespace(spine2d_generated_gray_color=(0.2, 0.3))
         )
+
+
+def test_scene_capture_rejects_non_finite_rgb():
+    with pytest.raises(ValueError, match=r"generated_gray_color\[1\].*finite"):
+        _resolve_generated_gray_color(
+            SimpleNamespace(spine2d_generated_gray_color=(0.2, float("nan"), 0.4))
+        )
+
+
+def test_generated_gray_scene_rna_exposes_rgb_without_alpha():
+    source = GENERATED_UI.read_text(encoding="utf-8")
+
+    assert "size=3" in source
+    assert "default=(0.5, 0.5, 0.5)" in source
+    assert "setattr(scene, GENERATED_GRAY_COLOR_PROPERTY, (0.5, 0.5, 0.5))" in source
+    assert "size=4" not in source
