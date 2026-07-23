@@ -10,13 +10,13 @@ import pytest
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.bake_execution_error import (
     BakeExecutionError,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_error import (
+from Blender_to_Spine2D_Mesh_Export_Addon.blender_adapter.camera_projection_error import (
     CameraProjectionExecutionError,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_execution import (
+from Blender_to_Spine2D_Mesh_Export_Addon.blender_adapter.camera_projection_execution import (
     _call_render_operator,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.semantic_bake_execution import (
+from Blender_to_Spine2D_Mesh_Export_Addon.blender_adapter.semantic_bake_execution import (
     _call_bake_operator,
 )
 
@@ -24,12 +24,13 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.semantic_bake_execution im
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "Blender_to_Spine2D_Mesh_Exporter"
 ADAPTER = PACKAGE / "blender_adapter"
+_DEFAULT_RESULT = object()
 
 
 class _Operator:
-    def __init__(self, *, poll=True, result=None, error=None):
+    def __init__(self, *, poll=True, result=_DEFAULT_RESULT, error=None):
         self.poll_result = poll
-        self.result = {"FINISHED"} if result is None else result
+        self.result = {"FINISHED"} if result is _DEFAULT_RESULT else result
         self.error = error
         self.calls: list[dict[str, object]] = []
 
@@ -61,7 +62,7 @@ def test_semantic_execution_owns_blender_bake_operator():
 
 
 def test_bake_operator_rejects_poll_cancel_and_invalid_result():
-    with pytest.raises(BakeExecutionError, match="poll\(\) returned False"):
+    with pytest.raises(BakeExecutionError, match=r"poll\(\) returned False"):
         _call_bake_operator(_bpy(bake=_Operator(poll=False)), "DIFFUSE")
 
     with pytest.raises(BakeExecutionError, match="did not finish"):
@@ -86,7 +87,10 @@ def test_camera_execution_owns_blender_render_operator():
 
 
 def test_render_operator_rejects_poll_cancel_and_exception():
-    with pytest.raises(CameraProjectionExecutionError, match="poll\(\) returned False"):
+    with pytest.raises(
+        CameraProjectionExecutionError,
+        match=r"poll\(\) returned False",
+    ):
         _call_render_operator(_bpy(render=_Operator(poll=False)))
 
     with pytest.raises(CameraProjectionExecutionError, match="did not finish"):
@@ -136,3 +140,22 @@ def test_bake_scene_configuration_has_no_optional_legacy_mode():
     assert "bake_mode: BakeMode | None" not in source
     assert "plan.bake_mode if bake_mode is None" not in source
     assert "preserves the legacy" not in source
+
+
+def test_camera_output_contains_no_historical_staging_api():
+    output = (ADAPTER / "camera_projection_output.py").read_text(
+        encoding="utf-8"
+    )
+    validation = (ADAPTER / "camera_projection_validation.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def _render_to_reservations(" not in output
+    assert "def stage_camera_projection_outputs(" not in output
+    assert "_reserve =" not in output
+    assert "_build_execution_result =" not in output
+    assert "Historical private names" not in output
+    assert "def validate_projection_runtime(" not in validation
+    assert "Compatibility runtime validation" not in validation
+    assert "B4" not in output
+    assert "B4" not in validation
