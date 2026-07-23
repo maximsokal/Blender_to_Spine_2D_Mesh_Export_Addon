@@ -1,11 +1,11 @@
-"""Resolve whether one connected A1 export can use a grouped B4 camera layer."""
+"""Resolve whether one connected A1 export can use a grouped camera layer."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Tuple
 
-from ..application import A1MultiObjectExportSettings, ConnectedB4RenderPolicy
+from ..application import A1MultiObjectExportSettings, ConnectedCameraRenderPolicy
 from ..domain.baking import (
     BakeExecutionSettings,
     CameraProjectionPlan,
@@ -17,7 +17,7 @@ from .a1_object_preparation import PreparedA1Object
 
 
 class GroupedCameraProjectionPolicyError(ValueError):
-    """Raised when strict grouped rendering cannot satisfy its compatibility contract."""
+    """Raised when strict grouped rendering cannot satisfy its contract."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,8 +62,8 @@ def _failure(
     reason: str,
 ) -> None:
     if (
-        settings.connected_b4_render_policy
-        is ConnectedB4RenderPolicy.GROUPED_CAMERA_REQUIRED
+        settings.connected_camera_render_policy
+        is ConnectedCameraRenderPolicy.GROUPED_CAMERA_REQUIRED
     ):
         raise GroupedCameraProjectionPolicyError(reason)
 
@@ -72,16 +72,20 @@ def resolve_grouped_camera_projection_request(
     prepared_objects: Tuple[PreparedA1Object, ...],
     settings: A1MultiObjectExportSettings,
 ) -> GroupedCameraProjectionRequest | None:
-    """Return one grouped request or a deterministic AUTO/individual fallback.
+    """Return one grouped request or a deterministic automatic/individual fallback.
 
-    Grouping is valid only when every connected object is B4. Mixing local UV-baked layers with
-    one grouped camera layer would still leave unresolved per-pixel depth between coordinate
-    spaces, so AUTO falls back and REQUIRED fails explicitly.
+    Grouping is valid only when every connected object uses camera projection.
+    Mixing local UV-baked layers with one grouped camera layer would leave
+    unresolved per-pixel depth between coordinate spaces, so AUTO falls back and
+    REQUIRED fails explicitly.
     """
 
     if not isinstance(settings, A1MultiObjectExportSettings):
         raise TypeError("settings must be A1MultiObjectExportSettings")
-    if settings.connected_b4_render_policy is ConnectedB4RenderPolicy.INDIVIDUAL_LAYERS:
+    if (
+        settings.connected_camera_render_policy
+        is ConnectedCameraRenderPolicy.INDIVIDUAL_LAYERS
+    ):
         return None
     if (
         not isinstance(prepared_objects, tuple)
@@ -90,7 +94,7 @@ def resolve_grouped_camera_projection_request(
     ):
         _failure(
             settings,
-            "grouped B4 requires at least two prepared connected objects",
+            "grouped camera rendering requires at least two prepared connected objects",
         )
         return None
 
@@ -102,7 +106,8 @@ def resolve_grouped_camera_projection_request(
     if len(camera_objects) != len(prepared_objects):
         _failure(
             settings,
-            "grouped B4 requires every connected component to use CameraProjectionPlan; "
+            "grouped camera rendering requires every connected component to use "
+            "CameraProjectionPlan; "
             f"camera={len(camera_objects)}, total={len(prepared_objects)}",
         )
         return None
@@ -116,7 +121,7 @@ def resolve_grouped_camera_projection_request(
     if incompatible_execution:
         _failure(
             settings,
-            "grouped B4 sources use different BakeExecutionSettings: "
+            "grouped camera sources use different BakeExecutionSettings: "
             f"{incompatible_execution}",
         )
         return None
@@ -130,7 +135,7 @@ def resolve_grouped_camera_projection_request(
     if incompatible_directories:
         _failure(
             settings,
-            "grouped B4 sources use different image-relative directories: "
+            "grouped camera sources use different image-relative directories: "
             f"{incompatible_directories}",
         )
         return None
@@ -141,7 +146,8 @@ def resolve_grouped_camera_projection_request(
         if len(projections) != 1:
             _failure(
                 settings,
-                "grouped B4 requires exactly one camera projection attachment per source; "
+                "grouped camera rendering requires exactly one camera projection "
+                "attachment per source; "
                 f"object={item.object_id!r}, projections={len(projections)}",
             )
             return None
