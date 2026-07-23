@@ -23,6 +23,31 @@ from .scene_bake_rna import (
 )
 
 
+def _load_bpy() -> Any:
+    try:
+        import bpy
+    except Exception as exc:
+        raise SceneBakeAnalysisError(
+            "Blender bpy module is unavailable during Scene analysis"
+        ) from exc
+    return bpy
+
+
+def working_space_interop_id() -> str:
+    """Return Blender 5.2's stable OCIO working-space interoperability ID."""
+
+    bpy = _load_bpy()
+    colorspace = getattr(getattr(bpy, "data", None), "colorspace", None)
+    value = str(
+        getattr(colorspace, "working_space_interop_id", "") or ""
+    ).strip()
+    if not value:
+        raise SceneBakeAnalysisError(
+            "Blender 5.2 working color space interoperability ID is unavailable"
+        )
+    return value
+
+
 def analyse_object_bake_context(obj: Any) -> ObjectBakeContext:
     if obj is None or getattr(obj, "type", None) != "MESH":
         raise SceneBakeAnalysisError("obj must be a Blender MESH object")
@@ -32,8 +57,19 @@ def analyse_object_bake_context(obj: Any) -> ObjectBakeContext:
     try:
         collections = tuple(getattr(obj, "users_collection", ()))
     except Exception as exc:
-        raise SceneBakeAnalysisError(f"Unable to inspect collections of source object '{object_id}'") from exc
-    collection_names = tuple(sorted({collection_name for collection in collections if (collection_name := name(collection))}, key=str.casefold))
+        raise SceneBakeAnalysisError(
+            f"Unable to inspect collections of source object '{object_id}'"
+        ) from exc
+    collection_names = tuple(
+        sorted(
+            {
+                collection_name
+                for collection in collections
+                if (collection_name := name(collection))
+            },
+            key=str.casefold,
+        )
+    )
     data = getattr(obj, "data", None)
     try:
         return ObjectBakeContext(
@@ -49,7 +85,9 @@ def analyse_object_bake_context(obj: Any) -> ObjectBakeContext:
     except SceneBakeAnalysisError:
         raise
     except (TypeError, ValueError, OverflowError) as exc:
-        raise SceneBakeAnalysisError(f"Unable to build source object snapshot for '{object_id}': {exc}") from exc
+        raise SceneBakeAnalysisError(
+            f"Unable to build source object snapshot for '{object_id}': {exc}"
+        ) from exc
 
 
 def analyse_light(obj: Any) -> LightBakeSnapshot:
@@ -61,8 +99,15 @@ def analyse_light(obj: Any) -> LightBakeSnapshot:
         return LightBakeSnapshot(
             object_id=object_id,
             light_type=str(getattr(data, "type", "POINT") or "POINT"),
-            energy=non_negative_float(getattr(data, "energy", 0.0) or 0.0, label=f"Light '{object_id}' energy"),
-            color=color_tuple(getattr(data, "color", (1.0, 1.0, 1.0)), default=(1.0, 1.0, 1.0), label=f"Light '{object_id}' color"),
+            energy=non_negative_float(
+                getattr(data, "energy", 0.0) or 0.0,
+                label=f"Light '{object_id}' energy",
+            ),
+            color=color_tuple(
+                getattr(data, "color", (1.0, 1.0, 1.0)),
+                default=(1.0, 1.0, 1.0),
+                label=f"Light '{object_id}' color",
+            ),
             world_matrix=matrix_tuple(getattr(obj, "matrix_world", None)),
             use_shadow=bool(getattr(data, "use_shadow", True)),
             animated=animated(obj, data),
@@ -70,7 +115,9 @@ def analyse_light(obj: Any) -> LightBakeSnapshot:
     except SceneBakeAnalysisError:
         raise
     except (TypeError, ValueError, OverflowError) as exc:
-        raise SceneBakeAnalysisError(f"Unable to build Light snapshot for '{object_id}': {exc}") from exc
+        raise SceneBakeAnalysisError(
+            f"Unable to build Light snapshot for '{object_id}': {exc}"
+        ) from exc
 
 
 def analyse_camera(scene: Any) -> CameraBakeSnapshot | None:
@@ -80,13 +127,33 @@ def analyse_camera(scene: Any) -> CameraBakeSnapshot | None:
     data = getattr(obj, "data", None)
     object_id = name(obj)
     if not object_id or data is None or getattr(obj, "type", None) != "CAMERA":
-        raise SceneBakeAnalysisError("scene.camera is not a valid Blender Camera object")
-    lens = positive_float(getattr(data, "lens", 50.0) or 50.0, label=f"Camera '{object_id}' lens", minimum=1e-8)
-    ortho_scale = positive_float(getattr(data, "ortho_scale", 6.0) or 6.0, label=f"Camera '{object_id}' ortho_scale", minimum=1e-8)
-    clip_start = positive_float(getattr(data, "clip_start", 0.1) or 0.1, label=f"Camera '{object_id}' clip_start", minimum=1e-8)
-    clip_end = positive_float(getattr(data, "clip_end", 1000.0) or 1000.0, label=f"Camera '{object_id}' clip_end", minimum=1e-7)
+        raise SceneBakeAnalysisError(
+            "scene.camera is not a valid Blender Camera object"
+        )
+    lens = positive_float(
+        getattr(data, "lens", 50.0) or 50.0,
+        label=f"Camera '{object_id}' lens",
+        minimum=1e-8,
+    )
+    ortho_scale = positive_float(
+        getattr(data, "ortho_scale", 6.0) or 6.0,
+        label=f"Camera '{object_id}' ortho_scale",
+        minimum=1e-8,
+    )
+    clip_start = positive_float(
+        getattr(data, "clip_start", 0.1) or 0.1,
+        label=f"Camera '{object_id}' clip_start",
+        minimum=1e-8,
+    )
+    clip_end = positive_float(
+        getattr(data, "clip_end", 1000.0) or 1000.0,
+        label=f"Camera '{object_id}' clip_end",
+        minimum=1e-7,
+    )
     if clip_end <= clip_start:
-        raise SceneBakeAnalysisError(f"Camera '{object_id}' clip_end must be greater than clip_start")
+        raise SceneBakeAnalysisError(
+            f"Camera '{object_id}' clip_end must be greater than clip_start"
+        )
     try:
         return CameraBakeSnapshot(
             object_id=object_id,
@@ -101,7 +168,9 @@ def analyse_camera(scene: Any) -> CameraBakeSnapshot | None:
     except SceneBakeAnalysisError:
         raise
     except (TypeError, ValueError, OverflowError) as exc:
-        raise SceneBakeAnalysisError(f"Unable to build Camera snapshot for '{object_id}': {exc}") from exc
+        raise SceneBakeAnalysisError(
+            f"Unable to build Camera snapshot for '{object_id}': {exc}"
+        ) from exc
 
 
 def analyse_color_management(scene: Any) -> ColorManagementSnapshot:
@@ -113,15 +182,32 @@ def analyse_color_management(scene: Any) -> ColorManagementSnapshot:
         gamma_value = 1.0
     try:
         return ColorManagementSnapshot(
-            view_transform=str(getattr(view, "view_transform", "Standard") or "Standard"),
+            view_transform=str(
+                getattr(view, "view_transform", "Standard") or "Standard"
+            ),
             look=str(getattr(view, "look", "") or ""),
-            exposure=finite_float(getattr(view, "exposure", 0.0) or 0.0, label="Scene color-management exposure"),
-            gamma=finite_float(gamma_value, label="Scene color-management gamma"),
+            exposure=finite_float(
+                getattr(view, "exposure", 0.0) or 0.0,
+                label="Scene color-management exposure",
+            ),
+            gamma=finite_float(
+                gamma_value,
+                label="Scene color-management gamma",
+            ),
+            working_space_interop_id=working_space_interop_id(),
         )
     except SceneBakeAnalysisError:
         raise
     except (TypeError, ValueError, OverflowError) as exc:
-        raise SceneBakeAnalysisError(f"Unable to build color-management snapshot: {exc}") from exc
+        raise SceneBakeAnalysisError(
+            f"Unable to build color-management snapshot: {exc}"
+        ) from exc
 
 
-__all__ = ["analyse_camera", "analyse_color_management", "analyse_light", "analyse_object_bake_context"]
+__all__ = [
+    "analyse_camera",
+    "analyse_color_management",
+    "analyse_light",
+    "analyse_object_bake_context",
+    "working_space_interop_id",
+]
