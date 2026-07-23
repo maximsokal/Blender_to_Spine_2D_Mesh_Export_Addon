@@ -11,7 +11,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
 
 
 class IndexOnlyNumericSequence(Sequence):
-    """Sequence that supports indexed access but forbids eager iteration."""
+    """Sequence that supports integer indexing but deliberately rejects slicing."""
 
     def __init__(self, values):
         self._values = tuple(values)
@@ -20,6 +20,8 @@ class IndexOnlyNumericSequence(Sequence):
         return len(self._values)
 
     def __getitem__(self, index):
+        if isinstance(index, slice):
+            raise AssertionError("decoder must not require sequence slicing")
         return self._values[index]
 
     def __iter__(self):
@@ -51,11 +53,34 @@ def test_decoder_rejects_binary_sequence_containers(stream):
         decode_weighted_vertices(stream)
 
 
-def test_decoder_accepts_custom_indexed_sequence_without_materializing():
-    stream = IndexOnlyNumericSequence((1, 0, 1.0, 2.0, 1.0))
+def test_decoder_accepts_custom_indexed_sequence_without_slicing_or_materializing():
+    stream = IndexOnlyNumericSequence(
+        (
+            2,
+            0,
+            1.0,
+            2.0,
+            0.25,
+            3,
+            4.0,
+            5.0,
+            0.75,
+            1,
+            2,
+            -1.0,
+            -2.0,
+            1.0,
+        )
+    )
 
-    assert decode_weighted_vertices(stream) == (
-        WeightedVertex((WeightedVertexInfluence(0, 1.0, 2.0, 1.0),)),
+    assert decode_weighted_vertices(stream, expected_vertex_count=2) == (
+        WeightedVertex(
+            (
+                WeightedVertexInfluence(0, 1.0, 2.0, 0.25),
+                WeightedVertexInfluence(3, 4.0, 5.0, 0.75),
+            )
+        ),
+        WeightedVertex((WeightedVertexInfluence(2, -1.0, -2.0, 1.0),)),
     )
 
 
