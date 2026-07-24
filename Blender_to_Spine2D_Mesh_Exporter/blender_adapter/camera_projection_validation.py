@@ -20,6 +20,10 @@ from .render_engine_contract import (
     render_engine_contract_from_execution,
 )
 from .scene_bake_runtime import validate_runtime_scene_context
+from .scene_context_contract import (
+    BlenderSceneContextError,
+    require_context_scene_consistency,
+)
 from .view_layer_contract import validate_source_view_layer_for_camera_projection
 
 
@@ -129,6 +133,12 @@ def _resolve_projection_runtime_context(
         raise CameraProjectionExecutionError(
             "A Blender Scene is required"
         )
+    try:
+        require_context_scene_consistency(resolved_context, resolved_scene)
+    except BlenderSceneContextError as exc:
+        raise CameraProjectionExecutionError(
+            f"Camera projection context and scene disagree: {exc}"
+        ) from exc
     if getattr(resolved_scene, "camera", None) is None:
         raise CameraProjectionExecutionError("Scene has no active camera")
 
