@@ -22,6 +22,7 @@ from .a1_preparation_contracts import (
     warning_issue,
 )
 from .a1_source_geometry_preparation import A1SourceGeometryPreparationResult
+from .scene_context_contract import require_context_scene_consistency
 from .uv_unwrap import unwrap_snapshot_uv
 
 
@@ -67,7 +68,7 @@ def prepare_a1_uv(
     """Build seam topology, unwrap it, inspect range, and propagate region UVs.
 
     This stage cannot yet know whether material planning will choose object baking or
-    camera projection.  It therefore records range diagnostics but defers strict
+    camera projection. It therefore records range diagnostics but defers strict
     enforcement to the final UV consumer: propagated object-bake regions or the
     exporter-generated camera projection snapshot.
     """
@@ -78,6 +79,10 @@ def prepare_a1_uv(
     warnings = source.warnings
     statistics = source.statistics
     try:
+        # A temporary object linked to one Scene cannot be activated through a ViewLayer
+        # owned by another Scene. Reject that ambiguity before allocating Blender data.
+        require_context_scene_consistency(context, scene)
+
         texturing_topology = build_a1_texturing_topology(
             source.source_snapshot,
             source.geometry,
