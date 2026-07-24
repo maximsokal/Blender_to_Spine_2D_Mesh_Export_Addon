@@ -8,6 +8,7 @@ Run from the repository root with Blender 5.2 or newer::
 
 from __future__ import annotations
 
+from dataclasses import replace
 from math import radians
 from pathlib import Path
 import sys
@@ -281,28 +282,52 @@ def _prepare(
 def _assert_connected(anchor, other) -> None:
     """Exercise the real adapter routing from prepared objects to connected domain."""
 
+    # Multi-object request settings retain the caller's standalone default. Preparation
+    # owns the CONNECTED override that disables absolute world placement per object.
     sources = (
         A1MultiObjectSource(
             source_object=anchor.source_object,
             component_id="anchor",
-            settings=anchor.settings,
+            settings=replace(
+                anchor.settings,
+                use_world_location_for_main_bone=True,
+            ),
         ),
         A1MultiObjectSource(
             source_object=other.source_object,
             component_id="other",
-            settings=other.settings,
+            settings=replace(
+                other.settings,
+                use_world_location_for_main_bone=True,
+            ),
         ),
     )
+    composition_settings = A1MultiObjectExportSettings(
+        output_directory=_OUTPUT_ROOT,
+        output_stem="origin_group",
+        mode=A1MultiObjectMode.CONNECTED,
+        connected_group_prefix="origin_group",
+        anchor_component_id="anchor",
+    )
+
+    try:
+        compose_a1_multi_object_document(
+            sources,
+            (other, anchor),
+            composition_settings,
+        )
+    except ValueError as exc:
+        if "does not match the prepared object's live source_object" not in str(exc):
+            raise AssertionError(
+                f"Swapped source/prepared pairing failed for the wrong reason: {exc}"
+            ) from exc
+    else:
+        raise AssertionError("Swapped source/prepared pairing was accepted")
+
     result = compose_a1_multi_object_document(
         sources,
         (anchor, other),
-        A1MultiObjectExportSettings(
-            output_directory=_OUTPUT_ROOT,
-            output_stem="origin_group",
-            mode=A1MultiObjectMode.CONNECTED,
-            connected_group_prefix="origin_group",
-            anchor_component_id="anchor",
-        ),
+        composition_settings,
     )
     if not isinstance(result, ConnectedGroupBuildResult):
         raise AssertionError(
