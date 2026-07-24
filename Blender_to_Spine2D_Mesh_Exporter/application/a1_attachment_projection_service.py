@@ -29,6 +29,8 @@ from .a1_attachment_projection import (
 
 
 Position2D = Tuple[float, float]
+_RELATIVE_AREA_EPSILON = 1.0e-10
+_MINIMUM_AREA_EPSILON = 1.0e-12
 
 
 def _position(vertex: LegacyAttachmentVertex) -> Position2D:
@@ -47,6 +49,32 @@ def _cross(first: Position2D, second: Position2D, third: Position2D) -> float:
     )
 
 
+def _area_tolerance(points: Tuple[Position2D, ...]) -> float:
+    """Return a scale-aware tolerance for twice-signed pixel-space areas."""
+
+    if not isinstance(points, tuple) or not points:
+        raise ValueError("points must be a non-empty tuple")
+    if not all(
+        isinstance(point, tuple)
+        and len(point) == 2
+        and all(isinstance(component, float) for component in point)
+        for point in points
+    ):
+        raise TypeError("points must contain float coordinate pairs")
+
+    x_values = tuple(point[0] for point in points)
+    y_values = tuple(point[1] for point in points)
+    extent = max(
+        max(x_values) - min(x_values),
+        max(y_values) - min(y_values),
+        1.0,
+    )
+    return max(
+        _MINIMUM_AREA_EPSILON,
+        extent * extent * _RELATIVE_AREA_EPSILON,
+    )
+
+
 def _convex_hull_positions(
     vertices: Tuple[LegacyAttachmentVertex, ...],
 ) -> frozenset[Position2D]:
@@ -62,23 +90,31 @@ def _convex_hull_positions(
         raise A1AttachmentProjectionError(
             "Spine mesh attachment requires at least three unique physical positions"
         )
+    tolerance = _area_tolerance(points)
 
     lower: list[Position2D] = []
     for point in points:
-        while len(lower) >= 2 and _cross(lower[-2], lower[-1], point) <= 0.0:
+        while (
+            len(lower) >= 2
+            and _cross(lower[-2], lower[-1], point) <= tolerance
+        ):
             lower.pop()
         lower.append(point)
 
     upper: list[Position2D] = []
     for point in reversed(points):
-        while len(upper) >= 2 and _cross(upper[-2], upper[-1], point) <= 0.0:
+        while (
+            len(upper) >= 2
+            and _cross(upper[-2], upper[-1], point) <= tolerance
+        ):
             upper.pop()
         upper.append(point)
 
     hull = tuple(lower[:-1] + upper[:-1])
     if len(hull) < 3:
         raise A1AttachmentProjectionError(
-            "Spine mesh attachment physical positions are collinear"
+            "Spine mesh attachment physical positions are collinear within "
+            f"pixel-space tolerance {tolerance}"
         )
     return frozenset(hull)
 
@@ -98,21 +134,24 @@ def _validate_projected_triangles(
             "triangles must contain complete index triples"
         )
 
+    all_positions = tuple(_position(vertex) for vertex in vertices)
+    tolerance = _area_tolerance(all_positions)
     for triangle_index in range(0, len(triangles), 3):
         indices = triangles[triangle_index : triangle_index + 3]
         try:
             first, second, third = (
-                _position(vertices[vertex_index]) for vertex_index in indices
+                all_positions[vertex_index] for vertex_index in indices
             )
         except IndexError as exc:
             raise A1AttachmentProjectionError(
                 f"Triangle {triangle_index // 3} references an unknown attachment vertex"
             ) from exc
         area_twice = _cross(first, second, third)
-        if area_twice == 0.0:
+        if abs(area_twice) <= tolerance:
             raise A1AttachmentProjectionError(
-                f"Triangle {triangle_index // 3} collapses to zero area in Spine "
-                f"pixel space; indices={indices}, positions={(first, second, third)}"
+                f"Triangle {triangle_index // 3} collapses within Spine pixel-space "
+                f"area tolerance {tolerance}; indices={indices}, "
+                f"positions={(first, second, third)}, twice_area={area_twice}"
             )
 
 
