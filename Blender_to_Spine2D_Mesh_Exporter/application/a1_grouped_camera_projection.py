@@ -1,4 +1,4 @@
-"""Build one root-bound grouped B4 overlay while preserving connected rig structure."""
+"""Build one static root-bound grouped camera overlay for connected export."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from ..domain.spine import (
 
 
 class GroupedCameraOverlayError(ValueError):
-    """Raised when a connected document cannot receive a grouped camera overlay."""
+    """Raised when a connected document cannot receive a static camera overlay."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +49,7 @@ class GroupedCameraOverlayResult:
 def _normalized_pair(first: int, second: int) -> tuple[int, int]:
     if first == second:
         raise GroupedCameraOverlayError(
-            f"grouped attachment edge repeats vertex {first}"
+            f"static grouped attachment edge repeats vertex {first}"
         )
     return (first, second) if first < second else (second, first)
 
@@ -78,7 +78,7 @@ def _attachment_edges(
     expected = vertex_count + max(0, vertex_count - 3)
     if len(result) // 2 != expected:
         raise GroupedCameraOverlayError(
-            "grouped attachment edge count differs from disk triangulation; "
+            "static grouped attachment edge count differs from disk triangulation; "
             f"expected={expected}, actual={len(result) // 2}"
         )
     return tuple(result)
@@ -128,14 +128,14 @@ def _build_grouped_attachment(
         raise TypeError("layout must be CameraProjectionLayout")
     if layout.frame_count != len(plan.frame_tasks):
         raise GroupedCameraOverlayError(
-            "grouped layout frame count does not match grouped plan"
+            "static grouped layout frame count does not match grouped plan"
         )
     if (
         layout.full_width != plan.settings.width
         or layout.full_height != plan.settings.height
     ):
         raise GroupedCameraOverlayError(
-            "grouped layout dimensions do not match grouped plan"
+            "static grouped layout dimensions do not match grouped plan"
         )
 
     triangles = layout.triangle_indices
@@ -166,6 +166,7 @@ def _build_grouped_attachment(
         sequence=_attachment_sequence(plan),
         extras={
             "spine2dGroupedCamera": True,
+            "spine2dStaticFlattening": True,
             "spine2dGroupedSourceCount": len(plan.source_object_ids),
         },
     )
@@ -175,11 +176,11 @@ def _strip_hidden_slot_timelines(
     animations: Mapping[str, Any],
     hidden_slot_names: set[str],
 ) -> dict[str, Any]:
-    """Remove only source-slot timelines that could reveal hidden grouped layers.
+    """Remove source-slot timelines that could reveal hidden flattened layers.
 
-    Bone, constraint, deform, draw-order and event timelines remain untouched. Grouped output
-    flattens visual source slots into the rendered sequence, so color or attachment timelines on
-    those slots must not be allowed to make the compatibility layers visible again.
+    Bone, constraint, deform, draw-order, and event timelines remain untouched. Static
+    flattening replaces visual source slots with one rendered sequence, so color or
+    attachment timelines on those hidden slots must not make them visible again.
     """
 
     result: dict[str, Any] = {}
@@ -214,13 +215,13 @@ def apply_grouped_camera_overlay(
     attachment_name: str,
     skin_name: str = "default",
 ) -> GroupedCameraOverlayResult:
-    """Hide individual B4 visuals and append one depth-correct root overlay.
+    """Hide individual visuals and append one static root-bound camera overlay.
 
-    Source bones, constraints, attachments and non-slot animation data remain in the typed
-    document. Source visual slots receive fully transparent setup color, and their slot color/
-    attachment timelines are removed so they cannot reappear over the grouped render. The
-    grouped slot is appended last inside the connected document and becomes the only visible B4
-    layer.
+    This operation intentionally flattens all camera-dependent sources into one rendered
+    attachment. Source bones, constraints, and non-slot animation data remain for
+    diagnostics and structural continuity, but the visible overlay is not equivalent to
+    the interactive connected vertex-bone rig: independent object transforms cannot be
+    reproduced after flattening. Callers must opt into grouped camera rendering explicitly.
     """
 
     if not isinstance(document, SpineDocument):
@@ -237,9 +238,7 @@ def apply_grouped_camera_overlay(
             for value in visual_slot_names
         )
     ):
-        raise ValueError(
-            "visual_slot_names must match grouped source objects"
-        )
+        raise ValueError("visual_slot_names must match grouped source objects")
     if len(visual_slot_names) != len(set(visual_slot_names)):
         raise ValueError("visual_slot_names must be unique")
     for field_name, value in (
@@ -255,17 +254,18 @@ def apply_grouped_camera_overlay(
     bone_names = {bone.name for bone in document.bones}
     if "root" not in bone_names:
         raise GroupedCameraOverlayError(
-            "connected document has no shared root bone for grouped B4 overlay"
+            "connected document has no shared root bone for static grouped overlay"
         )
     existing_slot_names = {slot.name for slot in document.slots}
     missing = tuple(name for name in visual_slot_names if name not in existing_slot_names)
     if missing:
         raise GroupedCameraOverlayError(
-            f"grouped B4 source slots are missing from connected document: {missing}"
+            "static grouped source slots are missing from connected document: "
+            f"{missing}"
         )
     if slot_name in existing_slot_names:
         raise GroupedCameraOverlayError(
-            f"grouped B4 slot '{slot_name}' already exists"
+            f"static grouped slot '{slot_name}' already exists"
         )
     if any(
         attachment_name in slot_attachments
@@ -273,7 +273,7 @@ def apply_grouped_camera_overlay(
         for slot_attachments in skin.attachments.values()
     ):
         raise GroupedCameraOverlayError(
-            f"grouped B4 attachment '{attachment_name}' already exists"
+            f"static grouped attachment '{attachment_name}' already exists"
         )
 
     hidden_set = set(visual_slot_names)
@@ -285,7 +285,10 @@ def apply_grouped_camera_overlay(
             name=slot_name,
             bone="root",
             attachment=attachment_name,
-            extras={"spine2dGroupedCamera": True},
+            extras={
+                "spine2dGroupedCamera": True,
+                "spine2dStaticFlattening": True,
+            },
         ),
     )
     attachment = _build_grouped_attachment(
@@ -328,6 +331,7 @@ def apply_grouped_camera_overlay(
                 "group": plan.group_id,
                 "sources": plan.source_object_ids,
                 "slot": slot_name,
+                "staticFlattening": True,
             },
         },
     )
