@@ -19,6 +19,12 @@ from .a1_document_assembly import (
     A1DocumentAssemblySettings,
     assemble_a1_document,
 )
+from .a1_export_readiness import (
+    A1ExportReadinessReport,
+    A1ObjectReadiness,
+    A1ReadinessState,
+    ReadinessStatistic,
+)
 from .a1_generated_materials import (
     build_generated_material_plan,
     generated_palette_color,
@@ -98,6 +104,7 @@ __all__ = [
     "A1DocumentAssemblyError",
     "A1DocumentAssemblyResult",
     "A1DocumentAssemblySettings",
+    "A1ExportReadinessReport",
     "A1GeometryPreparationError",
     "A1GeometryPreparationResult",
     "A1GeometryPreparationSettings",
@@ -105,11 +112,13 @@ __all__ = [
     "A1MultiObjectExportSettings",
     "A1MultiObjectMode",
     "A1MultiObjectStage",
+    "A1ObjectReadiness",
     "A1OutputNamespacePreflight",
     "A1OutputPathClaim",
     "A1OutputPathKind",
     "A1OutputPreflightSource",
     "A1PreparedRegion",
+    "A1ReadinessState",
     "A1ResolvedOutputPaths",
     "A1SingleObjectExportSettings",
     "A1SingleObjectStage",
@@ -132,6 +141,7 @@ __all__ = [
     "GroupedCameraOverlayError",
     "GroupedCameraOverlayResult",
     "IssueSeverity",
+    "ReadinessStatistic",
     "apply_grouped_camera_overlay",
     "assemble_a1_camera_projection_document",
     "assemble_a1_document",
