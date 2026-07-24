@@ -27,6 +27,27 @@ def test_object_bake_main_position_preserves_offset_geometry_around_object_origi
     assert result == (1300.0, 2400.0)
 
 
+def test_centered_attachment_and_main_offset_reconstruct_original_world_xy():
+    scale = 100.0
+    center_x = 3.0
+    center_y = -4.0
+    vertex_x = 5.0
+    vertex_y = -1.0
+    world_x_pixels = 1000.0
+    world_y_pixels = 2000.0
+
+    main_x, main_y = _combine_object_bake_main_position_pixels(
+        (world_x_pixels, world_y_pixels),
+        _bounds(center_x=center_x, center_y=center_y),
+        scale,
+    )
+    centered_vertex_x = (vertex_x - center_x) * scale
+    centered_vertex_y = -(vertex_y - center_y) * scale
+
+    assert main_x + centered_vertex_x == world_x_pixels + vertex_x * scale
+    assert main_y + centered_vertex_y == world_y_pixels - vertex_y * scale
+
+
 def test_connected_preparation_keeps_only_document_local_geometry_offset():
     result = _combine_object_bake_main_position_pixels(
         None,
