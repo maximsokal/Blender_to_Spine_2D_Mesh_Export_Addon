@@ -6,7 +6,6 @@ installs global MagicMock replacements for bpy, bmesh, and mathutils.
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -22,7 +21,6 @@ bmesh = pytest.importorskip(
 )
 
 EXPECTED_BLENDER_VERSION = (5, 2, 0)
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _require_real_blender_runtime() -> None:
@@ -121,7 +119,7 @@ def quad_object(clean_blender_data):
     mesh.update(calc_edges=True, calc_edges_loose=True)
 
     uv_layer = mesh.uv_layers.new(name="UVMap")
-    mesh.uv_layers.active_index = 0
+    mesh.uv_layers.active = uv_layer
     uv_layer.active_render = True
     coordinates = (
         (0.0, 0.0),
