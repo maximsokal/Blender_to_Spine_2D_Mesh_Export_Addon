@@ -1,6 +1,6 @@
 """Typed Spine 4.2 document model and validation utilities."""
 
-from .composition import (
+from .composition_service import (
     AnimationNameAssignment,
     ComponentBoneIndexMap,
     ConstraintOrderAssignment,
