@@ -13,7 +13,11 @@ from dataclasses import replace
 from typing import Tuple
 
 from ..domain.geometry import MeshSnapshot
-from ..domain.spine import LegacyAttachmentVertex, LegacyMeshAttachmentRequest, LegacyRigBuildResult
+from ..domain.spine import (
+    LegacyAttachmentVertex,
+    LegacyMeshAttachmentRequest,
+    LegacyRigBuildResult,
+)
 from .a1_attachment_projection import (
     A1AttachmentProjectionError,
     A1AttachmentProjectionResult,
@@ -79,6 +83,39 @@ def _convex_hull_positions(
     return frozenset(hull)
 
 
+def _validate_projected_triangles(
+    vertices: Tuple[LegacyAttachmentVertex, ...],
+    triangles: Tuple[int, ...],
+) -> None:
+    """Reject triangles that collapse after UVs become Spine pixel positions."""
+
+    if not isinstance(vertices, tuple) or not vertices:
+        raise ValueError("vertices must be a non-empty tuple")
+    if not isinstance(triangles, tuple) or not triangles:
+        raise ValueError("triangles must be a non-empty tuple")
+    if len(triangles) % 3 != 0:
+        raise A1AttachmentProjectionError(
+            "triangles must contain complete index triples"
+        )
+
+    for triangle_index in range(0, len(triangles), 3):
+        indices = triangles[triangle_index : triangle_index + 3]
+        try:
+            first, second, third = (
+                _position(vertices[vertex_index]) for vertex_index in indices
+            )
+        except IndexError as exc:
+            raise A1AttachmentProjectionError(
+                f"Triangle {triangle_index // 3} references an unknown attachment vertex"
+            ) from exc
+        area_twice = _cross(first, second, third)
+        if area_twice == 0.0:
+            raise A1AttachmentProjectionError(
+                f"Triangle {triangle_index // 3} collapses to zero area in Spine "
+                f"pixel space; indices={indices}, positions={(first, second, third)}"
+            )
+
+
 def _remap_index_stream(
     values: Tuple[int, ...],
     mapping: dict[int, int],
@@ -115,6 +152,7 @@ def normalize_a1_attachment_projection_hull(
 
     request = projection.request
     vertices = request.vertices
+    _validate_projected_triangles(vertices, request.triangles)
     convex_positions = _convex_hull_positions(vertices)
 
     # The raw projector places the complete topological boundary first. Filter that
@@ -201,6 +239,7 @@ def normalize_a1_attachment_projection_hull(
         raise A1AttachmentProjectionError(
             "Normalized Spine hull does not match the physical convex hull"
         )
+    _validate_projected_triangles(result.request.vertices, result.request.triangles)
     return result
 
 
