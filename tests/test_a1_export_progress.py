@@ -11,6 +11,7 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
     emit_a1_export_progress,
     scale_a1_export_progress_callback,
 )
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import a1_ui_router
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_blender_progress import (
     BlenderA1ProgressSession,
 )
@@ -19,7 +20,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_blender_progress import
 def test_progress_update_validates_percentage_and_object_position():
     with pytest.raises(TypeError, match="percent must be int"):
         A1ExportProgressUpdate(percent=True, stage="TEST", message="Testing")
-    with pytest.raises(ValueError, match="\[0, 100\]"):
+    with pytest.raises(ValueError, match=r"\[0, 100\]"):
         A1ExportProgressUpdate(percent=101, stage="TEST", message="Testing")
     with pytest.raises(ValueError, match="provided together"):
         A1ExportProgressUpdate(
@@ -136,3 +137,52 @@ def test_blender_progress_session_balances_lifecycle_and_clamps_regressions():
     assert "80% [1/2]" in status_calls[-2]
     assert status_calls[-1] is None
     assert len(redraw_calls) >= 2
+
+
+def test_ui_router_forwards_custom_callback_without_owning_blender_session(monkeypatch):
+    source_object = object()
+    settings = object()
+    expected_result = object()
+    callback = lambda _update: None
+    captured: dict[str, object] = {}
+    context = SimpleNamespace(scene=object())
+
+    monkeypatch.setattr(
+        a1_ui_router,
+        "build_active_ui_export_plan",
+        lambda _context: SimpleNamespace(
+            source_object=source_object,
+            settings=settings,
+        ),
+    )
+
+    def export_single(resolved_object, resolved_settings, **kwargs):
+        captured.update(
+            source_object=resolved_object,
+            settings=resolved_settings,
+            kwargs=kwargs,
+        )
+        return expected_result
+
+    monkeypatch.setattr(a1_ui_router, "export_a1_single_object", export_single)
+    monkeypatch.setattr(
+        a1_ui_router,
+        "blender_a1_progress_session",
+        lambda *_args, **_kwargs: pytest.fail(
+            "custom callback must bypass Blender progress ownership"
+        ),
+    )
+
+    result = a1_ui_router.export_active_object_a1(
+        context,
+        progress_callback=callback,
+    )
+
+    assert result is expected_result
+    assert captured["source_object"] is source_object
+    assert captured["settings"] is settings
+    assert captured["kwargs"] == {
+        "context": context,
+        "scene": context.scene,
+        "progress_callback": callback,
+    }
