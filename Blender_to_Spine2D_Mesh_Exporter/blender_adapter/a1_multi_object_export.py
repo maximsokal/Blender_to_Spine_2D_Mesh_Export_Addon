@@ -12,14 +12,17 @@ from types import MappingProxyType
 from typing import Any, Tuple
 
 from ..application import (
+    A1ExportProgressCallback,
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
     A1MultiObjectStage,
     A1OutputPreflightSource,
     A1SingleObjectExportSettings,
     ExportIssue,
+    emit_a1_export_progress,
     preflight_a1_output_namespace,
     resolve_a1_multi_object_preparation_settings,
+    scale_a1_export_progress_callback,
 )
 from ..domain.baking import windows_path_identity
 from .a1_multi_object_contracts import (
@@ -169,6 +172,7 @@ def prepare_a1_multi_object(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> PreparedA1MultiObject:
     """Prepare all objects and validate output ownership without composing a document."""
 
@@ -178,7 +182,19 @@ def prepare_a1_multi_object(
     current_component: str | None = None
 
     try:
+        emit_a1_export_progress(
+            progress_callback,
+            percent=0,
+            stage=stage,
+            message="Validating multi-object export request",
+        )
         _validate_sources(sources, settings)
+        emit_a1_export_progress(
+            progress_callback,
+            percent=5,
+            stage=stage,
+            message="Checking predicted output paths",
+        )
         predicted_texture_paths = _preflight_sources(sources, settings)
         statistics.update(
             {
@@ -191,14 +207,30 @@ def prepare_a1_multi_object(
 
         stage = A1MultiObjectStage.PREPARE_OBJECTS
         prepared_objects: list[PreparedA1Object] = []
-        for source in sources:
+        object_count = len(sources)
+        preparation_start = 10.0
+        preparation_end = 90.0
+        preparation_span = preparation_end - preparation_start
+        for index, source in enumerate(sources):
             current_component = source.component_id
+            object_start = preparation_start + preparation_span * index / object_count
+            object_end = preparation_start + preparation_span * (index + 1) / object_count
+            object_progress = scale_a1_export_progress_callback(
+                progress_callback,
+                start_percent=object_start,
+                end_percent=object_end,
+                object_id=source.component_id,
+                object_index=index + 1,
+                object_count=object_count,
+                message_prefix=f"[{index + 1}/{object_count}] ",
+            )
             try:
                 prepared = prepare_a1_object(
                     source.source_object,
                     _settings_for_preparation(source, settings.mode),
                     context=context,
                     scene=scene,
+                    progress_callback=object_progress,
                 )
             except A1ObjectPreparationError as exc:
                 warnings.extend(exc.warnings)
@@ -221,10 +253,16 @@ def prepare_a1_multi_object(
         resolved_objects = tuple(prepared_objects)
 
         stage = A1MultiObjectStage.VALIDATE_OUTPUTS
+        emit_a1_export_progress(
+            progress_callback,
+            percent=95,
+            stage=stage,
+            message="Validating realized texture output paths",
+        )
         texture_paths = _validate_prepared_outputs(resolved_objects, settings)
         statistics["texture_output_count"] = len(texture_paths)
 
-        return PreparedA1MultiObject(
+        result = PreparedA1MultiObject(
             settings=settings,
             sources=sources,
             objects=resolved_objects,
@@ -232,6 +270,13 @@ def prepare_a1_multi_object(
             warnings=tuple(warnings),
             statistics=MappingProxyType(dict(statistics)),
         )
+        emit_a1_export_progress(
+            progress_callback,
+            percent=100,
+            stage=stage,
+            message="Multi-object preparation complete",
+        )
+        return result
     except A1MultiObjectPreparationError:
         raise
     except Exception as exc:
