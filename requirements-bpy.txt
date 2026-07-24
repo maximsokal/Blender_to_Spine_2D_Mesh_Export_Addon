@@ -1,0 +1,5 @@
+# Real Blender 5.2 runtime tests without installing the Blender desktop application.
+# bpy 5.2.0 is published for CPython 3.13 only; pip must fail on another Python
+# instead of silently running the integration suite against mocks.
+bpy==5.2.0
+pytest>=8.3,<9
