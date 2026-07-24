@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from mathutils import Vector
 
 from Blender_to_Spine2D_Mesh_Exporter import ui
+from Blender_to_Spine2D_Mesh_Exporter.application import (
+    A1ExportReadinessReport,
+    A1ObjectReadiness,
+)
 
 
 class _OperatorResult:
@@ -15,6 +20,24 @@ class _OperatorResult:
         self.success = success
         self.issues = tuple(issues)
         self.output_files = tuple(output_files)
+
+
+def _ready_report() -> A1ExportReadinessReport:
+    return A1ExportReadinessReport(
+        signature="ready",
+        objects=(
+            A1ObjectReadiness(
+                object_id="Mesh",
+                statistics={
+                    "source_vertices": 4,
+                    "source_faces": 1,
+                    "triangles_after_triangulation": 2,
+                    "exported_attachment_vertices": 4,
+                    "final_bone_count": 10,
+                },
+            ),
+        ),
+    )
 
 
 def test_scale_applied_uses_tolerance():
@@ -62,7 +85,7 @@ def test_face_orientation_uses_inverse_transpose_normal_matrix():
     inverse.transposed.assert_called_once_with()
 
 
-def test_reset_settings_resets_only_rewrite_properties(monkeypatch):
+def test_reset_settings_resets_rewrite_properties_and_clears_analysis(monkeypatch):
     scene = SimpleNamespace(
         spine2d_texture_size=256,
         spine2d_json_path="old",
@@ -76,10 +99,16 @@ def test_reset_settings_resets_only_rewrite_properties(monkeypatch):
         spine2d_frames_for_render=10,
         spine2d_bake_frame_start=8,
     )
-    context = SimpleNamespace(scene=scene)
+    context = SimpleNamespace(scene=scene, area=None)
     operator = ui.SPINE2D_OT_ResetSettings()
     operator.report = MagicMock()
+    cleared: list[object] = []
     monkeypatch.setattr(ui, "get_default_output_dir", lambda: "/exports")
+    monkeypatch.setattr(
+        ui,
+        "clear_a1_export_readiness",
+        lambda value: cleared.append(value),
+    )
 
     result = operator.execute(context)
 
@@ -88,40 +117,93 @@ def test_reset_settings_resets_only_rewrite_properties(monkeypatch):
     assert scene.spine2d_json_path == "/exports"
     assert scene.spine2d_images_path == "images/"
     assert scene.spine2d_angle_limit == 30
-    assert scene.spine2d_angular_mode == "LEGACY_SEED_CONE"
+    assert scene.spine2d_angular_mode == "SEED_CONE"
     assert scene.spine2d_local_angle_limit == 30.0
     assert scene.spine2d_seam_maker_mode == "AUTO"
     assert scene.spine2d_frames_for_render == 0
     assert scene.spine2d_bake_frame_start == 0
+    assert cleared == [scene]
     operator.report.assert_called_once_with(
         {"INFO"},
         "Spine2D Rewrite settings have been reset.",
     )
 
 
-def test_refresh_info_rejects_missing_active_mesh():
+def test_analyze_operator_stores_production_readiness_report(monkeypatch):
+    mesh = SimpleNamespace(type="MESH")
+    context = SimpleNamespace(
+        active_object=mesh,
+        selected_objects=(mesh,),
+        scene=object(),
+        area=None,
+    )
+    report = _ready_report()
+    stored: list[tuple[object, object]] = []
     operator = ui.OBJECT_OT_Spine2DRefreshInfo()
     operator.report = MagicMock()
+    monkeypatch.setattr(ui, "analyse_a1_export_readiness", lambda _context: report)
+    monkeypatch.setattr(
+        ui,
+        "store_a1_export_readiness",
+        lambda resolved_context, resolved_report: stored.append(
+            (resolved_context, resolved_report)
+        ),
+    )
 
-    result = operator.execute(SimpleNamespace(active_object=None))
+    result = operator.execute(context)
 
-    assert result == {"CANCELLED"}
+    assert result == {"FINISHED"}
+    assert stored == [(context, report)]
     operator.report.assert_called_once_with(
-        {"ERROR"},
-        "A valid active Mesh object is required",
+        {"INFO"},
+        "Export readiness analysis passed",
     )
 
 
-def test_multi_export_always_calls_rewrite(monkeypatch):
+def test_single_export_uses_rewrite_and_requires_current_analysis(monkeypatch):
     expected = _OperatorResult(
         success=True,
-        output_files=("/exports/result.json",),
+        output_files=(Path("/exports/result.json"),),
+    )
+    calls: list[object] = []
+    context = object()
+    operator = ui.OBJECT_OT_Spine2DSingleExport()
+    operator.report = MagicMock()
+    monkeypatch.setattr(
+        ui,
+        "require_current_a1_export_readiness",
+        lambda _context: (True, ""),
+    )
+    monkeypatch.setattr(
+        ui,
+        "export_active_object_a1",
+        lambda value: calls.append(value) or expected,
+    )
+
+    result = operator.execute(context)
+
+    assert result == {"FINISHED"}
+    assert calls == [context]
+    operator.report.assert_called_once_with(
+        {"INFO"},
+        "Export finished → /exports/result.json",
+    )
+
+
+def test_multi_export_always_calls_rewrite_after_readiness_guard(monkeypatch):
+    expected = _OperatorResult(
+        success=True,
+        output_files=(Path("/exports/result.json"),),
     )
     calls: list[object] = []
     context = object()
     operator = ui.OBJECT_OT_Spine2DMultiExport()
     operator.report = MagicMock()
-
+    monkeypatch.setattr(
+        ui,
+        "require_current_a1_export_readiness",
+        lambda _context: (True, ""),
+    )
     monkeypatch.setattr(
         ui,
         "export_selected_objects_a1",
@@ -138,11 +220,40 @@ def test_multi_export_always_calls_rewrite(monkeypatch):
     )
 
 
-def test_ui_runtime_has_no_legacy_backend_property():
+def test_export_guard_blocks_stale_or_missing_analysis(monkeypatch):
+    calls: list[object] = []
+    context = object()
+    operator = ui.OBJECT_OT_Spine2DSingleExport()
+    operator.report = MagicMock()
+    monkeypatch.setattr(
+        ui,
+        "require_current_a1_export_readiness",
+        lambda _context: (False, "Run Analyze before export"),
+    )
+    monkeypatch.setattr(
+        ui,
+        "export_active_object_a1",
+        lambda value: calls.append(value),
+    )
+
+    result = operator.execute(context)
+
+    assert result == {"CANCELLED"}
+    assert calls == []
+    operator.report.assert_called_once_with(
+        {"ERROR"},
+        "Run Analyze before export",
+    )
+
+
+def test_ui_runtime_uses_only_rewrite_export_operators():
     property_names = tuple(registration.name for registration in ui.RNA_PROPERTIES)
     class_names = tuple(value.__name__ for value in ui.CLASSES)
+    source = Path(ui.__file__).read_text(encoding="utf-8")
 
     assert "spine2d_multi_export_backend" not in property_names
+    assert "OBJECT_OT_Spine2DSingleExport" in class_names
     assert "OBJECT_OT_Spine2DMultiExport" in class_names
+    assert 'row.operator("object.save_uv_as_json"' not in source
     assert not hasattr(ui, "resolve_multi_backend")
     assert not hasattr(ui, "MULTI_BACKEND_PROPERTY")
