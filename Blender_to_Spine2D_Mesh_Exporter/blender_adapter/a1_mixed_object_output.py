@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Tuple
+from typing import Any, Mapping, Tuple
 
 from ..application import (
     A1ExportProgressCallback,
     A1MultiObjectExportSettings,
     A1MultiObjectStage,
+    ExportIssue,
     ExportResult,
     emit_a1_export_progress,
     scale_a1_export_progress_callback,
@@ -26,27 +27,71 @@ from .a1_mixed_composition import (
 )
 from .a1_mixed_object_export import prepare_a1_mixed_object
 from .a1_mixed_settings import build_connected_subgroup_settings
-from .a1_multi_object_contracts import (
-    A1MultiObjectPreparationError,
-    A1MultiObjectSource,
-)
+from .a1_multi_object_contracts import A1MultiObjectPreparationError, A1MultiObjectSource
 from .a1_multi_object_result import build_multi_object_failure_result
 from .a1_output_staging import stage_and_finalize_a1_objects
 from .a1_output_statistics import (
     record_final_document_statistics,
     record_grouped_camera_statistics,
 )
-from .grouped_camera_projection_output import (
-    stage_grouped_camera_projection_outputs,
-)
-from .grouped_camera_projection_policy import (
-    resolve_grouped_camera_projection_request,
-)
+from .grouped_camera_projection_output import stage_grouped_camera_projection_outputs
+from .grouped_camera_projection_policy import resolve_grouped_camera_projection_request
 
 
 logger = logging.getLogger(__name__)
 _OPERATION = "A1 mixed-object output"
 _TRANSACTION_NAME = "a1-mixed-object"
+
+
+def _progress(
+    callback: A1ExportProgressCallback | None,
+    percent: int,
+    stage: A1MultiObjectStage,
+    message: str,
+) -> None:
+    emit_a1_export_progress(callback, percent=percent, stage=stage, message=message)
+
+
+def _scaled_progress(
+    callback: A1ExportProgressCallback | None,
+    start: float,
+    end: float,
+) -> A1ExportProgressCallback | None:
+    return scale_a1_export_progress_callback(
+        callback,
+        start_percent=start,
+        end_percent=end,
+    )
+
+
+def _failure(
+    stage: A1MultiObjectStage,
+    exc: Exception,
+    statistics: Mapping[str, int | float | str],
+    warnings: Tuple[ExportIssue, ...],
+) -> ExportResult:
+    return build_multi_object_failure_result(
+        logger=logger,
+        operation=_OPERATION,
+        stage=stage,
+        exc=exc,
+        statistics=statistics,
+        warnings=warnings,
+    )
+
+
+def _preparation_failure(exc: A1MultiObjectPreparationError) -> ExportResult:
+    return build_multi_object_failure_result(
+        logger=logger,
+        operation=_OPERATION,
+        stage=exc.stage,
+        exc=exc.cause,
+        statistics=exc.statistics,
+        warnings=exc.warnings,
+        component_id=exc.component_id,
+        object_id=exc.object_id,
+        object_stage=exc.object_stage,
+    )
 
 
 def export_a1_mixed_object(
@@ -60,17 +105,7 @@ def export_a1_mixed_object(
 ) -> ExportResult:
     """Finalize both groups, compose once, serialize once, and commit atomically."""
 
-    emit_a1_export_progress(
-        progress_callback,
-        percent=0,
-        stage=A1MultiObjectStage.VALIDATE_REQUEST,
-        message="Starting mixed-object export",
-    )
-    preparation_progress = scale_a1_export_progress_callback(
-        progress_callback,
-        start_percent=5.0,
-        end_percent=55.0,
-    )
+    _progress(progress_callback, 0, A1MultiObjectStage.VALIDATE_REQUEST, "Starting mixed-object export")
     try:
         prepared = prepare_a1_mixed_object(
             connected_sources,
@@ -78,52 +113,24 @@ def export_a1_mixed_object(
             settings,
             context=context,
             scene=scene,
-            progress_callback=preparation_progress,
+            progress_callback=_scaled_progress(progress_callback, 5.0, 55.0),
         )
     except A1MultiObjectPreparationError as exc:
-        return build_multi_object_failure_result(
-            logger=logger,
-            operation=_OPERATION,
-            stage=exc.stage,
-            exc=exc.cause,
-            statistics=exc.statistics,
-            warnings=exc.warnings,
-            component_id=exc.component_id,
-            object_id=exc.object_id,
-            object_stage=exc.object_stage,
-        )
+        return _preparation_failure(exc)
     except Exception as exc:
-        return build_multi_object_failure_result(
-            logger=logger,
-            operation=_OPERATION,
-            stage=A1MultiObjectStage.VALIDATE_REQUEST,
-            exc=exc,
-            statistics={},
-            warnings=(),
-        )
+        return _failure(A1MultiObjectStage.VALIDATE_REQUEST, exc, {}, ())
 
     stage = A1MultiObjectStage.VALIDATE_OUTPUTS
     statistics = dict(prepared.statistics)
     try:
-        emit_a1_export_progress(
-            progress_callback,
-            percent=58,
-            stage=stage,
-            message="Validating final mixed output namespace",
-        )
+        _progress(progress_callback, 58, stage, "Validating final mixed output namespace")
         prepared_partition = partition_mixed_prepared_objects(
             prepared.objects,
             connected_sources,
             standalone_sources,
         )
-        anchor = (
-            settings.anchor_component_id
-            or connected_sources[0].component_id
-        )
-        connected_settings = build_connected_subgroup_settings(
-            settings,
-            anchor,
-        )
+        anchor = settings.anchor_component_id or connected_sources[0].component_id
+        connected_settings = build_connected_subgroup_settings(settings, anchor)
         grouped_request = resolve_grouped_camera_projection_request(
             prepared_partition.connected,
             connected_settings,
@@ -141,22 +148,15 @@ def export_a1_mixed_object(
         )
 
         stage = A1MultiObjectStage.STAGE_OUTPUTS
-        with atomic_file_transaction(
-            operation_name=_TRANSACTION_NAME
-        ) as transaction:
+        with atomic_file_transaction(operation_name=_TRANSACTION_NAME) as transaction:
             json_reservation = transaction.reserve(prepared.json_path)
-            staging_progress = scale_a1_export_progress_callback(
-                progress_callback,
-                start_percent=60.0,
-                end_percent=80.0,
-            )
             staged_objects = stage_and_finalize_a1_objects(
                 prepared,
                 transaction,
                 statistics,
                 context=context,
                 scene=scene,
-                progress_callback=staging_progress,
+                progress_callback=_scaled_progress(progress_callback, 60.0, 80.0),
             )
             statistics = dict(staged_objects.statistics)
             finalized_partition = partition_mixed_prepared_objects(
@@ -167,12 +167,7 @@ def export_a1_mixed_object(
 
             grouped_stage = None
             if grouped_request is not None:
-                emit_a1_export_progress(
-                    progress_callback,
-                    percent=82,
-                    stage=stage,
-                    message="Staging grouped camera projection",
-                )
+                _progress(progress_callback, 82, stage, "Staging grouped camera projection")
                 grouped_stage = stage_grouped_camera_projection_outputs(
                     grouped_request.source_objects,
                     grouped_request.plan,
@@ -183,12 +178,7 @@ def export_a1_mixed_object(
                 )
 
             stage = A1MultiObjectStage.COMPOSE_DOCUMENT
-            emit_a1_export_progress(
-                progress_callback,
-                percent=86,
-                stage=stage,
-                message="Composing mixed Spine document",
-            )
+            _progress(progress_callback, 86, stage, "Composing mixed Spine document")
             composition = compose_a1_mixed_document(
                 connected_sources,
                 standalone_sources,
@@ -204,11 +194,7 @@ def export_a1_mixed_object(
                 staged_objects.objects,
                 grouped_enabled=grouped_request is not None,
             )
-            if (
-                grouped_request is not None
-                and grouped_stage is not None
-                and composition.overlay is not None
-            ):
+            if grouped_request is not None and grouped_stage is not None and composition.overlay is not None:
                 record_grouped_camera_statistics(
                     statistics,
                     grouped_request,
@@ -217,16 +203,8 @@ def export_a1_mixed_object(
                 )
 
             stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
-            emit_a1_export_progress(
-                progress_callback,
-                percent=93,
-                stage=stage,
-                message="Serializing Spine JSON",
-            )
-            json_text = SpineSerializer().to_json(
-                document,
-                indent=settings.json_indent,
-            )
+            _progress(progress_callback, 93, stage, "Serializing Spine JSON")
+            json_text = SpineSerializer().to_json(document, indent=settings.json_indent)
             write_staged_utf8_text(
                 json_reservation.staged_path,
                 json_text,
@@ -234,17 +212,10 @@ def export_a1_mixed_object(
             )
 
             stage = A1MultiObjectStage.COMMIT_OUTPUTS
-            emit_a1_export_progress(
-                progress_callback,
-                percent=98,
-                stage=stage,
-                message="Committing JSON and texture files",
-            )
+            _progress(progress_callback, 98, stage, "Committing JSON and texture files")
             committed_paths = transaction.commit()
 
-        grouped_reservations = (
-            () if grouped_stage is None else grouped_stage.reservations
-        )
+        grouped_reservations = () if grouped_stage is None else grouped_stage.reservations
         expected_paths = (
             json_reservation.final_path,
             *(item.final_path for item in staged_objects.reservations),
@@ -260,12 +231,7 @@ def export_a1_mixed_object(
             grouped_request is not None,
             tuple(str(path) for path in committed_paths),
         )
-        emit_a1_export_progress(
-            progress_callback,
-            percent=100,
-            stage=A1MultiObjectStage.COMMIT_OUTPUTS,
-            message="Export complete",
-        )
+        _progress(progress_callback, 100, A1MultiObjectStage.COMMIT_OUTPUTS, "Export complete")
         return ExportResult(
             success=True,
             output_files=tuple(committed_paths),
@@ -273,14 +239,7 @@ def export_a1_mixed_object(
             statistics=statistics,
         )
     except Exception as exc:
-        return build_multi_object_failure_result(
-            logger=logger,
-            operation=_OPERATION,
-            stage=stage,
-            exc=exc,
-            statistics=statistics,
-            warnings=prepared.warnings,
-        )
+        return _failure(stage, exc, statistics, prepared.warnings)
 
 
 __all__ = ["export_a1_mixed_object"]
