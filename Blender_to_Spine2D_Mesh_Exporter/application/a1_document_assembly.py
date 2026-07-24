@@ -15,7 +15,7 @@ from ..domain.spine import (
     build_legacy_mesh_document,
 )
 from ..domain.uv import UvRangePolicy, enforce_uv_range
-from .a1_attachment_projection import (
+from .a1_attachment_projection_service import (
     A1AttachmentProjectionResult,
     A1AttachmentProjectionSettings,
     project_triangulated_disk_attachment,
@@ -57,7 +57,11 @@ class A1DocumentAssemblySettings:
             "center_y",
         ):
             value = getattr(self, field_name)
-            if not isinstance(value, (int, float)) or isinstance(value, bool) or not isfinite(float(value)):
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not isfinite(float(value))
+            ):
                 raise ValueError(f"{field_name} must be finite")
         if self.attachment_width <= 0.0 or self.attachment_height <= 0.0:
             raise ValueError("attachment dimensions must be positive")
@@ -133,7 +137,7 @@ def assemble_a1_document(
     for region_offset, snapshot in enumerate(region_snapshots):
         MeshSnapshotValidator().validate_or_raise(snapshot)
         # Validate the exact propagated region state, not only the pre-propagation
-        # full-object unwrap.  This prevents a damaged transfer from reaching Spine.
+        # full-object unwrap. This prevents a damaged transfer from reaching Spine.
         enforce_uv_range(
             snapshot,
             settings.uv_layer_name,
