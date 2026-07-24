@@ -20,7 +20,11 @@ from ..application import (
     resolve_a1_names,
     resolve_a1_output_paths,
 )
-from ..domain.geometry import LineageSeverity, MeshSnapshot
+from ..domain.geometry import (
+    LineageSeverity,
+    MeshSnapshot,
+    normalize_mesh_snapshot_world_transform,
+)
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
     StatisticsValue,
@@ -111,7 +115,9 @@ def _resolved_evaluation_owners(
     try:
         import bpy
     except Exception as exc:
-        raise ValueError("Blender bpy module is unavailable for evaluated geometry") from exc
+        raise ValueError(
+            "Blender bpy module is unavailable for evaluated geometry"
+        ) from exc
 
     resolved_scene = scene or getattr(bpy.context, "scene", None)
     if resolved_scene is None:
@@ -119,7 +125,9 @@ def _resolved_evaluation_owners(
     try:
         resolved_depsgraph = bpy.context.evaluated_depsgraph_get()
     except Exception as exc:
-        raise ValueError("Unable to acquire Blender evaluated dependency graph") from exc
+        raise ValueError(
+            "Unable to acquire Blender evaluated dependency graph"
+        ) from exc
     if resolved_depsgraph is None:
         raise ValueError("Blender returned no evaluated dependency graph")
     try:
@@ -252,6 +260,25 @@ def prepare_a1_source_geometry(
         )
 
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
+        world_transform = normalize_mesh_snapshot_world_transform(source_snapshot)
+        source_snapshot = world_transform.snapshot
+        if world_transform.mirrored:
+            warnings = warnings + (
+                warning_issue(
+                    stage=stage,
+                    code="MIRRORED_OBJECT_TRANSFORM",
+                    message=(
+                        "Object matrix_world has a negative determinant. Rewrite "
+                        "preserved the mirrored geometry and oriented normals while "
+                        "normalizing rotation/scale into the mesh snapshot."
+                    ),
+                    object_id=object_id,
+                    context={
+                        "determinant": world_transform.determinant,
+                    },
+                ),
+            )
+
         resolved_source_uv_boundary_layer = _resolve_source_uv_boundary_layer(
             source_snapshot,
             settings,
@@ -263,6 +290,12 @@ def prepare_a1_source_geometry(
                 "source_vertices": len(source_snapshot.vertices),
                 "source_edges": len(source_snapshot.edges),
                 "source_faces": len(source_snapshot.faces),
+                "object_linear_transform_baked": int(world_transform.changed),
+                "object_world_determinant": world_transform.determinant,
+                "object_world_mirrored": int(world_transform.mirrored),
+                "object_world_translation_x": world_transform.translation[0],
+                "object_world_translation_y": world_transform.translation[1],
+                "object_world_translation_z": world_transform.translation[2],
                 "source_uv_boundary_resolved_layer": (
                     resolved_source_uv_boundary_layer or ""
                 ),
@@ -291,11 +324,15 @@ def prepare_a1_source_geometry(
         )
         logger.debug(
             "Prepared source geometry for %s: vertices=%d faces=%d regions=%d "
+            "world_transform_baked=%s determinant=%s mirrored=%s "
             "source_uv_boundary_mode=%s source_uv_boundary_layer=%s",
             object_id,
             len(source_snapshot.vertices),
             len(source_snapshot.faces),
             len(geometry.regions),
+            world_transform.changed,
+            world_transform.determinant,
+            world_transform.mirrored,
             settings.source_uv_boundary_mode.value,
             resolved_source_uv_boundary_layer,
         )
