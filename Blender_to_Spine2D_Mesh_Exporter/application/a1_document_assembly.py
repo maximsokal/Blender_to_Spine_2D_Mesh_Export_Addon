@@ -11,6 +11,7 @@ from ..domain.spine import (
     LegacyAttachmentSequence,
     LegacyMeshDocumentBuildResult,
     LegacyRigBuildResult,
+    apply_attachment_sequence_animations,
     apply_legacy_visual_options,
     build_legacy_mesh_document,
 )
@@ -136,8 +137,6 @@ def assemble_a1_document(
     projections: list[A1AttachmentProjectionResult] = []
     for region_offset, snapshot in enumerate(region_snapshots):
         MeshSnapshotValidator().validate_or_raise(snapshot)
-        # Validate the exact propagated region state, not only the pre-propagation
-        # full-object unwrap. This prevents a damaged transfer from reaching Spine.
         enforce_uv_range(
             snapshot,
             settings.uv_layer_name,
@@ -179,6 +178,7 @@ def assemble_a1_document(
             include_control_icons=settings.include_control_icons,
             include_preview_animation=settings.include_preview_animation,
         )
+        document = apply_attachment_sequence_animations(document)
         document_build = replace(document_build, document=document)
     except Exception as exc:
         raise A1DocumentAssemblyError(
