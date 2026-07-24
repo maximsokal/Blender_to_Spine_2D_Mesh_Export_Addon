@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 from typing import Any, Mapping, Tuple
 
@@ -32,7 +32,7 @@ from .a1_preparation_contracts import (
     warning_issue,
 )
 from .evaluated_mesh_reader import read_evaluated_mesh_snapshot
-from .mesh_reader import read_source_mesh_snapshot
+from .mesh_reader import _matrix_tuple, read_source_mesh_snapshot
 from .render_engine_contract import (
     RenderEngineContract,
     render_engine_contract_from_execution,
@@ -142,6 +142,27 @@ def _resolved_evaluation_owners(
     return resolved_scene, resolved_depsgraph
 
 
+def _evaluated_source_world_matrix(
+    source_obj: Any,
+    depsgraph: Any,
+) -> tuple[float, ...]:
+    """Read matrix_world from the same depsgraph evaluation as the Mesh snapshot."""
+
+    evaluated_get = getattr(source_obj, "evaluated_get", None)
+    if not callable(evaluated_get):
+        raise ValueError("source_obj.evaluated_get() is unavailable")
+    try:
+        evaluated_source = evaluated_get(depsgraph)
+    except Exception as exc:
+        raise ValueError("Unable to evaluate source object transform") from exc
+    if evaluated_source is None:
+        raise ValueError("source_obj.evaluated_get() returned None")
+    matrix_world = getattr(evaluated_source, "matrix_world", None)
+    if matrix_world is None:
+        raise ValueError("Evaluated source object has no matrix_world")
+    return _matrix_tuple(matrix_world)
+
+
 def _read_source_snapshot(
     source_obj: Any,
     object_id: str,
@@ -160,6 +181,17 @@ def _read_source_snapshot(
             snapshot_id=f"{object_id}:a1-evaluated",
             lineage_policy=settings.modifier_lineage_policy,
         )
+        # The evaluated Mesh and matrix must come from one dependency-graph state.
+        # The generic reader retains source lineage, while A1 explicitly replaces its
+        # snapshot transform with the actual evaluated source transform before world
+        # normalization. This matters for constraints, parenting, and animated drivers.
+        evaluated_snapshot = replace(
+            evaluated.snapshot,
+            world_matrix=_evaluated_source_world_matrix(
+                source_obj,
+                resolved_depsgraph,
+            ),
+        )
         warnings = tuple(
             warning_issue(
                 stage=stage,
@@ -171,7 +203,7 @@ def _read_source_snapshot(
             for issue in evaluated.lineage_report.issues
             if issue.severity is LineageSeverity.WARNING
         )
-        return evaluated.snapshot, len(evaluated.modifier_stack), warnings
+        return evaluated_snapshot, len(evaluated.modifier_stack), warnings
     snapshot = read_source_mesh_snapshot(
         source_obj,
         source_object_id=object_id,
