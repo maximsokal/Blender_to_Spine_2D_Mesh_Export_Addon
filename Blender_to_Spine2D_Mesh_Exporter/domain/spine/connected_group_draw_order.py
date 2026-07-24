@@ -8,6 +8,7 @@ top. Objects clustered into one tolerance layer retain source input order.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Tuple
 
@@ -52,6 +53,31 @@ def connected_draw_order_component_ids(
     )
 
 
+def _require_no_unrebased_draworder_timelines(
+    objects: Tuple[ConnectedObjectDocument, ...],
+) -> None:
+    """Fail before setup slots move if animation offsets would need rebasing."""
+
+    for item in objects:
+        for animation_name, animation in item.document.animations.items():
+            if not isinstance(animation, Mapping):
+                continue
+            draworder_keys = tuple(
+                key
+                for key in animation
+                if str(key).replace("_", "").casefold() == "draworder"
+            )
+            for key in draworder_keys:
+                timeline = animation[key]
+                if timeline:
+                    raise ConnectedGroupBuildError(
+                        "Connected setup slot reordering cannot preserve an existing "
+                        "draworder timeline until component offsets are explicitly "
+                        f"rebased; component={item.component_id!r}, "
+                        f"animation={str(animation_name)!r}, key={str(key)!r}"
+                    )
+
+
 def apply_connected_setup_draw_order(
     document: SpineDocument,
     objects: Tuple[ConnectedObjectDocument, ...],
@@ -66,6 +92,7 @@ def apply_connected_setup_draw_order(
     if not all(isinstance(item, ConnectedObjectDocument) for item in objects):
         raise TypeError("objects must contain ConnectedObjectDocument values")
 
+    _require_no_unrebased_draworder_timelines(objects)
     object_by_component = {item.component_id: item for item in objects}
     if len(object_by_component) != len(objects):
         raise ConnectedGroupBuildError(
