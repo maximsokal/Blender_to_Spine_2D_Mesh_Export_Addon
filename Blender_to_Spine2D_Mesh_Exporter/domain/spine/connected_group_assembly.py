@@ -16,6 +16,7 @@ from .connected_group_contracts import (
     ConnectedGroupSettings,
     ConnectedObjectDocument,
     ConnectedObjectPlacement,
+    ConnectedPlacementSpace,
 )
 from .connected_group_draw_order import apply_connected_setup_draw_order
 from .connected_group_error import ConnectedGroupBuildError
@@ -43,13 +44,12 @@ def apply_object_placements(
     placements: Tuple[ConnectedObjectPlacement, ...],
     uniform_scale: float,
 ) -> SpineDocument:
-    """Reparent object main bones and replace absolute XY with anchor-relative offsets.
+    """Reparent object main bones in their declared connected coordinate space.
 
-    Standalone Rewrite documents place ``<prefix>_main`` at the Blender object's
-    absolute world translation. Connected layout already resolves every object relative
-    to the selected anchor and the global ``all_objects_main`` remains at the origin.
-    Keeping the old main-bone Y and then adding ``relative_y`` would therefore apply the
-    world translation twice. Both X and Y are replaced symmetrically here.
+    Object-bake documents place ``<prefix>_main`` at absolute Blender translation,
+    so connected composition replaces both X and Y with anchor-relative offsets.
+    Camera-projection documents already encode screen-space XY in attachment vertices;
+    their main-bone coordinates are preserved while only the Z-layer parent changes.
     """
 
     placement_by_main = {
@@ -63,14 +63,28 @@ def apply_object_placements(
             updated_bones.append(bone)
             continue
         found.add(bone.name)
-        updated_bones.append(
-            replace(
-                bone,
-                parent=placement.parent_layer_bone_name,
-                x=round(placement.relative_x * uniform_scale, 2),
-                y=round(placement.relative_y * uniform_scale, 2),
+        if placement.placement_space is ConnectedPlacementSpace.ANCHOR_RELATIVE_WORLD:
+            updated_bones.append(
+                replace(
+                    bone,
+                    parent=placement.parent_layer_bone_name,
+                    x=round(placement.relative_x * uniform_scale, 2),
+                    y=round(placement.relative_y * uniform_scale, 2),
+                )
             )
+            continue
+        if placement.placement_space is ConnectedPlacementSpace.PRESERVE_DOCUMENT:
+            updated_bones.append(
+                replace(
+                    bone,
+                    parent=placement.parent_layer_bone_name,
+                )
+            )
+            continue
+        raise TypeError(
+            f"Unsupported connected placement space: {placement.placement_space!r}"
         )
+
     missing = set(placement_by_main) - found
     if missing:
         raise ConnectedGroupBuildError(
