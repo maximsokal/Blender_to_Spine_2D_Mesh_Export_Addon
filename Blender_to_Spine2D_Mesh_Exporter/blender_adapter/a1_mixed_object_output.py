@@ -105,7 +105,12 @@ def export_a1_mixed_object(
 ) -> ExportResult:
     """Finalize both groups, compose once, serialize once, and commit atomically."""
 
-    _progress(progress_callback, 0, A1MultiObjectStage.VALIDATE_REQUEST, "Starting mixed-object export")
+    _progress(
+        progress_callback,
+        0,
+        A1MultiObjectStage.VALIDATE_REQUEST,
+        "Starting mixed-object export",
+    )
     try:
         prepared = prepare_a1_mixed_object(
             connected_sources,
@@ -123,7 +128,12 @@ def export_a1_mixed_object(
     stage = A1MultiObjectStage.VALIDATE_OUTPUTS
     statistics = dict(prepared.statistics)
     try:
-        _progress(progress_callback, 58, stage, "Validating final mixed output namespace")
+        _progress(
+            progress_callback,
+            58,
+            stage,
+            "Validating final mixed output namespace",
+        )
         prepared_partition = partition_mixed_prepared_objects(
             prepared.objects,
             connected_sources,
@@ -167,7 +177,12 @@ def export_a1_mixed_object(
 
             grouped_stage = None
             if grouped_request is not None:
-                _progress(progress_callback, 82, stage, "Staging grouped camera projection")
+                _progress(
+                    progress_callback,
+                    82,
+                    stage,
+                    "Staging grouped camera projection",
+                )
                 grouped_stage = stage_grouped_camera_projection_outputs(
                     grouped_request.source_objects,
                     grouped_request.plan,
@@ -175,6 +190,11 @@ def export_a1_mixed_object(
                     grouped_request.execution_settings,
                     context=context,
                     scene=scene,
+                    progress_callback=_scaled_progress(
+                        progress_callback,
+                        82.0,
+                        85.0,
+                    ),
                 )
 
             stage = A1MultiObjectStage.COMPOSE_DOCUMENT
@@ -194,7 +214,11 @@ def export_a1_mixed_object(
                 staged_objects.objects,
                 grouped_enabled=grouped_request is not None,
             )
-            if grouped_request is not None and grouped_stage is not None and composition.overlay is not None:
+            if (
+                grouped_request is not None
+                and grouped_stage is not None
+                and composition.overlay is not None
+            ):
                 record_grouped_camera_statistics(
                     statistics,
                     grouped_request,
@@ -204,7 +228,10 @@ def export_a1_mixed_object(
 
             stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
             _progress(progress_callback, 93, stage, "Serializing Spine JSON")
-            json_text = SpineSerializer().to_json(document, indent=settings.json_indent)
+            json_text = SpineSerializer().to_json(
+                document,
+                indent=settings.json_indent,
+            )
             write_staged_utf8_text(
                 json_reservation.staged_path,
                 json_text,
@@ -231,7 +258,12 @@ def export_a1_mixed_object(
             grouped_request is not None,
             tuple(str(path) for path in committed_paths),
         )
-        _progress(progress_callback, 100, A1MultiObjectStage.COMMIT_OUTPUTS, "Export complete")
+        _progress(
+            progress_callback,
+            100,
+            A1MultiObjectStage.COMMIT_OUTPUTS,
+            "Export complete",
+        )
         return ExportResult(
             success=True,
             output_files=tuple(committed_paths),
