@@ -100,6 +100,12 @@ def export_a1_single_object(
             message="Staging texture outputs",
             object_id=prepared.object_id,
         )
+        texture_progress = scale_a1_export_progress_callback(
+            progress_callback,
+            start_percent=65.0,
+            end_percent=80.0,
+            object_id=prepared.object_id,
+        )
         with atomic_file_transaction(operation_name="a1-single-object") as output_transaction:
             json_reservation = output_transaction.reserve(
                 prepared.output_paths.json_path
@@ -112,6 +118,7 @@ def export_a1_single_object(
                 settings.bake_execution,
                 context=context,
                 scene=scene,
+                progress_callback=texture_progress,
             )
 
             stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
