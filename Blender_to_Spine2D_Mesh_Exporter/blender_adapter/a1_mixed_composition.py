@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Tuple
 
 from ..application import (
@@ -19,6 +19,7 @@ from ..domain.spine import (
     SpineDocumentCompositionResult,
     compose_spine_documents,
 )
+from .a1_composition_result import replace_a1_composition_document
 from .a1_grouped_output import apply_staged_grouped_camera_overlay
 from .a1_mixed_settings import (
     build_connected_subgroup_settings,
@@ -186,15 +187,12 @@ def compose_a1_mixed_document(
             grouped_request,
             grouped_stage,
         )
-        updated_connected_composition = replace(
-            connected.composition,
-            document=overlay.document,
-        )
-        connected = replace(
+        connected = replace_a1_composition_document(
             connected,
-            document=overlay.document,
-            composition=updated_connected_composition,
+            overlay.document,
         )
+        if not isinstance(connected, ConnectedGroupBuildResult):
+            raise TypeError("connected composition replacement changed result type")
 
     standalone = compose_a1_multi_object_document(
         standalone_sources,
