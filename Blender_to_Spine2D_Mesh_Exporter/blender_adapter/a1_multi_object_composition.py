@@ -10,7 +10,9 @@ from __future__ import annotations
 from typing import Tuple
 
 from ..application import A1MultiObjectExportSettings, A1MultiObjectMode
+from ..domain.baking import CameraProjectionPlan
 from ..domain.spine import (
+    ConnectedPlacementSpace,
     ConstraintOrderPolicy,
     SpineCompositionSettings,
     SpineDocumentComponent,
@@ -66,6 +68,18 @@ def _validate_composition_inputs(
             raise ValueError("anchor_component_id is not present in composition sources")
 
 
+def _connected_placement_space(
+    prepared: PreparedA1Object,
+) -> ConnectedPlacementSpace:
+    """Resolve where one finalized attachment already stores its visible XY position."""
+
+    if not isinstance(prepared, PreparedA1Object):
+        raise TypeError("prepared must be PreparedA1Object")
+    if isinstance(prepared.bake_plan, CameraProjectionPlan):
+        return ConnectedPlacementSpace.PRESERVE_DOCUMENT
+    return ConnectedPlacementSpace.ANCHOR_RELATIVE_WORLD
+
+
 def compose_a1_multi_object_document(
     sources: Tuple[A1MultiObjectSource, ...],
     prepared: Tuple[PreparedA1Object, ...],
@@ -117,6 +131,7 @@ def compose_a1_multi_object_document(
             animation_namespace=(
                 source.animation_namespace or source.component_id
             ),
+            placement_space=_connected_placement_space(item),
         )
         for source, item in zip(sources, prepared, strict=True)
     )
