@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import logging
 from typing import Any, Tuple
 
+from ..application import A1ExportProgressCallback
 from ..domain.baking import (
     BakeExecutionSettings,
     CameraProjectionLayout,
@@ -108,6 +109,8 @@ def reserve_grouped_camera_projection_outputs(
 def stage_validated_grouped_camera_projection(
     runtime: GroupedCameraProjectionRuntime,
     transaction: AtomicFileTransaction,
+    *,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> GroupedCameraProjectionStageResult:
     """Reserve, render, restore state, then process grouped staged images."""
 
@@ -123,6 +126,7 @@ def stage_validated_grouped_camera_projection(
     rendered = render_grouped_camera_projection_frames(
         runtime,
         reservations,
+        progress_callback=progress_callback,
     )
     layout = process_grouped_camera_projection_outputs(
         runtime,
@@ -143,6 +147,7 @@ def stage_grouped_camera_projection_outputs(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> GroupedCameraProjectionStageResult:
     """Validate and stage into the caller-owned atomic transaction."""
 
@@ -158,6 +163,7 @@ def stage_grouped_camera_projection_outputs(
         return stage_validated_grouped_camera_projection(
             runtime,
             transaction,
+            progress_callback=progress_callback,
         )
     except CameraProjectionExecutionError:
         raise
