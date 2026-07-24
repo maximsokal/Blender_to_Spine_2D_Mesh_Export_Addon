@@ -16,6 +16,10 @@ from .render_engine_contract import (
     render_engine_contract_from_execution,
 )
 from .scene_bake_runtime import validate_runtime_scene_context
+from .scene_context_contract import (
+    BlenderSceneContextError,
+    require_context_scene_consistency,
+)
 
 
 def _load_bpy() -> Any:
@@ -202,7 +206,10 @@ def validate_semantic_bake_request(
     )
     if not isinstance(resolved_settings, BakeExecutionSettings):
         raise TypeError("execution_settings must be BakeExecutionSettings or None")
-    if isinstance(plan, GeneratedBakePlan) and resolved_settings.render_engine != "CYCLES":
+    if (
+        isinstance(plan, GeneratedBakePlan)
+        and resolved_settings.render_engine != "CYCLES"
+    ):
         resolved_settings = replace(resolved_settings, render_engine="CYCLES")
 
     used_material_indices, face_material_indices = _validate_execution_input(
@@ -226,6 +233,12 @@ def validate_semantic_bake_request(
     )
     if resolved_scene is None:
         raise BakeExecutionError("A Blender Scene is required for texture baking")
+    try:
+        require_context_scene_consistency(resolved_context, resolved_scene)
+    except BlenderSceneContextError as exc:
+        raise BakeExecutionError(
+            f"Texture bake context and scene disagree: {exc}"
+        ) from exc
 
     if plan.scene_aware:
         validate_runtime_scene_context(
