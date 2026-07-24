@@ -53,7 +53,8 @@ def test_runner_executes_only_real_bpy_test_root_and_fails_closed():
     assert "tests" not in string_literals
     assert "--strict-markers" in string_literals
     assert "--maxfail=1" in string_literals
-    assert "official bpy package is not installed; run " in string_literals
+    assert "official bpy package is not installed" in source
+    assert "unable to import the real Blender Python runtime" in source
 
 
 def test_real_bpy_files_never_import_legacy_test_fixtures():
