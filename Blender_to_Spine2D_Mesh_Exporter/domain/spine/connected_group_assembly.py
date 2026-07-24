@@ -1,4 +1,4 @@
-"""Assemble connected A1 object documents under one global legacy rig."""
+"""Assemble connected A1 object documents under one global rotatable-mesh rig."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from .connected_group_contracts import (
     ConnectedObjectDocument,
     ConnectedObjectPlacement,
 )
+from .connected_group_draw_order import apply_connected_setup_draw_order
 from .connected_group_error import ConnectedGroupBuildError
 from .connected_group_global_rig import (
     build_global_bones_document,
@@ -142,8 +143,18 @@ def build_connected_group_document(
             animation_separator=settings.animation_separator,
         ),
     )
-    placed_document = apply_object_placements(
+
+    # Bone hierarchy and Z-layer parents do not control rendering depth in Spine.
+    # Apply the computed back-to-front component order to the setup slot list while
+    # preserving every object's internal slot order and all typed attachments.
+    draw_order_document = apply_connected_setup_draw_order(
         composition.document,
+        objects,
+        placements,
+    )
+    composition = replace(composition, document=draw_order_document)
+    placed_document = apply_object_placements(
+        draw_order_document,
         placements,
         uniform_scale,
     )
