@@ -9,6 +9,12 @@ import logging
 from math import isfinite
 from typing import Any, Mapping, Tuple
 
+try:
+    from bpy.app.handlers import persistent as _persistent
+except Exception:  # pragma: no cover - exercised by non-Blender unit-test mocks.
+    def _persistent(function):
+        return function
+
 from ..application import (
     A1ExportReadinessReport,
     A1MultiObjectMode,
@@ -185,12 +191,64 @@ def _object_signature(obj: Any) -> Mapping[str, object]:
     }
 
 
-def build_a1_readiness_signature(context: Any) -> str:
-    """Return a cheap signature for selection and mutable UI settings.
+def _selected_meshes(context: Any) -> Tuple[Any, ...]:
+    if context is None:
+        return ()
+    return tuple(
+        obj
+        for obj in getattr(context, "selected_objects", ())
+        if getattr(obj, "type", None) == "MESH"
+    )
 
-    Geometry/material edits are invalidated by the depsgraph handler. This signature
-    additionally catches selection, active-object and export-setting changes that may not
-    emit a useful dependency-graph update for the panel.
+
+def _request_mesh_objects(context: Any) -> Tuple[Any, ...]:
+    """Mirror the UI router: multi uses selection; single uses the active Mesh."""
+
+    selected = _selected_meshes(context)
+    if len(selected) > 1:
+        candidates = selected
+    else:
+        active = getattr(context, "active_object", None)
+        candidates = (
+            (active,)
+            if active is not None and getattr(active, "type", None) == "MESH"
+            else selected
+        )
+
+    unique: list[Any] = []
+    identities: set[int] = set()
+    for obj in candidates:
+        identity = _rna_identity(obj)
+        if identity in identities:
+            continue
+        identities.add(identity)
+        unique.append(obj)
+    return tuple(unique)
+
+
+def _ordered_signature_objects(context: Any) -> Tuple[Any, ...]:
+    active = getattr(context, "active_object", None)
+    return tuple(
+        sorted(
+            _request_mesh_objects(context),
+            key=lambda obj: (
+                0 if obj is active else 1,
+                str(
+                    getattr(obj, "name_full", None)
+                    or getattr(obj, "name", "")
+                ).casefold(),
+                str(getattr(obj, "name_full", None) or getattr(obj, "name", "")),
+            ),
+        )
+    )
+
+
+def build_a1_readiness_signature(context: Any) -> str:
+    """Return a cheap signature for the exact UI export request.
+
+    Geometry/material edits are invalidated by the persistent depsgraph handler. This
+    signature additionally catches active/selection and export-setting changes that may
+    not emit a useful dependency-graph update for the panel.
     """
 
     if context is None:
@@ -200,27 +258,7 @@ def build_a1_readiness_signature(context: Any) -> str:
         raise ValueError("context.scene is missing")
 
     active = getattr(context, "active_object", None)
-    candidates: list[Any] = [
-        obj
-        for obj in getattr(context, "selected_objects", ())
-        if getattr(obj, "type", None) == "MESH"
-    ]
-    if (
-        active is not None
-        and getattr(active, "type", None) == "MESH"
-        and all(_rna_identity(obj) != _rna_identity(active) for obj in candidates)
-    ):
-        candidates.append(active)
-    ordered = tuple(
-        sorted(
-            candidates,
-            key=lambda obj: (
-                0 if obj is active else 1,
-                str(getattr(obj, "name_full", None) or getattr(obj, "name", "")).casefold(),
-                str(getattr(obj, "name_full", None) or getattr(obj, "name", "")),
-            ),
-        )
-    )
+    ordered = _ordered_signature_objects(context)
     render = getattr(scene, "render", None)
     camera = getattr(scene, "camera", None)
     payload = {
@@ -314,11 +352,16 @@ def _prepared_statistics(prepared: PreparedA1Object) -> dict[str, ReadinessStati
             "loose_vertices": len(snapshot.vertices) - len(used_vertex_ids),
             "loose_edges": len(snapshot.edges) - len(used_edge_ids),
             "boundary_edges": sum(len(faces) == 1 for faces in edge_to_faces.values()),
-            "non_manifold_edges": sum(len(faces) > 2 for faces in edge_to_faces.values()),
+            "non_manifold_edges": sum(
+                len(faces) > 2 for faces in edge_to_faces.values()
+            ),
             "n_gon_count": sum(len(face.loop_ids) > 4 for face in snapshot.faces),
             "triangles_after_triangulation": triangulated_faces,
             "exported_attachment_vertices": attachment_vertices,
-            "uv_duplicated_vertices": max(0, attachment_vertices - len(used_vertex_ids)),
+            "uv_duplicated_vertices": max(
+                0,
+                attachment_vertices - len(used_vertex_ids),
+            ),
         }
     )
     return statistics
@@ -354,19 +397,11 @@ def _error_issue(
 
 
 def _requested_object_ids(context: Any) -> Tuple[str, ...]:
-    selected = tuple(
+    names = tuple(
         str(getattr(obj, "name_full", None) or getattr(obj, "name", "")).strip()
-        for obj in getattr(context, "selected_objects", ())
-        if getattr(obj, "type", None) == "MESH"
+        for obj in _request_mesh_objects(context)
     )
-    resolved = tuple(dict.fromkeys(value for value in selected if value))
-    if resolved:
-        return resolved
-    active = getattr(context, "active_object", None)
-    active_name = str(
-        getattr(active, "name_full", None) or getattr(active, "name", "")
-    ).strip()
-    return (active_name,) if active_name else ()
+    return tuple(dict.fromkeys(value for value in names if value))
 
 
 def _failure_report(
@@ -456,6 +491,7 @@ def _analyse_multi_plan(
         document = composition.document
     statistics = _readiness_statistics(prepared.statistics)
     statistics.update(_composition_statistics(document))
+    statistics["output_write_probe"] = "NOT_RUN"
     return prepared.objects, statistics
 
 
@@ -489,11 +525,7 @@ def analyse_a1_export_readiness(context: Any) -> A1ExportReadinessReport:
 
     scene = getattr(context, "scene", None)
     try:
-        selected_meshes = tuple(
-            obj
-            for obj in getattr(context, "selected_objects", ())
-            if getattr(obj, "type", None) == "MESH"
-        )
+        selected_meshes = _selected_meshes(context)
         if len(selected_meshes) > 1:
             plan = build_selected_ui_export_plan(context)
             prepared_objects, statistics = _analyse_multi_plan(
@@ -524,6 +556,7 @@ def analyse_a1_export_readiness(context: Any) -> A1ExportReadinessReport:
             statistics={
                 "object_count": 1,
                 "mode": "SINGLE",
+                "output_write_probe": "NOT_RUN",
                 **_composition_statistics(prepared.document),
             },
         )
@@ -620,6 +653,7 @@ def require_current_a1_export_readiness(context: Any) -> tuple[bool, str]:
     return True, ""
 
 
+@_persistent
 def a1_readiness_depsgraph_update_post(_scene: Any, depsgraph: Any) -> None:
     """Mark cached reports stale when export-relevant Blender IDs change."""
 
