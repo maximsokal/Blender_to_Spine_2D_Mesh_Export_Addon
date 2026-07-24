@@ -24,6 +24,7 @@ from .connected_group_contracts import (
     ConnectedGroupSettings,
     ConnectedObjectDocument,
     ConnectedObjectPlacement,
+    ConnectedPlacementSpace,
     ConnectedZLayer,
 )
 from .connected_group_error import ConnectedGroupBuildError
@@ -98,6 +99,7 @@ __all__ = [
     "ConnectedGroupSettings",
     "ConnectedObjectDocument",
     "ConnectedObjectPlacement",
+    "ConnectedPlacementSpace",
     "ConnectedZLayer",
     "ConstraintOrderAssignment",
     "ConstraintOrderPolicy",
