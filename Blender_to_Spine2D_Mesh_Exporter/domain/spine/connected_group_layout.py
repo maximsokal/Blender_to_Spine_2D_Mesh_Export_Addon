@@ -17,7 +17,7 @@ def resolve_anchor(
     objects: Tuple[ConnectedObjectDocument, ...],
     settings: ConnectedGroupSettings,
 ) -> ConnectedObjectDocument:
-    """Return the explicit anchor or preserve the first-object legacy default."""
+    """Return the explicit anchor or preserve the first-object default."""
 
     if settings.anchor_component_id is None:
         return objects[0]
@@ -108,6 +108,7 @@ def resolve_layers_and_placements(
             parent_layer_bone_name=layer_name_by_index[
                 layer_by_component[item.component_id]
             ],
+            placement_space=item.placement_space,
         )
         for item in objects
     )
