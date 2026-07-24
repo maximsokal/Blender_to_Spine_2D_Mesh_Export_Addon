@@ -36,9 +36,9 @@ def _require_finite_number(value: object, field_name: str) -> float:
 class ConnectedPlacementSpace(str, Enum):
     """Define where a component's visible XY placement is already encoded."""
 
-    # Object-bake attachments are centered in object-local geometry. Their standalone
-    # main bone contains absolute Blender translation and must be replaced by the
-    # anchor-relative connected offset.
+    # Connected object-bake preparation retains the document-local bbox-center
+    # compensation on <prefix>_main and deliberately omits absolute world translation.
+    # Composition adds anchor-relative Object translation to that existing local value.
     ANCHOR_RELATIVE_WORLD = "ANCHOR_RELATIVE_WORLD"
     # Camera-projection attachments already contain screen-space XY in their vertices.
     # Reparent the main bone but preserve its existing coordinates (normally 0, 0).
