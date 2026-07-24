@@ -21,13 +21,13 @@ def _bone_by_name(document):
     return {bone.name: bone for bone in document.bones}
 
 
-def test_connected_object_main_xy_replaces_absolute_world_translation():
+def test_connected_object_main_xy_adds_relative_world_to_document_local_offset():
     document = SpineDocument(
         skeleton={"spine": "4.2.43"},
         bones=(
             Bone("root"),
-            Bone("Anchor_main", parent="root", x=1000.0, y=2000.0),
-            Bone("Other_main", parent="root", x=3000.0, y=5000.0),
+            Bone("Anchor_main", parent="root", x=25.0, y=-40.0),
+            Bone("Other_main", parent="root", x=-10.0, y=15.0),
         ),
         slots=(),
         skins=(),
@@ -60,11 +60,11 @@ def test_connected_object_main_xy_replaces_absolute_world_translation():
     bones = _bone_by_name(result)
 
     assert bones["Anchor_main"].parent == "all_objects_layer_0"
-    assert bones["Anchor_main"].x == 0.0
-    assert bones["Anchor_main"].y == 0.0
+    assert bones["Anchor_main"].x == 25.0
+    assert bones["Anchor_main"].y == -40.0
     assert bones["Other_main"].parent == "all_objects_layer_1"
-    assert bones["Other_main"].x == 200.0
-    assert bones["Other_main"].y == 300.0
+    assert bones["Other_main"].x == 190.0
+    assert bones["Other_main"].y == 315.0
 
 
 def test_camera_projection_main_xy_is_preserved_while_reparenting():
