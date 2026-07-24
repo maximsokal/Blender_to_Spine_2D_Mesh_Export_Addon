@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
@@ -14,6 +14,7 @@ from .a1_numeric_contracts import (
     require_integer,
     require_non_empty_string,
 )
+from .a1_single_object import A1SingleObjectExportSettings
 
 
 class A1MultiObjectMode(str, Enum):
@@ -103,9 +104,37 @@ class A1MultiObjectExportSettings:
         return root / f"{self.resolved_output_stem}.json"
 
 
+def resolve_a1_multi_object_preparation_settings(
+    settings: A1SingleObjectExportSettings,
+    mode: A1MultiObjectMode,
+) -> A1SingleObjectExportSettings:
+    """Return the exact per-object settings used by multi-object preparation.
+
+    Connected documents must omit each object's absolute Blender world translation;
+    connected composition adds anchor-relative translation later. Standalone documents
+    preserve the caller's settings unchanged. MIXED must be resolved into an explicit
+    connected or standalone subgroup before this helper is called.
+    """
+
+    if not isinstance(settings, A1SingleObjectExportSettings):
+        raise TypeError("settings must be A1SingleObjectExportSettings")
+    if not isinstance(mode, A1MultiObjectMode):
+        raise TypeError("mode must be A1MultiObjectMode")
+    if mode is A1MultiObjectMode.MIXED:
+        raise ValueError(
+            "MIXED mode must be resolved to CONNECTED or STANDALONE before preparation"
+        )
+    if mode is A1MultiObjectMode.CONNECTED:
+        if not settings.use_world_location_for_main_bone:
+            return settings
+        return replace(settings, use_world_location_for_main_bone=False)
+    return settings
+
+
 __all__ = [
     "A1MultiObjectExportSettings",
     "A1MultiObjectMode",
     "A1MultiObjectStage",
     "ConnectedCameraRenderPolicy",
+    "resolve_a1_multi_object_preparation_settings",
 ]
