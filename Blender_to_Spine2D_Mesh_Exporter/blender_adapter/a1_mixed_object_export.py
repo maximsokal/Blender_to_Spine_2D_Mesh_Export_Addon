@@ -7,12 +7,15 @@ from types import MappingProxyType
 from typing import Any, Mapping, Tuple
 
 from ..application import (
+    A1ExportProgressCallback,
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
     A1MultiObjectStage,
     A1OutputPreflightSource,
     ExportIssue,
+    emit_a1_export_progress,
     preflight_a1_output_namespace,
+    scale_a1_export_progress_callback,
 )
 from ..domain.baking import windows_path_identity
 from .a1_mixed_settings import build_connected_subgroup_settings
@@ -93,6 +96,11 @@ def _prepare_standalone_objects(
     *,
     context: Any | None,
     scene: Any | None,
+    progress_callback: A1ExportProgressCallback | None = None,
+    progress_start: float = 0.0,
+    progress_end: float = 100.0,
+    object_index_offset: int = 0,
+    total_object_count: int | None = None,
 ) -> tuple[
     Tuple[PreparedA1Object, ...],
     Tuple[ExportIssue, ...],
@@ -104,13 +112,29 @@ def _prepare_standalone_objects(
         "object_count": len(sources),
         "mode": A1MultiObjectMode.STANDALONE.value,
     }
-    for source in sources:
+    object_count = len(sources)
+    overall_count = total_object_count or object_count
+    span = float(progress_end) - float(progress_start)
+    for local_index, source in enumerate(sources):
+        start = float(progress_start) + span * local_index / object_count
+        end = float(progress_start) + span * (local_index + 1) / object_count
+        global_index = object_index_offset + local_index + 1
+        object_progress = scale_a1_export_progress_callback(
+            progress_callback,
+            start_percent=start,
+            end_percent=end,
+            object_id=source.component_id,
+            object_index=global_index,
+            object_count=overall_count,
+            message_prefix=f"[{global_index}/{overall_count}] ",
+        )
         try:
             prepared = prepare_a1_object(
                 source.source_object,
                 source.settings,
                 context=context,
                 scene=scene,
+                progress_callback=object_progress,
             )
         except A1ObjectPreparationError as exc:
             warnings.extend(exc.warnings)
@@ -187,23 +211,63 @@ def prepare_a1_mixed_object(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> PreparedA1MultiObject:
     """Prepare both mixed subgroups and validate one shared output namespace."""
 
+    emit_a1_export_progress(
+        progress_callback,
+        percent=0,
+        stage=A1MultiObjectStage.VALIDATE_REQUEST,
+        message="Validating mixed export request",
+    )
     _validate_mixed_sources(connected_sources, standalone_sources, settings)
     all_sources = connected_sources + standalone_sources
+    emit_a1_export_progress(
+        progress_callback,
+        percent=5,
+        stage=A1MultiObjectStage.VALIDATE_REQUEST,
+        message="Checking mixed output paths",
+    )
     predicted_texture_paths = _preflight_mixed_sources(all_sources, settings)
     anchor = settings.anchor_component_id or connected_sources[0].component_id
+
+    total_count = len(all_sources)
+    preparation_start = 10.0
+    preparation_end = 90.0
+    preparation_span = preparation_end - preparation_start
+    connected_end = (
+        preparation_start
+        + preparation_span * len(connected_sources) / total_count
+    )
+    connected_progress = scale_a1_export_progress_callback(
+        progress_callback,
+        start_percent=preparation_start,
+        end_percent=connected_end,
+        message_prefix="Connected group: ",
+    )
     connected = prepare_a1_multi_object(
         connected_sources,
         build_connected_subgroup_settings(settings, anchor),
         context=context,
         scene=scene,
+        progress_callback=connected_progress,
     )
     standalone_objects, standalone_warnings, _ = _prepare_standalone_objects(
         standalone_sources,
         context=context,
         scene=scene,
+        progress_callback=progress_callback,
+        progress_start=connected_end,
+        progress_end=preparation_end,
+        object_index_offset=len(connected_sources),
+        total_object_count=total_count,
+    )
+    emit_a1_export_progress(
+        progress_callback,
+        percent=95,
+        stage=A1MultiObjectStage.VALIDATE_OUTPUTS,
+        message="Validating mixed realized output paths",
     )
     texture_paths = _validate_final_paths(
         settings,
@@ -218,7 +282,7 @@ def prepare_a1_mixed_object(
         "predicted_texture_output_count": len(predicted_texture_paths),
         "texture_output_count": len(texture_paths),
     }
-    return PreparedA1MultiObject(
+    result = PreparedA1MultiObject(
         settings=settings,
         sources=connected.sources + standalone_sources,
         objects=connected.objects + standalone_objects,
@@ -226,6 +290,13 @@ def prepare_a1_mixed_object(
         warnings=connected.warnings + standalone_warnings,
         statistics=MappingProxyType(dict(statistics)),
     )
+    emit_a1_export_progress(
+        progress_callback,
+        percent=100,
+        stage=A1MultiObjectStage.VALIDATE_OUTPUTS,
+        message="Mixed object preparation complete",
+    )
+    return result
 
 
 __all__ = ["build_connected_subgroup_settings", "prepare_a1_mixed_object"]
