@@ -41,6 +41,7 @@ from .a1_multi_object import (
     A1MultiObjectStage,
     ConnectedCameraRenderPolicy,
 )
+from .a1_object_bake_placement import calculate_a1_object_bake_main_position_pixels
 from .a1_single_object import (
     A1MeshBounds,
     A1ResolvedOutputPaths,
@@ -143,6 +144,7 @@ __all__ = [
     "build_generated_material_plan",
     "calculate_a1_main_position_pixels",
     "calculate_a1_mesh_bounds",
+    "calculate_a1_object_bake_main_position_pixels",
     "generated_palette_color",
     "preflight_a1_output_namespace",
     "prepare_a1_geometry_regions",
