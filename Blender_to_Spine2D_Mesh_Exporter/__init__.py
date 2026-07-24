@@ -23,7 +23,7 @@ else:
 
 
 if bpy is not None:
-    from . import addon_preferences, config, single_object_operator, ui
+    from . import addon_preferences, config, repolish_ui, single_object_operator, ui
     from .blender_adapter import generated_material_ui, scene_properties
     from .infrastructure.blender_registration import (
         RegistrationCleanupAction,
@@ -48,6 +48,7 @@ if bpy is not None:
     MODULES = (
         addon_preferences,
         ui,
+        repolish_ui,
         generated_material_ui,
         single_object_operator,
     )
@@ -91,6 +92,11 @@ if bpy is not None:
             "UI",
             ui.register,
             ui.unregister,
+        ),
+        (
+            "Re-Polish UI",
+            repolish_ui.register,
+            repolish_ui.unregister,
         ),
         (
             "generated material UI",
