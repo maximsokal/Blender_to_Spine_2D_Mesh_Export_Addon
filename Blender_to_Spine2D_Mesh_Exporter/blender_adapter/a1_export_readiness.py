@@ -81,22 +81,46 @@ def _scene_key(scene: Any) -> int:
     return id(scene)
 
 
-def _safe_float_tuple(value: Any, size: int) -> tuple[float, ...]:
+def _safe_int(value: Any, default: int = 0) -> int | str:
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return str(value) if value is not None else default
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float | str:
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return str(value) if value is not None else default
+    return result if isfinite(result) else str(result)
+
+
+def _safe_float_tuple(value: Any, size: int) -> tuple[float, ...] | str:
     try:
         result = tuple(float(value[index]) for index in range(size))
     except Exception:
-        return ()
-    return result if all(isfinite(item) for item in result) else ()
+        return str(value)
+    return result if all(isfinite(item) for item in result) else str(result)
 
 
-def _matrix_signature(matrix: Any) -> tuple[float, ...]:
+def _matrix_signature(matrix: Any) -> tuple[float, ...] | str:
     try:
         values = tuple(
             float(matrix[row][column]) for row in range(4) for column in range(4)
         )
     except Exception:
-        return ()
-    return values if all(isfinite(item) for item in values) else ()
+        return str(matrix)
+    return values if all(isfinite(item) for item in values) else str(values)
+
+
+def _blend_file_path() -> str:
+    try:
+        import bpy
+
+        return str(getattr(bpy.data, "filepath", ""))
+    except Exception:
+        return ""
 
 
 def _material_signature(obj: Any) -> tuple[tuple[object, ...], ...]:
@@ -110,7 +134,10 @@ def _material_signature(obj: Any) -> tuple[tuple[object, ...], ...]:
         result.append(
             (
                 _rna_identity(material),
-                str(getattr(material, "name_full", None) or material.name),
+                str(
+                    getattr(material, "name_full", None)
+                    or getattr(material, "name", "")
+                ),
                 bool(getattr(material, "use_nodes", False)),
                 None if node_tree is None else _rna_identity(node_tree),
                 len(tuple(getattr(node_tree, "nodes", ()))) if node_tree else 0,
@@ -141,10 +168,10 @@ def _object_signature(obj: Any) -> Mapping[str, object]:
         "name": str(getattr(obj, "name_full", None) or getattr(obj, "name", "")),
         "type": str(getattr(obj, "type", "")),
         "mesh_identity": None if mesh is None else _rna_identity(mesh),
-        "vertices": len(tuple(getattr(mesh, "vertices", ()))) if mesh else 0,
-        "edges": len(tuple(getattr(mesh, "edges", ()))) if mesh else 0,
-        "loops": len(tuple(getattr(mesh, "loops", ()))) if mesh else 0,
-        "faces": len(tuple(getattr(mesh, "polygons", ()))) if mesh else 0,
+        "vertices": len(tuple(getattr(mesh, "vertices", ()))) if mesh is not None else 0,
+        "edges": len(tuple(getattr(mesh, "edges", ()))) if mesh is not None else 0,
+        "loops": len(tuple(getattr(mesh, "loops", ()))) if mesh is not None else 0,
+        "faces": len(tuple(getattr(mesh, "polygons", ()))) if mesh is not None else 0,
         "matrix_world": _matrix_signature(getattr(obj, "matrix_world", None)),
         "location": _safe_float_tuple(getattr(obj, "location", ()), 3),
         "rotation": _safe_float_tuple(getattr(obj, "rotation_euler", ()), 3),
@@ -153,8 +180,8 @@ def _object_signature(obj: Any) -> Mapping[str, object]:
         "modifiers": _modifier_signature(obj),
         "materials": _material_signature(obj),
         "connect": bool(getattr(connect, "enabled", False)),
-        "bake_start": int(getattr(bake, "bake_frame_start", 0) or 0),
-        "bake_frames": int(getattr(bake, "frames_for_render", 0) or 0),
+        "bake_start": _safe_int(getattr(bake, "bake_frame_start", 0)),
+        "bake_frames": _safe_int(getattr(bake, "frames_for_render", 0)),
     }
 
 
@@ -171,16 +198,24 @@ def build_a1_readiness_signature(context: Any) -> str:
     scene = getattr(context, "scene", None)
     if scene is None:
         raise ValueError("context.scene is missing")
-    selected = tuple(
+
+    active = getattr(context, "active_object", None)
+    candidates: list[Any] = [
         obj
         for obj in getattr(context, "selected_objects", ())
         if getattr(obj, "type", None) == "MESH"
-    )
+    ]
+    if (
+        active is not None
+        and getattr(active, "type", None) == "MESH"
+        and all(_rna_identity(obj) != _rna_identity(active) for obj in candidates)
+    ):
+        candidates.append(active)
     ordered = tuple(
         sorted(
-            selected,
+            candidates,
             key=lambda obj: (
-                0 if obj is getattr(context, "active_object", None) else 1,
+                0 if obj is active else 1,
                 str(getattr(obj, "name_full", None) or getattr(obj, "name", "")).casefold(),
                 str(getattr(obj, "name_full", None) or getattr(obj, "name", "")),
             ),
@@ -189,19 +224,17 @@ def build_a1_readiness_signature(context: Any) -> str:
     render = getattr(scene, "render", None)
     camera = getattr(scene, "camera", None)
     payload = {
-        "blend_file": str(getattr(__import__("bpy").data, "filepath", "")),
+        "blend_file": _blend_file_path(),
         "scene": _rna_identity(scene),
-        "active": (
-            None
-            if getattr(context, "active_object", None) is None
-            else _rna_identity(context.active_object)
-        ),
+        "active": None if active is None else _rna_identity(active),
         "objects": tuple(_object_signature(obj) for obj in ordered),
-        "frame_current": int(getattr(scene, "frame_current", 0) or 0),
+        "frame_current": _safe_int(getattr(scene, "frame_current", 0)),
         "camera": None if camera is None else _rna_identity(camera),
         "render_engine": str(getattr(render, "engine", "")),
         "settings": {
-            "texture_size": int(getattr(scene, "spine2d_texture_size", 1024) or 0),
+            "texture_size": _safe_int(
+                getattr(scene, "spine2d_texture_size", 1024)
+            ),
             "json_path": str(getattr(scene, "spine2d_json_path", "")),
             "images_path": str(getattr(scene, "spine2d_images_path", "")),
             "control_icons": bool(getattr(scene, "spine2d_control_icons", True)),
@@ -209,16 +242,20 @@ def build_a1_readiness_signature(context: Any) -> str:
                 getattr(scene, "spine2d_export_preview_animation", True)
             ),
             "seam_mode": str(getattr(scene, "spine2d_seam_maker_mode", "AUTO")),
-            "angle_limit": float(getattr(scene, "spine2d_angle_limit", 30.0)),
+            "angle_limit": _safe_float(
+                getattr(scene, "spine2d_angle_limit", 30.0)
+            ),
             "angular_mode": str(
                 getattr(scene, "spine2d_angular_mode", "SEED_CONE")
             ),
-            "local_angle_limit": float(
+            "local_angle_limit": _safe_float(
                 getattr(scene, "spine2d_local_angle_limit", 30.0)
             ),
-            "frames": int(getattr(scene, "spine2d_frames_for_render", 0) or 0),
-            "frame_start": int(
-                getattr(scene, "spine2d_bake_frame_start", 0) or 0
+            "frames": _safe_int(
+                getattr(scene, "spine2d_frames_for_render", 0)
+            ),
+            "frame_start": _safe_int(
+                getattr(scene, "spine2d_bake_frame_start", 0)
             ),
             "material_policy": str(
                 getattr(scene, "spine2d_material_source_policy", "REQUIRE_SOURCE")
@@ -226,7 +263,7 @@ def build_a1_readiness_signature(context: Any) -> str:
             "generated_pattern": str(
                 getattr(scene, "spine2d_generated_material_pattern", "SOLID_GRAY")
             ),
-            "projection_alpha": float(
+            "projection_alpha": _safe_float(
                 getattr(scene, "spine2d_projection_alpha_threshold", 1.0 / 255.0)
             ),
         },
@@ -303,7 +340,8 @@ def _error_issue(
 ) -> ExportIssue:
     normalized_stage = str(stage or "VALIDATE_REQUEST").strip() or "VALIDATE_REQUEST"
     code_stage = "".join(
-        character if character.isalnum() else "_" for character in normalized_stage.upper()
+        character if character.isalnum() else "_"
+        for character in normalized_stage.upper()
     ).strip("_")
     return ExportIssue(
         severity=IssueSeverity.ERROR,
@@ -321,7 +359,7 @@ def _requested_object_ids(context: Any) -> Tuple[str, ...]:
         for obj in getattr(context, "selected_objects", ())
         if getattr(obj, "type", None) == "MESH"
     )
-    resolved = tuple(value for value in selected if value)
+    resolved = tuple(dict.fromkeys(value for value in selected if value))
     if resolved:
         return resolved
     active = getattr(context, "active_object", None)
@@ -337,35 +375,30 @@ def _failure_report(
     requested_object_ids: Tuple[str, ...],
     error: ExportIssue,
     warnings: Tuple[ExportIssue, ...] = (),
-    statistics: Mapping[str, object] = {},
+    statistics: Mapping[str, object] | None = None,
 ) -> A1ExportReadinessReport:
     recognized = set(requested_object_ids)
-    per_object: list[A1ObjectReadiness] = []
-    for object_id in requested_object_ids:
-        object_issues = tuple(
-            issue
-            for issue in warnings + (error,)
-            if issue.object_id in {None, object_id}
+    all_issues = warnings + (error,)
+    per_object = tuple(
+        A1ObjectReadiness(
+            object_id=object_id,
+            issues=tuple(
+                issue for issue in all_issues if issue.object_id == object_id
+            ),
+            statistics={},
         )
-        per_object.append(
-            A1ObjectReadiness(
-                object_id=object_id,
-                issues=object_issues,
-                statistics={},
-            )
-        )
+        for object_id in requested_object_ids
+    )
     global_issues = tuple(
         issue
-        for issue in warnings + (error,)
-        if issue.object_id is not None and issue.object_id not in recognized
+        for issue in all_issues
+        if issue.object_id is None or issue.object_id not in recognized
     )
-    if not requested_object_ids:
-        global_issues = warnings + (error,)
     return A1ExportReadinessReport(
         signature=signature,
-        objects=tuple(per_object),
+        objects=per_object,
         issues=global_issues,
-        statistics=_readiness_statistics(statistics),
+        statistics=_readiness_statistics(statistics or {}),
     )
 
 
@@ -426,11 +459,34 @@ def _analyse_multi_plan(
     return prepared.objects, statistics
 
 
+def _fallback_signature(context: Any, exc: Exception) -> str:
+    payload = {
+        "scene": id(getattr(context, "scene", None)),
+        "objects": _requested_object_ids(context),
+        "signature_error": repr(exc),
+    }
+    serialized = json.dumps(payload, sort_keys=True, default=str)
+    return sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def analyse_a1_export_readiness(context: Any) -> A1ExportReadinessReport:
     """Run the production preparation/composition pipeline without staging files."""
 
-    signature = build_a1_readiness_signature(context)
     requested_ids = _requested_object_ids(context)
+    try:
+        signature = build_a1_readiness_signature(context)
+    except Exception as exc:
+        logger.exception("Unable to build A1 readiness signature")
+        return _failure_report(
+            signature=_fallback_signature(context, exc),
+            requested_object_ids=requested_ids,
+            error=_error_issue(
+                stage="VALIDATE_REQUEST",
+                exc=exc,
+                object_id=None,
+            ),
+        )
+
     scene = getattr(context, "scene", None)
     try:
         selected_meshes = tuple(
