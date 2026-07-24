@@ -22,7 +22,9 @@ from .a1_document_assembly import (
 from .a1_export_progress import (
     A1ExportProgressCallback,
     A1ExportProgressUpdate,
+    a1_frame_progress_percent,
     emit_a1_export_progress,
+    emit_a1_frame_progress,
     scale_a1_export_progress_callback,
 )
 from .a1_export_readiness import (
@@ -150,6 +152,7 @@ __all__ = [
     "GroupedCameraOverlayResult",
     "IssueSeverity",
     "ReadinessStatistic",
+    "a1_frame_progress_percent",
     "apply_grouped_camera_overlay",
     "assemble_a1_camera_projection_document",
     "assemble_a1_document",
@@ -165,6 +168,7 @@ __all__ = [
     "calculate_a1_mesh_bounds",
     "calculate_a1_object_bake_main_position_pixels",
     "emit_a1_export_progress",
+    "emit_a1_frame_progress",
     "generated_palette_color",
     "preflight_a1_output_namespace",
     "prepare_a1_geometry_regions",
