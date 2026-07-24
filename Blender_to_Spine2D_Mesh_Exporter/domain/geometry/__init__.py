@@ -90,6 +90,11 @@ from .validator import (
     MeshValidationIssue,
     MeshValidationSeverity,
 )
+from .world_transform import (
+    MeshWorldTransformError,
+    MeshWorldTransformResult,
+    normalize_mesh_snapshot_world_transform,
+)
 
 __all__ = [
     "A1AngularMode",
@@ -126,6 +131,8 @@ __all__ = [
     "MeshValidationIssue",
     "MeshValidationSeverity",
     "MeshVertex",
+    "MeshWorldTransformError",
+    "MeshWorldTransformResult",
     "MissingSourceLoopError",
     "ModifierLineagePolicy",
     "RegionTopologyError",
@@ -163,6 +170,7 @@ __all__ = [
     "is_simple_disk",
     "materialize_decomposed_snapshots",
     "materialize_segment_snapshots",
+    "normalize_mesh_snapshot_world_transform",
     "require_valid_evaluated_lineage",
     "segment_mesh",
     "segment_mesh_a1",
