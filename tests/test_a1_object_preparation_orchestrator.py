@@ -47,6 +47,7 @@ def _stage_values():
 def test_orchestrator_passes_each_typed_stage_result_to_the_next(monkeypatch):
     source, uv, texture, document = _stage_values()
     calls = []
+    progress = []
     captured = {}
 
     def source_stage(source_obj, settings, *, scene):
@@ -87,10 +88,20 @@ def test_orchestrator_passes_each_typed_stage_result_to_the_next(monkeypatch):
         settings,
         context=context,
         scene=scene,
+        progress_callback=progress.append,
     )
 
     assert result == "prepared"
     assert [item[0] for item in calls] == ["source", "uv", "texture", "document"]
+    assert [item.percent for item in progress] == [0, 10, 45, 65, 82, 100]
+    assert [item.stage for item in progress] == [
+        A1SingleObjectStage.VALIDATE_REQUEST.value,
+        A1SingleObjectStage.READ_GEOMETRY.value,
+        A1SingleObjectStage.BUILD_TEXTURING_TOPOLOGY.value,
+        A1SingleObjectStage.ANALYZE_MATERIALS.value,
+        A1SingleObjectStage.BUILD_RIG.value,
+        A1SingleObjectStage.ASSEMBLE_DOCUMENT.value,
+    ]
     assert captured["object_id"] == "Hero"
     assert captured["warnings"] == document.warnings
     assert captured["statistics"] == document.statistics
