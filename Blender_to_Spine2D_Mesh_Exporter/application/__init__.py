@@ -19,6 +19,12 @@ from .a1_document_assembly import (
     A1DocumentAssemblySettings,
     assemble_a1_document,
 )
+from .a1_export_progress import (
+    A1ExportProgressCallback,
+    A1ExportProgressUpdate,
+    emit_a1_export_progress,
+    scale_a1_export_progress_callback,
+)
 from .a1_export_readiness import (
     A1ExportReadinessReport,
     A1ObjectReadiness,
@@ -104,6 +110,8 @@ __all__ = [
     "A1DocumentAssemblyError",
     "A1DocumentAssemblyResult",
     "A1DocumentAssemblySettings",
+    "A1ExportProgressCallback",
+    "A1ExportProgressUpdate",
     "A1ExportReadinessReport",
     "A1GeometryPreparationError",
     "A1GeometryPreparationResult",
@@ -156,6 +164,7 @@ __all__ = [
     "calculate_a1_main_position_pixels",
     "calculate_a1_mesh_bounds",
     "calculate_a1_object_bake_main_position_pixels",
+    "emit_a1_export_progress",
     "generated_palette_color",
     "preflight_a1_output_namespace",
     "prepare_a1_geometry_regions",
@@ -164,6 +173,7 @@ __all__ = [
     "resolve_a1_multi_object_preparation_settings",
     "resolve_a1_names",
     "resolve_a1_output_paths",
+    "scale_a1_export_progress_callback",
     "validate_a1_output_claims",
     "validate_a1_realized_output_namespace",
 ]
