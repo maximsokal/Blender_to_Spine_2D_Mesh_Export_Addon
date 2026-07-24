@@ -1,4 +1,9 @@
+from dataclasses import replace
+
+import pytest
+
 from Blender_to_Spine2D_Mesh_Exporter.application.a1_attachment_projection import (
+    A1AttachmentProjectionError,
     A1AttachmentProjectionResult,
     A1AttachmentVertexKey,
 )
@@ -21,7 +26,10 @@ def _concave_projection():
         (0.0, 2.0),
     )
     keys = tuple(
-        A1AttachmentVertexKey(VertexId(index), (position[0] / 2.0, position[1] / 2.0))
+        A1AttachmentVertexKey(
+            VertexId(index),
+            (position[0] / 2.0, position[1] / 2.0),
+        )
         for index, position in enumerate(positions)
     )
     triangles = (0, 1, 3, 1, 2, 3, 0, 3, 4)
@@ -107,3 +115,20 @@ def test_normalization_is_idempotent():
     second = normalize_a1_attachment_projection_hull(first)
 
     assert second == first
+
+
+def test_zero_area_triangle_in_spine_pixel_space_is_rejected():
+    projection = _concave_projection()
+    collapsed_vertices = tuple(
+        replace(vertex, bone_position_pixels=(1.0, 0.0))
+        if vertex.index == 3
+        else vertex
+        for vertex in projection.request.vertices
+    )
+    collapsed = replace(
+        projection,
+        request=replace(projection.request, vertices=collapsed_vertices),
+    )
+
+    with pytest.raises(A1AttachmentProjectionError, match="zero area"):
+        normalize_a1_attachment_projection_hull(collapsed)
