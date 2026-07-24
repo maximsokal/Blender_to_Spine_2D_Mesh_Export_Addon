@@ -70,6 +70,39 @@ def _stage_name(stage: str | Enum) -> str:
     return normalized
 
 
+def _require_frame_position(frame_index: int, frame_count: int) -> None:
+    for field_name, value in (
+        ("frame_index", frame_index),
+        ("frame_count", frame_count),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{field_name} must be int")
+    if frame_count < 1:
+        raise ValueError("frame_count must be positive")
+    if frame_index < 1 or frame_index > frame_count:
+        raise ValueError("frame_index must be in [1, frame_count]")
+
+
+def a1_frame_progress_percent(
+    frame_index: int,
+    frame_count: int,
+    *,
+    completed: bool,
+) -> int:
+    """Return frame-substage progress without claiming work is complete too early.
+
+    Before a frame starts, only preceding frames count as complete. After a frame finishes,
+    that frame is included. Consequently the final ``100`` is emitted only after the last
+    physical bake/render operation has completed successfully.
+    """
+
+    _require_frame_position(frame_index, frame_count)
+    if not isinstance(completed, bool):
+        raise TypeError("completed must be bool")
+    completed_count = frame_index if completed else frame_index - 1
+    return int(round(completed_count * 100.0 / frame_count))
+
+
 def emit_a1_export_progress(
     callback: A1ExportProgressCallback | None,
     *,
@@ -102,6 +135,34 @@ def emit_a1_export_progress(
             update.percent,
             update.stage,
         )
+
+
+def emit_a1_frame_progress(
+    callback: A1ExportProgressCallback | None,
+    *,
+    stage: str | Enum,
+    action: str,
+    frame_index: int,
+    frame_count: int,
+    completed: bool,
+    object_id: str | None = None,
+) -> None:
+    """Emit one physical frame update such as ``Baking frame 17/60``."""
+
+    normalized_action = str(action).strip()
+    if not normalized_action:
+        raise ValueError("action must be a non-empty string")
+    emit_a1_export_progress(
+        callback,
+        percent=a1_frame_progress_percent(
+            frame_index,
+            frame_count,
+            completed=completed,
+        ),
+        stage=stage,
+        message=f"{normalized_action} frame {frame_index}/{frame_count}",
+        object_id=object_id,
+    )
 
 
 def scale_a1_export_progress_callback(
@@ -162,6 +223,8 @@ def scale_a1_export_progress_callback(
 __all__ = [
     "A1ExportProgressCallback",
     "A1ExportProgressUpdate",
+    "a1_frame_progress_percent",
     "emit_a1_export_progress",
+    "emit_a1_frame_progress",
     "scale_a1_export_progress_callback",
 ]
