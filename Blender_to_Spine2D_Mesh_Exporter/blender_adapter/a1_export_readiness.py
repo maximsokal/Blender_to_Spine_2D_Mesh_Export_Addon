@@ -43,7 +43,7 @@ from .a1_ui_export_plan import (
     build_active_ui_export_plan,
     build_selected_ui_export_plan,
 )
-from .a1_ui_selection import _rna_identity
+from .a1_ui_selection import _ordered_selected_meshes, _rna_identity
 
 
 logger = logging.getLogger(__name__)
@@ -202,45 +202,20 @@ def _selected_meshes(context: Any) -> Tuple[Any, ...]:
 
 
 def _request_mesh_objects(context: Any) -> Tuple[Any, ...]:
-    """Mirror the UI router: multi uses selection; single uses the active Mesh."""
+    """Mirror the UI router: multi uses its exact ordered selection helper."""
 
     selected = _selected_meshes(context)
     if len(selected) > 1:
-        candidates = selected
-    else:
-        active = getattr(context, "active_object", None)
-        candidates = (
-            (active,)
-            if active is not None and getattr(active, "type", None) == "MESH"
-            else selected
-        )
+        return _ordered_selected_meshes(context)
 
-    unique: list[Any] = []
-    identities: set[tuple[str, object]] = set()
-    for obj in candidates:
-        identity = _rna_identity(obj)
-        if identity in identities:
-            continue
-        identities.add(identity)
-        unique.append(obj)
-    return tuple(unique)
+    active = getattr(context, "active_object", None)
+    if active is not None and getattr(active, "type", None) == "MESH":
+        return (active,)
+    return selected
 
 
 def _ordered_signature_objects(context: Any) -> Tuple[Any, ...]:
-    active = getattr(context, "active_object", None)
-    return tuple(
-        sorted(
-            _request_mesh_objects(context),
-            key=lambda obj: (
-                0 if obj is active else 1,
-                str(
-                    getattr(obj, "name_full", None)
-                    or getattr(obj, "name", "")
-                ).casefold(),
-                str(getattr(obj, "name_full", None) or getattr(obj, "name", "")),
-            ),
-        )
-    )
+    return _request_mesh_objects(context)
 
 
 def build_a1_readiness_signature(context: Any) -> str:
