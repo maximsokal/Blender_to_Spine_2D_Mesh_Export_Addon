@@ -27,9 +27,15 @@ def _source_signature(obj) -> tuple[object, ...]:
     mesh = obj.data
     layer = mesh.uv_layers.active
     return (
-        tuple(tuple(float(component) for component in vertex.co) for vertex in mesh.vertices),
+        tuple(
+            tuple(float(component) for component in vertex.co)
+            for vertex in mesh.vertices
+        ),
         tuple(tuple(int(value) for value in edge.vertices) for edge in mesh.edges),
-        tuple(tuple(int(value) for value in polygon.vertices) for polygon in mesh.polygons),
+        tuple(
+            tuple(int(value) for value in polygon.vertices)
+            for polygon in mesh.polygons
+        ),
         read_uv_coordinates(layer, expected_length=len(mesh.loops)),
         read_boolean_edge_attribute(mesh, UV_SEAM_ATTRIBUTE),
         read_boolean_edge_attribute(mesh, SHARP_EDGE_ATTRIBUTE),
@@ -79,9 +85,12 @@ def test_source_mesh_snapshot_reads_uv_seam_sharp_without_mutation(quad_object):
     assert len(snapshot.faces) == 1
     assert sum(int(edge.seam) for edge in snapshot.edges) == 1
     assert sum(int(edge.sharp) for edge in snapshot.edges) == 1
-    assert tuple(loop.uvs[0].coordinate for loop in snapshot.loops) == pytest.approx(
-        ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
-    )
+
+    expected_uvs = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
+    actual_uvs = tuple(loop.uvs[0].coordinate for loop in snapshot.loops)
+    assert len(actual_uvs) == len(expected_uvs)
+    for actual, expected in zip(actual_uvs, expected_uvs, strict=True):
+        assert actual == pytest.approx(expected)
 
 
 def test_source_mesh_snapshot_rejects_wrong_edge_attribute_type(quad_object):
