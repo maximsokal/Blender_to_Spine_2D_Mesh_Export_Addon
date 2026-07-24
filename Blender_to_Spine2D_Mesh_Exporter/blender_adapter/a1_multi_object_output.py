@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 import logging
 from typing import Any, Tuple
 
@@ -19,6 +18,7 @@ from ..infrastructure import (
     atomic_file_transaction,
     write_staged_utf8_text,
 )
+from .a1_composition_result import replace_a1_composition_document
 from .a1_grouped_output import apply_staged_grouped_camera_overlay
 from .a1_multi_object_composition import compose_a1_multi_object_document
 from .a1_multi_object_export import (
@@ -149,7 +149,10 @@ def export_a1_multi_object(
                     grouped_request,
                     grouped_stage,
                 )
-                composition = replace(composition, document=overlay.document)
+                composition = replace_a1_composition_document(
+                    composition,
+                    overlay.document,
+                )
 
             document = composition.document
             record_final_document_statistics(
