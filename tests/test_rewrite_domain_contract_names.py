@@ -44,6 +44,10 @@ RETIRED_IDENTIFIERS = (
     "ConnectedB4RenderPolicy",
     "connected_b4_render_policy",
 )
+RAW_PROJECTION_IMPORT = "from .a1_attachment_projection import"
+RAW_PROJECTION_IMPORT_OWNER = (
+    PACKAGE / "application" / "a1_attachment_projection_service.py"
+)
 
 
 def _active_sources():
@@ -77,6 +81,27 @@ def test_connected_camera_policy_has_one_current_contract():
     names = {field.name for field in fields(A1MultiObjectExportSettings)}
     assert "connected_camera_render_policy" in names
     assert "connected_b4_render_policy" not in names
+
+
+def test_production_uses_one_normalized_attachment_projection_entry_point():
+    owners = []
+    for path in (PACKAGE / "application").rglob("*.py"):
+        if RAW_PROJECTION_IMPORT in path.read_text(encoding="utf-8"):
+            owners.append(path)
+
+    assert owners == [RAW_PROJECTION_IMPORT_OWNER]
+    public_source = (PACKAGE / "application" / "__init__.py").read_text(
+        encoding="utf-8"
+    )
+    assembly_source = (
+        PACKAGE / "application" / "a1_document_assembly.py"
+    ).read_text(encoding="utf-8")
+    camera_source = (
+        PACKAGE / "application" / "a1_camera_projection.py"
+    ).read_text(encoding="utf-8")
+    assert "a1_attachment_projection_service" in public_source
+    assert "a1_attachment_projection_service" in assembly_source
+    assert "a1_attachment_projection_service" in camera_source
 
 
 def test_bake_plan_requires_explicit_strategy_passes(tmp_path):
