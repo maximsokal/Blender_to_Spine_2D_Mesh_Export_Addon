@@ -40,6 +40,7 @@ from .a1_multi_object import (
     A1MultiObjectMode,
     A1MultiObjectStage,
     ConnectedCameraRenderPolicy,
+    resolve_a1_multi_object_preparation_settings,
 )
 from .a1_object_bake_placement import calculate_a1_object_bake_main_position_pixels
 from .a1_single_object import (
@@ -150,6 +151,7 @@ __all__ = [
     "prepare_a1_geometry_regions",
     "project_triangulated_disk_attachment",
     "propagate_texturing_uv_to_regions",
+    "resolve_a1_multi_object_preparation_settings",
     "resolve_a1_names",
     "resolve_a1_output_paths",
     "validate_a1_output_claims",
