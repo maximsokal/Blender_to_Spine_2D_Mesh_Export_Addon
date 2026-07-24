@@ -14,9 +14,11 @@ def test_ui_allows_non_singular_rotation_and_scale_normalization():
     assert "Scale is not applied (Apply > All Transforms)" not in source
 
 
-def test_ui_blocks_only_singular_linear_object_transforms():
+def test_ui_blocks_only_relative_singular_linear_object_transforms():
     source = UI_SOURCE.read_text(encoding="utf-8")
 
     assert "Object transform is singular" in source
-    assert "abs(determinant) <= threshold" in source
+    assert "scale_product = first_length * second_length * third_length" in source
+    assert "relative_determinant <= tolerance" in source
     assert "Mirrored transform will preserve mirrored winding" in source
+    assert "orientation_sign = -1.0 if determinant < 0.0 else 1.0" in source
