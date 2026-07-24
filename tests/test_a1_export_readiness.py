@@ -176,18 +176,34 @@ def test_selected_mesh_wrappers_are_deduplicated_before_mode_selection():
     assert a1_export_readiness._request_mesh_objects(context) == (first,)
 
 
-def test_multi_signature_ignores_unrelated_active_mesh():
+def test_multi_request_uses_same_deterministic_order_as_ui_plan():
     first = _mesh("First", 301)
     second = _mesh("Second", 302)
+    active_wrapper = _mesh("First", 301)
+    context = SimpleNamespace(
+        selected_objects=(second, first),
+        active_object=active_wrapper,
+    )
+
+    assert a1_export_readiness._request_mesh_objects(context) == (first, second)
+    assert a1_export_readiness._requested_object_ids(context) == (
+        "First",
+        "Second",
+    )
+
+
+def test_multi_signature_ignores_unrelated_active_mesh():
+    first = _mesh("First", 401)
+    second = _mesh("Second", 402)
     context_a = SimpleNamespace(
         scene=_scene(),
         selected_objects=(second, first),
-        active_object=_mesh("UnrelatedA", 303),
+        active_object=_mesh("UnrelatedA", 403),
     )
     context_b = SimpleNamespace(
         scene=context_a.scene,
         selected_objects=(second, first),
-        active_object=_mesh("UnrelatedB", 304),
+        active_object=_mesh("UnrelatedB", 404),
     )
 
     signature_a = a1_export_readiness.build_a1_readiness_signature(context_a)
@@ -195,13 +211,13 @@ def test_multi_signature_ignores_unrelated_active_mesh():
 
     assert signature_a == signature_b
     assert a1_export_readiness._requested_object_ids(context_a) == (
-        "Second",
         "First",
+        "Second",
     )
 
 
 def test_cached_report_becomes_stale_when_request_signature_changes(monkeypatch):
-    scene = SimpleNamespace(as_pointer=lambda: 401)
+    scene = SimpleNamespace(as_pointer=lambda: 501)
     context = SimpleNamespace(scene=scene)
     report = _report(signature="first")
     monkeypatch.setattr(
@@ -229,7 +245,7 @@ def test_cached_report_becomes_stale_when_request_signature_changes(monkeypatch)
 
 
 def test_depsgraph_update_invalidates_cached_report(monkeypatch):
-    scene = SimpleNamespace(as_pointer=lambda: 502)
+    scene = SimpleNamespace(as_pointer=lambda: 602)
     context = SimpleNamespace(scene=scene)
     report = _report(signature="same")
     monkeypatch.setattr(
@@ -253,7 +269,7 @@ def test_depsgraph_update_invalidates_cached_report(monkeypatch):
 
 
 def test_irrelevant_depsgraph_update_keeps_cached_report_current(monkeypatch):
-    scene = SimpleNamespace(as_pointer=lambda: 603)
+    scene = SimpleNamespace(as_pointer=lambda: 703)
     context = SimpleNamespace(scene=scene)
     report = _report(signature="same")
     monkeypatch.setattr(
@@ -277,7 +293,7 @@ def test_irrelevant_depsgraph_update_keeps_cached_report_current(monkeypatch):
 
 
 def test_export_guard_requires_current_non_blocked_report(monkeypatch):
-    scene = SimpleNamespace(as_pointer=lambda: 704)
+    scene = SimpleNamespace(as_pointer=lambda: 804)
     context = SimpleNamespace(scene=scene)
     monkeypatch.setattr(
         a1_export_readiness,
