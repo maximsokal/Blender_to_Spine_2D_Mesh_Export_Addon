@@ -7,7 +7,6 @@ preparation implementation merely to import dataclasses.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Tuple
@@ -20,6 +19,7 @@ from ..application import (
     A1SingleObjectExportSettings,
     ExportIssue,
     preflight_a1_output_namespace,
+    resolve_a1_multi_object_preparation_settings,
 )
 from ..domain.baking import windows_path_identity
 from .a1_multi_object_contracts import (
@@ -113,13 +113,11 @@ def _settings_for_preparation(
     source: A1MultiObjectSource,
     mode: A1MultiObjectMode,
 ) -> A1SingleObjectExportSettings:
+    """Adapt one live source contract to the shared pure settings policy."""
+
     if not isinstance(source, A1MultiObjectSource):
         raise TypeError("source must be A1MultiObjectSource")
-    if not isinstance(mode, A1MultiObjectMode):
-        raise TypeError("mode must be A1MultiObjectMode")
-    if mode is A1MultiObjectMode.CONNECTED:
-        return replace(source.settings, use_world_location_for_main_bone=False)
-    return source.settings
+    return resolve_a1_multi_object_preparation_settings(source.settings, mode)
 
 
 def _validate_prepared_outputs(
