@@ -11,22 +11,24 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
 )
 
 
-def _raw_mesh(*, weighted):
+def _raw_mesh(*, weighted, include_edges=False):
     vertices = (
         [1, 0, 0.0, 0.0, 1.0] * 3
         if weighted
         else [-50.0, 50.0, 50.0, 50.0, 0.0, -50.0]
     )
-    return {
+    result = {
         "type": "mesh",
         "uvs": [0.0, 0.0, 1.0, 0.0, 0.5, 1.0],
         "triangles": [0, 1, 2],
         "vertices": vertices,
         "hull": 3,
-        "edges": [0, 2, 2, 4, 4, 0],
         "width": 100.0,
         "height": 100.0,
     }
+    if include_edges:
+        result["edges"] = [0, 2, 2, 4, 4, 0]
+    return result
 
 
 def _component(component_id, attachment):
@@ -50,7 +52,7 @@ def _component(component_id, attachment):
     )
 
 
-def test_public_composition_allows_raw_unweighted_mesh_without_bone_indices():
+def test_public_composition_allows_raw_unweighted_mesh_without_edges_or_bones():
     result = compose_spine_documents(
         (_component("plain", _raw_mesh(weighted=False)),),
     )
@@ -70,6 +72,18 @@ def test_public_composition_rejects_raw_weighted_mesh_with_ambiguous_bone_indice
     with pytest.raises(SpineCompositionError, match="typed MeshAttachment"):
         compose_spine_documents(
             (_component("weighted", _raw_mesh(weighted=True)),),
+        )
+
+
+def test_public_composition_rejects_raw_mesh_serialized_edge_offsets():
+    with pytest.raises(SpineCompositionError, match="serialized coordinate offsets"):
+        compose_spine_documents(
+            (
+                _component(
+                    "edged",
+                    _raw_mesh(weighted=False, include_edges=True),
+                ),
+            ),
         )
 
 
