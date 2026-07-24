@@ -1,4 +1,4 @@
-"""Build the global legacy ``all_objects`` bones and constraints."""
+"""Build the global ``all_objects`` bones and constraints for connected A1 rigs."""
 
 from __future__ import annotations
 
@@ -23,7 +23,14 @@ def build_global_bones_document(
     profile: LegacyRigProfile,
     uniform_scale: float,
 ) -> SpineDocument:
-    """Build and validate the bones-only global connected control component."""
+    """Build and validate the bones-only global connected control component.
+
+    Connected Z layers mirror the proven single-object Z-group pattern: the scale
+    bone stores physical depth as a Y offset under the X-rotation hierarchy, rotates
+    by +90 degrees, inherits translation only, and the child layer bone compensates
+    with -90 degrees. Without that offset/pair, Blender Z affected draw order but not
+    the visible parallax of global X rotation.
+    """
 
     half_scale = uniform_scale / 2.0
     prefix = settings.group_prefix
@@ -84,17 +91,25 @@ def build_global_bones_document(
         ),
     ]
     for layer in layers:
+        depth_pixels = round(
+            float(layer.representative_relative_z) * uniform_scale,
+            2,
+        )
         bones.extend(
             (
                 Bone(
                     name=layer.scale_bone_name,
                     parent=rotate,
                     length=half_scale * 0.1,
+                    rotation=90.0,
+                    y=depth_pixels,
+                    extras={"inherit": "onlyTranslation"},
                 ),
                 Bone(
                     name=layer.layer_bone_name,
                     parent=layer.scale_bone_name,
                     length=half_scale * 0.1,
+                    rotation=-90.0,
                 ),
             )
         )
