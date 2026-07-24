@@ -13,7 +13,7 @@ from ..domain.spine import (
     Skin,
     Slot,
     SpineDocument,
-    SpineValidator,
+    apply_attachment_sequence_animations,
 )
 from .camera_projection_attachment_topology import (
     build_camera_projection_attachment_topology,
@@ -141,15 +141,27 @@ def _build_grouped_attachment(
     )
 
 
-def _strip_hidden_slot_timelines(
+def _retained_slot_mapping(
+    values: Mapping[str, Any],
+    hidden_slot_names: set[str],
+) -> dict[str, Any]:
+    return {
+        str(slot_name): timeline
+        for slot_name, timeline in values.items()
+        if str(slot_name) not in hidden_slot_names
+    }
+
+
+def _strip_hidden_visual_timelines(
     animations: Mapping[str, Any],
     hidden_slot_names: set[str],
 ) -> dict[str, Any]:
-    """Remove source-slot timelines that could reveal hidden flattened layers.
+    """Remove timelines owned by source slots hidden by static flattening.
 
-    Bone, constraint, deform, draw-order, and event timelines remain untouched. Static
-    flattening replaces visual source slots with one rendered sequence, so color or
-    attachment timelines on those hidden slots must not make them visible again.
+    ``slots`` color/attachment timelines could reveal the individual meshes again.
+    ``attachments`` sequence timelines would continue advancing hidden image sequences.
+    Bone, constraint, deform, draw-order, and event timelines remain untouched for
+    diagnostic/structural continuity.
     """
 
     result: dict[str, Any] = {}
@@ -158,17 +170,36 @@ def _strip_hidden_slot_timelines(
             result[str(animation_name)] = animation_payload
             continue
         copied_payload = dict(animation_payload)
+
         slot_timelines = copied_payload.get("slots")
         if isinstance(slot_timelines, Mapping):
-            retained = {
-                str(slot_name): timeline
-                for slot_name, timeline in slot_timelines.items()
-                if str(slot_name) not in hidden_slot_names
-            }
-            if retained:
-                copied_payload["slots"] = retained
+            retained_slots = _retained_slot_mapping(
+                slot_timelines,
+                hidden_slot_names,
+            )
+            if retained_slots:
+                copied_payload["slots"] = retained_slots
             else:
                 copied_payload.pop("slots", None)
+
+        attachment_timelines = copied_payload.get("attachments")
+        if isinstance(attachment_timelines, Mapping):
+            retained_skins: dict[str, Any] = {}
+            for skin_name, skin_payload in attachment_timelines.items():
+                if not isinstance(skin_payload, Mapping):
+                    retained_skins[str(skin_name)] = skin_payload
+                    continue
+                retained_skin_slots = _retained_slot_mapping(
+                    skin_payload,
+                    hidden_slot_names,
+                )
+                if retained_skin_slots:
+                    retained_skins[str(skin_name)] = retained_skin_slots
+            if retained_skins:
+                copied_payload["attachments"] = retained_skins
+            else:
+                copied_payload.pop("attachments", None)
+
         result[str(animation_name)] = copied_payload
     return result
 
@@ -290,7 +321,7 @@ def apply_grouped_camera_overlay(
         document,
         slots=slots,
         skins=tuple(skins),
-        animations=_strip_hidden_slot_timelines(
+        animations=_strip_hidden_visual_timelines(
             document.animations,
             hidden_set,
         ),
@@ -304,7 +335,10 @@ def apply_grouped_camera_overlay(
             },
         },
     )
-    SpineValidator().validate_or_raise(result_document)
+    result_document = apply_attachment_sequence_animations(
+        result_document,
+        slot_names=(slot_name,),
+    )
     return GroupedCameraOverlayResult(
         document=result_document,
         slot_name=slot_name,
