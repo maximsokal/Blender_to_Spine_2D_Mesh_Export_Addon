@@ -246,8 +246,8 @@ def _assert_spine_vertex_bones(prepared) -> None:
                 translation_y * scale - float(source_vertex.position[1]) * scale,
             )
             actual_world_xy = (
-                float(main.x) + float(projected.bone_position_pixels[0]),
-                float(main.y) + float(projected.bone_position_pixels[1]),
+                float(main.x) + float(vertex_bone.x),
+                float(main.y) + float(vertex_bone.y),
             )
             _assert_pair_close(
                 actual_world_xy,
