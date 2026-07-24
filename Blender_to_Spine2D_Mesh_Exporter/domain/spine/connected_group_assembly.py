@@ -144,15 +144,11 @@ def build_connected_group_document(
         ),
     )
 
-    # Bone hierarchy and Z-layer parents do not control rendering depth in Spine.
-    # Apply the computed back-to-front component order to the setup slot list while
-    # preserving every object's internal slot order and all typed attachments.
     draw_order_document = apply_connected_setup_draw_order(
         composition.document,
         objects,
         placements,
     )
-    composition = replace(composition, document=draw_order_document)
     placed_document = apply_object_placements(
         draw_order_document,
         placements,
@@ -188,6 +184,7 @@ def build_connected_group_document(
             f"Connected A1 group failed final validation: {exc}"
         ) from exc
 
+    composition = replace(composition, document=final_document)
     return ConnectedGroupBuildResult(
         document=final_document,
         composition=composition,
