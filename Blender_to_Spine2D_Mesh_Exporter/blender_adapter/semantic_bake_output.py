@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any, Iterable, Tuple
 
+from ..application import A1ExportProgressCallback
 from ..domain.baking import (
     BakeArtifact,
     BakeExecutionResult,
@@ -55,9 +56,15 @@ def _reserve_outputs(
 def _stage_validated_request(
     runtime: SemanticBakeRuntime,
     transaction: AtomicFileTransaction,
+    *,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> Tuple[AtomicOutputReservation, ...]:
     reservations = _reserve_outputs(runtime, transaction)
-    run_semantic_bake(runtime, reservations)
+    run_semantic_bake(
+        runtime,
+        reservations,
+        progress_callback=progress_callback,
+    )
     return reservations
 
 
@@ -70,6 +77,7 @@ def stage_bake_plan_outputs(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> Tuple[AtomicOutputReservation, ...]:
     """Validate first, then bake into a caller-owned transaction without commit."""
 
@@ -84,7 +92,11 @@ def stage_bake_plan_outputs(
         scene=scene,
     )
     try:
-        return _stage_validated_request(runtime, output_transaction)
+        return _stage_validated_request(
+            runtime,
+            output_transaction,
+            progress_callback=progress_callback,
+        )
     except BakeExecutionError:
         raise
     except (
@@ -157,6 +169,7 @@ def execute_bake_plan(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> BakeExecutionResult:
     """Validate before transaction creation, then stage and commit exactly once."""
 
@@ -175,6 +188,7 @@ def execute_bake_plan(
             reservations = _stage_validated_request(
                 runtime,
                 output_transaction,
+                progress_callback=progress_callback,
             )
             expected_commit_order = tuple(
                 reservation.final_path for reservation in reservations
