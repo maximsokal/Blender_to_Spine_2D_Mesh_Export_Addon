@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from math import isfinite
+from math import isfinite, sqrt
 import os
 from typing import Callable, Set
 
@@ -157,12 +157,19 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             for column in range(3)
         )
         determinant = float(linear.determinant())
-        coefficient_scale = max(1.0, *(abs(value) for value in values))
-        threshold = tolerance * coefficient_scale**3
+        first_length = sqrt(values[0] ** 2 + values[3] ** 2 + values[6] ** 2)
+        second_length = sqrt(values[1] ** 2 + values[4] ** 2 + values[7] ** 2)
+        third_length = sqrt(values[2] ** 2 + values[5] ** 2 + values[8] ** 2)
+        scale_product = first_length * second_length * third_length
+        relative_determinant = (
+            abs(determinant) / scale_product
+            if isfinite(scale_product) and scale_product > 0.0
+            else 0.0
+        )
         is_singular = (
             not isfinite(determinant)
-            or not isfinite(threshold)
-            or abs(determinant) <= threshold
+            or not isfinite(relative_determinant)
+            or relative_determinant <= tolerance
         )
         identity = (
             1.0,
@@ -186,13 +193,18 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         try:
             mesh = obj.data
             matrix_world = obj.matrix_world
-            normal_matrix = matrix_world.to_3x3().inverted_safe().transposed()
+            linear = matrix_world.to_3x3()
+            determinant = float(linear.determinant())
+            orientation_sign = -1.0 if determinant < 0.0 else 1.0
+            normal_matrix = linear.inverted_safe().transposed()
             origin = matrix_world.translation
             inverted = 0
             correct = 0
             for polygon in mesh.polygons:
                 center_world = matrix_world @ polygon.center
-                normal_world = (normal_matrix @ polygon.normal).normalized()
+                normal_world = (
+                    (normal_matrix @ polygon.normal) * orientation_sign
+                ).normalized()
                 direction = center_world - origin
                 if direction.length_squared <= 1e-16:
                     continue
