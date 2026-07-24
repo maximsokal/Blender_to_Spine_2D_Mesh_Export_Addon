@@ -9,7 +9,7 @@ this specialization normalizes only raw edge offsets before delegating to it.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 from .mesh_edge_contract import (
