@@ -7,8 +7,11 @@ import bpy
 import Blender_to_Spine2D_Mesh_Exporter as extension
 
 
-SCENE_PROPERTY_NAMES = tuple(
-    registration.name for registration in extension.CONFIG_RNA_PROPERTIES
+RNA_REGISTRATIONS = (
+    *extension.CONFIG_RNA_PROPERTIES,
+    *extension.ui.RNA_PROPERTIES,
+    *extension.generated_material_ui.RNA_PROPERTIES,
+    *extension.single_object_operator.RNA_PROPERTIES,
 )
 
 
@@ -50,23 +53,30 @@ def _unregister_completed(completed) -> None:
 
 
 def _assert_registered() -> None:
-    for name in SCENE_PROPERTY_NAMES:
-        assert hasattr(bpy.types.Scene, name), name
+    for registration in RNA_REGISTRATIONS:
+        assert hasattr(registration.owner, registration.name), registration.name
     assert bpy.context.scene.spine2d_texture_size == 1024
     assert bpy.context.scene.spine2d_seam_maker_mode == "AUTO"
+    assert bpy.context.scene.spine2d_material_source_policy == "REQUIRE_SOURCE"
+    assert hasattr(bpy.types.Object, "spine2d_bake_settings")
+    assert hasattr(bpy.types.Object, "spine2d_connect_settings")
     assert _panel_class("OBJECT_PT_spine2d_mesh") is not None
     assert _panel_class("OBJECT_PT_spine2d_repolish") is not None
+    assert _panel_class("OBJECT_PT_spine2d_generated_materials") is not None
     assert _operator_class("object.spine2d_single_export") is not None
     assert _operator_class("object.spine2d_multi_export") is not None
+    assert _operator_class("object.save_uv_as_json") is not None
 
 
 def _assert_unregistered() -> None:
-    for name in SCENE_PROPERTY_NAMES:
-        assert not hasattr(bpy.types.Scene, name), name
+    for registration in RNA_REGISTRATIONS:
+        assert not hasattr(registration.owner, registration.name), registration.name
     assert _panel_class("OBJECT_PT_spine2d_mesh") is None
     assert _panel_class("OBJECT_PT_spine2d_repolish") is None
+    assert _panel_class("OBJECT_PT_spine2d_generated_materials") is None
     assert _operator_class("object.spine2d_single_export") is None
     assert _operator_class("object.spine2d_multi_export") is None
+    assert _operator_class("object.save_uv_as_json") is None
 
 
 def test_every_registration_owner_survives_two_real_rna_cycles(clean_blender_data):
