@@ -7,6 +7,7 @@ calling :func:`compose_a1_multi_object_document`.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Tuple
 
 from ..application import A1MultiObjectExportSettings, A1MultiObjectMode
@@ -27,6 +28,45 @@ from ..domain.spine.connected_group_contracts import (
 )
 from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_object_preparation import PreparedA1Object
+
+
+def _expected_prepared_settings(
+    source: A1MultiObjectSource,
+    mode: A1MultiObjectMode,
+):
+    """Return the exact per-object settings owned by multi-object preparation."""
+
+    if not isinstance(source, A1MultiObjectSource):
+        raise TypeError("source must be A1MultiObjectSource")
+    if not isinstance(mode, A1MultiObjectMode):
+        raise TypeError("mode must be A1MultiObjectMode")
+    if mode is A1MultiObjectMode.CONNECTED:
+        return replace(source.settings, use_world_location_for_main_bone=False)
+    return source.settings
+
+
+def _validate_source_prepared_pair(
+    source: A1MultiObjectSource,
+    prepared: PreparedA1Object,
+    mode: A1MultiObjectMode,
+    *,
+    pair_index: int,
+) -> None:
+    """Reject tuple reordering and settings drift before component IDs are assigned."""
+
+    if not isinstance(pair_index, int) or isinstance(pair_index, bool) or pair_index < 0:
+        raise ValueError("pair_index must be a non-negative integer")
+    if prepared.source_object is not source.source_object:
+        raise ValueError(
+            f"sources[{pair_index}] component '{source.component_id}' does not match "
+            "the prepared object's live source_object"
+        )
+    expected_settings = _expected_prepared_settings(source, mode)
+    if prepared.settings != expected_settings:
+        raise ValueError(
+            f"sources[{pair_index}] component '{source.component_id}' settings do not "
+            f"match the prepared {mode.value} object settings"
+        )
 
 
 def _validate_composition_inputs(
@@ -66,6 +106,16 @@ def _validate_composition_inputs(
             settings.anchor_component_id not in set(component_ids)
         ):
             raise ValueError("anchor_component_id is not present in composition sources")
+
+    for pair_index, (source, item) in enumerate(
+        zip(sources, prepared, strict=True)
+    ):
+        _validate_source_prepared_pair(
+            source,
+            item,
+            settings.mode,
+            pair_index=pair_index,
+        )
 
 
 def _connected_placement_space(
