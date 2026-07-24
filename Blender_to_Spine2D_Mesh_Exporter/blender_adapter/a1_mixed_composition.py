@@ -69,8 +69,16 @@ class A1MixedCompositionResult:
             raise TypeError("outer_composition must be SpineDocumentCompositionResult")
         if self.outer_composition.document is not self.document:
             raise ValueError("outer composition must own the returned document")
+        if (
+            self.connected_composition.composition.document
+            is not self.connected_composition.document
+        ):
+            raise ValueError(
+                "connected composition metadata must own the connected final document"
+            )
         if self.overlay is not None and not isinstance(
-            self.overlay, GroupedCameraOverlayResult
+            self.overlay,
+            GroupedCameraOverlayResult,
         ):
             raise TypeError("overlay must be GroupedCameraOverlayResult or None")
 
@@ -110,6 +118,13 @@ def _compose_outer_document(
     standalone_document: SpineDocument,
     settings: A1MultiObjectExportSettings,
 ) -> SpineDocumentCompositionResult:
+    """Compose connected first and standalone second as two explicit visual blocks.
+
+    Spine draws later slots on top. Mixed mode currently has no cross-group Z contract,
+    so the standalone subgroup intentionally remains above the connected subgroup while
+    each subgroup preserves its own deterministic internal ordering.
+    """
+
     return compose_spine_documents(
         (
             SpineDocumentComponent(
@@ -139,7 +154,7 @@ def compose_a1_mixed_document(
     grouped_request: GroupedCameraProjectionRequest | None = None,
     grouped_stage: GroupedCameraProjectionStageResult | None = None,
 ) -> A1MixedCompositionResult:
-    """Compose both subgroups exactly once and optionally apply grouped B4 output."""
+    """Compose both subgroups exactly once and optionally apply static flattening."""
 
     if not isinstance(settings, A1MultiObjectExportSettings):
         raise TypeError("settings must be A1MultiObjectExportSettings")
@@ -171,7 +186,15 @@ def compose_a1_mixed_document(
             grouped_request,
             grouped_stage,
         )
-        connected = replace(connected, document=overlay.document)
+        updated_connected_composition = replace(
+            connected.composition,
+            document=overlay.document,
+        )
+        connected = replace(
+            connected,
+            document=overlay.document,
+            composition=updated_connected_composition,
+        )
 
     standalone = compose_a1_multi_object_document(
         standalone_sources,
