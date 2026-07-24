@@ -7,6 +7,7 @@ Run with:
 
 from __future__ import annotations
 
+from math import isfinite, radians
 import traceback
 
 import bpy
@@ -18,6 +19,11 @@ MINIMUM_VERSION = (5, 2, 0)
 def _assert(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def _require_finished(result, label: str) -> None:
+    _assert(isinstance(result, set), f"{label} returned non-set result: {result!r}")
+    _assert("FINISHED" in result, f"{label} did not finish: {result!r}")
 
 
 def _remove_object(obj) -> None:
@@ -38,6 +44,57 @@ def _remove_material(material) -> None:
 def _remove_image(image) -> None:
     if image is not None:
         bpy.data.images.remove(image, do_unlink=True)
+
+
+def _restore_object_mode() -> None:
+    active = bpy.context.view_layer.objects.active
+    if active is None:
+        return
+    if str(getattr(active, "mode", "OBJECT")) == "OBJECT":
+        return
+    try:
+        bpy.ops.object.mode_set(mode="OBJECT")
+    except Exception:
+        traceback.print_exc()
+
+
+def _activate_only(obj) -> None:
+    for candidate in tuple(bpy.context.selected_objects):
+        candidate.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+
+
+def _operator_properties(operator):
+    rna_type = operator.get_rna_type()
+    return {
+        prop.identifier: prop
+        for prop in rna_type.properties
+        if prop.identifier != "rna_type"
+    }
+
+
+def _require_operator_contract(
+    operator,
+    *,
+    required_properties,
+    required_enum_items=None,
+) -> None:
+    properties = _operator_properties(operator)
+    missing = tuple(sorted(set(required_properties) - set(properties)))
+    _assert(not missing, f"{operator.idname()} is missing properties: {missing}")
+
+    for property_name, expected_items in (required_enum_items or {}).items():
+        prop = properties[property_name]
+        actual_items = {
+            item.identifier for item in getattr(prop, "enum_items", ())
+        }
+        missing_items = tuple(sorted(set(expected_items) - actual_items))
+        _assert(
+            not missing_items,
+            f"{operator.idname()}.{property_name} is missing enum identifiers: "
+            f"{missing_items}; actual={tuple(sorted(actual_items))}",
+        )
 
 
 def test_blender_version_and_eevee_identifier() -> None:
@@ -103,6 +160,268 @@ def test_mesh_edge_and_uv_attribute_contract() -> None:
         _remove_mesh(mesh)
 
 
+def test_uv_operator_rna_and_headless_execution_contract() -> None:
+    smart_project_properties = {
+        "angle_limit",
+        "margin_method",
+        "rotate_method",
+        "island_margin",
+        "area_weight",
+        "correct_aspect",
+        "scale_to_bounds",
+    }
+    unwrap_properties = {
+        "method",
+        "fill_holes",
+        "correct_aspect",
+        "use_subsurf_data",
+        "margin_method",
+        "margin",
+        "no_flip",
+        "iterations",
+        "use_weights",
+        "weight_group",
+        "weight_factor",
+    }
+    pack_properties = {
+        "udim_source",
+        "rotate",
+        "rotate_method",
+        "scale",
+        "merge_overlap",
+        "margin_method",
+        "margin",
+        "pin",
+        "pin_method",
+        "shape_method",
+    }
+    _require_operator_contract(
+        bpy.ops.uv.smart_project,
+        required_properties=smart_project_properties,
+        required_enum_items={
+            "margin_method": {"SCALED", "ADD", "FRACTION"},
+            "rotate_method": {
+                "AXIS_ALIGNED",
+                "AXIS_ALIGNED_X",
+                "AXIS_ALIGNED_Y",
+            },
+        },
+    )
+    _require_operator_contract(
+        bpy.ops.uv.unwrap,
+        required_properties=unwrap_properties,
+        required_enum_items={
+            "method": {"ANGLE_BASED", "CONFORMAL", "MINIMUM_STRETCH"},
+            "margin_method": {"SCALED", "ADD", "FRACTION"},
+        },
+    )
+    _require_operator_contract(
+        bpy.ops.uv.pack_islands,
+        required_properties=pack_properties,
+        required_enum_items={
+            "udim_source": {"CLOSEST_UDIM", "ACTIVE_UDIM", "ORIGINAL_AABB"},
+            "rotate_method": {
+                "ANY",
+                "CARDINAL",
+                "AXIS_ALIGNED",
+                "AXIS_ALIGNED_X",
+                "AXIS_ALIGNED_Y",
+            },
+            "pin_method": {"SCALE", "ROTATION", "ROTATION_SCALE", "LOCKED"},
+            "shape_method": {"CONCAVE", "CONVEX", "AABB"},
+        },
+    )
+
+    mesh = None
+    obj = None
+    try:
+        mesh = bpy.data.meshes.new("__Spine2D_UvOperatorContractMesh")
+        mesh.from_pydata(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            ),
+            (),
+            ((0, 1, 2, 3),),
+        )
+        mesh.update(calc_edges=True)
+        obj = bpy.data.objects.new("__Spine2D_UvOperatorContractObject", mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        uv_layer = mesh.uv_layers.new(name="SpineBakeUV")
+        mesh.uv_layers.active = uv_layer
+        uv_layer.active_render = True
+
+        _activate_only(obj)
+        _require_finished(
+            bpy.ops.object.mode_set(mode="EDIT"),
+            "bpy.ops.object.mode_set(EDIT)",
+        )
+        _assert(bpy.ops.mesh.select_all.poll(), "mesh.select_all poll failed")
+        _require_finished(
+            bpy.ops.mesh.select_all(action="SELECT"),
+            "bpy.ops.mesh.select_all",
+        )
+        _assert(bpy.ops.uv.select_all.poll(), "uv.select_all poll failed")
+        _require_finished(
+            bpy.ops.uv.select_all(action="SELECT"),
+            "bpy.ops.uv.select_all",
+        )
+        _assert(bpy.ops.uv.smart_project.poll(), "uv.smart_project poll failed")
+        _require_finished(
+            bpy.ops.uv.smart_project(
+                angle_limit=radians(66.0),
+                margin_method="SCALED",
+                rotate_method="AXIS_ALIGNED_Y",
+                island_margin=0.001,
+                area_weight=0.0,
+                correct_aspect=True,
+                scale_to_bounds=True,
+            ),
+            "bpy.ops.uv.smart_project",
+        )
+        _assert(bpy.ops.uv.pack_islands.poll(), "uv.pack_islands poll failed")
+        _require_finished(
+            bpy.ops.uv.pack_islands(
+                udim_source="CLOSEST_UDIM",
+                rotate=True,
+                rotate_method="ANY",
+                scale=True,
+                merge_overlap=False,
+                margin_method="SCALED",
+                margin=0.001,
+                pin=False,
+                pin_method="LOCKED",
+                shape_method="CONCAVE",
+            ),
+            "bpy.ops.uv.pack_islands after smart_project",
+        )
+        _require_finished(
+            bpy.ops.object.mode_set(mode="OBJECT"),
+            "bpy.ops.object.mode_set(OBJECT)",
+        )
+
+        first_coordinates = tuple(
+            tuple(float(component) for component in item.vector)
+            for item in uv_layer.uv
+        )
+        _assert(
+            len(first_coordinates) == len(mesh.loops),
+            "smart_project returned incomplete UV data",
+        )
+        _assert(
+            all(isfinite(component) for uv in first_coordinates for component in uv),
+            "smart_project returned non-finite UV data",
+        )
+
+        _require_finished(
+            bpy.ops.object.mode_set(mode="EDIT"),
+            "bpy.ops.object.mode_set(EDIT) for unwrap",
+        )
+        _require_finished(
+            bpy.ops.mesh.select_all(action="SELECT"),
+            "bpy.ops.mesh.select_all for unwrap",
+        )
+        _require_finished(
+            bpy.ops.uv.select_all(action="SELECT"),
+            "bpy.ops.uv.select_all for unwrap",
+        )
+        _assert(bpy.ops.uv.unwrap.poll(), "uv.unwrap poll failed")
+        _require_finished(
+            bpy.ops.uv.unwrap(
+                method="CONFORMAL",
+                fill_holes=True,
+                correct_aspect=True,
+                use_subsurf_data=False,
+                margin_method="SCALED",
+                margin=0.001,
+                no_flip=False,
+                iterations=10,
+                use_weights=False,
+                weight_group="uv_importance",
+                weight_factor=1.0,
+            ),
+            "bpy.ops.uv.unwrap",
+        )
+        _require_finished(
+            bpy.ops.uv.pack_islands(
+                udim_source="CLOSEST_UDIM",
+                rotate=True,
+                rotate_method="ANY",
+                scale=True,
+                merge_overlap=False,
+                margin_method="SCALED",
+                margin=0.001,
+                pin=False,
+                pin_method="LOCKED",
+                shape_method="CONCAVE",
+            ),
+            "bpy.ops.uv.pack_islands after unwrap",
+        )
+        _require_finished(
+            bpy.ops.object.mode_set(mode="OBJECT"),
+            "bpy.ops.object.mode_set(OBJECT) after unwrap",
+        )
+
+        second_coordinates = tuple(
+            tuple(float(component) for component in item.vector)
+            for item in uv_layer.uv
+        )
+        _assert(
+            len(second_coordinates) == len(mesh.loops),
+            "unwrap returned incomplete UV data",
+        )
+        _assert(
+            all(isfinite(component) for uv in second_coordinates for component in uv),
+            "unwrap returned non-finite UV data",
+        )
+    finally:
+        _restore_object_mode()
+        _remove_object(obj)
+        _remove_mesh(mesh)
+
+
+def test_evaluated_object_to_mesh_lifetime_contract() -> None:
+    mesh = None
+    obj = None
+    evaluated_object = None
+    evaluated_mesh = None
+    try:
+        mesh = bpy.data.meshes.new("__Spine2D_EvaluatedContractMesh")
+        mesh.from_pydata(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            ),
+            (),
+            ((0, 1, 2, 3),),
+        )
+        mesh.update(calc_edges=True)
+        obj = bpy.data.objects.new("__Spine2D_EvaluatedContractObject", mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        triangulate = obj.modifiers.new(name="Triangulate", type="TRIANGULATE")
+        _assert(triangulate.type == "TRIANGULATE", "Triangulate modifier unavailable")
+
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        depsgraph.update()
+        evaluated_object = obj.evaluated_get(depsgraph)
+        evaluated_mesh = evaluated_object.to_mesh(
+            preserve_all_data_layers=True,
+            depsgraph=depsgraph,
+        )
+        _assert(evaluated_mesh is not None, "Object.to_mesh returned None")
+        _assert(len(evaluated_mesh.polygons) == 2, "Evaluated triangulation was not applied")
+        _assert(len(evaluated_mesh.loops) == 6, "Evaluated triangle loop count mismatch")
+    finally:
+        if evaluated_object is not None and evaluated_mesh is not None:
+            evaluated_object.to_mesh_clear()
+        _remove_object(obj)
+        _remove_mesh(mesh)
+
+
 def test_material_node_tree_and_output_target_contract() -> None:
     material = None
     try:
@@ -158,7 +477,10 @@ def test_image_alpha_and_color_attribute_contract() -> None:
         attribute.data[0].color_srgb = (0.25, 0.5, 0.75, 1.0)
         stored = tuple(float(value) for value in attribute.data[0].color_srgb)
         _assert(
-            all(abs(actual - expected) < 1e-6 for actual, expected in zip(stored, (0.25, 0.5, 0.75, 1.0))),
+            all(
+                abs(actual - expected) < 1e-6
+                for actual, expected in zip(stored, (0.25, 0.5, 0.75, 1.0))
+            ),
             f"FloatColorAttributeValue.color_srgb round trip failed: {stored}",
         )
     finally:
@@ -170,6 +492,8 @@ def main() -> None:
     tests = (
         test_blender_version_and_eevee_identifier,
         test_mesh_edge_and_uv_attribute_contract,
+        test_uv_operator_rna_and_headless_execution_contract,
+        test_evaluated_object_to_mesh_lifetime_contract,
         test_material_node_tree_and_output_target_contract,
         test_image_alpha_and_color_attribute_contract,
     )
