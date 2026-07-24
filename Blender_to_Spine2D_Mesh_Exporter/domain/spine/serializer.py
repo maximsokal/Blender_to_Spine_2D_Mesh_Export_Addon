@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from .animation_model_contract import validate_animation_model_contracts
 from .curve_timeline_contract import validate_animation_curves
 from .deform_timeline_contract import validate_animation_deform_timelines
 from .linked_mesh_contract import validate_setup_linked_meshes
+from .mesh_edge_contract import encode_spine_mesh_edge_offsets
 from .model import (
     Bone,
     IKConstraint,
@@ -18,7 +20,6 @@ from .model import (
     SpineDocument,
     TransformConstraint,
 )
-from .animation_model_contract import validate_animation_model_contracts
 from .sequence_timeline_contract import validate_animation_sequence_timelines
 from .setup_attachment_contract import SetupAttachmentNameIndex
 from .setup_slot_contract import SetupSlotIndex
@@ -135,7 +136,15 @@ class SpineSerializer:
         }
         _put_optional(data, "path", attachment.path)
         if attachment.edges:
-            data["edges"] = list(attachment.edges)
+            # The typed Rewrite model stores logical attachment vertex indices.
+            # Spine 4.2 JSON stores edge endpoints as offsets into the interleaved
+            # x/y coordinate domain, so vertex N is serialized as offset N * 2.
+            data["edges"] = list(
+                encode_spine_mesh_edge_offsets(
+                    attachment.edges,
+                    vertex_count=len(attachment.uvs) // 2,
+                )
+            )
         _put_optional(data, "width", attachment.width)
         _put_optional(data, "height", attachment.height)
         _put_optional(
