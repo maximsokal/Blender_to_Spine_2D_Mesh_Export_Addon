@@ -9,6 +9,7 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import FaceId, extract_face_subset
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
+    LegacyAttachmentSequence,
     LegacyRigBuildRequest,
     SpineSerializer,
     SpineValidator,
@@ -108,6 +109,44 @@ def test_serialization_contains_both_slots_and_attachments_without_merge():
     ]
     attachments = data["skins"][0]["attachments"]
     assert set(attachments) == {"Cube_Segment_0", "Cube_Segment_1"}
+
+
+def test_sequence_assembly_adds_one_timeline_per_segment_attachment():
+    _, z_plan, rig, regions, settings = build_inputs()
+    sequence_settings = A1DocumentAssemblySettings(
+        prefix=settings.prefix,
+        uv_layer_name=settings.uv_layer_name,
+        image_path="images/Cube_Baked_",
+        attachment_width=settings.attachment_width,
+        attachment_height=settings.attachment_height,
+        center_x=settings.center_x,
+        center_y=settings.center_y,
+        sequence=LegacyAttachmentSequence(
+            count=3,
+            start=0,
+            digits=4,
+        ),
+    )
+
+    result = assemble_a1_document(
+        rig,
+        z_plan,
+        regions,
+        sequence_settings,
+    )
+    data = SpineSerializer().to_dict(result.document)
+
+    attachment_timelines = data["animations"]["animation"]["attachments"]["default"]
+    assert set(attachment_timelines) == {
+        "Cube_Segment_0",
+        "Cube_Segment_1",
+    }
+    for slot_name in ("Cube_Segment_0", "Cube_Segment_1"):
+        assert attachment_timelines[slot_name][slot_name]["sequence"] == [
+            {"mode": "loop", "delay": 0.0333},
+            {"time": 0.0333, "mode": "loop", "index": 1},
+            {"time": 0.0666, "mode": "loop", "index": 2},
+        ]
 
 
 def test_segment_index_base_changes_names_without_changing_geometry():
