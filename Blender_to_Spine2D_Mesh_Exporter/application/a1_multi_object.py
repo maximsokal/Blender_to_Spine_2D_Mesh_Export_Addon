@@ -23,9 +23,13 @@ class A1MultiObjectMode(str, Enum):
 
 
 class ConnectedCameraRenderPolicy(str, Enum):
-    """How connected camera-dependent objects become visible Spine layers."""
+    """Choose interactive rig layers or an explicit static camera flattening."""
 
+    # Preserve one weighted mesh per object so global and object-specific controls
+    # continue to deform every visible layer through the generated vertex-bone rig.
     INDIVIDUAL_LAYERS = "INDIVIDUAL_LAYERS"
+    # Static flattening is depth-correct for the captured camera render, but the
+    # resulting root-bound overlay cannot reproduce independent object controls.
     AUTO_GROUPED_CAMERA = "AUTO_GROUPED_CAMERA"
     GROUPED_CAMERA_REQUIRED = "GROUPED_CAMERA_REQUIRED"
 
@@ -57,7 +61,7 @@ class A1MultiObjectExportSettings:
     z_tolerance: float = 1e-4
     connected_scale_mode: UniformScaleMode = UniformScaleMode.AVERAGE
     connected_camera_render_policy: ConnectedCameraRenderPolicy = (
-        ConnectedCameraRenderPolicy.AUTO_GROUPED_CAMERA
+        ConnectedCameraRenderPolicy.INDIVIDUAL_LAYERS
     )
 
     def __post_init__(self) -> None:
