@@ -33,6 +33,10 @@ from .render_engine_contract import (
     RenderEngineContract,
     render_engine_contract_from_execution,
 )
+from .scene_context_contract import (
+    BlenderSceneContextError,
+    require_depsgraph_scene_consistency,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -99,6 +103,37 @@ def object_name(source_obj: Any) -> str:
     return value
 
 
+def _resolved_evaluation_owners(
+    scene: Any | None,
+) -> tuple[Any, Any]:
+    """Return one Blender Scene and its current evaluated dependency graph."""
+
+    try:
+        import bpy
+    except Exception as exc:
+        raise ValueError("Blender bpy module is unavailable for evaluated geometry") from exc
+
+    resolved_scene = scene or getattr(bpy.context, "scene", None)
+    if resolved_scene is None:
+        raise ValueError("A Blender Scene is required for evaluated geometry")
+    try:
+        resolved_depsgraph = bpy.context.evaluated_depsgraph_get()
+    except Exception as exc:
+        raise ValueError("Unable to acquire Blender evaluated dependency graph") from exc
+    if resolved_depsgraph is None:
+        raise ValueError("Blender returned no evaluated dependency graph")
+    try:
+        require_depsgraph_scene_consistency(
+            resolved_depsgraph,
+            resolved_scene,
+        )
+    except BlenderSceneContextError as exc:
+        raise ValueError(
+            f"Evaluated geometry scene and dependency graph disagree: {exc}"
+        ) from exc
+    return resolved_scene, resolved_depsgraph
+
+
 def _read_source_snapshot(
     source_obj: Any,
     object_id: str,
@@ -108,9 +143,11 @@ def _read_source_snapshot(
 ) -> tuple[MeshSnapshot, int, Tuple[ExportIssue, ...]]:
     stage = A1SingleObjectStage.READ_GEOMETRY
     if settings.source_geometry_mode is A1SourceGeometryMode.EVALUATED:
+        resolved_scene, resolved_depsgraph = _resolved_evaluation_owners(scene)
         evaluated = read_evaluated_mesh_snapshot(
             source_obj,
-            scene=scene,
+            scene=resolved_scene,
+            depsgraph=resolved_depsgraph,
             source_object_id=object_id,
             snapshot_id=f"{object_id}:a1-evaluated",
             lineage_policy=settings.modifier_lineage_policy,
