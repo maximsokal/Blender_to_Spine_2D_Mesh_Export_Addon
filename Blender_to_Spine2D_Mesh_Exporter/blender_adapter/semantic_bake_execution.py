@@ -20,6 +20,7 @@ from .bake_scene_state import configure_scene_for_bake, preserve_bake_scene_stat
 from .context_state import activate_object_for_operator
 from .mesh_writer import temporary_mesh_object
 from .scene_bake_execution import temporarily_exclude_source_from_render
+from .scene_bake_runtime import validate_runtime_object_transform
 from .semantic_bake_image_io import (
     _activate_uv_layer,
     _create_bake_image,
@@ -199,6 +200,11 @@ def _bake_frame_task(
         runtime.scene,
         runtime.context,
         task.timeline_frame,
+    )
+    validate_runtime_object_transform(
+        runtime.source_object,
+        runtime.plan.object_context,
+        timeline_frame=task.timeline_frame,
     )
     if runtime.plan.requires_composition:
         _bake_composed_frame(
