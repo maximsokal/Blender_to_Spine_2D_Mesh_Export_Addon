@@ -194,11 +194,11 @@ def _object_signature(obj: Any) -> Mapping[str, object]:
 def _selected_meshes(context: Any) -> Tuple[Any, ...]:
     if context is None:
         return ()
-    return tuple(
-        obj
-        for obj in getattr(context, "selected_objects", ())
-        if getattr(obj, "type", None) == "MESH"
-    )
+    unique_by_identity: dict[tuple[str, object], Any] = {}
+    for obj in getattr(context, "selected_objects", ()):
+        if getattr(obj, "type", None) == "MESH":
+            unique_by_identity.setdefault(_rna_identity(obj), obj)
+    return tuple(unique_by_identity.values())
 
 
 def _request_mesh_objects(context: Any) -> Tuple[Any, ...]:
@@ -216,7 +216,7 @@ def _request_mesh_objects(context: Any) -> Tuple[Any, ...]:
         )
 
     unique: list[Any] = []
-    identities: set[int] = set()
+    identities: set[tuple[str, object]] = set()
     for obj in candidates:
         identity = _rna_identity(obj)
         if identity in identities:
@@ -259,12 +259,18 @@ def build_a1_readiness_signature(context: Any) -> str:
 
     active = getattr(context, "active_object", None)
     ordered = _ordered_signature_objects(context)
+    active_identity = None if active is None else _rna_identity(active)
+    request_active_identity = (
+        active_identity
+        if any(_rna_identity(obj) == active_identity for obj in ordered)
+        else None
+    )
     render = getattr(scene, "render", None)
     camera = getattr(scene, "camera", None)
     payload = {
         "blend_file": _blend_file_path(),
         "scene": _rna_identity(scene),
-        "active": None if active is None else _rna_identity(active),
+        "active": request_active_identity,
         "objects": tuple(_object_signature(obj) for obj in ordered),
         "frame_current": _safe_int(getattr(scene, "frame_current", 0)),
         "camera": None if camera is None else _rna_identity(camera),
