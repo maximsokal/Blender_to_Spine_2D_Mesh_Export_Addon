@@ -46,8 +46,11 @@ def apply_object_placements(
 ) -> SpineDocument:
     """Reparent object main bones in their declared connected coordinate space.
 
-    Object-bake documents place ``<prefix>_main`` at absolute Blender translation,
-    so connected composition replaces both X and Y with anchor-relative offsets.
+    Connected object-bake documents intentionally keep only document-local XY on
+    ``<prefix>_main``. That local value compensates for centering attachment vertex bones
+    around the geometry bounding-box midpoint. Connected composition adds the
+    anchor-relative Object translation to this existing offset instead of replacing it.
+
     Camera-projection documents already encode screen-space XY in attachment vertices;
     their main-bone coordinates are preserved while only the Z-layer parent changes.
     """
@@ -68,8 +71,14 @@ def apply_object_placements(
                 replace(
                     bone,
                     parent=placement.parent_layer_bone_name,
-                    x=round(placement.relative_x * uniform_scale, 2),
-                    y=round(placement.relative_y * uniform_scale, 2),
+                    x=round(
+                        float(bone.x) + placement.relative_x * uniform_scale,
+                        2,
+                    ),
+                    y=round(
+                        float(bone.y) + placement.relative_y * uniform_scale,
+                        2,
+                    ),
                 )
             )
             continue
