@@ -1,5 +1,5 @@
 # pylint: disable=import-error
-"""Blender 5.2+ Rewrite UI and multi-object export operator."""
+"""Blender 5.2+ Rewrite UI, readiness analysis, and export operators."""
 
 from __future__ import annotations
 
@@ -10,9 +10,22 @@ from typing import Callable, Set
 
 import bpy
 
-from .blender_adapter.a1_ui_bridge import export_selected_objects_a1
+from .application import A1ReadinessState, IssueSeverity
+from .blender_adapter.a1_export_readiness import (
+    a1_readiness_depsgraph_update_post,
+    analyse_a1_export_readiness,
+    clear_a1_export_readiness,
+    current_a1_export_readiness,
+    require_current_a1_export_readiness,
+    store_a1_export_readiness,
+)
+from .blender_adapter.a1_ui_bridge import (
+    export_active_object_a1,
+    export_selected_objects_a1,
+)
 from .config import get_default_output_dir
 from .infrastructure.blender_registration import (
+    RegistrationCleanupAction,
     RnaPropertyRegistration,
     class_cleanup_actions,
     register_classes_transactionally,
@@ -23,6 +36,25 @@ from .infrastructure.blender_registration import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _tag_redraw(context: bpy.types.Context) -> None:
+    area = getattr(context, "area", None)
+    tag_redraw = getattr(area, "tag_redraw", None)
+    if callable(tag_redraw):
+        tag_redraw()
+
+
+def _readiness_handler_cleanup_action() -> RegistrationCleanupAction:
+    def remove() -> None:
+        handlers = bpy.app.handlers.depsgraph_update_post
+        while a1_readiness_depsgraph_update_post in handlers:
+            handlers.remove(a1_readiness_depsgraph_update_post)
+
+    return RegistrationCleanupAction(
+        label="A1 readiness depsgraph handler",
+        callback=remove,
+    )
 
 
 class SPINE2D_OT_ResetSettings(bpy.types.Operator):
@@ -46,6 +78,8 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene.spine2d_seam_maker_mode = "AUTO"
             scene.spine2d_frames_for_render = 0
             scene.spine2d_bake_frame_start = 0
+            clear_a1_export_readiness(scene)
+            _tag_redraw(context)
             self.report({"INFO"}, "Spine2D Rewrite settings have been reset.")
             return {"FINISHED"}
         except Exception as exc:
@@ -55,49 +89,47 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
 
 
 class OBJECT_OT_Spine2DRefreshInfo(bpy.types.Operator):
-    """Recalculate and cache object information displayed by the panel."""
+    """Run production preparation and cache a file-free readiness report."""
 
     bl_idname = "object.spine2d_refresh_info"
-    bl_label = "Refresh Object Info"
+    bl_label = "Analyze Export Readiness"
+    bl_description = (
+        "Run the Rewrite geometry, UV, material, rig, and composition pipeline "
+        "without writing export files"
+    )
 
     @classmethod
     def poll(cls, context: bpy.types.Context) -> bool:
-        active = context.active_object
-        return bool(active is not None and active.type == "MESH")
+        active = getattr(context, "active_object", None)
+        if active is not None and getattr(active, "type", None) == "MESH":
+            return True
+        return any(
+            getattr(obj, "type", None) == "MESH"
+            for obj in getattr(context, "selected_objects", ())
+        )
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
-        obj = context.active_object
-        if obj is None or obj.type != "MESH" or obj.data is None:
-            self.report({"ERROR"}, "A valid active Mesh object is required")
-            return {"CANCELLED"}
         try:
-            obj["_spine2d_vertex_count"] = len(obj.data.vertices)
-            inverted, correct = OBJECT_PT_Spine2DMeshPanel._face_orientation_stats(obj)
-            obj["_spine2d_face_stats"] = {
-                "inverted": inverted,
-                "correct": correct,
-            }
-
-            for material in obj.data.materials:
-                if material is None:
-                    continue
-                icon_id = 0
-                try:
-                    material.preview_ensure()
-                    preview = material.preview
-                    icon_id = int(getattr(preview, "icon_id", 0) or 0)
-                except Exception:
-                    logger.exception(
-                        "Unable to generate material preview for '%s'",
-                        material.name,
-                    )
-                material["_spine2d_icon_id"] = icon_id
-
-            self.report({"INFO"}, "Object info cache has been updated.")
+            report = analyse_a1_export_readiness(context)
+            store_a1_export_readiness(context, report)
+            _tag_redraw(context)
+            if report.state is A1ReadinessState.BLOCKED:
+                self.report(
+                    {"ERROR"},
+                    f"Export blocked: {report.blocker_count} blocker(s), "
+                    f"{report.warning_count} warning(s)",
+                )
+            elif report.state is A1ReadinessState.WARNING:
+                self.report(
+                    {"WARNING"},
+                    f"Export ready with {report.warning_count} warning(s)",
+                )
+            else:
+                self.report({"INFO"}, "Export readiness analysis passed")
             return {"FINISHED"}
         except Exception as exc:
-            logger.exception("Unable to refresh Spine2D object information")
-            self.report({"ERROR"}, f"Refresh error: {exc}")
+            logger.exception("Unable to analyze Spine2D export readiness")
+            self.report({"ERROR"}, f"Analyze error: {exc}")
             return {"CANCELLED"}
 
 
@@ -190,6 +222,8 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
 
     @staticmethod
     def _face_orientation_stats(obj: bpy.types.Object) -> tuple[int, int]:
+        """Compatibility diagnostic; orientation never acts as an export blocker."""
+
         try:
             mesh = obj.data
             matrix_world = obj.matrix_world
@@ -216,85 +250,6 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         except Exception:
             logger.exception("Unable to calculate face orientation statistics")
             return 0, 0
-
-    @staticmethod
-    def _list_materials(
-        box: bpy.types.UILayout,
-        obj: bpy.types.Object,
-    ) -> None:
-        materials = tuple(
-            material for material in getattr(obj.data, "materials", ()) if material
-        )
-        if not materials:
-            box.label(text="No materials", icon="ERROR")
-            return
-
-        column = box.column(align=True)
-        column.label(text=f"Materials ({len(materials)}):")
-        for material in materials:
-            row = column.row(align=True)
-            icon_id = int(material.get("_spine2d_icon_id", 0) or 0)
-            if icon_id:
-                row.label(text=material.name, icon_value=icon_id)
-            else:
-                row.label(text=material.name, icon="MATERIAL")
-
-    def _populate_info_box(
-        self,
-        box: bpy.types.UILayout,
-        obj: bpy.types.Object | None,
-    ) -> bool:
-        if obj is None:
-            box.label(text="No active object", icon="ERROR")
-            return False
-        if obj.type != "MESH" or obj.data is None:
-            box.label(text="Active object is not a valid Mesh", icon="ERROR")
-            return False
-
-        vertex_count = obj.get("_spine2d_vertex_count")
-        if vertex_count is None:
-            box.label(text="Vertex count: Press Refresh", icon="QUESTION")
-        else:
-            box.label(text=f"Vertex count: {vertex_count}", icon="INFO")
-
-        is_singular, requires_normalization, determinant = (
-            self._world_linear_transform_status(obj)
-        )
-        export_allowed = not is_singular
-        if is_singular:
-            box.label(
-                text=(
-                    "Object transform is singular; set every scale axis to a "
-                    "non-zero value"
-                ),
-                icon="ERROR",
-            )
-        elif requires_normalization:
-            box.label(
-                text="Rotation/scale will be normalized during export",
-                icon="INFO",
-            )
-            if determinant < 0.0:
-                box.label(
-                    text="Mirrored transform will preserve mirrored winding",
-                    icon="INFO",
-                )
-
-        self._list_materials(box, obj)
-        statistics = obj.get("_spine2d_face_stats")
-        if statistics:
-            inverted = int(statistics.get("inverted", 0))
-            correct = int(statistics.get("correct", 0))
-            if inverted == 0:
-                box.label(text="All faces oriented correctly", icon="INFO")
-            else:
-                box.label(
-                    text=f"Inverted faces: {inverted} / {inverted + correct}",
-                    icon="ERROR",
-                )
-        else:
-            box.label(text="Face orientation: Press Refresh", icon="QUESTION")
-        return export_allowed
 
     def _draw_foldout(
         self,
@@ -417,10 +372,112 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         column.label(text=f"Last frame: {last}")
         column.label(text=f"Playback end: {scene.frame_end}")
 
+    @staticmethod
+    def _issue_icon(severity: IssueSeverity) -> str:
+        if severity is IssueSeverity.ERROR:
+            return "CANCEL"
+        if severity is IssueSeverity.WARNING:
+            return "ERROR"
+        return "INFO"
+
+    @staticmethod
+    def _state_icon(state: A1ReadinessState) -> str:
+        if state is A1ReadinessState.READY:
+            return "CHECKMARK"
+        if state is A1ReadinessState.WARNING:
+            return "ERROR"
+        if state is A1ReadinessState.BLOCKED:
+            return "CANCEL"
+        return "QUESTION"
+
+    def _draw_object_readiness(self, layout: bpy.types.UILayout, item) -> None:
+        box = layout.box()
+        box.label(
+            text=f"{item.object_id}: {item.state.value}",
+            icon=self._state_icon(item.state),
+        )
+        statistics = item.statistics
+        source_vertices = int(statistics.get("source_vertices", 0))
+        source_faces = int(statistics.get("source_faces", 0))
+        exported_vertices = int(statistics.get("exported_attachment_vertices", 0))
+        triangles = int(statistics.get("triangles_after_triangulation", 0))
+        regions = int(statistics.get("region_count", 0))
+        bones = int(statistics.get("final_bone_count", 0))
+        attachments = int(statistics.get("attachment_count", 0))
+        box.label(text=f"Source: {source_vertices} vertices / {source_faces} faces")
+        box.label(text=f"Export: {exported_vertices} vertices / {triangles} triangles")
+        box.label(text=f"Rig: {bones} bones / {regions} regions / {attachments} attachments")
+        pipeline = str(statistics.get("texture_pipeline", ""))
+        if pipeline:
+            frames = int(statistics.get("bake_frame_count", 0))
+            materials = int(statistics.get("material_slot_count", 0))
+            box.label(text=f"Texture: {pipeline} / {frames} frame(s) / {materials} material(s)")
+        topology_parts = []
+        for key, label in (
+            ("non_manifold_edges", "non-manifold"),
+            ("loose_vertices", "loose vertices"),
+            ("loose_edges", "loose edges"),
+            ("decomposition_cut_count", "cuts"),
+        ):
+            value = int(statistics.get(key, 0))
+            if value:
+                topology_parts.append(f"{label}: {value}")
+        if topology_parts:
+            box.label(text="Topology: " + ", ".join(topology_parts), icon="INFO")
+        for issue in item.issues[:6]:
+            box.label(
+                text=f"{issue.code}: {issue.message}",
+                icon=self._issue_icon(issue.severity),
+            )
+        if len(item.issues) > 6:
+            box.label(text=f"... and {len(item.issues) - 6} more issue(s)")
+
+    def _draw_readiness(
+        self,
+        layout: bpy.types.UILayout,
+        context: bpy.types.Context,
+    ) -> bool:
+        state, report = current_a1_export_readiness(context)
+        box = layout.box()
+        row = box.row(align=True)
+        row.label(text="Export readiness:")
+        row.operator(
+            "object.spine2d_refresh_info",
+            text="Analyze",
+            icon="VIEWZOOM",
+        )
+
+        if state is A1ReadinessState.NOT_ANALYSED:
+            box.label(text="Not analyzed", icon="QUESTION")
+            box.label(text="Run Analyze before export")
+            return False
+        if state is A1ReadinessState.STALE:
+            box.label(text="Analysis outdated", icon="FILE_REFRESH")
+            box.label(text="Selection, geometry, material, scene, or settings changed")
+            return False
+        if report is None:
+            box.label(text="Analysis cache unavailable", icon="CANCEL")
+            return False
+
+        box.label(
+            text=(
+                f"{state.value}: {report.blocker_count} blocker(s), "
+                f"{report.warning_count} warning(s)"
+            ),
+            icon=self._state_icon(state),
+        )
+        for issue in report.issues[:6]:
+            box.label(
+                text=f"{issue.code}: {issue.message}",
+                icon=self._issue_icon(issue.severity),
+            )
+        for item in report.objects:
+            self._draw_object_readiness(box, item)
+        return report.can_export
+
     def draw(self, context: bpy.types.Context) -> None:
         layout = self.layout
         scene = context.scene
-        obj = context.active_object
 
         try:
             if not bpy.data.filepath:
@@ -456,16 +513,7 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             )
 
             layout.separator()
-            info_box = layout.box()
-            row = info_box.row(align=True)
-            row.label(text="Info:")
-            row.operator(
-                "object.spine2d_refresh_info",
-                text="Refresh",
-                icon="FILE_REFRESH",
-            )
-            export_allowed = self._populate_info_box(info_box, obj)
-
+            export_allowed = self._draw_readiness(layout, context)
             row = layout.row()
             row.enabled = export_allowed
             selected_meshes = tuple(
@@ -474,7 +522,10 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
                 if candidate.type == "MESH"
             )
             if len(selected_meshes) <= 1:
-                row.operator("object.save_uv_as_json", text="Export Current Object")
+                row.operator(
+                    "object.spine2d_single_export",
+                    text="Export Current Object",
+                )
             else:
                 row.operator(
                     "object.spine2d_multi_export",
@@ -485,12 +536,12 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             layout.label(text="UI error (see console)", icon="ERROR")
 
 
-class OBJECT_OT_Spine2DMultiExport(bpy.types.Operator):
-    """Export selected Mesh objects through the Rewrite pipeline."""
-
-    bl_idname = "object.spine2d_multi_export"
-    bl_label = "Export Selected Objects"
-    bl_description = "Export selected Mesh objects with the Rewrite pipeline"
+class _Spine2DExportOperatorMixin:
+    def _require_readiness(self, context: bpy.types.Context) -> bool:
+        allowed, message = require_current_a1_export_readiness(context)
+        if not allowed:
+            self.report({"ERROR"}, message)
+        return allowed
 
     def _report_result(self, result) -> Set[str]:
         for issue in result.issues:
@@ -506,10 +557,43 @@ class OBJECT_OT_Spine2DMultiExport(bpy.types.Operator):
             self.report({"ERROR"}, "Rewrite export failed without diagnostics")
         return {"CANCELLED"}
 
+
+class OBJECT_OT_Spine2DSingleExport(
+    _Spine2DExportOperatorMixin,
+    bpy.types.Operator,
+):
+    """Export the active Mesh through the Rewrite pipeline."""
+
+    bl_idname = "object.spine2d_single_export"
+    bl_label = "Export Current Object"
+    bl_description = "Export the active Mesh with the Rewrite pipeline"
+
     def execute(self, context: bpy.types.Context) -> Set[str]:
+        if not self._require_readiness(context):
+            return {"CANCELLED"}
         try:
-            result = export_selected_objects_a1(context)
-            return self._report_result(result)
+            return self._report_result(export_active_object_a1(context))
+        except Exception as exc:
+            logger.exception("Rewrite single-object export failed")
+            self.report({"ERROR"}, f"Single-object export failed: {exc}")
+            return {"CANCELLED"}
+
+
+class OBJECT_OT_Spine2DMultiExport(
+    _Spine2DExportOperatorMixin,
+    bpy.types.Operator,
+):
+    """Export selected Mesh objects through the Rewrite pipeline."""
+
+    bl_idname = "object.spine2d_multi_export"
+    bl_label = "Export Selected Objects"
+    bl_description = "Export selected Mesh objects with the Rewrite pipeline"
+
+    def execute(self, context: bpy.types.Context) -> Set[str]:
+        if not self._require_readiness(context):
+            return {"CANCELLED"}
+        try:
+            return self._report_result(export_selected_objects_a1(context))
         except Exception as exc:
             logger.exception("Rewrite multi-object export failed")
             self.report({"ERROR"}, f"Multi-object export failed: {exc}")
@@ -606,8 +690,10 @@ CLASSES = (
     SPINE2D_OT_ResetSettings,
     OBJECT_OT_Spine2DRefreshInfo,
     OBJECT_PT_Spine2DMeshPanel,
+    OBJECT_OT_Spine2DSingleExport,
     OBJECT_OT_Spine2DMultiExport,
 )
+
 
 RNA_PROPERTIES = tuple(
     RnaPropertyRegistration(
@@ -631,22 +717,35 @@ RNA_PROPERTIES = tuple(
 
 
 def register() -> None:
-    """Register all Rewrite UI classes and RNA properties transactionally."""
+    """Register Rewrite UI, RNA properties, and readiness invalidation."""
 
     registered_classes = register_classes_transactionally(
         CLASSES,
         register_class=bpy.utils.register_class,
         unregister_class=bpy.utils.unregister_class,
     )
+    registered_rna = ()
+    handler_added = False
     try:
-        register_rna_properties_transactionally(RNA_PROPERTIES)
+        registered_rna = register_rna_properties_transactionally(RNA_PROPERTIES)
+        handlers = bpy.app.handlers.depsgraph_update_post
+        if a1_readiness_depsgraph_update_post not in handlers:
+            handlers.append(a1_readiness_depsgraph_update_post)
+            handler_added = True
     except Exception as exc:
-        logger.exception("Rewrite UI RNA registration failed")
-        unregister_all_best_effort(
+        logger.exception("Rewrite UI registration failed")
+        actions = []
+        if handler_added:
+            actions.append(_readiness_handler_cleanup_action())
+        actions.extend(rna_property_cleanup_actions(registered_rna))
+        actions.extend(
             class_cleanup_actions(
                 registered_classes,
                 unregister_class=bpy.utils.unregister_class,
-            ),
+            )
+        )
+        unregister_all_best_effort(
+            tuple(actions),
             operation="Rewrite UI registration rollback",
             primary_error=exc,
         )
@@ -655,11 +754,16 @@ def register() -> None:
 
 
 def unregister() -> None:
-    """Remove every Rewrite UI property and class before reporting failures."""
+    """Remove readiness cache, handler, RNA properties, and UI classes."""
 
     try:
         unregister_all_best_effort(
             (
+                RegistrationCleanupAction(
+                    label="A1 readiness cache",
+                    callback=clear_a1_export_readiness,
+                ),
+                _readiness_handler_cleanup_action(),
                 *rna_property_cleanup_actions(RNA_PROPERTIES),
                 *class_cleanup_actions(
                     CLASSES,
@@ -678,6 +782,7 @@ __all__ = [
     "CLASSES",
     "OBJECT_OT_Spine2DMultiExport",
     "OBJECT_OT_Spine2DRefreshInfo",
+    "OBJECT_OT_Spine2DSingleExport",
     "OBJECT_PT_Spine2DMeshPanel",
     "RNA_PROPERTIES",
     "SPINE2D_OT_ResetSettings",
