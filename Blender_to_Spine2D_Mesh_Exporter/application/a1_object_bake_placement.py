@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from math import isclose
-
 from ..domain.geometry import MeshSnapshot
 from ..domain.spine.legacy_rig_scale import calculate_uniform_scale
 from .a1_numeric_contracts import require_finite_number
@@ -33,20 +31,21 @@ def _validated_bounds_center(bounds: A1MeshBounds) -> tuple[float, float]:
     if minimum_y > maximum_y:
         raise ValueError("bounds.minimum_y cannot exceed bounds.maximum_y")
 
-    # Divide before adding so two large same-sign finite endpoints cannot overflow.
+    # Cached bounds must be byte-for-byte compatible with calculate_a1_mesh_bounds().
+    # Reject an overflowing midpoint instead of silently accepting a different formula.
     expected_center_x = require_finite_number(
-        minimum_x / 2.0 + maximum_x / 2.0,
+        (minimum_x + maximum_x) / 2.0,
         "bounds.expected_center_x",
     )
     expected_center_y = require_finite_number(
-        minimum_y / 2.0 + maximum_y / 2.0,
+        (minimum_y + maximum_y) / 2.0,
         "bounds.expected_center_y",
     )
-    if not isclose(center_x, expected_center_x, rel_tol=1.0e-12, abs_tol=1.0e-12):
+    if center_x != expected_center_x:
         raise ValueError(
             "bounds.center_x must be the midpoint of minimum_x and maximum_x"
         )
-    if not isclose(center_y, expected_center_y, rel_tol=1.0e-12, abs_tol=1.0e-12):
+    if center_y != expected_center_y:
         raise ValueError(
             "bounds.center_y must be the midpoint of minimum_y and maximum_y"
         )
