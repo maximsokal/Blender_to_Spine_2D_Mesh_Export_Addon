@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+from math import isfinite
 from typing import Mapping, Tuple
 
 from ..application import (
     A1DocumentAssemblyResult,
     A1DocumentAssemblySettings,
+    A1MeshBounds,
     A1SingleObjectStage,
     ExportIssue,
     assemble_a1_camera_projection_document,
@@ -24,6 +26,7 @@ from ..domain.spine.legacy_rig_contracts import (
     LegacyRigBuildRequest,
     LegacyRigBuildResult,
 )
+from ..domain.spine.legacy_rig_scale import calculate_uniform_scale
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
     StatisticsValue,
@@ -63,6 +66,56 @@ class A1DocumentPreparationResult:
             raise TypeError("statistics must be a mapping")
 
 
+def _combine_object_bake_main_position_pixels(
+    world_position_pixels: tuple[float, float] | None,
+    bounds: A1MeshBounds,
+    uniform_scale: float,
+) -> tuple[float, float]:
+    """Combine Object-origin placement with the centered attachment's local offset.
+
+    Object-bake attachment vertices are intentionally centered around the source XY
+    bounding-box midpoint. The inverse center translation therefore belongs on the main
+    bone. Blender Y is inverted by attachment projection, so the matching main-bone
+    offset is ``(center_x, -center_y) * uniform_scale``.
+
+    Connected preparation disables absolute world placement but still uses this helper;
+    its generated document then carries only the local geometry-center offset. Connected
+    composition can safely add the anchor-relative Object translation later.
+    """
+
+    if world_position_pixels is not None:
+        if not isinstance(world_position_pixels, tuple) or len(world_position_pixels) != 2:
+            raise ValueError("world_position_pixels must contain two finite values or None")
+        if not all(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and isfinite(float(value))
+            for value in world_position_pixels
+        ):
+            raise ValueError("world_position_pixels must contain two finite values or None")
+        base_x = float(world_position_pixels[0])
+        base_y = float(world_position_pixels[1])
+    else:
+        base_x = 0.0
+        base_y = 0.0
+
+    if not isinstance(bounds, A1MeshBounds):
+        raise TypeError("bounds must be A1MeshBounds")
+    if (
+        isinstance(uniform_scale, bool)
+        or not isinstance(uniform_scale, (int, float))
+        or not isfinite(float(uniform_scale))
+        or float(uniform_scale) <= 0.0
+    ):
+        raise ValueError("uniform_scale must be a finite positive number")
+
+    resolved_scale = float(uniform_scale)
+    return (
+        base_x + float(bounds.center_x) * resolved_scale,
+        base_y - float(bounds.center_y) * resolved_scale,
+    )
+
+
 def prepare_a1_document(
     texture: A1TexturePlanningResult,
 ) -> A1DocumentPreparationResult:
@@ -77,20 +130,31 @@ def prepare_a1_document(
     try:
         camera_projection = isinstance(texture.bake_plan, CameraProjectionPlan)
         bounds = calculate_a1_mesh_bounds(source.source_snapshot)
+        if camera_projection:
+            main_position_pixels = None
+        else:
+            world_position_pixels = calculate_a1_main_position_pixels(
+                source.source_snapshot,
+                source.settings,
+            )
+            uniform_scale = calculate_uniform_scale(
+                source.settings.export.texture_width,
+                source.settings.export.texture_height,
+                source.settings.rig_scale_mode,
+            )
+            main_position_pixels = _combine_object_bake_main_position_pixels(
+                world_position_pixels,
+                bounds,
+                uniform_scale,
+            )
+
         rig = build_legacy_rig(
             LegacyRigBuildRequest(
                 prefix=source.prefix,
                 texture_width=source.settings.export.texture_width,
                 texture_height=source.settings.export.texture_height,
                 z_groups=source.z_groups.groups,
-                main_position_pixels=(
-                    None
-                    if camera_projection
-                    else calculate_a1_main_position_pixels(
-                        source.source_snapshot,
-                        source.settings,
-                    )
-                ),
+                main_position_pixels=main_position_pixels,
                 scale_mode=source.settings.rig_scale_mode,
             )
         )
