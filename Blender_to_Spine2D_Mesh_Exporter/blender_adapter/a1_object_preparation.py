@@ -73,12 +73,24 @@ def prepare_a1_object(
         statistics, warnings = uv.statistics, uv.warnings
 
         stage = A1SingleObjectStage.ANALYZE_MATERIALS
-        _progress(progress_callback, 65, stage, "Planning materials and textures", object_id)
+        _progress(
+            progress_callback,
+            65,
+            stage,
+            "Planning materials and textures",
+            object_id,
+        )
         texture = prepare_a1_texture_plan(uv, context=context, scene=scene)
         statistics, warnings = texture.statistics, texture.warnings
 
         stage = A1SingleObjectStage.BUILD_RIG
-        _progress(progress_callback, 82, stage, "Building Spine rig and document", object_id)
+        _progress(
+            progress_callback,
+            82,
+            stage,
+            "Building Spine rig and document",
+            object_id,
+        )
         document = prepare_a1_document(texture)
         statistics, warnings = document.statistics, document.warnings
 
@@ -102,7 +114,13 @@ def prepare_a1_object(
             warnings=warnings,
             statistics=statistics,
         )
-        _progress(progress_callback, 100, stage, "Object preparation complete", object_id)
+        _progress(
+            progress_callback,
+            100,
+            stage,
+            "Object preparation complete",
+            object_id,
+        )
         return prepared
     except A1ObjectPreparationError:
         raise
