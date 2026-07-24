@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any, Iterable, Tuple
 
+from ..application import A1ExportProgressCallback
 from ..domain.baking import (
     BakeArtifact,
     BakeExecutionResult,
@@ -97,6 +98,8 @@ def _reserve_camera_projection_outputs(
 def _stage_validated_camera_projection(
     runtime: CameraProjectionRuntime,
     transaction: AtomicFileTransaction,
+    *,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> CameraProjectionStageResult:
     """Reserve, render, restore state, derive crop, and rewrite staged frames."""
 
@@ -112,6 +115,7 @@ def _stage_validated_camera_projection(
     rendered = render_camera_projection_frames(
         runtime,
         reservations,
+        progress_callback=progress_callback,
     )
     request = build_camera_projection_postprocess_request(runtime)
     layout = process_projection_outputs(
@@ -132,6 +136,7 @@ def stage_camera_projection_outputs_detailed(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> CameraProjectionStageResult:
     """Validate and stage camera renders with one stable crop/hull layout."""
 
@@ -147,6 +152,7 @@ def stage_camera_projection_outputs_detailed(
         return _stage_validated_camera_projection(
             runtime,
             transaction,
+            progress_callback=progress_callback,
         )
     except CameraProjectionExecutionError:
         raise
@@ -219,6 +225,7 @@ def execute_camera_projection_plan(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> BakeExecutionResult:
     """Validate, stage, crop, commit exactly once, and return typed artifacts."""
 
@@ -236,6 +243,7 @@ def execute_camera_projection_plan(
             staged = _stage_validated_camera_projection(
                 runtime,
                 transaction,
+                progress_callback=progress_callback,
             )
             expected_commit_order = tuple(
                 reservation.final_path
