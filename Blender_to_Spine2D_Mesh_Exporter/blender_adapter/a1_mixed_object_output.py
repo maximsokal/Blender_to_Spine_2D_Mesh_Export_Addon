@@ -6,9 +6,12 @@ import logging
 from typing import Any, Tuple
 
 from ..application import (
+    A1ExportProgressCallback,
     A1MultiObjectExportSettings,
     A1MultiObjectStage,
     ExportResult,
+    emit_a1_export_progress,
+    scale_a1_export_progress_callback,
     validate_a1_realized_output_namespace,
 )
 from ..domain.spine import SpineSerializer
@@ -53,9 +56,21 @@ def export_a1_mixed_object(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> ExportResult:
     """Finalize both groups, compose once, serialize once, and commit atomically."""
 
+    emit_a1_export_progress(
+        progress_callback,
+        percent=0,
+        stage=A1MultiObjectStage.VALIDATE_REQUEST,
+        message="Starting mixed-object export",
+    )
+    preparation_progress = scale_a1_export_progress_callback(
+        progress_callback,
+        start_percent=5.0,
+        end_percent=55.0,
+    )
     try:
         prepared = prepare_a1_mixed_object(
             connected_sources,
@@ -63,6 +78,7 @@ def export_a1_mixed_object(
             settings,
             context=context,
             scene=scene,
+            progress_callback=preparation_progress,
         )
     except A1MultiObjectPreparationError as exc:
         return build_multi_object_failure_result(
@@ -89,6 +105,12 @@ def export_a1_mixed_object(
     stage = A1MultiObjectStage.VALIDATE_OUTPUTS
     statistics = dict(prepared.statistics)
     try:
+        emit_a1_export_progress(
+            progress_callback,
+            percent=58,
+            stage=stage,
+            message="Validating final mixed output namespace",
+        )
         prepared_partition = partition_mixed_prepared_objects(
             prepared.objects,
             connected_sources,
@@ -123,12 +145,18 @@ def export_a1_mixed_object(
             operation_name=_TRANSACTION_NAME
         ) as transaction:
             json_reservation = transaction.reserve(prepared.json_path)
+            staging_progress = scale_a1_export_progress_callback(
+                progress_callback,
+                start_percent=60.0,
+                end_percent=80.0,
+            )
             staged_objects = stage_and_finalize_a1_objects(
                 prepared,
                 transaction,
                 statistics,
                 context=context,
                 scene=scene,
+                progress_callback=staging_progress,
             )
             statistics = dict(staged_objects.statistics)
             finalized_partition = partition_mixed_prepared_objects(
@@ -139,6 +167,12 @@ def export_a1_mixed_object(
 
             grouped_stage = None
             if grouped_request is not None:
+                emit_a1_export_progress(
+                    progress_callback,
+                    percent=82,
+                    stage=stage,
+                    message="Staging grouped camera projection",
+                )
                 grouped_stage = stage_grouped_camera_projection_outputs(
                     grouped_request.source_objects,
                     grouped_request.plan,
@@ -149,6 +183,12 @@ def export_a1_mixed_object(
                 )
 
             stage = A1MultiObjectStage.COMPOSE_DOCUMENT
+            emit_a1_export_progress(
+                progress_callback,
+                percent=86,
+                stage=stage,
+                message="Composing mixed Spine document",
+            )
             composition = compose_a1_mixed_document(
                 connected_sources,
                 standalone_sources,
@@ -177,6 +217,12 @@ def export_a1_mixed_object(
                 )
 
             stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
+            emit_a1_export_progress(
+                progress_callback,
+                percent=93,
+                stage=stage,
+                message="Serializing Spine JSON",
+            )
             json_text = SpineSerializer().to_json(
                 document,
                 indent=settings.json_indent,
@@ -188,6 +234,12 @@ def export_a1_mixed_object(
             )
 
             stage = A1MultiObjectStage.COMMIT_OUTPUTS
+            emit_a1_export_progress(
+                progress_callback,
+                percent=98,
+                stage=stage,
+                message="Committing JSON and texture files",
+            )
             committed_paths = transaction.commit()
 
         grouped_reservations = (
@@ -207,6 +259,12 @@ def export_a1_mixed_object(
             "A1 mixed export completed (grouped_b4=%s): %s",
             grouped_request is not None,
             tuple(str(path) for path in committed_paths),
+        )
+        emit_a1_export_progress(
+            progress_callback,
+            percent=100,
+            stage=A1MultiObjectStage.COMMIT_OUTPUTS,
+            message="Export complete",
         )
         return ExportResult(
             success=True,
