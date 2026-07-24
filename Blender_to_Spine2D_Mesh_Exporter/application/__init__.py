@@ -1,6 +1,6 @@
 """Application use-case contracts for the rewrite pipeline."""
 
-from .a1_attachment_projection import (
+from .a1_attachment_projection_service import (
     A1AttachmentProjectionError,
     A1AttachmentProjectionResult,
     A1AttachmentProjectionSettings,
