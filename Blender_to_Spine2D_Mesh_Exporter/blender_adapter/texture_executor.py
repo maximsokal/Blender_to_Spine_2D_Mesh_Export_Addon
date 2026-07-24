@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Tuple
 
+from ..application import A1ExportProgressCallback
 from ..domain.baking import (
     BakeExecutionResult,
     BakeExecutionSettings,
@@ -123,6 +124,7 @@ def stage_texture_plan_outputs(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> TextureStageResult:
     """Stage one texture plan and retain camera-projection layout metadata."""
 
@@ -141,6 +143,7 @@ def stage_texture_plan_outputs(
             request.execution_settings,
             context=context,
             scene=scene,
+            progress_callback=progress_callback,
         )
         return TextureStageResult(staged.reservations, staged.layout)
     reservations = stage_object_bake_outputs(
@@ -151,6 +154,7 @@ def stage_texture_plan_outputs(
         request.execution_settings,
         context=context,
         scene=scene,
+        progress_callback=progress_callback,
     )
     return TextureStageResult(tuple(reservations))
 
@@ -163,6 +167,7 @@ def execute_bake_plan(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> BakeExecutionResult:
     """Execute one validated texture plan and atomically commit its outputs."""
 
@@ -179,6 +184,7 @@ def execute_bake_plan(
             request.execution_settings,
             context=context,
             scene=scene,
+            progress_callback=progress_callback,
         )
     return execute_object_bake_plan(
         request.source_object,
@@ -187,6 +193,7 @@ def execute_bake_plan(
         request.execution_settings,
         context=context,
         scene=scene,
+        progress_callback=progress_callback,
     )
 
 
