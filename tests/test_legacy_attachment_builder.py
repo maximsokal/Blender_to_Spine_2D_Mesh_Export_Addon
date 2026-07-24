@@ -41,6 +41,7 @@ def make_request(*, sequence=None):
         ),
         triangles=(0, 1, 2),
         hull=3,
+        # Rewrite topology uses logical attachment vertex indices internally.
         edges=(0, 1, 1, 2, 2, 0),
         sequence=sequence,
     )
@@ -94,8 +95,10 @@ def test_attachment_slot_skin_and_document_are_validated_together():
     assert result.slot.bone == "Triangle"
     assert result.slot.attachment == "Triangle_Segment_0"
     assert result.skin.name == "default"
-    assert result.skin.attachments["Triangle_Segment_0"]["Triangle_Segment_0"] \
+    assert (
+        result.skin.attachments["Triangle_Segment_0"]["Triangle_Segment_0"]
         is result.attachment
+    )
     assert result.attachment.path == "images/Triangle_Baked"
     assert result.attachment.uvs == (0.0, 0.0, 1.0, 0.0, 0.5, 1.0)
     assert result.attachment.triangles == (0, 1, 2)
@@ -104,7 +107,7 @@ def test_attachment_slot_skin_and_document_are_validated_together():
     assert SpineValidator().validate(result.document) == ()
 
 
-def test_serializer_emits_legacy_mesh_fields_without_post_merge():
+def test_serializer_emits_spine_42_mesh_edge_coordinate_offsets():
     result = build_legacy_mesh_attachment(make_rig(), make_request())
     data = SpineSerializer().to_dict(result.document)
     attachment = data["skins"][0]["attachments"]["Triangle_Segment_0"][
@@ -118,10 +121,12 @@ def test_serializer_emits_legacy_mesh_fields_without_post_merge():
         "vertices": list(result.attachment.vertices),
         "hull": 3,
         "path": "images/Triangle_Baked",
-        "edges": [0, 1, 1, 2, 2, 0],
+        # Spine JSON addresses interleaved x/y positions: vertex N -> N * 2.
+        "edges": [0, 2, 2, 4, 4, 0],
         "width": 100.0,
         "height": 100.0,
     }
+    assert all(value % 2 == 0 for value in attachment["edges"])
 
 
 def test_sequence_path_and_mapping_match_spine_42_contract():
@@ -169,7 +174,7 @@ def test_unknown_z_group_index_fails_before_weighted_stream_is_exposed():
         build_legacy_mesh_attachment(make_rig(), broken)
 
 
-def test_triangle_and_edge_indices_are_validated_at_request_boundary():
+def test_triangle_and_internal_edge_indices_are_validated_at_request_boundary():
     base = make_request()
     with pytest.raises(ValueError):
         LegacyMeshAttachmentRequest(
