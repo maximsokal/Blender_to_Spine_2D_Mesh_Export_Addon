@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Tuple
 
-from ..application import A1SingleObjectExportSettings, A1SingleObjectStage, ExportIssue
+from ..application import (
+    A1ExportProgressCallback,
+    A1SingleObjectExportSettings,
+    A1SingleObjectStage,
+    ExportIssue,
+    emit_a1_export_progress,
+)
 from .a1_document_preparation import prepare_a1_document
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
@@ -22,6 +28,7 @@ def prepare_a1_object(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> PreparedA1Object:
     """Run the four typed A1 preparation stages without writing output files."""
 
@@ -30,28 +37,61 @@ def prepare_a1_object(
     statistics: Mapping[str, StatisticsValue] = {}
     warnings: Tuple[ExportIssue, ...] = ()
     try:
+        emit_a1_export_progress(
+            progress_callback,
+            percent=0,
+            stage=stage,
+            message="Validating object export request",
+        )
+        emit_a1_export_progress(
+            progress_callback,
+            percent=10,
+            stage=A1SingleObjectStage.READ_GEOMETRY,
+            message="Reading and preparing source geometry",
+        )
         source = prepare_a1_source_geometry(source_obj, settings, scene=scene)
         object_id = source.object_id
         statistics = source.statistics
         warnings = source.warnings
 
         stage = A1SingleObjectStage.BUILD_TEXTURING_TOPOLOGY
+        emit_a1_export_progress(
+            progress_callback,
+            percent=45,
+            stage=stage,
+            message="Building texturing topology and UV layout",
+            object_id=object_id,
+        )
         uv = prepare_a1_uv(source, context=context, scene=scene)
         statistics = uv.statistics
         warnings = uv.warnings
 
         stage = A1SingleObjectStage.ANALYZE_MATERIALS
+        emit_a1_export_progress(
+            progress_callback,
+            percent=65,
+            stage=stage,
+            message="Analyzing materials and planning textures",
+            object_id=object_id,
+        )
         texture = prepare_a1_texture_plan(uv, context=context, scene=scene)
         statistics = texture.statistics
         warnings = texture.warnings
 
         stage = A1SingleObjectStage.BUILD_RIG
+        emit_a1_export_progress(
+            progress_callback,
+            percent=82,
+            stage=stage,
+            message="Building Spine rig and document",
+            object_id=object_id,
+        )
         document = prepare_a1_document(texture)
         statistics = document.statistics
         warnings = document.warnings
 
         stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
-        return PreparedA1Object(
+        prepared = PreparedA1Object(
             source_object=source.source_object,
             object_id=source.object_id,
             prefix=source.prefix,
@@ -70,6 +110,14 @@ def prepare_a1_object(
             warnings=warnings,
             statistics=statistics,
         )
+        emit_a1_export_progress(
+            progress_callback,
+            percent=100,
+            stage=stage,
+            message="Object preparation complete",
+            object_id=object_id,
+        )
+        return prepared
     except A1ObjectPreparationError:
         raise
     except Exception as exc:
