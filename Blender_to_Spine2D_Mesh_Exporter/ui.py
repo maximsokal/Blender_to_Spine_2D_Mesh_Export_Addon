@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from math import isfinite
 import os
 from typing import Callable, Set
 
@@ -138,7 +139,47 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
 
     @staticmethod
     def _scale_applied(obj: bpy.types.Object, tolerance: float = 1e-4) -> bool:
+        """Compatibility helper retained for external callers and source tests."""
+
         return all(abs(float(value) - 1.0) < tolerance for value in obj.scale)
+
+    @staticmethod
+    def _world_linear_transform_status(
+        obj: bpy.types.Object,
+        tolerance: float = 1.0e-12,
+    ) -> tuple[bool, bool, float]:
+        """Return ``(is_singular, requires_normalization, determinant)``."""
+
+        linear = obj.matrix_world.to_3x3()
+        values = tuple(
+            float(linear[row][column])
+            for row in range(3)
+            for column in range(3)
+        )
+        determinant = float(linear.determinant())
+        coefficient_scale = max(1.0, *(abs(value) for value in values))
+        threshold = tolerance * coefficient_scale**3
+        is_singular = (
+            not isfinite(determinant)
+            or not isfinite(threshold)
+            or abs(determinant) <= threshold
+        )
+        identity = (
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        )
+        requires_normalization = any(
+            actual != expected
+            for actual, expected in zip(values, identity, strict=True)
+        )
+        return is_singular, requires_normalization, determinant
 
     @staticmethod
     def _face_orientation_stats(obj: bpy.types.Object) -> tuple[int, int]:
@@ -204,13 +245,28 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         else:
             box.label(text=f"Vertex count: {vertex_count}", icon="INFO")
 
-        export_allowed = True
-        if not self._scale_applied(obj):
+        is_singular, requires_normalization, determinant = (
+            self._world_linear_transform_status(obj)
+        )
+        export_allowed = not is_singular
+        if is_singular:
             box.label(
-                text="Scale is not applied (Apply > All Transforms)",
+                text=(
+                    "Object transform is singular; set every scale axis to a "
+                    "non-zero value"
+                ),
                 icon="ERROR",
             )
-            export_allowed = False
+        elif requires_normalization:
+            box.label(
+                text="Rotation/scale will be normalized during export",
+                icon="INFO",
+            )
+            if determinant < 0.0:
+                box.label(
+                    text="Mirrored transform will preserve mirrored winding",
+                    icon="INFO",
+                )
 
         self._list_materials(box, obj)
         statistics = obj.get("_spine2d_face_stats")
