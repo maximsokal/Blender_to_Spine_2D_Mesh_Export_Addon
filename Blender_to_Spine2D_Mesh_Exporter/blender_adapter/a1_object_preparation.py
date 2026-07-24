@@ -54,29 +54,33 @@ def prepare_a1_object(
     warnings: Tuple[ExportIssue, ...] = ()
     try:
         _progress(progress_callback, 0, stage, "Validating object export request")
-        _progress(progress_callback, 10, A1SingleObjectStage.READ_GEOMETRY, "Reading and preparing source geometry")
+        _progress(
+            progress_callback,
+            10,
+            A1SingleObjectStage.READ_GEOMETRY,
+            "Reading and preparing source geometry",
+        )
         source = prepare_a1_source_geometry(source_obj, settings, scene=scene)
-        object_id = source.object_id
-        statistics = source.statistics
-        warnings = source.warnings
+        object_id, statistics, warnings = (
+            source.object_id,
+            source.statistics,
+            source.warnings,
+        )
 
         stage = A1SingleObjectStage.BUILD_TEXTURING_TOPOLOGY
-        _progress(progress_callback, 45, stage, "Building texturing topology and UV layout", object_id)
+        _progress(progress_callback, 45, stage, "Building topology and UV", object_id)
         uv = prepare_a1_uv(source, context=context, scene=scene)
-        statistics = uv.statistics
-        warnings = uv.warnings
+        statistics, warnings = uv.statistics, uv.warnings
 
         stage = A1SingleObjectStage.ANALYZE_MATERIALS
-        _progress(progress_callback, 65, stage, "Analyzing materials and planning textures", object_id)
+        _progress(progress_callback, 65, stage, "Planning materials and textures", object_id)
         texture = prepare_a1_texture_plan(uv, context=context, scene=scene)
-        statistics = texture.statistics
-        warnings = texture.warnings
+        statistics, warnings = texture.statistics, texture.warnings
 
         stage = A1SingleObjectStage.BUILD_RIG
         _progress(progress_callback, 82, stage, "Building Spine rig and document", object_id)
         document = prepare_a1_document(texture)
-        statistics = document.statistics
-        warnings = document.warnings
+        statistics, warnings = document.statistics, document.warnings
 
         stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
         prepared = PreparedA1Object(
