@@ -66,6 +66,30 @@ def _assert_pair_close(
         raise AssertionError(f"{label} differs: first={first}, second={second}")
 
 
+def _datablock_counts() -> dict[str, int]:
+    """Capture every Blender datablock family allocated by this preparation path."""
+
+    return {
+        "objects": len(bpy.data.objects),
+        "meshes": len(bpy.data.meshes),
+        "collections": len(bpy.data.collections),
+        "textures": len(bpy.data.textures),
+        "materials": len(bpy.data.materials),
+        "images": len(bpy.data.images),
+        "node_groups": len(bpy.data.node_groups),
+    }
+
+
+def _context_signature() -> tuple[str | None, tuple[str, ...], str | None]:
+    """Return the active object, selection, and mode visible to Blender operators."""
+
+    active = bpy.context.view_layer.objects.active
+    active_name = None if active is None else str(active.name)
+    active_mode = None if active is None else str(active.mode).upper()
+    selected_names = tuple(sorted(str(obj.name) for obj in bpy.context.selected_objects))
+    return active_name, selected_names, active_mode
+
+
 def _create_source(
     name: str,
     *,
@@ -309,11 +333,8 @@ def main() -> None:
             f"Blender 5.2+ is required, running {tuple(bpy.app.version)}"
         )
 
-    initial_counts = (
-        len(bpy.data.objects),
-        len(bpy.data.meshes),
-        len(bpy.data.textures),
-    )
+    initial_counts = _datablock_counts()
+    initial_context = _context_signature()
     mirrored = None
     evaluated = None
     displace_texture = None
@@ -425,14 +446,18 @@ def main() -> None:
         for obj in bpy.data.objects
     ):
         raise AssertionError("Temporary origin-offset target object leaked")
-    final_counts = (
-        len(bpy.data.objects),
-        len(bpy.data.meshes),
-        len(bpy.data.textures),
-    )
+
+    final_counts = _datablock_counts()
     if final_counts != initial_counts:
         raise AssertionError(
-            f"Blender datablock cleanup mismatch: initial={initial_counts}, final={final_counts}"
+            f"Blender datablock cleanup mismatch: initial={initial_counts}, "
+            f"final={final_counts}"
+        )
+    final_context = _context_signature()
+    if final_context != initial_context:
+        raise AssertionError(
+            f"Blender operator context was not restored: initial={initial_context}, "
+            f"final={final_context}"
         )
     print("Blender 5.2 A1 Object Origin offset integration passed")
 
