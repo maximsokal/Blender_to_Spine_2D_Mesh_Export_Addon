@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from Blender_to_Spine2D_Mesh_Exporter.application import (
+    A1MeshBounds,
     A1SingleObjectExportSettings,
     ExportSettings,
     calculate_a1_object_bake_main_position_pixels,
@@ -179,6 +180,44 @@ def test_object_bake_main_position_rejects_invalid_contract_types():
             snapshot,
             settings,
             bounds=object(),
+        )
+
+
+def test_object_bake_main_position_rejects_non_finite_or_inverted_bounds():
+    snapshot = build_square_snapshot()
+    settings = _settings()
+
+    with pytest.raises(ValueError, match=r"bounds\.center_x.*finite"):
+        calculate_a1_object_bake_main_position_pixels(
+            snapshot,
+            settings,
+            bounds=A1MeshBounds(0.0, 1.0, 0.0, 1.0, float("nan"), 0.5),
+        )
+    with pytest.raises(ValueError, match="minimum_x cannot exceed"):
+        calculate_a1_object_bake_main_position_pixels(
+            snapshot,
+            settings,
+            bounds=A1MeshBounds(2.0, 1.0, 0.0, 1.0, 1.5, 0.5),
+        )
+
+
+def test_object_bake_main_position_rejects_inconsistent_cached_center():
+    with pytest.raises(ValueError, match="center_x must be the midpoint"):
+        calculate_a1_object_bake_main_position_pixels(
+            build_square_snapshot(),
+            _settings(),
+            bounds=A1MeshBounds(0.0, 1.0, 0.0, 1.0, 0.25, 0.5),
+        )
+
+
+def test_object_bake_main_position_rejects_derived_coordinate_overflow():
+    huge = 1.0e308
+
+    with pytest.raises(ValueError, match="object_bake_main_x must be finite"):
+        calculate_a1_object_bake_main_position_pixels(
+            build_square_snapshot(),
+            _settings(),
+            bounds=A1MeshBounds(huge, huge, 0.0, 0.0, huge, 0.0),
         )
 
 
