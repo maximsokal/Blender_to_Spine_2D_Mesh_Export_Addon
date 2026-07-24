@@ -116,6 +116,20 @@ def _determinant(matrix: Matrix3x3) -> float:
     )
 
 
+def _relative_determinant(matrix: Matrix3x3, determinant: float) -> float:
+    """Normalize determinant by axis magnitudes to measure linear dependence."""
+
+    a, b, c, d, e, f, g, h, i = matrix
+    first_length = sqrt(a * a + d * d + g * g)
+    second_length = sqrt(b * b + e * e + h * h)
+    third_length = sqrt(c * c + f * f + i * i)
+    scale_product = first_length * second_length * third_length
+    if not isfinite(scale_product) or scale_product <= 0.0:
+        return 0.0
+    result = abs(determinant) / scale_product
+    return result if isfinite(result) else 0.0
+
+
 def _cofactor_matrix(matrix: Matrix3x3) -> Matrix3x3:
     """Return the oriented normal transform ``det(A) * inverse(A).T``."""
 
@@ -206,12 +220,12 @@ def normalize_mesh_snapshot_world_transform(
 
     linear, translation = _matrix_parts(snapshot.world_matrix)
     determinant = float(_determinant(linear))
-    coefficient_scale = max(1.0, *(abs(value) for value in linear))
-    determinant_limit = float(singular_tolerance) * coefficient_scale**3
-    if not isfinite(determinant_limit) or abs(determinant) <= determinant_limit:
+    relative_determinant = _relative_determinant(linear, determinant)
+    if relative_determinant <= float(singular_tolerance):
         raise MeshWorldTransformError(
             "Object world transform is singular or numerically unstable; "
-            f"determinant={determinant}, threshold={determinant_limit}"
+            f"determinant={determinant}, relative_determinant={relative_determinant}, "
+            f"threshold={float(singular_tolerance)}"
         )
 
     translation_only = _translation_matrix(translation)
