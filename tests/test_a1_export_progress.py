@@ -8,7 +8,9 @@ import pytest
 
 from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1ExportProgressUpdate,
+    a1_frame_progress_percent,
     emit_a1_export_progress,
+    emit_a1_frame_progress,
     scale_a1_export_progress_callback,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import a1_ui_router
@@ -31,6 +33,46 @@ def test_progress_update_validates_percentage_and_object_position():
         )
     with pytest.raises(ValueError, match="boundary whitespace"):
         A1ExportProgressUpdate(percent=10, stage=" TEST", message="Testing")
+
+
+def test_frame_progress_counts_only_completed_physical_frames():
+    assert a1_frame_progress_percent(1, 60, completed=False) == 0
+    assert a1_frame_progress_percent(17, 60, completed=False) == 27
+    assert a1_frame_progress_percent(17, 60, completed=True) == 28
+    assert a1_frame_progress_percent(60, 60, completed=False) == 98
+    assert a1_frame_progress_percent(60, 60, completed=True) == 100
+
+    with pytest.raises(TypeError, match="frame_index must be int"):
+        a1_frame_progress_percent(True, 60, completed=False)
+    with pytest.raises(ValueError, match="frame_count must be positive"):
+        a1_frame_progress_percent(1, 0, completed=False)
+    with pytest.raises(ValueError, match=r"\[1, frame_count\]"):
+        a1_frame_progress_percent(61, 60, completed=False)
+    with pytest.raises(TypeError, match="completed must be bool"):
+        a1_frame_progress_percent(1, 60, completed=1)
+
+
+def test_frame_progress_emits_exact_ui_message_and_object_id():
+    received: list[A1ExportProgressUpdate] = []
+
+    emit_a1_frame_progress(
+        received.append,
+        stage="BAKE_FRAME",
+        action="Baking",
+        frame_index=17,
+        frame_count=60,
+        completed=False,
+        object_id="Body",
+    )
+
+    assert received == [
+        A1ExportProgressUpdate(
+            percent=27,
+            stage="BAKE_FRAME",
+            message="Baking frame 17/60",
+            object_id="Body",
+        )
+    ]
 
 
 def test_scaled_progress_maps_child_range_and_metadata():
@@ -60,6 +102,39 @@ def test_scaled_progress_maps_child_range_and_metadata():
             stage="READ_GEOMETRY",
             message="Preparing: Reading geometry",
             object_id="Component",
+            object_index=2,
+            object_count=4,
+        )
+    ]
+
+
+def test_scaled_frame_progress_preserves_message_and_maps_percentage():
+    received: list[A1ExportProgressUpdate] = []
+    scaled = scale_a1_export_progress_callback(
+        received.append,
+        start_percent=65.0,
+        end_percent=80.0,
+        object_index=2,
+        object_count=4,
+    )
+    assert scaled is not None
+
+    emit_a1_frame_progress(
+        scaled,
+        stage="BAKE_FRAME",
+        action="Baking",
+        frame_index=17,
+        frame_count=60,
+        completed=False,
+        object_id="Body",
+    )
+
+    assert received == [
+        A1ExportProgressUpdate(
+            percent=69,
+            stage="BAKE_FRAME",
+            message="Baking frame 17/60",
+            object_id="Body",
             object_index=2,
             object_count=4,
         )
@@ -121,9 +196,9 @@ def test_blender_progress_session_balances_lifecycle_and_clamps_regressions():
         )
         callback(
             A1ExportProgressUpdate(
-                percent=80,
-                stage="STAGE_OUTPUTS",
-                message="Staging textures",
+                percent=71,
+                stage="BAKE_FRAME",
+                message="Baking frame 17/60",
                 object_id="Body",
                 object_index=1,
                 object_count=2,
@@ -131,10 +206,10 @@ def test_blender_progress_session_balances_lifecycle_and_clamps_regressions():
         )
 
     assert begin_calls == [(0.0, 100.0)]
-    assert update_calls == [40.0, 40.0, 80.0]
+    assert update_calls == [40.0, 40.0, 71.0]
     assert end_calls == [True]
     assert status_calls[0].startswith("Spine2D export: 0%")
-    assert "80% [1/2]" in status_calls[-2]
+    assert "71% [1/2] — Baking frame 17/60" in status_calls[-2]
     assert status_calls[-1] is None
     assert len(redraw_calls) >= 2
 
