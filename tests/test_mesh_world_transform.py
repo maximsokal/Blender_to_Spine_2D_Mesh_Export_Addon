@@ -69,8 +69,14 @@ def test_rotation_non_uniform_scale_and_translation_preserve_world_geometry():
         (-3.0, 2.0, 0.0),
         (-3.0, 0.0, 0.0),
     )
-    assert all(vertex.normal == (0.0, 0.0, 1.0) for vertex in result.snapshot.vertices)
-    assert all(face.normal == (0.0, 0.0, 1.0) for face in result.snapshot.faces)
+    assert all(
+        vertex.normal == (0.0, 0.0, 1.0)
+        for vertex in result.snapshot.vertices
+    )
+    assert all(
+        face.normal == (0.0, 0.0, 1.0)
+        for face in result.snapshot.faces
+    )
 
     for old_vertex, new_vertex in zip(
         source.vertices,
@@ -121,8 +127,44 @@ def test_mirrored_transform_preserves_oriented_winding_normals():
         (-2.0, 3.0, 0.0),
         (0.0, 3.0, 0.0),
     )
-    assert all(vertex.normal == (0.0, 0.0, -1.0) for vertex in result.snapshot.vertices)
-    assert all(face.normal == (0.0, 0.0, -1.0) for face in result.snapshot.faces)
+    assert all(
+        vertex.normal == (0.0, 0.0, -1.0)
+        for vertex in result.snapshot.vertices
+    )
+    assert all(
+        face.normal == (0.0, 0.0, -1.0)
+        for face in result.snapshot.faces
+    )
+
+
+def test_large_valid_non_uniform_scale_is_not_misclassified_as_singular():
+    source = replace(
+        build_square_snapshot(),
+        world_matrix=(
+            1_000_000.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ),
+    )
+
+    result = normalize_mesh_snapshot_world_transform(source)
+
+    assert result.changed is True
+    assert result.determinant == pytest.approx(1_000_000.0)
+    assert result.snapshot.vertices[1].position == (1_000_000.0, 0.0, 0.0)
 
 
 def test_translation_only_snapshot_is_returned_without_geometry_rebuild():
