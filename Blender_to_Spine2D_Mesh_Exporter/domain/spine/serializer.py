@@ -21,6 +21,7 @@ from .model import (
     TransformConstraint,
 )
 from .sequence_timeline_contract import validate_animation_sequence_timelines
+from .serialization_validator import SpineSerializationValidator
 from .setup_attachment_contract import SetupAttachmentNameIndex
 from .setup_slot_contract import SetupSlotIndex
 from .slot_color_timeline_contract import (
@@ -63,7 +64,7 @@ class SpineSerializer:
     def __init__(self, validator: SpineValidator | None = None) -> None:
         if validator is not None and not isinstance(validator, SpineValidator):
             raise TypeError("validator must be SpineValidator or None")
-        self._validator = validator or SpineValidator()
+        self._validator = validator or SpineSerializationValidator()
 
     def bone_to_dict(self, bone: Bone, *, path: str = "bone") -> dict[str, Any]:
         data: dict[str, Any] = {"name": bone.name}
