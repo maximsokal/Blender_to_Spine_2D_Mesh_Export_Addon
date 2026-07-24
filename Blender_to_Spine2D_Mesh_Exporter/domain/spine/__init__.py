@@ -1,5 +1,11 @@
 """Typed Spine 4.2 document model and validation utilities."""
 
+from .attachment_sequence_animation import (
+    AttachmentSequenceAnimationError,
+    DEFAULT_SEQUENCE_FRAME_DELAY,
+    apply_attachment_sequence_animations,
+    build_attachment_sequence_timeline,
+)
 from .composition_service import (
     AnimationNameAssignment,
     ComponentBoneIndexMap,
@@ -83,6 +89,7 @@ __all__ = [
     "A1ParitySettings",
     "A1ParitySeverity",
     "AnimationNameAssignment",
+    "AttachmentSequenceAnimationError",
     "Bone",
     "ComponentBoneIndexMap",
     "ConnectedConstraintSchedule",
@@ -94,6 +101,7 @@ __all__ = [
     "ConnectedZLayer",
     "ConstraintOrderAssignment",
     "ConstraintOrderPolicy",
+    "DEFAULT_SEQUENCE_FRAME_DELAY",
     "IKConstraint",
     "LegacyAttachmentComponent",
     "LegacyAttachmentSequence",
@@ -126,7 +134,9 @@ __all__ = [
     "UniformScaleMode",
     "WeightedVertex",
     "WeightedVertexInfluence",
+    "apply_attachment_sequence_animations",
     "apply_legacy_visual_options",
+    "build_attachment_sequence_timeline",
     "build_connected_group_document",
     "build_legacy_control_slots_and_attachments",
     "build_legacy_fingerprint",
