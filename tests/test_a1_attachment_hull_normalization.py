@@ -130,5 +130,35 @@ def test_zero_area_triangle_in_spine_pixel_space_is_rejected():
         request=replace(projection.request, vertices=collapsed_vertices),
     )
 
-    with pytest.raises(A1AttachmentProjectionError, match="zero area"):
+    with pytest.raises(A1AttachmentProjectionError, match="area tolerance"):
         normalize_a1_attachment_projection_hull(collapsed)
+
+
+def test_nearly_collapsed_large_triangle_is_rejected_scale_relatively():
+    projection = _concave_projection()
+    scaled_vertices = tuple(
+        replace(
+            vertex,
+            bone_position_pixels=(
+                float(vertex.bone_position_pixels[0]) * 4096.0,
+                float(vertex.bone_position_pixels[1]) * 4096.0,
+            ),
+        )
+        for vertex in projection.request.vertices
+    )
+    nearly_collapsed_vertices = tuple(
+        replace(vertex, bone_position_pixels=(4096.0, 1.0e-8))
+        if vertex.index == 3
+        else vertex
+        for vertex in scaled_vertices
+    )
+    nearly_collapsed = replace(
+        projection,
+        request=replace(
+            projection.request,
+            vertices=nearly_collapsed_vertices,
+        ),
+    )
+
+    with pytest.raises(A1AttachmentProjectionError, match="area tolerance"):
+        normalize_a1_attachment_projection_hull(nearly_collapsed)
