@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Tuple
 
+from ..application import A1ExportProgressCallback, emit_a1_frame_progress
 from ..infrastructure import AtomicOutputReservation
 from .camera_projection_error import CameraProjectionExecutionError
 from .camera_projection_execution import _call_render_operator
@@ -51,6 +52,8 @@ def require_nonempty_grouped_staged_output(
 def render_grouped_camera_projection_frames(
     runtime: GroupedCameraProjectionRuntime,
     reservations: Tuple[AtomicOutputReservation, ...],
+    *,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> Tuple[AtomicOutputReservation, ...]:
     """Render all grouped frames and restore Scene state before returning."""
 
@@ -61,6 +64,7 @@ def render_grouped_camera_projection_frames(
         runtime.plan,
         reservations,
     )
+    frame_count = len(runtime.plan.frame_tasks)
 
     with preserve_camera_projection_state(runtime.scene):
         configure_group_camera_visibility(
@@ -68,11 +72,19 @@ def render_grouped_camera_projection_frames(
             runtime.scene,
         )
 
-        for task, reservation in zip(
-            runtime.plan.frame_tasks,
-            resolved,
-            strict=True,
+        for frame_index, (task, reservation) in enumerate(
+            zip(runtime.plan.frame_tasks, resolved, strict=True),
+            start=1,
         ):
+            emit_a1_frame_progress(
+                progress_callback,
+                stage="GROUPED_CAMERA_RENDER_FRAME",
+                action="Rendering grouped",
+                frame_index=frame_index,
+                frame_count=frame_count,
+                completed=False,
+                object_id=runtime.plan.group_id,
+            )
             set_timeline_frame(
                 runtime.scene,
                 runtime.context,
@@ -88,8 +100,8 @@ def render_grouped_camera_projection_frames(
                 "Rendering grouped projection '%s' frame %d/%d camera='%s' "
                 "sources=%s dynamic_range=%s tone_mapping=%s alpha=%s",
                 runtime.plan.group_id,
-                task.task_index + 1,
-                len(runtime.plan.frame_tasks),
+                frame_index,
+                frame_count,
                 runtime.plan.camera_object_id,
                 runtime.plan.source_object_ids,
                 runtime.output_policy.dynamic_range.value,
@@ -98,6 +110,15 @@ def render_grouped_camera_projection_frames(
             )
             _call_render_operator(runtime.bpy_module)
             require_nonempty_grouped_staged_output(reservation)
+            emit_a1_frame_progress(
+                progress_callback,
+                stage="GROUPED_CAMERA_RENDER_FRAME",
+                action="Rendered grouped",
+                frame_index=frame_index,
+                frame_count=frame_count,
+                completed=True,
+                object_id=runtime.plan.group_id,
+            )
 
     return resolved
 
