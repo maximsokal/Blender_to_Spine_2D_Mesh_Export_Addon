@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.connected_group_contracts import (
@@ -62,10 +64,7 @@ def test_connected_component_draw_order_is_back_to_front_by_z_layer():
         _placement(middle, layer_index=1, relative_z=0.0),
         _placement(back, layer_index=2, relative_z=-1.0),
     )
-    composed = _document(
-        "Combined",
-        (),
-    )
+    composed = _document("Combined", ())
     composed = SpineDocument(
         skeleton=composed.skeleton,
         bones=composed.bones,
@@ -143,4 +142,31 @@ def test_draw_order_rejects_missing_or_unknown_placement_ownership():
             ),
             (first, second),
             (_placement(first, layer_index=0, relative_z=0.0),),
+        )
+
+
+def test_connected_draw_order_rejects_existing_unrebased_draworder_timeline():
+    item = _object("object", "Object", ("mesh",), 0.0)
+    animated_document = replace(
+        item.document,
+        animations={
+            "animation": {
+                "draworder": [
+                    {
+                        "time": 0.0,
+                        "offsets": [
+                            {"slot": "Object_mesh", "offset": 0},
+                        ],
+                    },
+                ],
+            },
+        },
+    )
+    animated_item = replace(item, document=animated_document)
+
+    with pytest.raises(ConnectedGroupBuildError, match="explicitly rebased"):
+        apply_connected_setup_draw_order(
+            animated_document,
+            (animated_item,),
+            (_placement(animated_item, layer_index=0, relative_z=0.0),),
         )
