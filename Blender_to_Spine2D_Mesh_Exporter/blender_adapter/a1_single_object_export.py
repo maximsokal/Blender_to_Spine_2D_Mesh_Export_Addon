@@ -12,9 +12,12 @@ import logging
 from typing import Any
 
 from ..application import (
+    A1ExportProgressCallback,
     A1SingleObjectExportSettings,
     A1SingleObjectStage,
     ExportResult,
+    emit_a1_export_progress,
+    scale_a1_export_progress_callback,
 )
 from ..domain.spine import SpineSerializer
 from ..infrastructure import (
@@ -38,6 +41,7 @@ def export_a1_single_object(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> ExportResult:
     """Prepare, stage textures, finalize JSON, and atomically commit one export.
 
@@ -47,12 +51,24 @@ def export_a1_single_object(
     a camera render has produced the final sequence-union crop and screen-space hull.
     """
 
+    emit_a1_export_progress(
+        progress_callback,
+        percent=0,
+        stage=A1SingleObjectStage.VALIDATE_REQUEST,
+        message="Starting single-object export",
+    )
+    preparation_progress = scale_a1_export_progress_callback(
+        progress_callback,
+        start_percent=5.0,
+        end_percent=60.0,
+    )
     try:
         prepared = prepare_a1_object(
             source_obj,
             settings,
             context=context,
             scene=scene,
+            progress_callback=preparation_progress,
         )
     except A1ObjectPreparationError as exc:
         return build_a1_failure_result(
@@ -77,6 +93,13 @@ def export_a1_single_object(
     stage = A1SingleObjectStage.STAGE_OUTPUTS
     statistics = dict(prepared.statistics)
     try:
+        emit_a1_export_progress(
+            progress_callback,
+            percent=65,
+            stage=stage,
+            message="Staging texture outputs",
+            object_id=prepared.object_id,
+        )
         with atomic_file_transaction(operation_name="a1-single-object") as output_transaction:
             json_reservation = output_transaction.reserve(
                 prepared.output_paths.json_path
@@ -92,11 +115,25 @@ def export_a1_single_object(
             )
 
             stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
+            emit_a1_export_progress(
+                progress_callback,
+                percent=82,
+                stage=stage,
+                message="Finalizing render-derived attachment layout",
+                object_id=prepared.object_id,
+            )
             finalized = finalize_prepared_camera_projection(
                 prepared,
                 texture_stage.projection_layout,
             )
             statistics = dict(finalized.statistics)
+            emit_a1_export_progress(
+                progress_callback,
+                percent=90,
+                stage=stage,
+                message="Serializing Spine JSON",
+                object_id=prepared.object_id,
+            )
             json_text = SpineSerializer().to_json(
                 finalized.document,
                 indent=settings.json_indent,
@@ -108,6 +145,13 @@ def export_a1_single_object(
             )
 
             stage = A1SingleObjectStage.COMMIT_OUTPUTS
+            emit_a1_export_progress(
+                progress_callback,
+                percent=97,
+                stage=stage,
+                message="Committing JSON and texture files",
+                object_id=prepared.object_id,
+            )
             committed_paths = output_transaction.commit()
 
         expected_paths = (
@@ -123,6 +167,13 @@ def export_a1_single_object(
             "A1 single-object export completed for '%s': %s",
             finalized.object_id,
             tuple(str(path) for path in committed_paths),
+        )
+        emit_a1_export_progress(
+            progress_callback,
+            percent=100,
+            stage=A1SingleObjectStage.COMMIT_OUTPUTS,
+            message="Export complete",
+            object_id=finalized.object_id,
         )
         return ExportResult(
             success=True,
