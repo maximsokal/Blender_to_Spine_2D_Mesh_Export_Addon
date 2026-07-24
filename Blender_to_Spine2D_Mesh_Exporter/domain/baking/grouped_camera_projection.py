@@ -1,4 +1,4 @@
-"""Immutable planning for one depth-correct camera render of connected B4 objects."""
+"""Immutable planning for one static camera render of connected A1 objects."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from .model import BakeFrameTask, BakeSettings, sanitize_filename_stem
 
 
 class GroupedCameraProjectionPlanError(ValueError):
-    """Raised when connected B4 plans cannot share one camera render contract."""
+    """Raised when connected camera plans cannot share one render contract."""
 
 
 @dataclass(frozen=True, slots=True)
 class GroupedCameraProjectionPlan:
-    """One staged image sequence containing all connected B4 sources together."""
+    """One staged image sequence containing all connected camera sources together."""
 
     group_id: str
     source_object_ids: Tuple[str, ...]
@@ -168,14 +168,14 @@ def build_grouped_camera_projection_plan(
             incompatibilities.append(f"plan[{index}].transparent_background")
     if incompatibilities:
         raise GroupedCameraProjectionPlanError(
-            "connected B4 plans do not share one render contract: "
+            "connected camera plans do not share one render contract: "
             + ", ".join(incompatibilities)
         )
 
     source_ids = tuple(plan.source_object_id for plan in plans)
     if len(source_ids) != len(set(source_ids)):
         raise GroupedCameraProjectionPlanError(
-            "connected B4 plans contain duplicate source_object_id values"
+            "connected camera plans contain duplicate source_object_id values"
         )
 
     settings = replace(
