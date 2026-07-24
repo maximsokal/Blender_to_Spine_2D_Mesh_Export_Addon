@@ -43,7 +43,14 @@ def apply_object_placements(
     placements: Tuple[ConnectedObjectPlacement, ...],
     uniform_scale: float,
 ) -> SpineDocument:
-    """Reparent object main bones to resolved layers and apply XY offsets."""
+    """Reparent object main bones and replace absolute XY with anchor-relative offsets.
+
+    Standalone Rewrite documents place ``<prefix>_main`` at the Blender object's
+    absolute world translation. Connected layout already resolves every object relative
+    to the selected anchor and the global ``all_objects_main`` remains at the origin.
+    Keeping the old main-bone Y and then adding ``relative_y`` would therefore apply the
+    world translation twice. Both X and Y are replaced symmetrically here.
+    """
 
     placement_by_main = {
         placement.main_bone_name: placement for placement in placements
@@ -61,10 +68,7 @@ def apply_object_placements(
                 bone,
                 parent=placement.parent_layer_bone_name,
                 x=round(placement.relative_x * uniform_scale, 2),
-                y=round(
-                    (bone.y or 0.0) + placement.relative_y * uniform_scale,
-                    2,
-                ),
+                y=round(placement.relative_y * uniform_scale, 2),
             )
         )
     missing = set(placement_by_main) - found
