@@ -7,6 +7,11 @@ import logging
 from types import MappingProxyType
 from typing import Any, Mapping, Tuple
 
+from ..application import (
+    A1ExportProgressCallback,
+    A1MultiObjectStage,
+    emit_a1_export_progress,
+)
 from ..infrastructure import AtomicFileTransaction, AtomicOutputReservation
 from .a1_multi_object_contracts import (
     PreparedA1MultiObject,
@@ -48,6 +53,7 @@ def stage_and_finalize_a1_objects(
     *,
     context: Any | None = None,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> A1StagedFinalizedObjects:
     """Stage every object texture plan and apply its render-derived final layout."""
 
@@ -61,7 +67,27 @@ def stage_and_finalize_a1_objects(
     resolved_statistics: dict[str, StatisticsValue] = dict(statistics)
     reservations: list[AtomicOutputReservation] = []
     finalized_objects: list[PreparedA1Object] = []
-    for source, item in zip(prepared.sources, prepared.objects, strict=True):
+    object_count = len(prepared.objects)
+    emit_a1_export_progress(
+        progress_callback,
+        percent=0,
+        stage=A1MultiObjectStage.STAGE_OUTPUTS,
+        message="Starting texture staging",
+    )
+    for index, (source, item) in enumerate(
+        zip(prepared.sources, prepared.objects, strict=True)
+    ):
+        start_percent = int(round(index * 100.0 / object_count))
+        end_percent = int(round((index + 1) * 100.0 / object_count))
+        emit_a1_export_progress(
+            progress_callback,
+            percent=start_percent,
+            stage=A1MultiObjectStage.STAGE_OUTPUTS,
+            message=f"Staging textures for {item.object_id}",
+            object_id=source.component_id,
+            object_index=index + 1,
+            object_count=object_count,
+        )
         staged = stage_texture_plan_outputs(
             item.source_object,
             item.bake_target_snapshot,
@@ -81,6 +107,15 @@ def stage_and_finalize_a1_objects(
             resolved_statistics,
             source.component_id,
             finalized.statistics,
+        )
+        emit_a1_export_progress(
+            progress_callback,
+            percent=end_percent,
+            stage=A1MultiObjectStage.STAGE_OUTPUTS,
+            message=f"Textures staged for {item.object_id}",
+            object_id=source.component_id,
+            object_index=index + 1,
+            object_count=object_count,
         )
 
     result = A1StagedFinalizedObjects(
