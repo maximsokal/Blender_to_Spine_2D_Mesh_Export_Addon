@@ -40,6 +40,30 @@ def test_bmesh_create_cube_roundtrip_frees_owned_bmesh(clean_blender_data):
     assert len(mesh.polygons) == 6
 
 
+def test_from_edit_mesh_returns_borrowed_bmesh_and_restores_object_mode(quad_object):
+    original_x = float(quad_object.data.vertices[0].co.x)
+    borrowed_bmesh = None
+    try:
+        result = bpy.ops.object.mode_set(mode="EDIT")
+        assert "FINISHED" in result
+        borrowed_bmesh = bmesh.from_edit_mesh(quad_object.data)
+        borrowed_bmesh.verts.ensure_lookup_table()
+        borrowed_bmesh.verts[0].co.x = original_x - 0.25
+        bmesh.update_edit_mesh(
+            quad_object.data,
+            loop_triangles=False,
+            destructive=False,
+        )
+    finally:
+        # Never call bm.free() for the BMesh borrowed from bmesh.from_edit_mesh().
+        if quad_object.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+
+    assert borrowed_bmesh is not None
+    assert quad_object.mode == "OBJECT"
+    assert float(quad_object.data.vertices[0].co.x) == original_x - 0.25
+
+
 def test_real_depsgraph_updates_linked_mesh(quad_object):
     depsgraph = bpy.context.evaluated_depsgraph_get()
     depsgraph.update()
