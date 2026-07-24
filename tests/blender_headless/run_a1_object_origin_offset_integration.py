@@ -21,10 +21,18 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from Blender_to_Spine2D_Mesh_Exporter.application import (  # noqa: E402
+    A1MultiObjectExportSettings,
+    A1MultiObjectMode,
     A1SingleObjectExportSettings,
     A1SourceGeometryMode,
     ExportSettings,
     calculate_a1_object_bake_main_position_pixels,
+)
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_multi_object_composition import (  # noqa: E402
+    compose_a1_multi_object_document,
+)
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_multi_object_contracts import (  # noqa: E402
+    A1MultiObjectSource,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_object_preparation import (  # noqa: E402
     prepare_a1_object,
@@ -35,12 +43,9 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.mesh_writer import (  # no
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking.generated_materials import (  # noqa: E402
     A1MaterialSourcePolicy,
 )
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine.connected_group_assembly import (  # noqa: E402
-    build_connected_group_document,
-)
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine.connected_group_contracts import (  # noqa: E402
-    ConnectedGroupSettings,
-    ConnectedObjectDocument,
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (  # noqa: E402
+    ConnectedGroupBuildResult,
+    ConnectedPlacementSpace,
 )
 
 
@@ -193,6 +198,8 @@ def _assert_bake_target_matches_world(prepared, expected_world: tuple[Vector, ..
 
 
 def _assert_spine_vertex_bones(prepared) -> None:
+    """Check the origin-offset coordinate split before runtime Z controls deform it."""
+
     bones = {bone.name: bone for bone in prepared.document.bones}
     main = bones[prepared.rig.info.main_bone_name]
     matrix = prepared.source_snapshot.world_matrix
@@ -272,28 +279,52 @@ def _prepare(
 
 
 def _assert_connected(anchor, other) -> None:
-    result = build_connected_group_document(
-        (
-            ConnectedObjectDocument(
-                component_id="anchor",
-                prefix=anchor.prefix,
-                document=anchor.document,
-                world_position=anchor.world_position,
-            ),
-            ConnectedObjectDocument(
-                component_id="other",
-                prefix=other.prefix,
-                document=other.document,
-                world_position=other.world_position,
-            ),
+    """Exercise the real adapter routing from prepared objects to connected domain."""
+
+    sources = (
+        A1MultiObjectSource(
+            source_object=anchor.source_object,
+            component_id="anchor",
+            settings=anchor.settings,
         ),
-        ConnectedGroupSettings(
-            texture_width=_TEXTURE_SIZE,
-            texture_height=_TEXTURE_SIZE,
-            group_prefix="origin_group",
+        A1MultiObjectSource(
+            source_object=other.source_object,
+            component_id="other",
+            settings=other.settings,
+        ),
+    )
+    result = compose_a1_multi_object_document(
+        sources,
+        (anchor, other),
+        A1MultiObjectExportSettings(
+            output_directory=_OUTPUT_ROOT,
+            output_stem="origin_group",
+            mode=A1MultiObjectMode.CONNECTED,
+            connected_group_prefix="origin_group",
             anchor_component_id="anchor",
         ),
     )
+    if not isinstance(result, ConnectedGroupBuildResult):
+        raise AssertionError(
+            f"Connected composition returned unexpected type {type(result).__name__}"
+        )
+
+    placement_by_component = {
+        placement.component_id: placement for placement in result.placements
+    }
+    if set(placement_by_component) != {"anchor", "other"}:
+        raise AssertionError(
+            "Connected composition did not preserve the component placement set"
+        )
+    if any(
+        placement.placement_space
+        is not ConnectedPlacementSpace.ANCHOR_RELATIVE_WORLD
+        for placement in placement_by_component.values()
+    ):
+        raise AssertionError(
+            "Object-bake prepared documents were routed to the wrong placement space"
+        )
+
     bones = {bone.name: bone for bone in result.document.bones}
     anchor_local = calculate_a1_object_bake_main_position_pixels(
         anchor.source_snapshot,
