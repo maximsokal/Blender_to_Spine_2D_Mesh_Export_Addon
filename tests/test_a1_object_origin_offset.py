@@ -210,8 +210,20 @@ def test_object_bake_main_position_rejects_inconsistent_cached_center():
         )
 
 
-def test_object_bake_main_position_rejects_derived_coordinate_overflow():
+def test_object_bake_main_position_rejects_cached_midpoint_overflow():
     huge = 1.0e308
+
+    with pytest.raises(ValueError, match="bounds.expected_center_x must be finite"):
+        calculate_a1_object_bake_main_position_pixels(
+            build_square_snapshot(),
+            _settings(),
+            bounds=A1MeshBounds(huge, huge, 0.0, 0.0, huge, 0.0),
+        )
+
+
+def test_object_bake_main_position_rejects_derived_coordinate_overflow():
+    # The midpoint remains finite, but applying the 100-pixel rig scale overflows.
+    huge = 2.0e306
 
     with pytest.raises(ValueError, match="object_bake_main_x must be finite"):
         calculate_a1_object_bake_main_position_pixels(
