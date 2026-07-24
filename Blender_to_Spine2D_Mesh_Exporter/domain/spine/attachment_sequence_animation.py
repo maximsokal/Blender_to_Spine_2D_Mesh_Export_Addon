@@ -140,38 +140,69 @@ def _merge_sequence_timeline(
         )
 
 
+def _resolved_slot_filter(
+    slot_names: tuple[str, ...] | None,
+) -> frozenset[str] | None:
+    if slot_names is None:
+        return None
+    if not isinstance(slot_names, tuple):
+        raise TypeError("slot_names must be a tuple or None")
+    if not slot_names:
+        raise ValueError("slot_names cannot be empty when supplied")
+    if not all(isinstance(value, str) and value.strip() for value in slot_names):
+        raise TypeError("slot_names must contain non-empty strings")
+    normalized = tuple(value.strip() for value in slot_names)
+    if len(normalized) != len(set(normalized)):
+        raise ValueError("slot_names cannot contain duplicates")
+    return frozenset(normalized)
+
+
 def apply_attachment_sequence_animations(
     document: SpineDocument,
     *,
     animation_name: str = "animation",
     frame_delay: float = DEFAULT_SEQUENCE_FRAME_DELAY,
+    slot_names: tuple[str, ...] | None = None,
 ) -> SpineDocument:
-    """Add missing sequence timelines for every setup sequence attachment.
+    """Add missing sequence timelines for selected setup sequence attachments.
 
     Existing equal timelines are retained, different timelines fail explicitly, and
-    documents without sequence attachments are returned unchanged.
+    documents without matching sequence attachments are returned unchanged. ``slot_names``
+    limits generation to an explicitly owned visual subset, which is required when a
+    static grouped overlay keeps hidden source attachments for diagnostics.
     """
 
     if not isinstance(document, SpineDocument):
         raise TypeError("document must be SpineDocument")
     if not isinstance(animation_name, str) or not animation_name.strip():
         raise ValueError("animation_name must be a non-empty string")
+    slot_filter = _resolved_slot_filter(slot_names)
+    if slot_filter is not None:
+        setup_slot_names = {slot.name for slot in document.slots}
+        unknown = tuple(sorted(slot_filter - setup_slot_names, key=str.casefold))
+        if unknown:
+            raise AttachmentSequenceAnimationError(
+                f"slot_names reference unknown setup slots: {unknown}"
+            )
 
     targets: list[tuple[str, str, str, int]] = []
     for skin in document.skins:
         for slot_name, attachments in skin.attachments.items():
+            resolved_slot_name = str(slot_name)
+            if slot_filter is not None and resolved_slot_name not in slot_filter:
+                continue
             for attachment_name, attachment in attachments.items():
                 sequence = _sequence_mapping(attachment)
                 if sequence is None:
                     continue
                 path = (
-                    f"skins[{skin.name!r}].attachments[{str(slot_name)!r}]"
+                    f"skins[{skin.name!r}].attachments[{resolved_slot_name!r}]"
                     f"[{str(attachment_name)!r}].sequence"
                 )
                 targets.append(
                     (
                         skin.name,
-                        str(slot_name),
+                        resolved_slot_name,
                         str(attachment_name),
                         _sequence_count(sequence, path=path),
                     )
