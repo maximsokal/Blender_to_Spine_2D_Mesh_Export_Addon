@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from Blender_to_Spine2D_Mesh_Exporter.application.a1_grouped_camera_projection import (
     _build_grouped_attachment,
 )
