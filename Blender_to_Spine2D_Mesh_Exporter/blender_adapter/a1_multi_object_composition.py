@@ -7,10 +7,14 @@ calling :func:`compose_a1_multi_object_document`.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Tuple
 
-from ..application import A1MultiObjectExportSettings, A1MultiObjectMode
+from ..application import (
+    A1MultiObjectExportSettings,
+    A1MultiObjectMode,
+    A1SingleObjectExportSettings,
+    resolve_a1_multi_object_preparation_settings,
+)
 from ..domain.baking import CameraProjectionPlan
 from ..domain.spine import (
     ConnectedPlacementSpace,
@@ -33,16 +37,12 @@ from .a1_object_preparation import PreparedA1Object
 def _expected_prepared_settings(
     source: A1MultiObjectSource,
     mode: A1MultiObjectMode,
-):
-    """Return the exact per-object settings owned by multi-object preparation."""
+) -> A1SingleObjectExportSettings:
+    """Resolve expected settings through the shared preparation policy owner."""
 
     if not isinstance(source, A1MultiObjectSource):
         raise TypeError("source must be A1MultiObjectSource")
-    if not isinstance(mode, A1MultiObjectMode):
-        raise TypeError("mode must be A1MultiObjectMode")
-    if mode is A1MultiObjectMode.CONNECTED:
-        return replace(source.settings, use_world_location_for_main_bone=False)
-    return source.settings
+    return resolve_a1_multi_object_preparation_settings(source.settings, mode)
 
 
 def _validate_source_prepared_pair(
