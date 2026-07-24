@@ -83,6 +83,18 @@ def test_connected_camera_policy_has_one_current_contract():
     assert "connected_b4_render_policy" not in names
 
 
+def test_connected_camera_policy_defaults_to_interactive_rig_layers(tmp_path):
+    settings = A1MultiObjectExportSettings(
+        output_directory=tmp_path,
+        output_stem="Connected",
+    )
+
+    assert (
+        settings.connected_camera_render_policy
+        is ConnectedCameraRenderPolicy.INDIVIDUAL_LAYERS
+    )
+
+
 def test_production_uses_one_normalized_attachment_projection_entry_point():
     owners = []
     for path in (PACKAGE / "application").rglob("*.py"):
