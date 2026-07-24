@@ -71,9 +71,22 @@ class PreparedA1MultiObject:
             raise TypeError("warnings must be a tuple of ExportIssue values")
         if not isinstance(self.statistics, Mapping):
             raise TypeError("statistics must be a mapping")
+
+        component_ids = tuple(item.component_id for item in self.sources)
+        if len(component_ids) != len(set(component_ids)):
+            raise ValueError("source component IDs must be unique")
         object_ids = tuple(item.object_id for item in self.objects)
         if len(object_ids) != len(set(object_ids)):
             raise ValueError("prepared object IDs must be unique")
+
+        for pair_index, (source, prepared) in enumerate(
+            zip(self.sources, self.objects, strict=True)
+        ):
+            if prepared.source_object is not source.source_object:
+                raise ValueError(
+                    f"sources[{pair_index}] component '{source.component_id}' does not "
+                    "match objects[{pair_index}].source_object"
+                )
 
     @property
     def json_path(self) -> Path:
