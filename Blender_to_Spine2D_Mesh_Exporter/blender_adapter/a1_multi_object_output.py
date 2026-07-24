@@ -103,7 +103,12 @@ def export_a1_multi_object(
 ) -> ExportResult:
     """Finalize textures, compose once, serialize once, and commit atomically."""
 
-    _progress(progress_callback, 0, A1MultiObjectStage.VALIDATE_REQUEST, "Starting multi-object export")
+    _progress(
+        progress_callback,
+        0,
+        A1MultiObjectStage.VALIDATE_REQUEST,
+        "Starting multi-object export",
+    )
     try:
         prepared = prepare_a1_multi_object(
             sources,
@@ -154,7 +159,12 @@ def export_a1_multi_object(
 
             grouped_stage = None
             if grouped_request is not None:
-                _progress(progress_callback, 82, stage, "Staging grouped camera projection")
+                _progress(
+                    progress_callback,
+                    82,
+                    stage,
+                    "Staging grouped camera projection",
+                )
                 grouped_stage = stage_grouped_camera_projection_outputs(
                     grouped_request.source_objects,
                     grouped_request.plan,
@@ -162,6 +172,11 @@ def export_a1_multi_object(
                     grouped_request.execution_settings,
                     context=context,
                     scene=scene,
+                    progress_callback=_scaled_progress(
+                        progress_callback,
+                        82.0,
+                        85.0,
+                    ),
                 )
 
             stage = A1MultiObjectStage.COMPOSE_DOCUMENT
@@ -174,13 +189,18 @@ def export_a1_multi_object(
             overlay = None
             if grouped_request is not None:
                 if grouped_stage is None:
-                    raise RuntimeError("grouped camera request completed without a stage result")
+                    raise RuntimeError(
+                        "grouped camera request completed without a stage result"
+                    )
                 overlay = apply_staged_grouped_camera_overlay(
                     composition.document,
                     grouped_request,
                     grouped_stage,
                 )
-                composition = replace_a1_composition_document(composition, overlay.document)
+                composition = replace_a1_composition_document(
+                    composition,
+                    overlay.document,
+                )
 
             document = composition.document
             record_final_document_statistics(
@@ -191,7 +211,11 @@ def export_a1_multi_object(
             )
             if isinstance(composition, ConnectedGroupBuildResult):
                 statistics["connected_layer_count"] = len(composition.layers)
-            if grouped_request is not None and grouped_stage is not None and overlay is not None:
+            if (
+                grouped_request is not None
+                and grouped_stage is not None
+                and overlay is not None
+            ):
                 record_grouped_camera_statistics(
                     statistics,
                     grouped_request,
@@ -201,7 +225,10 @@ def export_a1_multi_object(
 
             stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
             _progress(progress_callback, 93, stage, "Serializing Spine JSON")
-            json_text = SpineSerializer().to_json(document, indent=settings.json_indent)
+            json_text = SpineSerializer().to_json(
+                document,
+                indent=settings.json_indent,
+            )
             write_staged_utf8_text(
                 json_reservation.staged_path,
                 json_text,
@@ -229,7 +256,12 @@ def export_a1_multi_object(
             grouped_request is not None,
             tuple(str(path) for path in committed_paths),
         )
-        _progress(progress_callback, 100, A1MultiObjectStage.COMMIT_OUTPUTS, "Export complete")
+        _progress(
+            progress_callback,
+            100,
+            A1MultiObjectStage.COMMIT_OUTPUTS,
+            "Export complete",
+        )
         return ExportResult(
             success=True,
             output_files=tuple(committed_paths),
