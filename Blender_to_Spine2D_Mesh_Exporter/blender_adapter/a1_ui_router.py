@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import logging
 
-from ..application import ExportIssue, ExportResult
+from ..application import A1MultiObjectMode, ExportIssue, ExportResult
 from .a1_mixed_object_output import export_a1_mixed_object
 from .a1_multi_object_output import export_a1_multi_object
 from .a1_single_object_export import export_a1_single_object
@@ -60,7 +60,7 @@ def export_selected_objects_a1(context) -> ExportResult:
 
     plan = build_selected_ui_export_plan(context)
     scene = context.scene
-    if plan.settings.mode.value == "MIXED":
+    if plan.settings.mode is A1MultiObjectMode.MIXED:
         result = export_a1_mixed_object(
             plan.connected_sources,
             plan.standalone_sources,
