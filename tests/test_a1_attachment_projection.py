@@ -134,7 +134,7 @@ def test_projected_request_builds_a_fully_valid_spine_document():
     assert SpineValidator().validate(attachment.document) == ()
 
 
-def test_uv_split_vertex_is_duplicated_without_merging_texture_coordinates():
+def test_uv_split_vertex_moves_duplicate_physical_position_after_convex_hull():
     result = project_triangulated_disk_attachment(
         build_boundary_uv_split_snapshot(),
         make_rig(),
@@ -143,55 +143,64 @@ def test_uv_split_vertex_is_duplicated_without_merging_texture_coordinates():
 
     assert result.hull_vertex_ids == (
         VertexId(0),
-        VertexId(0),
         VertexId(1),
         VertexId(2),
         VertexId(3),
     )
-    assert result.ordered_vertex_ids == result.hull_vertex_ids
-    assert result.hull_vertex_keys[:2] == (
-        A1AttachmentVertexKey(VertexId(0), (0.25, 0.25)),
-        A1AttachmentVertexKey(VertexId(0), (0.0, 0.0)),
+    assert result.ordered_vertex_ids == (
+        VertexId(0),
+        VertexId(1),
+        VertexId(2),
+        VertexId(3),
+        VertexId(0),
+    )
+    assert result.hull_vertex_keys[0] == A1AttachmentVertexKey(
+        VertexId(0),
+        (0.25, 0.25),
+    )
+    assert result.ordered_vertex_keys[-1] == A1AttachmentVertexKey(
+        VertexId(0),
+        (0.0, 0.0),
     )
     assert tuple(vertex.uv for vertex in result.request.vertices) == (
         (0.25, 0.25),
-        (0.0, 0.0),
         (1.0, 0.0),
         (1.0, 1.0),
         (0.0, 1.0),
+        (0.0, 0.0),
     )
-    assert result.request.hull == 5
-    assert result.request.triangles == (1, 2, 3, 0, 3, 4)
+    assert result.request.hull == 4
+    assert result.request.triangles == (4, 1, 2, 0, 2, 3)
     assert result.request.edges == (
+        4,
+        1,
         1,
         2,
         2,
-        3,
-        3,
-        1,
+        4,
         0,
+        2,
+        2,
         3,
         3,
-        4,
-        4,
         0,
     )
     assert result.loop_to_attachment_index == (
-        (LoopId(0), 1),
-        (LoopId(1), 2),
-        (LoopId(2), 3),
+        (LoopId(0), 4),
+        (LoopId(1), 1),
+        (LoopId(2), 2),
         (LoopId(3), 0),
-        (LoopId(4), 3),
-        (LoopId(5), 4),
+        (LoopId(4), 2),
+        (LoopId(5), 3),
     )
-    assert result.attachment_indices_for(VertexId(0)) == (0, 1)
-    assert result.attachment_index_for_loop(LoopId(0)) == 1
+    assert result.attachment_indices_for(VertexId(0)) == (0, 4)
+    assert result.attachment_index_for_loop(LoopId(0)) == 4
     assert result.attachment_index_for_loop(LoopId(3)) == 0
     assert result.attachment_index_for(
         VertexId(0),
         uv=(0.25, 0.25),
     ) == 0
-    assert result.attachment_index_for(VertexId(0), uv=(0.0, 0.0)) == 1
+    assert result.attachment_index_for(VertexId(0), uv=(0.0, 0.0)) == 4
     with pytest.raises(A1AttachmentProjectionError, match="provide uv"):
         result.attachment_index_for(VertexId(0))
     with pytest.raises(A1AttachmentProjectionError, match="one-to-many"):
@@ -208,9 +217,9 @@ def test_uv_split_projection_builds_valid_document_and_duplicate_vertex_bones():
     attachment = build_legacy_mesh_attachment(rig, projection.request)
 
     assert len(attachment.vertex_bones) == 5
-    assert attachment.vertex_bones[0].x == attachment.vertex_bones[1].x
-    assert attachment.vertex_bones[0].y == attachment.vertex_bones[1].y
-    assert attachment.attachment.hull == 5
+    assert attachment.vertex_bones[0].x == attachment.vertex_bones[4].x
+    assert attachment.vertex_bones[0].y == attachment.vertex_bones[4].y
+    assert attachment.attachment.hull == 4
     assert SpineValidator().validate(attachment.document) == ()
 
 
