@@ -52,8 +52,49 @@ def require_context_scene_consistency(
         )
 
 
+def _depsgraph_original_scene(depsgraph: Any) -> Any:
+    """Resolve the original Scene that owns a Blender 5.2 dependency graph."""
+
+    scene = getattr(depsgraph, "scene", None)
+    if scene is not None:
+        return scene
+
+    evaluated_scene = getattr(depsgraph, "scene_eval", None)
+    if evaluated_scene is None:
+        raise BlenderSceneContextError(
+            "Blender dependency graph exposes neither scene nor scene_eval"
+        )
+    original = getattr(evaluated_scene, "original", None)
+    if original is None:
+        raise BlenderSceneContextError(
+            "Blender dependency graph scene_eval has no original Scene owner"
+        )
+    return original
+
+
+def require_depsgraph_scene_consistency(
+    depsgraph: Any | None,
+    scene: Any | None,
+) -> None:
+    """Require a supplied dependency graph to belong to the explicit Scene."""
+
+    if depsgraph is None or scene is None:
+        return
+    depsgraph_scene = _depsgraph_original_scene(depsgraph)
+    if rna_identity(depsgraph_scene) != rna_identity(scene):
+        depsgraph_scene_name = str(
+            getattr(depsgraph_scene, "name", "") or "<unnamed>"
+        )
+        scene_name = str(getattr(scene, "name", "") or "<unnamed>")
+        raise BlenderSceneContextError(
+            "Blender dependency graph and explicit scene must reference the same "
+            f"Scene; depsgraph_scene={depsgraph_scene_name!r}, scene={scene_name!r}"
+        )
+
+
 __all__ = [
     "BlenderSceneContextError",
     "require_context_scene_consistency",
+    "require_depsgraph_scene_consistency",
     "rna_identity",
 ]
