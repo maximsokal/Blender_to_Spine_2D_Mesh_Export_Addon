@@ -111,6 +111,18 @@ def validate_connected_group_inputs(
     ):
         raise ValueError("anchor_component_id is not present in objects")
 
+    placement_spaces = {item.placement_space for item in objects}
+    if len(placement_spaces) != 1:
+        details = tuple(
+            (item.component_id, item.placement_space.value)
+            for item in objects
+        )
+        raise ConnectedGroupBuildError(
+            "Connected A1 composition cannot mix object-local attachments with "
+            "camera screen-space attachments. Use one placement space for the whole "
+            f"connected subgroup or use static grouped camera flattening; sources={details}"
+        )
+
     internal_component_id = f"__{settings.group_prefix}_rig__"
     if internal_component_id in set(component_ids):
         raise ConnectedGroupBuildError(
