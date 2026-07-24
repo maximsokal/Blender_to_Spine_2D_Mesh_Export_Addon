@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Tuple
 
+from ..application import A1ExportProgressCallback, emit_a1_frame_progress
 from ..domain.baking import TextureFormat
 from ..domain.baking.generated_materials import GeneratedBakePlan
 from ..infrastructure import AtomicOutputReservation
@@ -225,6 +226,8 @@ def _bake_frame_task(
 def run_semantic_bake(
     runtime: SemanticBakeRuntime,
     reservations: Tuple[AtomicOutputReservation, ...],
+    *,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> None:
     """Write every planned frame to reserved staged paths without committing."""
 
@@ -234,6 +237,7 @@ def run_semantic_bake(
         runtime.plan,
         reservations,
     )
+    frame_count = len(runtime.plan.frame_tasks)
 
     with preserve_bake_scene_state(runtime.scene):
         with temporary_mesh_object(
@@ -281,17 +285,29 @@ def run_semantic_bake(
                                     "Unable to prepare selected-to-active bake selection"
                                 ) from exc
 
-                        for task, reservation in zip(
-                            runtime.plan.frame_tasks,
-                            resolved_reservations,
-                            strict=True,
+                        for frame_index, (task, reservation) in enumerate(
+                            zip(
+                                runtime.plan.frame_tasks,
+                                resolved_reservations,
+                                strict=True,
+                            ),
+                            start=1,
                         ):
+                            emit_a1_frame_progress(
+                                progress_callback,
+                                stage="BAKE_FRAME",
+                                action="Baking",
+                                frame_index=frame_index,
+                                frame_count=frame_count,
+                                completed=False,
+                                object_id=runtime.plan.source_object_id,
+                            )
                             logger.info(
                                 "Staging semantic bake '%s' frame %d/%d "
                                 "(timeline=%s passes=%d composite=%s scene_aware=%s)",
                                 runtime.plan.source_object_id,
-                                task.task_index + 1,
-                                len(runtime.plan.frame_tasks),
+                                frame_index,
+                                frame_count,
                                 task.timeline_frame,
                                 len(runtime.plan.passes),
                                 runtime.plan.composite.mode.value,
@@ -302,6 +318,15 @@ def run_semantic_bake(
                                 task=task,
                                 reservation=reservation,
                                 prepared_materials=prepared_materials,
+                            )
+                            emit_a1_frame_progress(
+                                progress_callback,
+                                stage="BAKE_FRAME",
+                                action="Baked",
+                                frame_index=frame_index,
+                                frame_count=frame_count,
+                                completed=True,
+                                object_id=runtime.plan.source_object_id,
                             )
 
 
