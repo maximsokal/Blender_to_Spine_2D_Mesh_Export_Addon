@@ -8,7 +8,6 @@ import tomllib
 from types import SimpleNamespace
 
 import pytest
-
 import Blender_to_Spine2D_Mesh_Exporter as extension
 
 
@@ -283,6 +282,7 @@ def test_registration_structure_has_current_runtime_owners_only():
     assert module_names == (
         "addon_preferences",
         "ui",
+        "repolish_ui",
         "generated_material_ui",
         "single_object_operator",
     )
@@ -292,6 +292,7 @@ def test_registration_structure_has_current_runtime_owners_only():
         "addon preferences",
         "Scene RNA properties",
         "UI",
+        "Re-Polish UI",
         "generated material UI",
         "single-object operator",
     )
