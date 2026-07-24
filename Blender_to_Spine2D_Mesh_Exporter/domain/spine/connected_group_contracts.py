@@ -1,8 +1,9 @@
-"""Immutable contracts for connected legacy A1 document composition."""
+"""Immutable contracts for connected A1 document composition."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from math import isfinite
 from typing import Tuple
 
@@ -32,6 +33,18 @@ def _require_finite_number(value: object, field_name: str) -> float:
     return resolved
 
 
+class ConnectedPlacementSpace(str, Enum):
+    """Define where a component's visible XY placement is already encoded."""
+
+    # Object-bake attachments are centered in object-local geometry. Their standalone
+    # main bone contains absolute Blender translation and must be replaced by the
+    # anchor-relative connected offset.
+    ANCHOR_RELATIVE_WORLD = "ANCHOR_RELATIVE_WORLD"
+    # Camera-projection attachments already contain screen-space XY in their vertices.
+    # Reparent the main bone but preserve its existing coordinates (normally 0, 0).
+    PRESERVE_DOCUMENT = "PRESERVE_DOCUMENT"
+
+
 @dataclass(frozen=True, slots=True)
 class ConnectedObjectDocument:
     component_id: str
@@ -39,6 +52,9 @@ class ConnectedObjectDocument:
     document: SpineDocument
     world_position: Tuple[float, float, float]
     animation_namespace: str | None = None
+    placement_space: ConnectedPlacementSpace = (
+        ConnectedPlacementSpace.ANCHOR_RELATIVE_WORLD
+    )
 
     def __post_init__(self) -> None:
         _require_canonical_string(self.component_id, "component_id")
@@ -54,6 +70,8 @@ class ConnectedObjectDocument:
                 self.animation_namespace,
                 "animation_namespace",
             )
+        if not isinstance(self.placement_space, ConnectedPlacementSpace):
+            raise TypeError("placement_space must be ConnectedPlacementSpace")
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +148,9 @@ class ConnectedObjectPlacement:
     layer_index: int
     main_bone_name: str
     parent_layer_bone_name: str
+    placement_space: ConnectedPlacementSpace = (
+        ConnectedPlacementSpace.ANCHOR_RELATIVE_WORLD
+    )
 
     def __post_init__(self) -> None:
         _require_canonical_string(self.component_id, "component_id")
@@ -147,6 +168,8 @@ class ConnectedObjectPlacement:
             self.parent_layer_bone_name,
             "parent_layer_bone_name",
         )
+        if not isinstance(self.placement_space, ConnectedPlacementSpace):
+            raise TypeError("placement_space must be ConnectedPlacementSpace")
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,5 +323,6 @@ __all__ = [
     "ConnectedGroupSettings",
     "ConnectedObjectDocument",
     "ConnectedObjectPlacement",
+    "ConnectedPlacementSpace",
     "ConnectedZLayer",
 ]
