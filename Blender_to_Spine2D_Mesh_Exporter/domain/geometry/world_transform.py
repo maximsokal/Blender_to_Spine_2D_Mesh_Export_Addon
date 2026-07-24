@@ -19,8 +19,8 @@ from dataclasses import dataclass, replace
 from math import isfinite, sqrt
 from typing import Tuple
 
-from .model import Matrix4x4, MeshFace, MeshSnapshot, MeshVertex, Vector3
-from .validation import MeshSnapshotValidator
+from .model import Matrix4x4, MeshSnapshot, Vector3
+from .validator import MeshSnapshotValidator
 
 
 Matrix3x3 = Tuple[
@@ -56,9 +56,15 @@ class MeshWorldTransformResult:
             raise ValueError("linear_matrix must contain nine values")
         if not isinstance(self.translation, tuple) or len(self.translation) != 3:
             raise ValueError("translation must contain three values")
-        if not all(isinstance(value, float) and isfinite(value) for value in self.linear_matrix):
+        if not all(
+            isinstance(value, float) and isfinite(value)
+            for value in self.linear_matrix
+        ):
             raise ValueError("linear_matrix must contain finite floats")
-        if not all(isinstance(value, float) and isfinite(value) for value in self.translation):
+        if not all(
+            isinstance(value, float) and isfinite(value)
+            for value in self.translation
+        ):
             raise ValueError("translation must contain finite floats")
         if not isinstance(self.determinant, float) or not isfinite(self.determinant):
             raise ValueError("determinant must be a finite float")
@@ -149,7 +155,7 @@ def _normalized(value: Vector3, *, field_name: str) -> Vector3:
         raise MeshWorldTransformError(
             f"{field_name} became non-finite after normalization"
         )
-    return result  # type: ignore[return-value]
+    return (float(result[0]), float(result[1]), float(result[2]))
 
 
 def _translation_matrix(translation: Vector3) -> Matrix4x4:
@@ -186,7 +192,10 @@ def _linear_is_identity(matrix: Matrix3x3, *, tolerance: float) -> bool:
         0.0,
         1.0,
     )
-    return all(abs(actual - expected) <= tolerance for actual, expected in zip(matrix, identity, strict=True))
+    return all(
+        abs(actual - expected) <= tolerance
+        for actual, expected in zip(matrix, identity, strict=True)
+    )
 
 
 def normalize_mesh_snapshot_world_transform(
