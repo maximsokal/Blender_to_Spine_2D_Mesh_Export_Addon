@@ -180,3 +180,23 @@ def test_object_bake_main_position_rejects_invalid_contract_types():
             settings,
             bounds=object(),
         )
+
+
+def test_object_bake_placement_math_has_one_blender_independent_owner():
+    root = Path(__file__).resolve().parents[1]
+    application_source = (
+        root
+        / "Blender_to_Spine2D_Mesh_Exporter"
+        / "application"
+        / "a1_object_bake_placement.py"
+    ).read_text(encoding="utf-8")
+    adapter_source = (
+        root
+        / "Blender_to_Spine2D_Mesh_Exporter"
+        / "blender_adapter"
+        / "a1_document_preparation.py"
+    ).read_text(encoding="utf-8")
+
+    assert "import bpy" not in application_source
+    assert "def _combine_object_bake_main_position_pixels" not in adapter_source
+    assert "calculate_a1_object_bake_main_position_pixels(" in adapter_source
