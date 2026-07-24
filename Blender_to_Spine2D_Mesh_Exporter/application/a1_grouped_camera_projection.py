@@ -15,6 +15,9 @@ from ..domain.spine import (
     SpineDocument,
     SpineValidator,
 )
+from .camera_projection_attachment_topology import (
+    build_camera_projection_attachment_topology,
+)
 
 
 class GroupedCameraOverlayError(ValueError):
@@ -44,44 +47,6 @@ class GroupedCameraOverlayResult:
             )
         ):
             raise ValueError("hidden_slot_names must contain non-empty strings")
-
-
-def _normalized_pair(first: int, second: int) -> tuple[int, int]:
-    if first == second:
-        raise GroupedCameraOverlayError(
-            f"static grouped attachment edge repeats vertex {first}"
-        )
-    return (first, second) if first < second else (second, first)
-
-
-def _attachment_edges(
-    vertex_count: int,
-    triangles: Tuple[tuple[int, int, int], ...],
-) -> Tuple[int, ...]:
-    boundary = tuple((index, (index + 1) % vertex_count) for index in range(vertex_count))
-    result: list[int] = []
-    seen: set[tuple[int, int]] = set()
-    for first, second in boundary:
-        seen.add(_normalized_pair(first, second))
-        result.extend((first, second))
-    for triangle in triangles:
-        for first, second in (
-            (triangle[0], triangle[1]),
-            (triangle[1], triangle[2]),
-            (triangle[2], triangle[0]),
-        ):
-            pair = _normalized_pair(first, second)
-            if pair in seen:
-                continue
-            seen.add(pair)
-            result.extend((first, second))
-    expected = vertex_count + max(0, vertex_count - 3)
-    if len(result) // 2 != expected:
-        raise GroupedCameraOverlayError(
-            "static grouped attachment edge count differs from disk triangulation; "
-            f"expected={expected}, actual={len(result) // 2}"
-        )
-    return tuple(result)
 
 
 def _attachment_path(
@@ -138,29 +103,31 @@ def _build_grouped_attachment(
             "static grouped layout dimensions do not match grouped plan"
         )
 
-    triangles = layout.triangle_indices
+    topology = build_camera_projection_attachment_topology(layout)
     uvs = tuple(
         component
-        for point in layout.hull
+        for point in topology.points
         for component in layout.spine_uv(point)
     )
     vertices = tuple(
         component
-        for point in layout.hull
+        for point in topology.points
         for component in (
             layout.spine_position_pixels(point)[0],
             -layout.spine_position_pixels(point)[1],
         )
     )
-    triangle_values = tuple(index for triangle in triangles for index in triangle)
+    triangle_values = tuple(
+        index for triangle in topology.triangles for index in triangle
+    )
     return MeshAttachment(
         name=attachment_name,
         path=_attachment_path(plan, image_relative_directory),
         uvs=uvs,
         triangles=triangle_values,
         vertices=vertices,
-        hull=len(layout.hull),
-        edges=_attachment_edges(len(layout.hull), triangles),
+        hull=topology.hull_count,
+        edges=topology.edges,
         width=float(layout.cropped_width),
         height=float(layout.cropped_height),
         sequence=_attachment_sequence(plan),
@@ -168,6 +135,8 @@ def _build_grouped_attachment(
             "spine2dGroupedCamera": True,
             "spine2dStaticFlattening": True,
             "spine2dGroupedSourceCount": len(plan.source_object_ids),
+            "spine2dSourceContourVertexCount": len(layout.contour),
+            "spine2dConvexHullVertexCount": topology.hull_count,
         },
     )
 
