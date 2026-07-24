@@ -180,28 +180,9 @@ def _translation_matrix(translation: Vector3) -> Matrix4x4:
     )
 
 
-def _linear_is_identity(matrix: Matrix3x3, *, tolerance: float) -> bool:
-    identity: Matrix3x3 = (
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-    )
-    return all(
-        abs(actual - expected) <= tolerance
-        for actual, expected in zip(matrix, identity, strict=True)
-    )
-
-
 def normalize_mesh_snapshot_world_transform(
     snapshot: MeshSnapshot,
     *,
-    identity_tolerance: float = 1.0e-10,
     singular_tolerance: float = 1.0e-12,
 ) -> MeshWorldTransformResult:
     """Bake rotation/scale/shear into positions and leave translation on the Object.
@@ -213,17 +194,15 @@ def normalize_mesh_snapshot_world_transform(
 
     if not isinstance(snapshot, MeshSnapshot):
         raise TypeError("snapshot must be MeshSnapshot")
-    for field_name, value in (
-        ("identity_tolerance", identity_tolerance),
-        ("singular_tolerance", singular_tolerance),
+    if (
+        isinstance(singular_tolerance, bool)
+        or not isinstance(singular_tolerance, (int, float))
+        or not isfinite(float(singular_tolerance))
+        or float(singular_tolerance) < 0.0
     ):
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not isfinite(float(value))
-            or float(value) < 0.0
-        ):
-            raise ValueError(f"{field_name} must be a finite non-negative number")
+        raise ValueError(
+            "singular_tolerance must be a finite non-negative number"
+        )
 
     linear, translation = _matrix_parts(snapshot.world_matrix)
     determinant = float(_determinant(linear))
@@ -236,11 +215,7 @@ def normalize_mesh_snapshot_world_transform(
         )
 
     translation_only = _translation_matrix(translation)
-    changed = not _linear_is_identity(
-        linear,
-        tolerance=float(identity_tolerance),
-    )
-    if not changed and snapshot.world_matrix == translation_only:
+    if snapshot.world_matrix == translation_only:
         return MeshWorldTransformResult(
             snapshot=snapshot,
             linear_matrix=linear,
@@ -285,7 +260,7 @@ def normalize_mesh_snapshot_world_transform(
         translation=translation,
         determinant=determinant,
         mirrored=determinant < 0.0,
-        changed=changed,
+        changed=True,
     )
 
 
