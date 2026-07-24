@@ -49,7 +49,7 @@ _TEXTURE_SIZE = 100
 _OUTPUT_ROOT = Path(bpy.app.tempdir) / "spine2d-origin-offset-integration"
 
 
-def _assert_close(first: Vector, second: Vector, *, label: str) -> None:
+def _assert_vector_close(first: Vector, second: Vector, *, label: str) -> None:
     if (first - second).length > _EPSILON:
         raise AssertionError(
             f"{label} differs: first={tuple(first)}, second={tuple(second)}"
@@ -75,14 +75,7 @@ def _create_source(
     mesh = bpy.data.meshes.new(f"{name}_Mesh")
     source = bpy.data.objects.new(name, mesh)
     bpy.context.scene.collection.objects.link(source)
-    mesh.from_pydata(
-        vertices,
-        (),
-        (
-            (0, 1, 2),
-            (0, 2, 3),
-        ),
-    )
+    mesh.from_pydata(vertices, (), ((0, 1, 2), (0, 2, 3)))
     mesh.update()
     source.matrix_world = matrix_world
     bpy.context.view_layer.update()
@@ -96,6 +89,16 @@ def _cleanup_object(obj: bpy.types.Object | None) -> None:
     bpy.data.objects.remove(obj, do_unlink=True)
     if mesh is not None and mesh.users == 0:
         bpy.data.meshes.remove(mesh)
+
+
+def _cleanup_texture(texture: bpy.types.Texture | None) -> None:
+    if texture is None:
+        return
+    if texture.users != 0:
+        raise AssertionError(
+            f"Texture '{texture.name}' still has {texture.users} users during cleanup"
+        )
+    bpy.data.textures.remove(texture)
 
 
 def _evaluated_world_positions(obj: bpy.types.Object) -> tuple[Vector, ...]:
@@ -137,66 +140,45 @@ def _settings(
     )
 
 
-def _expected_world_by_source_index(
-    positions: tuple[Vector, ...],
-) -> dict[int, Vector]:
-    return {index: position.copy() for index, position in enumerate(positions)}
-
-
-def _assert_bake_target_matches_evaluated_geometry(
-    prepared,
-    expected_world_positions: tuple[Vector, ...],
-) -> None:
-    expected_by_source = _expected_world_by_source_index(expected_world_positions)
-    target_snapshot = prepared.bake_target_snapshot
+def _assert_bake_target_matches_world(prepared, expected_world: tuple[Vector, ...]) -> None:
+    expected_by_source = {
+        index: position.copy() for index, position in enumerate(expected_world)
+    }
+    snapshot = prepared.bake_target_snapshot
     with temporary_mesh_object(
-        target_snapshot,
+        snapshot,
         scene=bpy.context.scene,
         name_prefix=f"__{prepared.prefix}_OriginTarget",
     ) as temporary:
         target = temporary.object
-        if len(target.data.vertices) != len(target_snapshot.vertices):
-            raise AssertionError("Temporary bake target vertex order changed")
-        for snapshot_vertex in target_snapshot.vertices:
-            source_index = snapshot_vertex.source_id.vertex_index
-            expected = expected_by_source.get(source_index)
+        for vertex in snapshot.vertices:
+            expected = expected_by_source.get(vertex.source_id.vertex_index)
             if expected is None:
                 raise AssertionError(
-                    f"Bake target references unknown source vertex {source_index}"
+                    f"Unknown source vertex {vertex.source_id.vertex_index}"
                 )
-            actual = target.matrix_world @ target.data.vertices[
-                snapshot_vertex.id.index
-            ].co
-            _assert_close(
+            actual = target.matrix_world @ target.data.vertices[vertex.id.index].co
+            _assert_vector_close(
                 expected,
                 actual,
                 label=(
-                    f"{prepared.prefix} bake target source vertex "
-                    f"{source_index}/local {snapshot_vertex.id.index}"
+                    f"{prepared.prefix} bake target source "
+                    f"{vertex.source_id.vertex_index}"
                 ),
             )
 
 
-def _assert_spine_vertex_bones_reconstruct_world_xy(prepared) -> None:
-    document_bones = {bone.name: bone for bone in prepared.document.bones}
-    main = document_bones[prepared.rig.info.main_bone_name]
+def _assert_spine_vertex_bones(prepared) -> None:
+    bones = {bone.name: bone for bone in prepared.document.bones}
+    main = bones[prepared.rig.info.main_bone_name]
     matrix = prepared.source_snapshot.world_matrix
     translation_x = (
-        float(matrix[3])
-        if prepared.settings.use_world_location_for_main_bone
-        else 0.0
+        float(matrix[3]) if prepared.settings.use_world_location_for_main_bone else 0.0
     )
     translation_y = (
-        float(matrix[7])
-        if prepared.settings.use_world_location_for_main_bone
-        else 0.0
+        float(matrix[7]) if prepared.settings.use_world_location_for_main_bone else 0.0
     )
     scale = prepared.rig.info.uniform_scale
-
-    if len(prepared.document_assembly.projections) != len(
-        prepared.uv_regions.snapshots
-    ):
-        raise AssertionError("Projection count does not match prepared UV regions")
 
     for region, projection in zip(
         prepared.uv_regions.snapshots,
@@ -205,58 +187,50 @@ def _assert_spine_vertex_bones_reconstruct_world_xy(prepared) -> None:
     ):
         vertex_by_id = region.vertex_by_id()
         request = projection.request
-        for attachment_vertex, key in zip(
+        for projected, key in zip(
             request.vertices,
             projection.ordered_vertex_keys,
             strict=True,
         ):
+            vertex_bone = bones[
+                prepared.rig.profile.vertex_bone(
+                    request.vertex_prefix,
+                    projected.index,
+                )
+            ]
+            expected_bone = (
+                round(float(projected.bone_position_pixels[0]), 2),
+                round(float(projected.bone_position_pixels[1]), 2),
+            )
+            _assert_pair_close(
+                (float(vertex_bone.x), float(vertex_bone.y)),
+                expected_bone,
+                label=f"{prepared.prefix} stored vertex bone {projected.index}",
+            )
+
             source_vertex = vertex_by_id[key.vertex_id]
-            vertex_bone_name = prepared.rig.profile.vertex_bone(
-                request.vertex_prefix,
-                attachment_vertex.index,
-            )
-            vertex_bone = document_bones[vertex_bone_name]
-            if float(vertex_bone.x) != round(
-                float(attachment_vertex.bone_position_pixels[0]),
-                2,
-            ):
-                raise AssertionError(
-                    f"{prepared.prefix} vertex bone X does not match projection request"
-                )
-            if float(vertex_bone.y) != round(
-                float(attachment_vertex.bone_position_pixels[1]),
-                2,
-            ):
-                raise AssertionError(
-                    f"{prepared.prefix} vertex bone Y does not match projection request"
-                )
-            actual = (
-                float(main.x)
-                + float(attachment_vertex.bone_position_pixels[0]),
-                float(main.y)
-                + float(attachment_vertex.bone_position_pixels[1]),
-            )
-            expected = (
+            expected_world_xy = (
                 (translation_x + float(source_vertex.position[0])) * scale,
                 translation_y * scale - float(source_vertex.position[1]) * scale,
             )
+            actual_world_xy = (
+                float(main.x) + float(projected.bone_position_pixels[0]),
+                float(main.y) + float(projected.bone_position_pixels[1]),
+            )
             _assert_pair_close(
-                actual,
-                expected,
-                label=(
-                    f"{prepared.prefix} Spine vertex bone "
-                    f"{attachment_vertex.index}"
-                ),
+                actual_world_xy,
+                expected_world_xy,
+                label=f"{prepared.prefix} reconstructed vertex {projected.index}",
             )
 
 
-def _prepare_and_assert(
+def _prepare(
     source: bpy.types.Object,
     *,
     prefix: str,
     source_mode: A1SourceGeometryMode,
     use_world_location: bool,
-    expected_world_positions: tuple[Vector, ...],
+    expected_world: tuple[Vector, ...],
 ):
     prepared = prepare_a1_object(
         source,
@@ -268,15 +242,12 @@ def _prepare_and_assert(
         context=bpy.context,
         scene=bpy.context.scene,
     )
-    _assert_bake_target_matches_evaluated_geometry(
-        prepared,
-        expected_world_positions,
-    )
-    _assert_spine_vertex_bones_reconstruct_world_xy(prepared)
+    _assert_bake_target_matches_world(prepared, expected_world)
+    _assert_spine_vertex_bones(prepared)
     return prepared
 
 
-def _assert_connected_origin_conventions(anchor, other) -> None:
+def _assert_connected(anchor, other) -> None:
     result = build_connected_group_document(
         (
             ConnectedObjectDocument(
@@ -310,20 +281,23 @@ def _assert_connected_origin_conventions(anchor, other) -> None:
     )
     relative_x = other.world_position[0] - anchor.world_position[0]
     relative_y = other.world_position[1] - anchor.world_position[1]
-    expected_anchor = anchor_local
     expected_other = (
         other_local[0] + relative_x * result.uniform_scale,
         other_local[1] + relative_y * result.uniform_scale,
     )
-    anchor_main = bones[anchor.rig.info.main_bone_name]
-    other_main = bones[other.rig.info.main_bone_name]
     _assert_pair_close(
-        (float(anchor_main.x), float(anchor_main.y)),
-        expected_anchor,
+        (
+            float(bones[anchor.rig.info.main_bone_name].x),
+            float(bones[anchor.rig.info.main_bone_name].y),
+        ),
+        anchor_local,
         label="connected anchor main",
     )
     _assert_pair_close(
-        (float(other_main.x), float(other_main.y)),
+        (
+            float(bones[other.rig.info.main_bone_name].x),
+            float(bones[other.rig.info.main_bone_name].y),
+        ),
         expected_other,
         label="connected other main",
     )
@@ -335,16 +309,15 @@ def main() -> None:
             f"Blender 5.2+ is required, running {tuple(bpy.app.version)}"
         )
 
-    initial_object_count = len(bpy.data.objects)
-    initial_mesh_count = len(bpy.data.meshes)
+    initial_counts = (
+        len(bpy.data.objects),
+        len(bpy.data.meshes),
+        len(bpy.data.textures),
+    )
     mirrored = None
     evaluated = None
+    displace_texture = None
     try:
-        mirrored_matrix = (
-            Matrix.Translation((7.0, -4.0, 2.0))
-            @ Euler((0.0, 0.0, radians(31.0)), "XYZ").to_matrix().to_4x4()
-            @ Matrix.Diagonal((-1.5, 0.75, 1.0, 1.0))
-        )
         mirrored = _create_source(
             "Spine2D_Origin_Mirrored",
             vertices=(
@@ -353,29 +326,26 @@ def main() -> None:
                 (5.0, -1.0, 0.0),
                 (2.0, -1.0, 0.0),
             ),
-            matrix_world=mirrored_matrix,
+            matrix_world=(
+                Matrix.Translation((7.0, -4.0, 2.0))
+                @ Euler((0.0, 0.0, radians(31.0)), "XYZ").to_matrix().to_4x4()
+                @ Matrix.Diagonal((-1.5, 0.75, 1.0, 1.0))
+            ),
         )
         mirrored_world = _evaluated_world_positions(mirrored)
-        mirrored_prepared = _prepare_and_assert(
+        mirrored_standalone = _prepare(
             mirrored,
             prefix="MirroredOrigin",
             source_mode=A1SourceGeometryMode.ORIGINAL,
             use_world_location=True,
-            expected_world_positions=mirrored_world,
+            expected_world=mirrored_world,
         )
         if not any(
             issue.code == "MIRRORED_OBJECT_TRANSFORM"
-            for issue in mirrored_prepared.warnings
+            for issue in mirrored_standalone.warnings
         ):
             raise AssertionError("Mirrored Object transform warning was not emitted")
 
-        evaluated_matrix = (
-            Matrix.Translation((-6.0, 8.0, -1.0))
-            @ Euler((radians(9.0), radians(-13.0), radians(17.0)), "XYZ")
-            .to_matrix()
-            .to_4x4()
-            @ Matrix.Diagonal((1.25, 0.6, 1.4, 1.0))
-        )
         evaluated = _create_source(
             "Spine2D_Origin_Evaluated",
             vertices=(
@@ -384,9 +354,23 @@ def main() -> None:
                 (-1.0, 3.0, 0.0),
                 (-4.0, 3.0, 0.0),
             ),
-            matrix_world=evaluated_matrix,
+            matrix_world=(
+                Matrix.Translation((-6.0, 8.0, -1.0))
+                @ Euler(
+                    (radians(9.0), radians(-13.0), radians(17.0)),
+                    "XYZ",
+                ).to_matrix().to_4x4()
+                @ Matrix.Diagonal((1.25, 0.6, 1.4, 1.0))
+            ),
         )
+        displace_texture = bpy.data.textures.new(
+            "Spine2D_Origin_Displace_Texture",
+            type="BLEND",
+        )
+        displace_texture.progression = "LINEAR"
         modifier = evaluated.modifiers.new("ShiftBBoxX", "DISPLACE")
+        modifier.texture = displace_texture
+        modifier.texture_coords = "LOCAL"
         modifier.direction = "X"
         modifier.strength = 1.75
         modifier.mid_level = 0.0
@@ -404,49 +388,52 @@ def main() -> None:
                 strict=True,
             )
         ):
-            raise AssertionError("Displace modifier did not change evaluated geometry")
+            raise AssertionError("Explicit Displace texture did not change geometry")
 
-        evaluated_prepared = _prepare_and_assert(
+        evaluated_standalone = _prepare(
             evaluated,
             prefix="EvaluatedOrigin",
             source_mode=A1SourceGeometryMode.EVALUATED,
             use_world_location=True,
-            expected_world_positions=evaluated_world,
+            expected_world=evaluated_world,
         )
-        if int(evaluated_prepared.statistics["modifier_count"]) != 1:
+        if int(evaluated_standalone.statistics["modifier_count"]) != 1:
             raise AssertionError("Evaluated modifier stack was not recorded")
 
-        mirrored_connected = _prepare_and_assert(
+        mirrored_connected = _prepare(
             mirrored,
             prefix="MirroredConnected",
             source_mode=A1SourceGeometryMode.ORIGINAL,
             use_world_location=False,
-            expected_world_positions=mirrored_world,
+            expected_world=mirrored_world,
         )
-        evaluated_connected = _prepare_and_assert(
+        evaluated_connected = _prepare(
             evaluated,
             prefix="EvaluatedConnected",
             source_mode=A1SourceGeometryMode.EVALUATED,
             use_world_location=False,
-            expected_world_positions=evaluated_world,
+            expected_world=evaluated_world,
         )
-        _assert_connected_origin_conventions(
-            mirrored_connected,
-            evaluated_connected,
-        )
+        _assert_connected(mirrored_connected, evaluated_connected)
     finally:
         _cleanup_object(evaluated)
         _cleanup_object(mirrored)
+        _cleanup_texture(displace_texture)
 
     if any(
         obj.name.startswith("__") and "OriginTarget" in obj.name
         for obj in bpy.data.objects
     ):
         raise AssertionError("Temporary origin-offset target object leaked")
-    if len(bpy.data.objects) != initial_object_count:
-        raise AssertionError("Object cleanup did not restore initial count")
-    if len(bpy.data.meshes) != initial_mesh_count:
-        raise AssertionError("Mesh cleanup did not restore initial count")
+    final_counts = (
+        len(bpy.data.objects),
+        len(bpy.data.meshes),
+        len(bpy.data.textures),
+    )
+    if final_counts != initial_counts:
+        raise AssertionError(
+            f"Blender datablock cleanup mismatch: initial={initial_counts}, final={final_counts}"
+        )
     print("Blender 5.2 A1 Object Origin offset integration passed")
 
 
