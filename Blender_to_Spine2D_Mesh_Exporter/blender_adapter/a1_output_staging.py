@@ -11,6 +11,7 @@ from ..application import (
     A1ExportProgressCallback,
     A1MultiObjectStage,
     emit_a1_export_progress,
+    scale_a1_export_progress_callback,
 )
 from ..infrastructure import AtomicFileTransaction, AtomicOutputReservation
 from .a1_multi_object_contracts import (
@@ -88,6 +89,14 @@ def stage_and_finalize_a1_objects(
             object_index=index + 1,
             object_count=object_count,
         )
+        object_progress = scale_a1_export_progress_callback(
+            progress_callback,
+            start_percent=start_percent,
+            end_percent=end_percent,
+            object_id=source.component_id,
+            object_index=index + 1,
+            object_count=object_count,
+        )
         staged = stage_texture_plan_outputs(
             item.source_object,
             item.bake_target_snapshot,
@@ -96,6 +105,7 @@ def stage_and_finalize_a1_objects(
             item.settings.bake_execution,
             context=context,
             scene=scene,
+            progress_callback=object_progress,
         )
         reservations.extend(staged.reservations)
         finalized = finalize_prepared_camera_projection(
