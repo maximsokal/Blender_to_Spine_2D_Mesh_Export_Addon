@@ -4,6 +4,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.connected_group_assembly impo
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.connected_group_contracts import (
     ConnectedGroupSettings,
     ConnectedObjectPlacement,
+    ConnectedPlacementSpace,
     ConnectedZLayer,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.connected_group_global_rig import (
@@ -64,6 +65,41 @@ def test_connected_object_main_xy_replaces_absolute_world_translation():
     assert bones["Other_main"].parent == "all_objects_layer_1"
     assert bones["Other_main"].x == 200.0
     assert bones["Other_main"].y == 300.0
+
+
+def test_camera_projection_main_xy_is_preserved_while_reparenting():
+    document = SpineDocument(
+        skeleton={"spine": "4.2.43"},
+        bones=(
+            Bone("root"),
+            Bone("Camera_main", parent="root", x=0.0, y=0.0),
+        ),
+        slots=(),
+        skins=(),
+        animations={},
+    )
+    placement = ConnectedObjectPlacement(
+        component_id="camera",
+        prefix="Camera",
+        relative_x=12.0,
+        relative_y=-8.0,
+        relative_z=3.0,
+        layer_index=0,
+        main_bone_name="Camera_main",
+        parent_layer_bone_name="all_objects_layer_0",
+        placement_space=ConnectedPlacementSpace.PRESERVE_DOCUMENT,
+    )
+
+    result = apply_object_placements(
+        document,
+        (placement,),
+        uniform_scale=100.0,
+    )
+    camera_main = _bone_by_name(result)["Camera_main"]
+
+    assert camera_main.parent == "all_objects_layer_0"
+    assert camera_main.x == 0.0
+    assert camera_main.y == 0.0
 
 
 def test_connected_global_layers_encode_relative_z_with_single_rig_bone_pattern():
