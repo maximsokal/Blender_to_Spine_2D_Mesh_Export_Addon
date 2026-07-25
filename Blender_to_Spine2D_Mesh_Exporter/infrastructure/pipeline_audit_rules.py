@@ -307,17 +307,30 @@ class PipelineAuditVisitor(ast.NodeVisitor):
         function: ast.FunctionDef | ast.AsyncFunctionDef,
     ) -> None:
         allocations: dict[str, ast.Call] = {}
+        borrowed_edit_meshes: dict[str, ast.Call] = {}
         free_calls: Counter[str] = Counter()
         final_free_names: set[str] = set()
         parent_map = {child: parent for parent in ast.walk(function) for child in ast.iter_child_nodes(parent)}
 
         for node in ast.walk(function):
-            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
-                if self._call_name(node.value) != "bmesh.new":
-                    continue
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        allocations[target.id] = node.value
+            assignment_value: ast.AST | None = None
+            assignment_targets: tuple[ast.AST, ...] = ()
+            if isinstance(node, ast.Assign):
+                assignment_value = node.value
+                assignment_targets = tuple(node.targets)
+            elif isinstance(node, ast.AnnAssign):
+                assignment_value = node.value
+                assignment_targets = (node.target,)
+            if isinstance(assignment_value, ast.Call):
+                call_name = self._call_name(assignment_value)
+                if call_name in {"bmesh.new", "bmesh.from_edit_mesh"}:
+                    for target in assignment_targets:
+                        if not isinstance(target, ast.Name):
+                            continue
+                        if call_name == "bmesh.new":
+                            allocations[target.id] = assignment_value
+                        else:
+                            borrowed_edit_meshes[target.id] = assignment_value
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
                 continue
             if node.func.attr != "free" or not isinstance(node.func.value, ast.Name):
@@ -359,6 +372,18 @@ class PipelineAuditVisitor(ast.NodeVisitor):
                     function=function.name,
                 )
 
+        for name, allocation in borrowed_edit_meshes.items():
+            if free_calls[name] > 0:
+                self._finding(
+                    AuditSeverity.ERROR,
+                    "BMESH_BORROWED_FREE",
+                    (
+                        f"bmesh.from_edit_mesh() assigned to '{name}' is borrowed "
+                        "from Blender and must not be freed"
+                    ),
+                    allocation,
+                    function=function.name,
+                )
 
 
 __all__ = ["PipelineAuditVisitor", "PRODUCTION_LAYERS"]
