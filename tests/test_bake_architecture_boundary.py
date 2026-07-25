@@ -3,9 +3,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).parents[1] / "Blender_to_Spine2D_Mesh_Exporter"
+ADAPTER = ROOT / "blender_adapter"
 
 
-def _attribute_path(node):
+def _attribute_path(node: ast.AST) -> str:
     parts = []
     current = node
     while isinstance(current, ast.Attribute):
@@ -16,205 +17,101 @@ def _attribute_path(node):
     return ".".join(reversed(parts))
 
 
-def _function_for_line(tree, line_number):
+def _function_for_line(tree: ast.Module, line_number: int) -> str | None:
     matches = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             end = getattr(node, "end_lineno", node.lineno)
             if node.lineno <= line_number <= end:
                 matches.append(node)
-    if not matches:
-        return None
-    return max(matches, key=lambda node: node.lineno)
+    return max(matches, key=lambda node: node.lineno).name if matches else None
 
 
-def _function_names(path: Path):
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return {
-        node.name
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+def _operator_owners() -> set[tuple[str, str | None, str]]:
+    owners = set()
+    for path in ADAPTER.glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Attribute):
+                continue
+            attribute = _attribute_path(node)
+            if ".ops." not in f".{attribute}.":
+                continue
+            # Only record the deepest concrete operator property, not parent chains.
+            if attribute.endswith((".ops", ".ops.object", ".ops.render", ".ops.uv", ".ops.mesh")):
+                continue
+            owners.add((path.name, _function_for_line(tree, node.lineno), attribute))
+    return owners
 
 
 def test_baking_domain_has_no_blender_dependencies():
-    package_root = ROOT / "domain" / "baking"
     forbidden = ("import bpy", "from bpy", "import bmesh", "from bmesh")
-    for path in package_root.glob("*.py"):
+    for path in (ROOT / "domain" / "baking").glob("*.py"):
         source = path.read_text(encoding="utf-8")
         for fragment in forbidden:
-            assert fragment not in source, (
-                f"{path.name} contains forbidden '{fragment}'"
-            )
+            assert fragment not in source, f"{path.name} contains {fragment!r}"
 
 
-def test_bake_helpers_use_no_operator_attributes():
-    for filename in (
-        "a1_mixed_object_output.py",
-        "a1_multi_object_output.py",
-        "a1_projection_finalization.py",
-        "a1_single_object_export.py",
-        "bake_compositor.py",
-        "bake_execution_error.py",
-        "bake_material_preparation.py",
-        "bake_materials.py",
-        "bake_scene_state.py",
-        "camera_projection_error.py",
+def test_blender_operators_are_confined_to_four_physical_owners():
+    owners = _operator_owners()
+    assert owners
+    owner_files = {filename for filename, _function, _attribute in owners}
+    assert owner_files == {
         "camera_projection_execution.py",
-        "camera_projection_executor.py",
-        "camera_projection_executor_core.py",
-        "camera_projection_image.py",
-        "camera_projection_output.py",
-        "camera_projection_postprocess.py",
-        "camera_projection_state.py",
-        "camera_projection_validation.py",
-        "grouped_camera_projection_execution.py",
-        "grouped_camera_projection_executor.py",
-        "grouped_camera_projection_output.py",
-        "grouped_camera_projection_postprocess.py",
-        "grouped_camera_projection_validation.py",
-        "grouped_camera_projection_visibility.py",
-        "material_analysis_error.py",
-        "material_analysis_rna.py",
-        "material_analyzer.py",
-        "material_graph_resolution.py",
-        "material_node_classification.py",
-        "material_object_analysis.py",
-        "material_slot_analysis.py",
-        "production_shader_capabilities.py",
-        "production_shader_capability_error.py",
-        "production_shader_capability_merge.py",
-        "production_shader_capability_object_audit.py",
-        "production_shader_capability_proxy.py",
-        "production_shader_capability_routing.py",
-        "production_shader_capability_runtime.py",
-        "production_shader_capability_uv.py",
-        "scene_bake_analyzer.py",
-        "scene_bake_capture.py",
-        "scene_bake_error.py",
-        "scene_bake_resources.py",
-        "scene_bake_rna.py",
-        "scene_bake_runtime.py",
-        "scene_bake_world.py",
+        "context_state.py",
         "semantic_bake_execution.py",
-        "semantic_bake_executor.py",
-        "semantic_bake_image_io.py",
-        "semantic_bake_output.py",
-        "semantic_bake_validation.py",
-        "shader_graph_analysis.py",
-        "shader_graph_analyzer.py",
-        "shader_graph_error.py",
-        "shader_graph_rna.py",
-        "shader_graph_semantics.py",
-        "shader_graph_snapshot.py",
-        "shader_graph_traversal.py",
-        "texture_executor.py",
-    ):
-        path = ROOT / "blender_adapter" / filename
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(path))
-        operator_attributes = [
-            _attribute_path(node)
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Attribute)
-            and ".ops." in f".{_attribute_path(node)}."
-        ]
-        assert not operator_attributes, (
-            f"{filename} contains Blender operator access: "
-            f"{operator_attributes}"
-        )
+        "uv_unwrap.py",
+    }
+    assert any(
+        filename == "camera_projection_execution.py"
+        and function == "_call_render_operator"
+        and attribute.endswith(".ops.render.render")
+        for filename, function, attribute in owners
+    )
+    assert any(
+        filename == "semantic_bake_execution.py"
+        and function == "_call_bake_operator"
+        and attribute.endswith(".ops.object.bake")
+        for filename, function, attribute in owners
+    )
 
 
 def test_strategy_and_projection_domains_remain_blender_independent():
-    for filename in (
-        "strategies.py",
-        "camera_projection.py",
-        "projection_layout.py",
-    ):
+    for filename in ("strategies.py", "camera_projection.py", "projection_layout.py"):
         path = ROOT / "domain" / "baking" / filename
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(path))
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         imported_roots = {
-            node.names[0].name.split(".")[0]
+            alias.name.split(".")[0]
             for node in ast.walk(tree)
-            if isinstance(node, ast.Import) and node.names
+            if isinstance(node, ast.Import)
+            for alias in node.names
         }
-        assert "bpy" not in imported_roots
-        assert "bmesh" not in imported_roots
-        assert "numpy" not in imported_roots
+        assert not imported_roots.intersection({"bpy", "bmesh", "numpy"})
 
 
 def test_camera_projection_postprocess_streams_one_union_buffer():
-    path = (
-        ROOT
-        / "blender_adapter"
-        / "camera_projection_postprocess.py"
-    )
-    source = path.read_text(encoding="utf-8")
-
+    source = (ADAPTER / "camera_projection_postprocess.py").read_text(encoding="utf-8")
     assert "ProjectionAlphaUnionAccumulator" in source
     assert "build_sequence_union_layout" not in source
     assert "masks: list" not in source
     assert "del coverage" in source
 
 
-def test_object_bake_operator_is_confined_to_core_helper():
-    path = ROOT / "blender_adapter" / "bake_executor_core.py"
+def test_retired_monolithic_bake_executors_are_absent():
+    for filename in (
+        "bake_executor.py",
+        "bake_executor_core.py",
+        "camera_projection_executor.py",
+        "semantic_bake_executor.py",
+    ):
+        assert not (ADAPTER / filename).exists(), filename
+
+
+def test_camera_projection_core_is_a_definition_free_compatibility_export():
+    path = ADAPTER / "camera_projection_executor_core.py"
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
-    operator_attributes = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute)
-        and _attribute_path(node).endswith(".ops.object.bake")
-    ]
-
-    assert operator_attributes
-    function_names = {
-        _function_for_line(tree, node.lineno).name
-        for node in operator_attributes
-        if _function_for_line(tree, node.lineno) is not None
-    }
-    assert function_names == {"_call_bake_operator"}
-
-
-def test_render_operator_is_confined_to_public_failure_injection_hook():
-    path = ROOT / "blender_adapter" / "bake_executor.py"
-    source = path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(path))
-    operator_attributes = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute)
-        and _attribute_path(node).endswith(".ops.render.render")
-    ]
-
-    assert operator_attributes
-    function_names = {
-        _function_for_line(tree, node.lineno).name
-        for node in operator_attributes
-        if _function_for_line(tree, node.lineno) is not None
-    }
-    assert function_names == {"_call_render_operator"}
-
-
-def test_public_executor_is_a_small_facade():
-    path = ROOT / "blender_adapter" / "bake_executor.py"
-    source = path.read_text(encoding="utf-8")
-    assert _function_names(path) == {
-        "_call_bake_operator",
-        "_call_render_operator",
-    }
-    assert "texture_executor" in source
-    assert "bake_executor_core" in source
-    assert "bake_execution_error" in source
-
-
-def test_camera_projection_executor_is_a_small_facade():
-    path = ROOT / "blender_adapter" / "camera_projection_executor.py"
-    source = path.read_text(encoding="utf-8")
-    assert _function_names(path) == set()
+    assert not any(isinstance(node, (ast.FunctionDef, ast.ClassDef)) for node in tree.body)
     assert "camera_projection_error" in source
     assert "camera_projection_output" in source
-    assert "camera_projection_state" in source
-    assert "camera_projection_executor_core" not in source
+    assert ".ops." not in source

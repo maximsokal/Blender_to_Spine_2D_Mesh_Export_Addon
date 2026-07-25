@@ -56,6 +56,7 @@ def test_recovery_removes_stale_stage_and_restores_missing_final_backup(tmp_path
     report = recover_stale_atomic_work_files(
         tmp_path,
         preserve_failed_work_files=False,
+        minimum_stale_age_seconds=0.0,
     )
 
     assert stale_stage in report.removed_paths

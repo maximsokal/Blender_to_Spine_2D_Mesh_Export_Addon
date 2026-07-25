@@ -100,7 +100,7 @@ def _scene_context():
             clip_end=1000.0,
         ),
         lights=(),
-        visible_object_ids=("Camera", "A", "B"),
+        visible_object_ids=("A", "B", "Camera"),
         shadow_caster_ids=("A", "B"),
         color_management=ColorManagementSnapshot(
             view_transform="Standard",

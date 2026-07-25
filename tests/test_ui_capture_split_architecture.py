@@ -9,8 +9,12 @@ ADAPTER = (
 )
 
 
+def _source(name: str) -> str:
+    return (ADAPTER / name).read_text(encoding="utf-8")
+
+
 def _tree(name: str) -> ast.Module:
-    return ast.parse((ADAPTER / name).read_text(encoding="utf-8"), filename=name)
+    return ast.parse(_source(name), filename=name)
 
 
 def _relative_imports(name: str) -> set[str]:
@@ -21,18 +25,15 @@ def _relative_imports(name: str) -> set[str]:
     }
 
 
-def test_rna_module_is_only_a_compatibility_facade():
-    tree = _tree("a1_ui_rna.py")
-    assert not any(
-        isinstance(node, (ast.FunctionDef, ast.ClassDef)) for node in tree.body
-    )
-    imports = _relative_imports("a1_ui_rna.py")
-    assert {"a1_ui_selection", "a1_ui_scene_capture"}.issubset(imports)
+def test_retired_rna_compatibility_module_is_absent():
+    assert not (ADAPTER / "a1_ui_rna.py").exists()
+    for name in ADAPTER.glob("a1_ui_*.py"):
+        assert "a1_ui_rna" not in _source(name.name)
 
 
 def test_selection_and_scene_capture_are_physically_independent():
-    selection = (ADAPTER / "a1_ui_selection.py").read_text(encoding="utf-8")
-    scene = (ADAPTER / "a1_ui_scene_capture.py").read_text(encoding="utf-8")
+    selection = _source("a1_ui_selection.py")
+    scene = _source("a1_ui_scene_capture.py")
     assert "a1_ui_scene_capture" not in selection
     assert "a1_ui_selection" not in scene
     for source in (selection, scene):
@@ -41,16 +42,20 @@ def test_selection_and_scene_capture_are_physically_independent():
         assert "export_a1_mixed_object" not in source
 
 
-def test_runtime_modules_do_not_depend_on_compatibility_rna_facade():
-    for name in ("a1_ui_settings.py", "a1_ui_router.py"):
-        imports = _relative_imports(name)
-        assert "a1_ui_rna" not in imports
-        assert "a1_ui_selection" in imports
-        assert "a1_ui_scene_capture" in imports
+def test_settings_and_export_plan_depend_on_physical_capture_owners():
+    settings_imports = _relative_imports("a1_ui_settings.py")
+    assert {"a1_ui_selection", "a1_ui_scene_capture"}.issubset(settings_imports)
+
+    plan_imports = _relative_imports("a1_ui_export_plan.py")
+    assert {
+        "a1_ui_selection",
+        "a1_ui_scene_capture",
+        "a1_ui_settings",
+    }.issubset(plan_imports)
 
 
 def test_selection_module_owns_object_profile_and_rna_identity():
-    source = (ADAPTER / "a1_ui_selection.py").read_text(encoding="utf-8")
+    source = _source("a1_ui_selection.py")
     assert "class _ObjectExportProfile" in source
     assert "def _rna_identity" in source
     assert "as_pointer" in source
@@ -58,7 +63,7 @@ def test_selection_module_owns_object_profile_and_rna_identity():
 
 
 def test_scene_module_owns_scene_profile_and_scene_property_capture():
-    source = (ADAPTER / "a1_ui_scene_capture.py").read_text(encoding="utf-8")
+    source = _source("a1_ui_scene_capture.py")
     assert "class _SceneExportProfile" in source
     assert "def _capture_scene_profile" in source
     assert "spine2d_projection_alpha_threshold" in source

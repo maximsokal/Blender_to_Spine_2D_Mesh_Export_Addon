@@ -26,6 +26,12 @@ VALID_RAW_MESH = {
 }
 
 
+
+def serialized_raw_mesh(payload: dict[str, object]) -> dict[str, object]:
+    serialized = deepcopy(payload)
+    serialized["edges"] = [int(value) * 2 for value in payload.get("edges", ())]
+    return serialized
+
 def build_typed_mesh(payload: dict[str, object]) -> MeshAttachment:
     return MeshAttachment(
         name="mesh",
@@ -163,7 +169,7 @@ def test_validate_or_raise_preserves_duplicate_edge_code_and_pair_path():
 
 
 def test_serializer_rejects_raw_mesh_that_bypasses_typed_request_contract():
-    payload = deepcopy(VALID_RAW_MESH)
+    payload = serialized_raw_mesh(VALID_RAW_MESH)
     payload["triangles"] = [0, 0, 1]
 
     with pytest.raises(SpineValidationError) as error:
@@ -182,4 +188,4 @@ def test_valid_typed_mesh_serialization_preserves_topology_arrays():
     assert mesh["uvs"] == payload["uvs"]
     assert mesh["triangles"] == payload["triangles"]
     assert mesh["hull"] == payload["hull"]
-    assert mesh["edges"] == payload["edges"]
+    assert mesh["edges"] == [value * 2 for value in payload["edges"]]

@@ -55,7 +55,7 @@ def _region_face_indices(plan):
     )
 
 
-def test_default_angular_mode_is_exact_explicit_legacy_mode():
+def test_default_angular_mode_is_exact_explicit_seed_cone_mode():
     snapshot = build_three_quad_strip()
     settings = SegmentationSettings(
         angle_limit_degrees=30.0,
@@ -66,7 +66,7 @@ def test_default_angular_mode_is_exact_explicit_legacy_mode():
     explicit = segment_mesh_a1(
         snapshot,
         settings,
-        angular_mode=A1AngularMode.LEGACY_SEED_CONE,
+        angular_mode=A1AngularMode.SEED_CONE,
     )
 
     assert implicit == explicit

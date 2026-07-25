@@ -38,8 +38,10 @@ def test_linked_metadata_contract_owns_only_runtime_consumed_fields():
     assert 'sequence = attachment.get("sequence")' in source
     assert "isinstance(sequence, Mapping)" in source
     assert '_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")' in source
-    assert "len(hexadecimal) not in (6, 8)" in source
-    assert 'color.startswith("#")' in source
+    assert "def _validate_optional_color_metadata(" in source
+    assert "len(color) != 8" in source
+    assert "character not in _HEX_DIGITS" in source
+    assert 'color.startswith("#")' not in source
 
 
 def test_linked_metadata_defaults_are_never_materialized():

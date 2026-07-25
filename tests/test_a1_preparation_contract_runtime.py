@@ -39,6 +39,10 @@ class Snapshot(Base):
         self.world_matrix = (1.0, 0.0, 0.0, 2.0, 0.0, 1.0, 0.0, 3.0, 0.0, 0.0, 1.0, 4.0, 0.0, 0.0, 0.0, 1.0)
 
 
+class GeneratedBakePlan(Base):
+    pass
+
+
 class BakePlan(Base):
     def __init__(self):
         self.source_object_id = "Object"
@@ -84,10 +88,15 @@ def _load_contracts():
         ExportIssue=ExportIssue,
         IssueSeverity=IssueSeverity,
     )
-    _install_stub(
+    baking = _install_stub(
         root + ".domain.baking",
         BakePlan=BakePlan,
         ObjectMaterialAnalysis=type("ObjectMaterialAnalysis", (Base,), {}),
+    )
+    baking.__path__ = []
+    _install_stub(
+        root + ".domain.baking.generated_materials",
+        GeneratedBakePlan=GeneratedBakePlan,
     )
     _install_stub(root + ".domain.geometry", MeshSnapshot=Snapshot)
     _install_stub(

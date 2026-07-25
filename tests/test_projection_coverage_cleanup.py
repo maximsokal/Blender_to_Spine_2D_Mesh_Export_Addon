@@ -41,11 +41,11 @@ def test_default_policy_enables_hysteresis_and_conservative_morphology():
         ("core_alpha_threshold", -0.1, ValueError),
         ("core_alpha_threshold", 1.1, ValueError),
         ("core_alpha_threshold", float("nan"), ValueError),
-        ("core_alpha_threshold", True, ValueError),
+        ("core_alpha_threshold", True, TypeError),
         ("minimum_component_pixels", 0, ValueError),
-        ("minimum_component_pixels", True, ValueError),
+        ("minimum_component_pixels", True, TypeError),
         ("maximum_hole_pixels", -1, ValueError),
-        ("maximum_hole_pixels", False, ValueError),
+        ("maximum_hole_pixels", False, TypeError),
     ),
 )
 def test_policy_rejects_invalid_values(field_name, value, error_type):

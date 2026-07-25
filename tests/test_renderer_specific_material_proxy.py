@@ -4,9 +4,8 @@ from types import SimpleNamespace
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.bake_materials import (
     PreparedBakeMaterials,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.scene_material_preparation import (
-    _renderer_output,
-    _temporary_renderer_output_selection,
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.render_engine_contract import (
+    render_engine_contract,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     BakeMode,
@@ -41,27 +40,9 @@ class FakeNodeTree:
         return (active or candidates or [None])[0]
 
 
-def test_renderer_output_resolves_exact_target_before_generic():
-    generic = FakeOutput("Generic", "ALL", True)
-    cycles = FakeOutput("Cycles", "CYCLES", True)
-    eevee = FakeOutput("Eevee", "EEVEE", True)
-    tree = FakeNodeTree((generic, eevee, cycles))
-
-    assert _renderer_output(tree, "CYCLES") is cycles
-    assert _renderer_output(tree, "BLENDER_EEVEE_NEXT") is eevee
-
-
-def test_temporary_output_selection_is_exact_and_restored():
-    eevee = FakeOutput("Eevee", "EEVEE", True)
-    cycles = FakeOutput("Cycles", "CYCLES", True)
-    material = SimpleNamespace(node_tree=FakeNodeTree((eevee, cycles)))
-    original = (eevee.is_active_output, cycles.is_active_output)
-
-    with _temporary_renderer_output_selection((material,), "CYCLES"):
-        assert not eevee.is_active_output
-        assert cycles.is_active_output
-
-    assert (eevee.is_active_output, cycles.is_active_output) == original
+def test_renderer_contract_normalizes_only_supported_blender_52_engines():
+    assert render_engine_contract("CYCLES").shader_target == "CYCLES"
+    assert render_engine_contract("BLENDER_EEVEE").shader_target == "EEVEE"
 
 
 def test_prepared_materials_normalize_and_forward_renderer_target(monkeypatch):
@@ -82,7 +63,7 @@ def test_prepared_materials_normalize_and_forward_renderer_target(monkeypatch):
         image_nodes=(),
         placeholder_slot_indices=(),
         used_material_indices=(0,),
-        render_target="BLENDER_EEVEE_NEXT",
+        render_target="BLENDER_EEVEE",
     )
     pass_plan = BakePassPlan(
         pass_index=0,

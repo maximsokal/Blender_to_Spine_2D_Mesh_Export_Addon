@@ -50,8 +50,8 @@ def test_rewrite_contains_no_removed_or_fuzzy_renderer_identifiers():
     assert _occurrences('if "EEVEE" in target') == ()
 
 
-def test_rewrite_does_not_use_deprecated_material_or_world_use_nodes():
-    assert _occurrences(".use_nodes") == ()
+def test_rewrite_does_not_mutate_material_or_world_use_nodes():
+    assert _occurrences(".use_nodes =") == ()
 
 
 def test_rewrite_does_not_use_removed_scene_compositor_node_tree():

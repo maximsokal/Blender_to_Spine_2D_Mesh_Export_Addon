@@ -55,17 +55,14 @@ def test_missing_scene_angular_properties_preserve_legacy_default(tmp_path):
     assert settings.geometry == A1GeometryPreparationSettings()
 
 
-def test_registered_legacy_scene_ignores_dormant_local_limit():
-    settings = _resolve_geometry_settings(
-        _scene(
-            spine2d_angular_mode="LEGACY_SEED_CONE",
-            spine2d_local_angle_limit=87.0,
+def test_retired_legacy_scene_mode_fails_closed():
+    with pytest.raises(ValueError, match="Unsupported Spine2D angular mode"):
+        _resolve_geometry_settings(
+            _scene(
+                spine2d_angular_mode="LEGACY_SEED_CONE",
+                spine2d_local_angle_limit=87.0,
+            )
         )
-    )
-
-    assert settings == A1GeometryPreparationSettings()
-    assert settings.angular_mode is A1AngularMode.LEGACY_SEED_CONE
-    assert settings.local_angle_limit_degrees is None
 
 
 def test_hybrid_scene_properties_reach_single_object_geometry(tmp_path):

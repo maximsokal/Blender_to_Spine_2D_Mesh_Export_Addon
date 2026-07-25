@@ -6,7 +6,16 @@ import sys
 def test_domain_and_parity_cli_import_without_bpy():
     repository_root = Path(__file__).resolve().parents[1]
     code = """
+import importlib.abc
 import sys
+
+class BlockBpy(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "bpy" or fullname.startswith("bpy."):
+            raise ModuleNotFoundError("blocked bpy for no-runtime import test", name=fullname)
+        return None
+
+sys.meta_path.insert(0, BlockBpy())
 assert 'bpy' not in sys.modules
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1ParitySettings
 import Blender_to_Spine2D_Mesh_Exporter as addon

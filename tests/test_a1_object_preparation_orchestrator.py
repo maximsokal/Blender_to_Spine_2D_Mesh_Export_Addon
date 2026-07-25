@@ -2,11 +2,25 @@ from types import SimpleNamespace
 
 import pytest
 
-from Blender_to_Spine2D_Mesh_Exporter.application import A1SingleObjectStage
+from Blender_to_Spine2D_Mesh_Exporter.application import (
+    A1SingleObjectStage,
+    ExportIssue,
+    IssueSeverity,
+)
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import a1_object_preparation
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_preparation_contracts import (
     A1ObjectPreparationError,
 )
+
+
+def _warning(code: str) -> ExportIssue:
+    return ExportIssue(
+        severity=IssueSeverity.WARNING,
+        stage=A1SingleObjectStage.VALIDATE_REQUEST.value,
+        code=code,
+        message=code,
+        object_id="Hero",
+    )
 
 
 def _stage_values():
@@ -19,26 +33,26 @@ def _stage_values():
         source_snapshot=object(),
         z_groups=object(),
         geometry=object(),
-        warnings=("source-warning",),
+        warnings=(_warning("source-warning"),),
         statistics={"source_vertices": 4},
     )
     uv = SimpleNamespace(
         texturing_topology=object(),
         unwrap_result=object(),
         uv_regions=object(),
-        warnings=("uv-warning",),
+        warnings=(_warning("uv-warning"),),
         statistics={"uv_loop_count": 6},
     )
     texture = SimpleNamespace(
         material_analysis=object(),
         bake_plan=object(),
-        warnings=("texture-warning",),
+        warnings=(_warning("texture-warning"),),
         statistics={"bake_pass_count": 1},
     )
     document = SimpleNamespace(
         rig=object(),
         document_assembly=object(),
-        warnings=("document-warning",),
+        warnings=(_warning("document-warning"),),
         statistics={"final_bone_count": 3},
     )
     return source, uv, texture, document

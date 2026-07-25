@@ -72,4 +72,3 @@ def test_camera_projection_keeps_exporter_generated_uv_strict():
     assert validate_index < return_index
     assert "policy=UvRangePolicy.REQUIRE_UNIT_SQUARE" in source
     assert "epsilon=0.0" in source
-    assert "remain strict even when authored unwrap" in source

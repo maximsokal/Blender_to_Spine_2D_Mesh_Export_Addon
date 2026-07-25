@@ -50,9 +50,12 @@ def build_raw_attachment(
     sequence: object,
     *,
     variant: str,
+    serialized_edges: bool = False,
 ) -> tuple[dict[str, object], dict[str, object]]:
     if variant == "raw_mesh":
         attachment = deepcopy(VALID_RAW_MESH)
+        if serialized_edges:
+            attachment["edges"] = [value * 2 for value in attachment["edges"]]
         attachment["sequence"] = sequence
         return attachment, {}
 
@@ -69,13 +72,16 @@ def build_raw_attachment(
         )
 
     if variant == "raw_linkedmesh":
+        parent = deepcopy(VALID_RAW_MESH)
+        if serialized_edges:
+            parent["edges"] = [value * 2 for value in parent["edges"]]
         return (
             {
                 "type": "linkedmesh",
                 "parent": "parent",
                 "sequence": sequence,
             },
-            {"parent": deepcopy(VALID_RAW_MESH)},
+            {"parent": parent},
         )
 
     raise AssertionError(f"unsupported raw attachment variant: {variant}")
@@ -103,13 +109,18 @@ def build_variant_document(
     sequence: object,
     *,
     variant: str,
+    serialized_edges: bool = False,
 ) -> SpineDocument:
     if variant == "typed_mesh":
         if sequence is not None and not isinstance(sequence, dict):
             raise TypeError("typed MeshAttachment sequence fixture must be dict or None")
         return build_document(build_typed_mesh(sequence))
 
-    attachment, extras = build_raw_attachment(sequence, variant=variant)
+    attachment, extras = build_raw_attachment(
+        sequence,
+        variant=variant,
+        serialized_edges=serialized_edges,
+    )
     return build_document(attachment, extra_attachments=extras)
 
 
@@ -204,7 +215,11 @@ def test_invalid_count_does_not_trigger_secondary_setup_range_error(variant):
 @pytest.mark.parametrize("variant", _ATTACHMENT_VARIANTS)
 def test_omitted_runtime_defaults_are_not_materialized(variant):
     sequence = {"count": 10}
-    document = build_variant_document(sequence, variant=variant)
+    document = build_variant_document(
+        sequence,
+        variant=variant,
+        serialized_edges=True,
+    )
 
     serialized = SpineSerializer().to_dict(document)
     serialized_sequence = serialized["skins"][0]["attachments"]["slot"]["item"][

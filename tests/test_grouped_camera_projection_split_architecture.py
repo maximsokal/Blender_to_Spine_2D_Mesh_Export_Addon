@@ -65,7 +65,7 @@ def test_grouped_validation_owns_no_mutation_operator_or_output_lifecycle():
     for forbidden in (
         "preserve_camera_projection_state",
         "configure_group_camera_visibility",
-        "call_public_render_operator",
+        "_call_render_operator",
         "ProjectionAlphaUnionAccumulator",
         "read_staged_alpha_coverage",
         "rewrite_staged_image_with_crop",
@@ -86,7 +86,7 @@ def test_grouped_visibility_owns_only_group_camera_mutation():
     for forbidden in (
         "validate_grouped_camera_projection_request",
         "resolve_projection_output_policy",
-        "call_public_render_operator",
+        "_call_render_operator",
         "preserve_camera_projection_state",
         "ProjectionAlphaUnionAccumulator",
         "AtomicFileTransaction",
@@ -100,7 +100,7 @@ def test_grouped_execution_owns_reversible_render_but_no_postprocess():
     source = _source("grouped_camera_projection_execution.py")
     assert "preserve_camera_projection_state" in source
     assert "configure_group_camera_visibility" in source
-    assert "call_public_render_operator" in source
+    assert "_call_render_operator" in source
     assert "require_nonempty_grouped_staged_output" in source
     for forbidden in (
         "ProjectionAlphaUnionAccumulator",
@@ -120,7 +120,7 @@ def test_shared_postprocess_engine_serves_single_and_grouped_b4():
     grouped = _source("grouped_camera_projection_postprocess.py")
     assert "class ProjectionPostprocessRequest" in shared
     assert "def process_projection_outputs" in shared
-    assert "def process_camera_projection_outputs" in shared
+    assert "def process_camera_projection_outputs" not in shared
     assert "ProjectionAlphaUnionAccumulator" in shared
     assert "read_staged_alpha_coverage" in shared
     assert "rewrite_staged_image_with_crop" in shared
@@ -138,7 +138,7 @@ def test_grouped_postprocess_has_no_scene_operator_or_output_lifecycle():
     for forbidden in (
         "preserve_camera_projection_state",
         "configure_scene_for_camera_projection",
-        "call_public_render_operator",
+        "_call_render_operator",
         "AtomicFileTransaction",
         "atomic_file_transaction",
         ".reserve(",

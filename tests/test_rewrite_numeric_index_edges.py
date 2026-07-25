@@ -80,6 +80,15 @@ def test_bake_composite_rejects_bool_alpha_pass_index():
 
 
 def test_attachment_projection_result_rejects_bool_attachment_index():
+    vertices = tuple(
+        LegacyAttachmentVertex(
+            index=index,
+            uv=uv,
+            bone_position_pixels=(float(index), 0.0),
+            z_group_index=0,
+        )
+        for index, uv in enumerate(((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)))
+    )
     request = LegacyMeshAttachmentRequest(
         slot_name="slot",
         attachment_name="attachment",
@@ -87,23 +96,23 @@ def test_attachment_projection_result_rejects_bool_attachment_index():
         image_path="images/Cube",
         width=64.0,
         height=64.0,
-        vertices=(
-            LegacyAttachmentVertex(
-                index=0,
-                uv=(0.0, 0.0),
-                bone_position_pixels=(0.0, 0.0),
-                z_group_index=0,
-            ),
-        ),
-        triangles=(),
-        hull=1,
+        vertices=vertices,
+        triangles=(0, 1, 2),
+        hull=3,
     )
-    key = A1AttachmentVertexKey(VertexId(0), (0.0, 0.0))
+    keys = tuple(
+        A1AttachmentVertexKey(VertexId(index), vertex.uv)
+        for index, vertex in enumerate(vertices)
+    )
 
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises((TypeError, ValueError), match="attachment_index"):
         A1AttachmentProjectionResult(
             request=request,
-            hull_vertex_keys=(key,),
-            ordered_vertex_keys=(key,),
-            loop_to_attachment_index=((LoopId(0), True),),
+            hull_vertex_keys=keys,
+            ordered_vertex_keys=keys,
+            loop_to_attachment_index=(
+                (LoopId(0), 0),
+                (LoopId(1), True),
+                (LoopId(2), 2),
+            ),
         )

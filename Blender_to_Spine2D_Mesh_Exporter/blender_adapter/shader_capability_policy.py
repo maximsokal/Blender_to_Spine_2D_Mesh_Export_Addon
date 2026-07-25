@@ -174,9 +174,7 @@ def normalise_render_target(value: str) -> str:
     target = str(value or "ALL").strip().upper()
     if target in RENDER_TARGETS:
         return target
-    if "CYCLE" in target:
-        return "CYCLES"
-    if "EEVEE" in target:
+    if target == "BLENDER_EEVEE":
         return "EEVEE"
     raise ValueError(f"Unsupported render_target: {value!r}")
 

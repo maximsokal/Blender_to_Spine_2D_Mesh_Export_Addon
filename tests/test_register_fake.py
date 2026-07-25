@@ -1,28 +1,29 @@
-# tests/test_register_fake.py
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-import Blender_to_Spine2D_Mesh_Exporter
 
-# Create a fake module with a register function
-fake_module = MagicMock()
-fake_module.register.return_value = None
-fake_module.unregister.return_value = None
+import Blender_to_Spine2D_Mesh_Exporter as addon
 
 
-# Patch the list of modules used in __init__.py
-@patch("Blender_to_Spine2D_Mesh_Exporter.MODULES", (fake_module,))
-def test_register_unregister_no_errors():  # <-- FIX: Removed mock_modules argument
-    """
-    Checks that register/unregister call register/unregister
-    on each module from the MODULES list.
-    """
-    # Reset call counters before the test
-    fake_module.register.reset_mock()
-    fake_module.unregister.reset_mock()
+def test_register_unregister_no_errors(monkeypatch):
+    register_callback = MagicMock()
+    unregister_callback = MagicMock()
+    preferences = object()
+    monkeypatch.setattr(addon.bpy.app, "version", (5, 2, 0))
+    monkeypatch.setitem(
+        addon.bpy.context.preferences.addons,
+        addon.__name__,
+        SimpleNamespace(preferences=preferences),
+    )
 
-    Blender_to_Spine2D_Mesh_Exporter.register()
-    # Check that the register method of our fake module was called
-    fake_module.register.assert_called_once()
+    steps = (("fake owner", register_callback, unregister_callback),)
+    with patch.object(addon, "REGISTRATION_STEPS", steps), patch.object(
+        addon.config, "_setup_default_logging"
+    ), patch.object(addon.config, "setup_logging"), patch.object(
+        addon, "initialize_logging_preferences"
+    ) as initialize:
+        addon.register()
+        register_callback.assert_called_once_with()
+        initialize.assert_called_once_with(preferences)
 
-    Blender_to_Spine2D_Mesh_Exporter.unregister()
-    # Check that the unregister method of our fake module was called
-    fake_module.unregister.assert_called_once()
+        addon.unregister()
+        unregister_callback.assert_called_once_with()

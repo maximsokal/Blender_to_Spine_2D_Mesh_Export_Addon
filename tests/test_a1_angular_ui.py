@@ -46,7 +46,6 @@ def test_seed_cone_cut_ui_does_not_draw_local_limit():
     column = MagicMock()
 
     ui.OBJECT_PT_Spine2DMeshPanel._draw_cut_settings(
-        None,
         column,
         _scene(),
     )
@@ -62,7 +61,6 @@ def test_hybrid_cut_ui_draws_independent_local_limit():
     column = MagicMock()
 
     ui.OBJECT_PT_Spine2DMeshPanel._draw_cut_settings(
-        None,
         column,
         _scene(spine2d_angular_mode="SEED_CONE_AND_LOCAL_DIHEDRAL"),
     )
@@ -79,7 +77,6 @@ def test_custom_seam_mode_hides_unused_angular_controls():
     column = MagicMock()
 
     ui.OBJECT_PT_Spine2DMeshPanel._draw_cut_settings(
-        None,
         column,
         _scene(spine2d_seam_maker_mode="CUSTOM"),
     )

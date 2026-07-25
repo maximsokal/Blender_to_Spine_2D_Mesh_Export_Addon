@@ -136,21 +136,16 @@ def test_analysis_owner_coordinates_physical_layers_in_order():
 
 def test_material_and_production_callers_use_physical_analysis_owner():
     material_source = _source("material_graph_resolution.py")
-    material_facade = _source("material_analyzer.py")
     production_source = _source("production_shader_capability_runtime.py")
     production_facade = _source("production_shader_capabilities.py")
     package_source = _source("__init__.py")
 
-    assert "from .shader_graph_analysis import analyse_material_graph_detailed" in (
-        material_source
-    )
-    assert "from .shader_graph_error import MaterialGraphAnalysisError" in material_source
+    assert not (ADAPTER / "material_analyzer.py").exists()
+    assert "from .shader_graph_analysis import analyse_material_graph_detailed" in material_source
+    assert "from .shader_graph_error import" not in material_source
     assert "from .shader_graph_analyzer import" not in material_source
-    assert "shader_graph_analysis" not in material_facade
 
-    assert "from .shader_graph_analysis import analyse_material_graph_detailed" in (
-        production_source
-    )
+    assert "from .shader_graph_analysis import analyse_material_graph_detailed" in production_source
     assert "from .shader_graph_analyzer import" not in production_source
     assert "shader_graph_analysis" not in production_facade
 

@@ -88,6 +88,9 @@ def _validate_optional_string_metadata(
     if field_name not in attachment:
         return
     value = attachment[field_name]
+    if field_name == "name":
+        _require_name(value, f"{path}.{field_name}")
+        return
     if not isinstance(value, str):
         raise TypeError(f"{path}.{field_name} must be str")
 
@@ -101,18 +104,11 @@ def _validate_optional_color_metadata(
         return
 
     color = attachment["color"]
-    if color is None or color == "":
-        return
     if not isinstance(color, str):
-        raise TypeError(f"{path}.color must be str or None")
-
-    hexadecimal = color[1:] if color.startswith("#") else color
-    if len(hexadecimal) not in (6, 8) or any(
-        character not in _HEX_DIGITS for character in hexadecimal
-    ):
+        raise TypeError(f"{path}.color must be str")
+    if len(color) != 8 or any(character not in _HEX_DIGITS for character in color):
         raise ValueError(
-            f"{path}.color must contain 6 or 8 hexadecimal digits, "
-            "optionally prefixed by '#'"
+            f"{path}.color must contain exactly 8 hexadecimal RGBA digits"
         )
 
 

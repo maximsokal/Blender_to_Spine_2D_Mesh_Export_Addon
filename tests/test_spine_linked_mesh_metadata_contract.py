@@ -63,15 +63,9 @@ def build_document(child):
         {"timelines": True},
         {"timelines": False},
         {"name": "runtime name"},
-        {"name": ""},
         {"path": "images/child"},
         {"path": ""},
-        {"color": None},
-        {"color": ""},
-        {"color": "ffffff"},
         {"color": "ffffffff"},
-        {"color": "#ffffff"},
-        {"color": "#ffffffff"},
         {"color": "Aa01fF80"},
         {"sequence": None},
         {"sequence": {"count": 2}},
@@ -114,23 +108,30 @@ def test_name_and_path_metadata_must_be_strings(field_name, value):
         validate_setup_linked_meshes(build_skins(child))
 
 
-@pytest.mark.parametrize("value", (True, 1, 1.5, [], {}, ()))
-def test_color_metadata_requires_string_or_none(value):
+def test_name_metadata_must_be_non_empty():
+    with pytest.raises(ValueError, match=r"child\.name cannot be empty"):
+        build_skins(linked(name=""))
+
+
+@pytest.mark.parametrize("value", (None, True, 1, 1.5, [], {}, ()))
+def test_color_metadata_requires_string(value):
     child = linked(color=value)
 
-    with pytest.raises(TypeError, match=r"child\.color must be str or None"):
+    with pytest.raises(TypeError, match=r"child\.color must be str"):
         validate_setup_linked_meshes(build_skins(child))
 
 
 @pytest.mark.parametrize(
     "value",
     (
+        "",
         "fff",
+        "ffffff",
         "fffffff",
         "fffffffff",
-        "gggggg",
-        "#fffff",
-        "##ffffff",
+        "gggggggg",
+        "#ffffff",
+        "#ffffffff",
         "ffffff00ff",
         "white",
     ),
@@ -138,7 +139,7 @@ def test_color_metadata_requires_string_or_none(value):
 def test_non_runtime_hex_colors_are_rejected(value):
     child = linked(color=value)
 
-    with pytest.raises(ValueError, match="6 or 8 hexadecimal digits"):
+    with pytest.raises(ValueError, match="exactly 8 hexadecimal RGBA digits"):
         validate_setup_linked_meshes(build_skins(child))
 
 

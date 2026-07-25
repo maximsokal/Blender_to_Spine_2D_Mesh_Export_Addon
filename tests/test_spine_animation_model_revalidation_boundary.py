@@ -31,6 +31,7 @@ def test_contract_owns_model_animation_implementation_without_import_cycle():
 
 def test_contract_validates_in_original_model_order_without_mutation():
     source = read(CONTRACT)
+    body = source[source.index("def validate_animation_model_contracts(") :]
     names = (
         "validate_json_mapping(animations, path=path)",
         "validate_json_mapping(events, path=events_path)",
@@ -41,11 +42,11 @@ def test_contract_validates_in_original_model_order_without_mutation():
         "attachment_index = resolve_setup_attachment_name_index(",
         "_validate_animation_slot_attachment_timelines(",
     )
-    positions = [source.index(name) for name in names]
+    positions = [body.index(name) for name in names]
 
     assert positions == sorted(positions)
-    assert "setdefault(" not in source
-    assert "deepcopy(" not in source
+    assert "setdefault(" not in body
+    assert "deepcopy(" not in body
 
 
 def test_contract_accepts_and_reuses_both_exact_indexes():

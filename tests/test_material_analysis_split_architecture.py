@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import material_analyzer
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import material_graph_resolution
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.material_analysis_error import (
     MaterialAnalysisError,
@@ -112,14 +111,14 @@ def _missing_output_graph(*issues):
     )
 
 
-def _effective_graph(*issues):
+def _effective_graph(*issues, material_name="Material"):
     output = ShaderNodeSnapshot(
         node_id="Material Output",
         node_type="OUTPUT_MATERIAL",
         node_name="Material Output",
     )
     return MaterialGraphSnapshot(
-        material_name="Material",
+        material_name=material_name,
         active_output_node_id=output.node_id,
         reachable_nodes=(output,),
         reachable_links=(),
@@ -127,19 +126,6 @@ def _effective_graph(*issues):
         dependencies=(),
         issues=tuple(issues),
     )
-
-
-def test_material_analyzer_is_compatibility_only():
-    assert _top_level_definitions("material_analyzer.py") == ()
-    source = _source("material_analyzer.py")
-    for owner in (
-        "material_analysis_error",
-        "material_analysis_rna",
-        "material_node_classification",
-        "material_object_analysis",
-        "material_slot_analysis",
-    ):
-        assert owner in source
 
 
 def test_material_physical_owners_have_separate_responsibilities():
@@ -262,11 +248,8 @@ def test_missing_output_uses_root_nodes_and_preserves_graph_issues(monkeypatch):
         ),
     )
 
-    result = analyse_material_slot(0, material, render_target="CYCLES")
-
-    assert result.kind is MaterialKind.PROCEDURAL
-    assert result.graph is None
-    assert result.issues == ("Missing output",)
+    with pytest.raises(MaterialAnalysisError, match="no active output node"):
+        analyse_material_slot(0, material, render_target="CYCLES")
 
 
 def test_graph_analysis_error_uses_root_nodes_and_records_diagnostic(monkeypatch):
@@ -281,11 +264,8 @@ def test_graph_analysis_error_uses_root_nodes_and_records_diagnostic(monkeypatch
         fail,
     )
 
-    result = analyse_material_slot(0, material, render_target="CYCLES")
-
-    assert result.kind is MaterialKind.PROCEDURAL
-    assert result.graph is None
-    assert result.issues == ("Shader graph analysis failed: broken graph",)
+    with pytest.raises(MaterialAnalysisError, match="broken graph"):
+        analyse_material_slot(0, material, render_target="CYCLES")
 
 
 def test_classification_issues_precede_graph_issues_and_deduplicate(monkeypatch):
@@ -301,28 +281,26 @@ def test_classification_issues_precede_graph_issues_and_deduplicate(monkeypatch)
         ),
     )
 
-    result = analyse_material_slot(0, material, render_target="CYCLES")
-
-    assert result.kind is MaterialKind.UNSUPPORTED
-    assert result.issues == (classification_issue, "Graph note")
+    with pytest.raises(MaterialAnalysisError, match="no active output node"):
+        analyse_material_slot(0, material, render_target="CYCLES")
 
 
 def test_object_analysis_preserves_dense_slots_and_source_id_override(monkeypatch):
     monkeypatch.setattr(
         material_graph_resolution,
         "analyse_material_graph_detailed",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            snapshot=_missing_output_graph(),
-            reachable_nodes=(),
+        lambda material, *_args, **_kwargs: SimpleNamespace(
+            snapshot=_effective_graph(material_name=material.name),
+            reachable_nodes=(FakeNode("BSDF_PRINCIPLED"),),
         ),
     )
     result = analyse_object_materials(
         FakeObject(
             "Cube",
             (
-                FakeMaterial("A", None, use_nodes=False),
+                FakeMaterial("A", (FakeNode("BSDF_PRINCIPLED"),)),
                 None,
-                FakeMaterial("B", None, use_nodes=False),
+                FakeMaterial("B", (FakeNode("BSDF_PRINCIPLED"),)),
             ),
         ),
         source_object_id="SourceId",
@@ -349,17 +327,6 @@ def test_material_slot_iteration_failure_is_wrapped():
 
     with pytest.raises(
         MaterialAnalysisError,
-        match="Failed to analyze materials for 'Broken': slot collection failed",
+        match="Unable to iterate material slots of object 'Broken'",
     ):
         analyse_object_materials(BrokenObject(), render_target="CYCLES")
-
-
-def test_facade_retains_historical_return_types_and_alias_identity():
-    nodes = (FakeNode("BSDF_PRINCIPLED"),)
-    legacy = material_analyzer._classify_nodes(nodes)
-
-    assert isinstance(legacy, tuple)
-    assert len(legacy) == 4
-    assert legacy[0] is MaterialKind.SOLID_COLOR
-    assert material_analyzer.analyse_material_slot is analyse_material_slot
-    assert material_analyzer.analyse_object_materials is analyse_object_materials

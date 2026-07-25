@@ -220,6 +220,7 @@ def test_uv_transfer_uses_source_loop_ids_not_position_or_local_order():
         ),
         uv_layer_names=(),
         active_uv_layer=None,
+        render_uv_layer=None,
     )
     MeshSnapshotValidator().validate_or_raise(target)
 
@@ -237,29 +238,42 @@ def test_uv_transfer_uses_source_loop_ids_not_position_or_local_order():
         assert loop.uv("TransferredUV") == source_lookup[loop.source_id]
 
 
-def test_repeated_source_loop_id_is_allowed_when_uv_matches():
-    snapshot = build_square_snapshot()
-    repeated = replace(
-        snapshot.loops[1],
-        id=LoopId(6),
-        source_id=snapshot.loops[0].source_id,
-        vertex_id=VertexId(0),
-        edge_id=EdgeId(0),
-        uvs=snapshot.loops[0].uvs,
+def _with_repeated_first_face(snapshot, *, conflicting_uv=False):
+    appended_loops = tuple(
+        replace(
+            snapshot.loops[index],
+            id=LoopId(6 + index),
+            uvs=(LoopUV("UVMap", (0.5, 0.5)),)
+            if conflicting_uv and index == 0
+            else snapshot.loops[index].uvs,
+        )
+        for index in range(3)
     )
-    derived = replace(snapshot, loops=snapshot.loops + (repeated,))
+    appended_face = MeshFace(
+        FaceId(2),
+        SourceFaceId("Cube", 0),
+        tuple(loop.id for loop in appended_loops),
+        0,
+        (0.0, 0.0, 1.0),
+    )
+    return replace(
+        snapshot,
+        loops=snapshot.loops + appended_loops,
+        faces=snapshot.faces + (appended_face,),
+    )
+
+
+def test_repeated_source_loop_id_is_allowed_when_uv_matches():
+    derived = _with_repeated_first_face(build_square_snapshot())
     correspondence = build_uv_correspondence(derived, "UVMap")
     assert correspondence.as_dict()[SourceLoopId("Cube", 0, 0)] == (0.0, 0.0)
 
 
 def test_repeated_source_loop_id_with_conflicting_uv_is_rejected():
-    snapshot = build_square_snapshot()
-    conflicting = replace(
-        snapshot.loops[0],
-        id=LoopId(6),
-        uvs=(LoopUV("UVMap", (0.5, 0.5)),),
+    derived = _with_repeated_first_face(
+        build_square_snapshot(),
+        conflicting_uv=True,
     )
-    derived = replace(snapshot, loops=snapshot.loops + (conflicting,))
     with pytest.raises(ConflictingSourceLoopUVError):
         build_uv_correspondence(derived, "UVMap")
 

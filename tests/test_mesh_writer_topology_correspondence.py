@@ -88,7 +88,7 @@ def build_triangle_snapshot() -> MeshSnapshot:
 class FakeUvLayer:
     def __init__(self, name, loop_count):
         self.name = name
-        self.data = [SimpleNamespace(uv=None) for _ in range(loop_count)]
+        self.uv = [SimpleNamespace(vector=None) for _ in range(loop_count)]
         self.active_render = False
 
 
@@ -200,7 +200,7 @@ def test_uv_write_and_capture_use_the_same_corner_correspondence():
     _write_uv_layers(snapshot, mesh)
 
     layer = mesh.uv_layers.get("UVMap")
-    assert tuple(item.uv for item in layer.data) == (
+    assert tuple(item.vector for item in layer.uv) == (
         (1.0, 0.0),
         (0.0, 1.0),
         (0.0, 0.0),

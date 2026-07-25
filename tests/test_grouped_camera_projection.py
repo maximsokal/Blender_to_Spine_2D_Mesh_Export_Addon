@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from Blender_to_Spine2D_Mesh_Exporter.application import (
-    ConnectedB4RenderPolicy,
+    ConnectedCameraRenderPolicy,
     apply_grouped_camera_overlay,
 )
 from Blender_to_Spine2D_Mesh_Exporter.application.a1_multi_object import (
@@ -269,7 +269,7 @@ def test_grouped_overlay_hides_source_slots_and_adds_root_bound_mesh(tmp_path):
     default_skin = next(skin for skin in result.document.skins if skin.name == "default")
     attachment = default_skin.attachments[result.slot_name][result.attachment_name]
     assert isinstance(attachment, MeshAttachment)
-    assert attachment.hull == 6
+    assert attachment.hull == 5
     assert len(attachment.vertices) == 12
     assert len(attachment.uvs) == 12
     assert len(attachment.triangles) == 12
@@ -334,8 +334,8 @@ def test_multi_settings_grouped_policy_is_typed(tmp_path):
         output_stem="Combined",
     )
     assert (
-        settings.connected_b4_render_policy
-        is ConnectedB4RenderPolicy.AUTO_GROUPED_CAMERA
+        settings.connected_camera_render_policy
+        is ConnectedCameraRenderPolicy.INDIVIDUAL_LAYERS
     )
-    with pytest.raises(TypeError, match="connected_b4_render_policy"):
-        replace(settings, connected_b4_render_policy="AUTO_GROUPED_CAMERA")
+    with pytest.raises(TypeError, match="connected_camera_render_policy"):
+        replace(settings, connected_camera_render_policy="INDIVIDUAL_LAYERS")

@@ -41,11 +41,11 @@ def test_b4_postprocess_runs_outside_reversible_scene_scope():
         "camera_projection_output.py"
     )
 
-    assert "process_camera_projection_outputs" not in execution_source
+    assert "process_projection_outputs" not in execution_source
     render_index = output_source.index(
         "render_camera_projection_frames"
     )
     postprocess_index = output_source.index(
-        "process_camera_projection_outputs"
+        "process_projection_outputs"
     )
     assert render_index < postprocess_index

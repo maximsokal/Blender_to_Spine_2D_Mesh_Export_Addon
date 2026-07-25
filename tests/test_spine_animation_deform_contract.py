@@ -127,7 +127,6 @@ def test_unweighted_deform_is_accepted_and_preserved_without_defaults():
             {"time": 2.0, "vertices": []},
         ],
         extra_attachment_timelines={
-            "sequence": [{"time": 0.0, "mode": "hold"}],
             "futureTimeline": {"enabled": True},
         },
     )

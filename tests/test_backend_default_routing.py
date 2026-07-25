@@ -1,60 +1,23 @@
-from types import SimpleNamespace
-
-import pytest
-
-from Blender_to_Spine2D_Mesh_Exporter.single_object_operator import (
-    DEFAULT_SINGLE_BACKEND,
-    SINGLE_BACKEND_PROPERTY,
-    resolve_single_backend,
-)
-from Blender_to_Spine2D_Mesh_Exporter.ui import (
-    DEFAULT_MULTI_BACKEND,
-    MULTI_BACKEND_PROPERTY,
-    resolve_multi_backend,
-)
+from pathlib import Path
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    (
-        (None, "REWRITE"),
-        ("", "REWRITE"),
-        ("unknown", "REWRITE"),
-        ("rewrite", "REWRITE"),
-        ("  rewrite  ", "REWRITE"),
-        ("legacy", "LEGACY"),
-        ("  LEGACY  ", "LEGACY"),
-    ),
-)
-def test_single_backend_is_rewrite_by_default_and_legacy_only_when_explicit(
-    value,
-    expected,
-):
-    scene = SimpleNamespace()
-    if value is not None:
-        setattr(scene, SINGLE_BACKEND_PROPERTY, value)
-    assert resolve_single_backend(scene) == expected
-    assert DEFAULT_SINGLE_BACKEND == "REWRITE"
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGE = ROOT / "Blender_to_Spine2D_Mesh_Exporter"
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    (
-        (None, "REWRITE"),
-        ("", "REWRITE"),
-        ("unknown", "REWRITE"),
-        ("rewrite", "REWRITE"),
-        ("  rewrite  ", "REWRITE"),
-        ("legacy", "LEGACY"),
-        ("  LEGACY  ", "LEGACY"),
-    ),
-)
-def test_multi_backend_is_rewrite_by_default_and_legacy_only_when_explicit(
-    value,
-    expected,
-):
-    scene = SimpleNamespace()
-    if value is not None:
-        setattr(scene, MULTI_BACKEND_PROPERTY, value)
-    assert resolve_multi_backend(scene) == expected
-    assert DEFAULT_MULTI_BACKEND == "REWRITE"
+def test_single_operator_routes_directly_to_rewrite_backend():
+    source = (PACKAGE / "single_object_operator.py").read_text(encoding="utf-8")
+
+    assert "export_active_object_a1" in source
+    assert "legacy" not in source.casefold()
+    assert "DEFAULT_SINGLE_BACKEND" not in source
+    assert "SINGLE_BACKEND_PROPERTY" not in source
+
+
+def test_multi_ui_routes_directly_to_rewrite_backends():
+    source = (PACKAGE / "ui.py").read_text(encoding="utf-8")
+
+    assert "export_active_object_a1" in source
+    assert "export_selected_objects_a1" in source
+    assert "DEFAULT_MULTI_BACKEND" not in source
+    assert "MULTI_BACKEND_PROPERTY" not in source

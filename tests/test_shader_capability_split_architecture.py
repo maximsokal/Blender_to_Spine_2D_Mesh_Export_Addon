@@ -185,11 +185,12 @@ def test_facade_retains_historical_private_aliases():
 def test_policy_mappings_are_read_only_and_target_normalization_is_compatible():
     assert shader_capability_policy.normalise_render_target("cycles") == "CYCLES"
     assert (
-        shader_capability_policy.normalise_render_target("BLENDER_EEVEE_NEXT")
+        shader_capability_policy.normalise_render_target("BLENDER_EEVEE")
         == "EEVEE"
     )
-    with pytest.raises(ValueError, match="Unsupported render_target"):
-        shader_capability_policy.normalise_render_target("WORKBENCH")
+    for unsupported in ("BLENDER_EEVEE_NEXT", "MY_CYCLES", "WORKBENCH"):
+        with pytest.raises(ValueError, match="Unsupported render_target"):
+            shader_capability_policy.normalise_render_target(unsupported)
     with pytest.raises(TypeError):
         shader_capability_policy.TEXTURE_COORD_CAPABILITIES["future"] = (
             ShaderBakeCapability.UNSUPPORTED

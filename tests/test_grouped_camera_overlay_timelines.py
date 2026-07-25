@@ -1,5 +1,5 @@
 from Blender_to_Spine2D_Mesh_Exporter.application.a1_grouped_camera_projection import (
-    _strip_hidden_slot_timelines,
+    _strip_hidden_visual_timelines,
 )
 
 
@@ -18,7 +18,7 @@ def test_grouped_overlay_removes_only_hidden_source_slot_timelines():
         "raw": "preserve-non-mapping",
     }
 
-    result = _strip_hidden_slot_timelines(
+    result = _strip_hidden_visual_timelines(
         animations,
         {"hidden_a", "hidden_b"},
     )
@@ -40,7 +40,7 @@ def test_grouped_overlay_removes_empty_slots_section_only():
         }
     }
 
-    result = _strip_hidden_slot_timelines(animations, {"hidden"})
+    result = _strip_hidden_visual_timelines(animations, {"hidden"})
 
     assert "slots" not in result["preview"]
     assert result["preview"]["bones"] == animations["preview"]["bones"]

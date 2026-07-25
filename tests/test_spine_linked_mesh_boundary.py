@@ -73,7 +73,7 @@ def test_terminal_parent_must_be_mesh_compatible():
     source = read(CONTRACT)
 
     assert "if parent_type not in _MESH_PARENT_TYPES:" in source
-    assert "unsupported attachment type" in source
+    assert "resolves to unsupported attachment " in source
     assert "resolves to non-mesh attachment type" in source
 
 

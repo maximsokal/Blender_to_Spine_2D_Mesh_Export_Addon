@@ -48,19 +48,19 @@ def test_projection_contour_mode_requires_typed_enum():
 
 
 @pytest.mark.parametrize(
-    "value",
+    ("value", "error_type"),
     (
-        -0.01,
-        float("inf"),
-        float("-inf"),
-        float("nan"),
-        "1",
-        None,
-        True,
+        (-0.01, ValueError),
+        (float("inf"), ValueError),
+        (float("-inf"), ValueError),
+        (float("nan"), ValueError),
+        ("1", TypeError),
+        (None, TypeError),
+        (True, TypeError),
     ),
 )
-def test_projection_contour_tolerance_rejects_invalid_values(value):
-    with pytest.raises(ValueError, match="simplify_tolerance"):
+def test_projection_contour_tolerance_rejects_invalid_values(value, error_type):
+    with pytest.raises(error_type, match="simplify_tolerance"):
         BakeExecutionSettings(
             projection_contour_simplify_tolerance_pixels=value,
         )

@@ -94,10 +94,10 @@ def test_production_preparation_uses_one_renderer_contract():
         ROOT
         / "Blender_to_Spine2D_Mesh_Exporter"
         / "blender_adapter"
-        / "a1_object_preparation.py"
+        / "a1_source_geometry_preparation.py"
     ).read_text(encoding="utf-8")
 
-    assert "render_target=renderer.shader_target" in source
-    assert "renderer.validate_scene(scene_bake_context)" in source
-    assert "if renderer.uses_eevee:" in source
-    assert "build_camera_projection_plan(" in source
+    assert "renderer = render_engine_contract_from_execution" in source
+    assert '"render_engine": renderer.blender_engine' in source
+    assert '"shader_render_target": renderer.shader_target' in source
+    assert "normalize_mesh_snapshot_world_transform" in source

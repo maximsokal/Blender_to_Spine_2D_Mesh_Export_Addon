@@ -40,7 +40,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.legacy_connected_group import
     _validate_inputs,
 )
 
-from test_legacy_connected_group import connected_objects, settings
+from test_connected_group_document import connected_objects, settings
 
 
 ROOT = Path(__file__).parents[1] / "Blender_to_Spine2D_Mesh_Exporter"
@@ -194,21 +194,13 @@ def test_internal_component_and_global_bone_namespace_collisions_fail_early():
         )
 
 
-def test_a1_constraint_names_in_wrong_collection_are_rejected():
-    objects = connected_objects()
-    first = objects[0]
-    broken_document = replace(
-        first.document,
-        ik=(),
-        transform=(first.document.ik[0], *first.document.transform),
-    )
-    SpineValidator().validate_or_raise(broken_document)
-    broken = replace(first, document=broken_document)
-
-    with pytest.raises(ConnectedGroupBuildError, match="IK/Transform collections"):
-        build_connected_group_document(
-            (broken, objects[1]),
-            settings(),
+def test_constraint_collections_reject_wrong_typed_values_at_model_boundary():
+    first = connected_objects()[0]
+    with pytest.raises(TypeError, match="transform must contain only TransformConstraint"):
+        replace(
+            first.document,
+            ik=(),
+            transform=(first.document.ik[0], *first.document.transform),
         )
 
 

@@ -128,15 +128,18 @@ def test_slot_attachment_contract_does_not_normalize_or_move_timelines():
 
 def test_grouped_camera_remains_owner_of_hidden_source_slot_timelines():
     source = read(GROUPED_OVERLAY)
-    strip_start = source.index("def _strip_hidden_slot_timelines(")
+    retained_start = source.index("def _retained_slot_mapping(")
+    strip_start = source.index("def _strip_hidden_visual_timelines(", retained_start)
     apply_start = source.index("def apply_grouped_camera_overlay(", strip_start)
+    retained_source = source[retained_start:strip_start]
     strip_source = source[strip_start:apply_start]
     apply_source = source[apply_start:]
 
-    assert "hidden_slot_names" in strip_source
-    assert "if str(slot_name) not in hidden_slot_names" in strip_source
+    assert "hidden_slot_names" in retained_source
+    assert "if str(slot_name) not in hidden_slot_names" in retained_source
+    assert "_retained_slot_mapping(" in strip_source
     assert 'copied_payload.pop("slots", None)' in strip_source
-    assert "animations=_strip_hidden_slot_timelines(" in apply_source
+    assert "animations=_strip_hidden_visual_timelines(" in apply_source
     assert "hidden_set" in apply_source
 
 

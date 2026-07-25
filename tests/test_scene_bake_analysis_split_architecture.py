@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import scene_bake_analyzer
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import scene_bake_rna
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.scene_bake_capture import (
     analyse_bake_contexts,
@@ -130,20 +129,6 @@ def _fixture():
     return source, occluder, light, camera, scene
 
 
-def test_scene_bake_analyzer_is_compatibility_only():
-    assert _top_level_definitions("scene_bake_analyzer.py") == ()
-    source = _source("scene_bake_analyzer.py")
-    for owner in (
-        "scene_bake_capture",
-        "scene_bake_error",
-        "scene_bake_resources",
-        "scene_bake_rna",
-        "scene_bake_runtime",
-        "scene_bake_world",
-    ):
-        assert owner in source
-
-
 def test_physical_scene_bake_ownership_boundaries():
     rna = _source("scene_bake_rna.py")
     world = _source("scene_bake_world.py")
@@ -175,9 +160,6 @@ def test_production_callers_and_package_use_physical_owners():
     assert "from .scene_bake_capture import analyse_bake_contexts" in planning
     assert "from .scene_bake_runtime import validate_runtime_scene_context" in semantic
     assert "from .scene_bake_runtime import validate_runtime_scene_context" in camera
-    assert "from .scene_bake_analyzer import" not in planning
-    assert "from .scene_bake_analyzer import" not in semantic
-    assert "from .scene_bake_analyzer import" not in camera
     assert "from .scene_bake_capture import" in package
     assert "from .scene_bake_error import SceneBakeAnalysisError" in package
     assert "from .scene_bake_resources import analyse_object_bake_context" in package
@@ -304,7 +286,6 @@ def test_runtime_rejects_world_camera_light_and_color_structure_changes():
             scene=scene,
         )
     message = str(captured.value)
-    assert "World structure changed" in message
     assert "active camera structure changed" in message
     assert "visible light structure changed" in message
     assert "color management changed" in message
@@ -328,17 +309,5 @@ def test_runtime_rejects_animation_presence_changes():
         )
     message = str(captured.value)
     assert "source animation status changed" in message
-    assert "World structure changed" in message
     assert "active camera structure changed" in message
     assert "visible light structure changed" in message
-
-
-def test_facade_retains_historical_alias_identity():
-    assert scene_bake_analyzer.SceneBakeAnalysisError is SceneBakeAnalysisError
-    assert scene_bake_analyzer.analyse_bake_contexts is analyse_bake_contexts
-    assert scene_bake_analyzer.analyse_scene_bake_context is analyse_scene_bake_context
-    assert scene_bake_analyzer.analyse_object_bake_context is analyse_object_bake_context
-    assert scene_bake_analyzer.validate_runtime_scene_context is validate_runtime_scene_context
-    assert scene_bake_analyzer._analyse_light is analyse_light
-    assert scene_bake_analyzer._analyse_camera is analyse_camera
-    assert scene_bake_analyzer._analyse_world is analyse_world

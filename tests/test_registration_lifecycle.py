@@ -18,19 +18,9 @@ def _tree(name: str) -> ast.Module:
 
 def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
     return next(
-        node
-        for node in ast.walk(tree)
+        node for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef) and node.name == name
     )
-
-
-def _assigned_string(tree: ast.Module, name: str) -> str:
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        if any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
-            return ast.literal_eval(node.value)
-    raise AssertionError(f"assignment {name!r} not found")
 
 
 def _called_names(function: ast.FunctionDef) -> set[str]:
@@ -68,45 +58,19 @@ def test_registration_infrastructure_is_blender_independent():
     }.issubset(definitions)
 
 
-def test_single_backend_has_one_rewrite_default_and_unknown_values_fail_closed():
-    tree = _tree("single_object_operator.py")
-    assert _assigned_string(tree, "DEFAULT_SINGLE_BACKEND") == "REWRITE"
-    resolver = _function(tree, "resolve_single_backend")
-    resolver_source = ast.get_source_segment(_source("single_object_operator.py"), resolver)
-    assert "DEFAULT_SINGLE_BACKEND" in resolver_source
-    assert "return DEFAULT_SINGLE_BACKEND" in resolver_source
-
-    execute = next(
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "execute"
-        and any(
-            isinstance(parent, ast.ClassDef)
-            and parent.name == "OBJECT_OT_SaveUVAsJSON"
-            and node in parent.body
-            for parent in ast.walk(tree)
-        )
-    )
-    assert "resolve_single_backend" in _called_names(execute)
-    source = _source("single_object_operator.py")
-    assert 'getattr(context.scene, SINGLE_BACKEND_PROPERTY, "LEGACY")' not in source
-    assert "default=DEFAULT_SINGLE_BACKEND" in source
+def test_runtime_operators_route_directly_to_rewrite_services():
+    single = _source("single_object_operator.py")
+    ui = _source("ui.py")
+    assert "export_active_object_a1" in single
+    assert "load_legacy_single_backend" not in single
+    assert "DEFAULT_SINGLE_BACKEND" not in single
+    assert "export_active_object_a1" in ui
+    assert "export_selected_objects_a1" in ui
+    assert "DEFAULT_MULTI_BACKEND" not in ui
+    assert "resolve_multi_backend" not in ui
 
 
-def test_multi_backend_has_one_rewrite_default_and_unknown_values_fail_closed():
-    tree = _tree("ui.py")
-    assert _assigned_string(tree, "DEFAULT_MULTI_BACKEND") == "REWRITE"
-    resolver = _function(tree, "resolve_multi_backend")
-    resolver_source = ast.get_source_segment(_source("ui.py"), resolver)
-    assert "DEFAULT_MULTI_BACKEND" in resolver_source
-    assert "return DEFAULT_MULTI_BACKEND" in resolver_source
-    source = _source("ui.py")
-    assert 'getattr(scene, "spine2d_multi_export_backend", "LEGACY")' not in source
-    assert "default=DEFAULT_MULTI_BACKEND" in source
-
-
-def test_nested_registration_owners_use_common_transaction_helpers():
+def test_registration_owners_use_only_needed_transaction_helpers():
     expectations = {
         "addon_preferences.py": {
             "register_classes_transactionally",
@@ -114,7 +78,10 @@ def test_nested_registration_owners_use_common_transaction_helpers():
         },
         "single_object_operator.py": {
             "register_classes_transactionally",
-            "register_rna_properties_transactionally",
+            "unregister_all_best_effort",
+        },
+        "repolish_ui.py": {
+            "register_classes_transactionally",
             "unregister_all_best_effort",
         },
         "ui.py": {
@@ -130,17 +97,17 @@ def test_nested_registration_owners_use_common_transaction_helpers():
     }
     for name, expected_calls in expectations.items():
         tree = _tree(name)
-        register_calls = _called_names(_function(tree, "register"))
-        unregister_calls = _called_names(_function(tree, "unregister"))
-        combined = register_calls | unregister_calls
+        combined = _called_names(_function(tree, "register")) | _called_names(
+            _function(tree, "unregister")
+        )
         assert expected_calls.issubset(combined), name
 
 
-def test_ui_rna_ownership_keeps_property_groups_before_pointer_properties():
+def test_ui_rna_ownership_registers_classes_before_pointer_properties():
     source = _source("ui.py")
-    class_position = source.index("register_classes_transactionally(")
-    property_position = source.index("register_rna_properties_transactionally(")
-    assert class_position < property_position
+    assert source.index("register_classes_transactionally(") < source.index(
+        "register_rna_properties_transactionally("
+    )
     assert 'name="spine2d_bake_settings"' in source
     assert 'name="spine2d_connect_settings"' in source
 
@@ -151,44 +118,41 @@ def test_ui_rna_ownership_keeps_property_groups_before_pointer_properties():
     )
 
 
-def test_root_owns_config_properties_and_orders_registration_dependencies():
+def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
     tree = _tree("__init__.py")
     source = _source("__init__.py")
-    assert "for name, prop in config.PROPERTIES" in source
+    assert "for name, prop in scene_properties.PROPERTIES" in source
     assert "register_rna_properties_transactionally(CONFIG_RNA_PROPERTIES)" in source
     assert "bpy.utils.register_class" not in source
     assert "bpy.utils.unregister_class" not in source
 
     steps_assignment = next(
-        node
-        for node in ast.walk(tree)
+        node for node in ast.walk(tree)
         if isinstance(node, ast.AnnAssign)
         and isinstance(node.target, ast.Name)
         and node.target.id == "REGISTRATION_STEPS"
     )
-    assert isinstance(steps_assignment.value, ast.Tuple)
     labels = [ast.literal_eval(item.elts[0]) for item in steps_assignment.value.elts]
     assert labels == [
         "addon preferences",
-        "config RNA properties",
+        "Scene RNA properties",
         "UI",
+        "Re-Polish UI",
         "generated material UI",
         "single-object operator",
     ]
-
-    register = _function(tree, "register")
-    unregister = _function(tree, "unregister")
-    assert "unregister_all_best_effort" in _called_names(register)
-    assert "unregister_all_best_effort" in _called_names(unregister)
+    assert "unregister_all_best_effort" in _called_names(_function(tree, "register"))
+    assert "unregister_all_best_effort" in _called_names(_function(tree, "unregister"))
 
 
-def test_root_startup_still_keeps_legacy_implementation_lazy():
+def test_root_startup_imports_no_legacy_implementation_module():
     source = _source("__init__.py")
-    assert "install_legacy_multi_facade()" in source
     for forbidden in (
         "from . import main",
         "from . import json_export",
         "from . import texture_baker",
         "from . import plane_cut",
+        "install_legacy_multi_facade",
+        "load_legacy_single_backend",
     ):
         assert forbidden not in source

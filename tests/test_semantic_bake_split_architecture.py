@@ -19,22 +19,15 @@ def _tree(name: str) -> ast.Module:
 
 def _function_source(name: str, function_name: str) -> str:
     source = _source(name)
-    tree = ast.parse(source, filename=name)
     node = next(
-        item
-        for item in tree.body
+        item for item in _tree(name).body
         if isinstance(item, ast.FunctionDef) and item.name == function_name
     )
-    lines = source.splitlines()
-    return "\n".join(lines[node.lineno - 1 : node.end_lineno])
+    return "\n".join(source.splitlines()[node.lineno - 1 : node.end_lineno])
 
 
-def test_semantic_executor_is_a_small_compatibility_facade():
-    tree = _tree("semantic_bake_executor.py")
-    assert not any(
-        isinstance(node, (ast.FunctionDef, ast.ClassDef)) for node in tree.body
-    )
-    assert "semantic_bake_output" in _source("semantic_bake_executor.py")
+def test_retired_semantic_executor_facade_is_absent():
+    assert not (ADAPTER / "semantic_bake_executor.py").exists()
 
 
 def test_validation_module_owns_no_transaction_or_mutation_scope():
@@ -73,10 +66,7 @@ def test_execution_module_cannot_commit_or_create_transactions():
 
 
 def test_stage_validates_before_any_reservation():
-    source = _function_source(
-        "semantic_bake_output.py",
-        "stage_bake_plan_outputs",
-    )
+    source = _function_source("semantic_bake_output.py", "stage_bake_plan_outputs")
     assert source.index("validate_semantic_bake_request") < source.index(
         "_stage_validated_request"
     )
@@ -94,10 +84,6 @@ def test_typed_texture_gateway_validates_before_dispatch():
     source = _source("texture_executor.py")
     assert "class TextureExecutionRequest" in source
     assert "target_snapshot.source_object_id != self.plan.source_object_id" in source
-    for name in (
-        "stage_texture_plan_outputs",
-        "stage_bake_plan_outputs",
-        "execute_bake_plan",
-    ):
+    for name in ("stage_texture_plan_outputs", "execute_bake_plan"):
         function = _function_source("texture_executor.py", name)
         assert "TextureExecutionRequest.capture" in function

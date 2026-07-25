@@ -130,7 +130,7 @@ def test_camera_data_and_object_info_require_source_camera_render():
 def test_shader_to_rgb_requires_eevee_and_rejects_cycles():
     eevee = audit_material_graph_capabilities(
         _graph("SHADER_TO_RGB", output_socket="Color"),
-        render_target="BLENDER_EEVEE_NEXT",
+        render_target="BLENDER_EEVEE",
     )
     cycles = audit_material_graph_capabilities(
         _graph("SHADER_TO_RGB", output_socket="Color"),

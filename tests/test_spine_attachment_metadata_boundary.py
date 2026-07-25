@@ -37,13 +37,17 @@ def test_typed_and_raw_attachments_share_one_metadata_helper():
 
 def test_attachment_color_contract_matches_official_rgba_format():
     source = read(MODEL)
+    rgba_index = source.index("def _require_rgba_hex_string(")
+    optional_index = source.index("def _require_optional_rgba_hex_string(")
+    rgba_source = source[rgba_index:optional_index]
     helper_index = source.index("def _validate_attachment_metadata(")
     finite_sequence_index = source.index("def _validate_finite_sequence(")
     helper_source = source[helper_index:finite_sequence_index]
 
-    assert "len(color) != 8" in helper_source
-    assert 'fullmatch(r"[0-9A-Fa-f]{8}", color)' in helper_source
-    assert 'color.startswith("#")' not in helper_source
+    assert "len(value) != 8" in rgba_source
+    assert 'fullmatch(r"[0-9A-Fa-f]{8}", value)' in rgba_source
+    assert "_require_rgba_hex_string(" in helper_source
+    assert 'color.startswith("#")' not in rgba_source
 
 
 def test_metadata_validation_does_not_consume_or_rewrite_extra_fields():

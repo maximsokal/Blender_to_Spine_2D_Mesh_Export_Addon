@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import sys
+
+import pytest
 from types import SimpleNamespace
 
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.material_analyzer import (
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.material_slot_analysis import (
     analyse_material_slot,
-    render_target_from_engine,
+)
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.render_engine_contract import (
+    render_engine_contract,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.shader_graph_analyzer import (
     analyse_material_graph,
@@ -226,7 +230,7 @@ def test_renderer_specific_material_output_is_selected():
 
     material = Material("RendererSpecific", tree)
     cycles = analyse_material_graph(material, render_target="CYCLES")
-    eevee = analyse_material_graph(material, render_target="BLENDER_EEVEE_NEXT")
+    eevee = analyse_material_graph(material, render_target="BLENDER_EEVEE")
 
     assert cycles.active_output_node_id == "Cycles Output"
     assert MaterialDependencyKind.CAMERA in cycles.dependencies
@@ -356,7 +360,7 @@ def test_material_kind_uses_only_reachable_recursive_nodes():
     unused = root.add(Node("Unused Missing Image", "TEX_IMAGE", image=None))
     unused.output("Color")
 
-    analysis = analyse_material_slot(0, Material("NestedImageMaterial", root))
+    analysis = analyse_material_slot(0, Material("NestedImageMaterial", root), render_target="CYCLES")
 
     assert analysis.kind is MaterialKind.IMAGE
     assert tuple(item.image_name for item in analysis.image_dependencies) == (
@@ -394,7 +398,7 @@ def test_duplicate_reachable_image_dependency_is_not_unsupported():
     root.link(mix.outputs[0], emission.inputs[0])
     root.link(emission.outputs[0], output.inputs.get("Surface"))
 
-    analysis = analyse_material_slot(0, Material("SharedImage", root))
+    analysis = analyse_material_slot(0, Material("SharedImage", root), render_target="CYCLES")
 
     assert analysis.kind is MaterialKind.IMAGE
     assert len(analysis.image_dependencies) == 1
@@ -417,11 +421,8 @@ def test_no_output_preserves_legacy_root_node_fallback():
     )
     image.output("Color")
 
-    analysis = analyse_material_slot(0, Material("DamagedMaterial", root))
-
-    assert analysis.graph is None
-    assert analysis.kind is MaterialKind.IMAGE
-    assert any("Material Output" in issue for issue in analysis.issues)
+    with pytest.raises(Exception, match="active output|Material Output"):
+        analyse_material_slot(0, Material("DamagedMaterial", root), render_target="CYCLES")
 
 
 def test_holdout_is_alpha_semantics():
@@ -460,13 +461,12 @@ def test_material_analysis_uses_active_blender_render_engine(monkeypatch):
         )
     )
     monkeypatch.setitem(sys.modules, "bpy", fake_bpy)
-    analysis = analyse_material_slot(0, Material("AutoTarget", tree))
+    analysis = analyse_material_slot(0, Material("AutoTarget", tree), render_target="BLENDER_EEVEE")
 
     assert analysis.graph.active_output_node_id == "Eevee Output"
     assert MaterialDependencyKind.CAMERA not in analysis.graph.dependencies
 
 
 def test_render_engine_target_normalization():
-    assert render_target_from_engine("CYCLES") == "CYCLES"
-    assert render_target_from_engine("BLENDER_EEVEE_NEXT") == "EEVEE"
-    assert render_target_from_engine("BLENDER_WORKBENCH") == "ALL"
+    assert render_engine_contract("CYCLES").shader_target == "CYCLES"
+    assert render_engine_contract("BLENDER_EEVEE").shader_target == "EEVEE"

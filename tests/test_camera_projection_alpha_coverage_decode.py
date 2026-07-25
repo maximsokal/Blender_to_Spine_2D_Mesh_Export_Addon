@@ -5,7 +5,6 @@ import pytest
 
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_image import (
     read_staged_alpha_coverage,
-    read_staged_alpha_mask,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_state import (
     CameraProjectionExecutionError,
@@ -42,7 +41,7 @@ class FakeImages:
         self.loaded_paths.append((path, check_existing))
         return self.image
 
-    def remove(self, image):
+    def remove(self, image, do_unlink=False):
         self.removed.append(image)
 
 
@@ -78,31 +77,3 @@ def test_staged_alpha_decode_rejects_non_finite_values_and_still_cleans_image(tm
         )
 
     assert images.removed == [images.image]
-
-
-def test_binary_mask_wrapper_applies_normalized_threshold(tmp_path):
-    bpy_module, _ = _bpy(FakeImage(4, 1, (0.0, 0.25, 0.5, 1.0)))
-
-    mask = read_staged_alpha_mask(
-        bpy_module,
-        tmp_path / "frame.png",
-        width=4,
-        height=1,
-        threshold=0.5,
-    )
-
-    assert mask == bytes((0, 0, 1, 1))
-
-
-def test_zero_threshold_binary_wrapper_includes_zero_alpha(tmp_path):
-    bpy_module, _ = _bpy(FakeImage(2, 1, (0.0, 0.0)))
-
-    mask = read_staged_alpha_mask(
-        bpy_module,
-        tmp_path / "frame.png",
-        width=2,
-        height=1,
-        threshold=0.0,
-    )
-
-    assert mask == bytes((1, 1))

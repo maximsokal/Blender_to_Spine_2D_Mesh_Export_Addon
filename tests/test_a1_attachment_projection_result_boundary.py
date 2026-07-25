@@ -18,9 +18,12 @@ def test_result_validates_vertex_uv_and_triangle_corner_correspondence():
     source = read_source()
 
     assert "hull_vertex_keys must contain at least three vertices" in source
-    assert "does not match ordered key UV" in source
-    assert "one entry for every triangle corner" in source
-    assert "exactly match request.triangles corner order" in source
+    assert "does not match " in source
+    assert "ordered key UV" in source
+    assert "one entry for every triangle " in source
+    assert "corner" in source
+    assert "exactly match " in source
+    assert "request.triangles corner order" in source
 
 
 def test_projection_builds_loop_mapping_in_face_corner_order():

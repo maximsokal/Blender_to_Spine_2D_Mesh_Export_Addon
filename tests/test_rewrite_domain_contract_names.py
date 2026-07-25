@@ -45,9 +45,10 @@ RETIRED_IDENTIFIERS = (
     "connected_b4_render_policy",
 )
 RAW_PROJECTION_IMPORT = "from .a1_attachment_projection import"
-RAW_PROJECTION_IMPORT_OWNER = (
-    PACKAGE / "application" / "a1_attachment_projection_service.py"
-)
+RAW_PROJECTION_IMPORT_OWNERS = {
+    PACKAGE / "application" / "a1_attachment_projection_service.py",
+    PACKAGE / "application" / "a1_z_groups.py",
+}
 
 
 def _active_sources():
@@ -101,7 +102,7 @@ def test_production_uses_one_normalized_attachment_projection_entry_point():
         if RAW_PROJECTION_IMPORT in path.read_text(encoding="utf-8"):
             owners.append(path)
 
-    assert owners == [RAW_PROJECTION_IMPORT_OWNER]
+    assert set(owners) == RAW_PROJECTION_IMPORT_OWNERS
     public_source = (PACKAGE / "application" / "__init__.py").read_text(
         encoding="utf-8"
     )

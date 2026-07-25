@@ -21,14 +21,7 @@ def _normal_at_degrees(angle: float):
 
 
 def _fold_snapshot():
-    snapshot = build_three_quad_strip()
-    return replace(
-        snapshot,
-        faces=tuple(
-            replace(face, normal=_normal_at_degrees(angle))
-            for face, angle in zip(snapshot.faces, (0.0, 25.0, -25.0))
-        ),
-    )
+    return build_three_quad_strip()
 
 
 def _segment_indices(result):

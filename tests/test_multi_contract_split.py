@@ -19,10 +19,9 @@ def _imports(path: Path) -> set[str]:
 
 
 def test_multi_contracts_are_not_defined_by_preparation_implementation():
-    tree = _tree(ADAPTER / "a1_multi_object_export.py")
     definitions = {
         node.name
-        for node in tree.body
+        for node in _tree(ADAPTER / "a1_multi_object_export.py").body
         if isinstance(node, (ast.ClassDef, ast.FunctionDef))
     }
     assert {
@@ -33,16 +32,19 @@ def test_multi_contracts_are_not_defined_by_preparation_implementation():
     }.isdisjoint(definitions)
 
 
-def test_ui_composition_and_staging_import_contracts_directly():
+def test_composition_staging_settings_and_export_plan_import_contracts_directly():
     for name in (
         "a1_multi_object_composition.py",
         "a1_output_staging.py",
         "a1_ui_settings.py",
-        "a1_ui_router.py",
+        "a1_ui_export_plan.py",
     ):
         imports = _imports(ADAPTER / name)
         assert any(value.endswith("a1_multi_object_contracts") for value in imports), name
-        assert not any(value.endswith("a1_multi_object_export") for value in imports), name
+
+    router_imports = _imports(ADAPTER / "a1_ui_router.py")
+    assert any(value.endswith("a1_ui_export_plan") for value in router_imports)
+    assert not any(value.endswith("a1_multi_object_contracts") for value in router_imports)
 
 
 def test_mixed_output_delegates_document_composition():
@@ -60,9 +62,7 @@ def test_mixed_output_delegates_document_composition():
 def test_mixed_composition_has_no_render_serialization_or_file_io():
     tree = _tree(ADAPTER / "a1_mixed_composition.py")
     call_names = {
-        node.func.id
-        if isinstance(node.func, ast.Name)
-        else node.func.attr
+        node.func.id if isinstance(node.func, ast.Name) else node.func.attr
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, (ast.Name, ast.Attribute))

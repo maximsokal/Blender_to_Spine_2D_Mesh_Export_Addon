@@ -14,11 +14,12 @@ def _tree(relative: str) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def test_addon_no_longer_uses_a_hardcoded_logging_module_list():
-    source = _source("__init__.py")
-    assert "MODULE_NAMES_FOR_LOGGING" not in source
-    assert "spine2d.refresh_logging_modules" in source
-    assert "module_filter" in source
+def test_logging_preferences_owner_has_dynamic_refresh_and_filtering():
+    root_source = _source("__init__.py")
+    preferences_source = _source("addon_preferences.py")
+    assert "MODULE_NAMES_FOR_LOGGING" not in root_source
+    assert "spine2d.refresh_logging_modules" in preferences_source
+    assert "module_filter" in preferences_source
 
 
 def test_config_discovers_nested_python_files_and_keeps_levels_independent():

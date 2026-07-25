@@ -149,13 +149,8 @@ def test_result_validation_rejects_tampered_structure_and_nonfinite_payload():
     with pytest.raises(LegacyRigBuildError, match="bones"):
         tampered.validate()
 
-    infinite_bone = replace(result.bones[1], x=float("inf"))
-    nonfinite = replace(
-        result,
-        bones=(result.bones[0], infinite_bone, *result.bones[2:]),
-    )
-    with pytest.raises(LegacyRigBuildError, match="must be finite"):
-        validate_legacy_rig_numeric_payload(nonfinite)
+    with pytest.raises(ValueError, match="x must be finite"):
+        replace(result.bones[1], x=float("inf"))
 
 
 def test_all_generated_numeric_payload_is_finite():

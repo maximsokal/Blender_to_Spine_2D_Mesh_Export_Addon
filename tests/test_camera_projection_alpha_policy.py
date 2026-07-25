@@ -25,21 +25,21 @@ def test_projection_alpha_threshold_accepts_explicit_output_policy():
 
 
 @pytest.mark.parametrize(
-    "value",
+    ("value", "error_type"),
     (
-        -0.0001,
-        1.0001,
-        float("inf"),
-        float("-inf"),
-        float("nan"),
-        "0.5",
-        None,
-        False,
-        True,
+        (-0.0001, ValueError),
+        (1.0001, ValueError),
+        (float("inf"), ValueError),
+        (float("-inf"), ValueError),
+        (float("nan"), ValueError),
+        ("0.5", TypeError),
+        (None, TypeError),
+        (False, TypeError),
+        (True, TypeError),
     ),
 )
-def test_projection_alpha_threshold_rejects_invalid_values(value):
-    with pytest.raises(ValueError, match="projection_alpha_threshold"):
+def test_projection_alpha_threshold_rejects_invalid_values(value, error_type):
+    with pytest.raises(error_type, match="projection_alpha_threshold"):
         BakeExecutionSettings(projection_alpha_threshold=value)
 
 
@@ -57,5 +57,5 @@ def test_b4_postprocess_uses_one_execution_threshold_for_coverage_layout():
         "execution_settings.projection_alpha_threshold"
         in builder_source
     )
-    assert "alpha_threshold=alpha_threshold" in builder_source
+    assert "alpha_threshold=float(" in builder_source
     assert "read_staged_alpha_coverage" in processor_source

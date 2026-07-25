@@ -18,6 +18,22 @@ class FakeUvLayers(list):
         self.active = active
 
 
+class FakeAttributes:
+    def __init__(self, values):
+        self._values = dict(values)
+
+    def get(self, name):
+        return self._values.get(name)
+
+
+def _boolean_edge_attribute(values):
+    return SimpleNamespace(
+        domain="EDGE",
+        data_type="BOOLEAN",
+        data=[SimpleNamespace(value=value) for value in values],
+    )
+
+
 class FakeMatrix:
     def __getitem__(self, row):
         return (
@@ -79,11 +95,12 @@ def make_fake_quad():
     ]
     uv_layer = SimpleNamespace(
         name="UVMap",
-        data=[
-            SimpleNamespace(uv=(0, 0)),
-            SimpleNamespace(uv=(1, 0)),
-            SimpleNamespace(uv=(1, 1)),
-            SimpleNamespace(uv=(0, 1)),
+        active_render=True,
+        uv=[
+            SimpleNamespace(vector=(0, 0)),
+            SimpleNamespace(vector=(1, 0)),
+            SimpleNamespace(vector=(1, 1)),
+            SimpleNamespace(vector=(0, 1)),
         ],
     )
     mesh = SimpleNamespace(
@@ -92,6 +109,12 @@ def make_fake_quad():
         loops=loops,
         polygons=polygons,
         uv_layers=FakeUvLayers([uv_layer], active=uv_layer),
+        attributes=FakeAttributes(
+            {
+                "uv_seam": _boolean_edge_attribute((False, True, False, False)),
+                "sharp_edge": _boolean_edge_attribute((False, False, True, False)),
+            }
+        ),
     )
     return SimpleNamespace(
         type="MESH",

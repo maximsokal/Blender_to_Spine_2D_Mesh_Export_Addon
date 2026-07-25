@@ -39,10 +39,9 @@ def _call_lines(tree: ast.Module, function_name: str) -> list[int]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        target = node.func
-        if isinstance(target, ast.Name) and target.id == function_name:
+        if isinstance(node.func, ast.Name) and node.func.id == function_name:
             result.append(node.lineno)
-        elif isinstance(target, ast.Attribute) and target.attr == function_name:
+        elif isinstance(node.func, ast.Attribute) and node.func.attr == function_name:
             result.append(node.lineno)
     return result
 
@@ -65,9 +64,9 @@ def test_preparation_modules_have_no_output_entrypoints_or_side_effect_dependenc
             assert fragment not in source, f"{filename} contains forbidden {fragment}"
 
 
-def test_prepared_multi_object_does_not_own_a_draft_document():
+def test_prepared_multi_object_contract_owns_no_draft_document():
     fields = _annotated_fields(
-        _tree("a1_multi_object_export.py"),
+        _tree("a1_multi_object_contracts.py"),
         "PreparedA1MultiObject",
     )
     assert fields == {
@@ -96,32 +95,29 @@ def test_composition_module_is_blender_and_io_independent():
         assert fragment not in source
 
 
-def test_output_services_finalize_before_composition_and_serialize_after_composition():
-    for filename in ("a1_multi_object_output.py", "a1_mixed_object_output.py"):
+def test_shared_staging_finalizes_before_output_composition_and_serialization():
+    staging_tree = _tree("a1_output_staging.py")
+    staging = _call_lines(staging_tree, "stage_texture_plan_outputs")
+    finalization = _call_lines(staging_tree, "finalize_prepared_camera_projection")
+    assert staging and finalization and max(staging) < min(finalization)
+
+    expectations = {
+        "a1_multi_object_output.py": "compose_a1_multi_object_document",
+        "a1_mixed_object_output.py": "compose_a1_mixed_document",
+    }
+    for filename, composition_name in expectations.items():
         tree = _tree(filename)
-        finalization = _call_lines(tree, "finalize_prepared_camera_projection")
-        composition = _call_lines(tree, "compose_a1_multi_object_document")
+        stage_calls = _call_lines(tree, "stage_and_finalize_a1_objects")
+        composition = _call_lines(tree, composition_name)
         serialization = _call_lines(tree, "to_json")
-
-        assert finalization, f"{filename} has no projection finalization"
-        assert composition, f"{filename} has no typed composition"
-        assert serialization, f"{filename} has no serialization"
-        assert max(finalization) < min(composition)
-        assert max(composition) < min(serialization)
+        assert stage_calls and composition and serialization
+        assert max(stage_calls) < min(composition) < min(serialization)
 
 
-def test_output_services_share_public_composition_and_failure_entrypoints():
+def test_output_services_use_shared_staging_and_failure_entrypoints():
     for filename in ("a1_multi_object_output.py", "a1_mixed_object_output.py"):
         source = _source(filename)
-        functions = _top_level_functions(_tree(filename))
-        assert (
-            "from .a1_multi_object_composition import "
-            "compose_a1_multi_object_document"
-        ) in source
-        assert (
-            "from .a1_multi_object_result import "
-            "build_multi_object_failure_result"
-        ) in source
+        assert "from .a1_output_staging import stage_and_finalize_a1_objects" in source
+        assert "build_multi_object_failure_result" in source
         assert "_compose_document" not in source
         assert "_record_object_statistics" not in source
-        assert "_failure_result" not in functions
