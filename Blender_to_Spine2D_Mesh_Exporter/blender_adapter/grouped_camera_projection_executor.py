@@ -6,14 +6,14 @@ shared postprocessing, and caller-owned output staging modules.
 
 from .grouped_camera_projection_output import (
     GroupedCameraProjectionStageResult,
-    _reserve_group_outputs,
+    reserve_grouped_camera_projection_outputs as _reserve_group_outputs,
     stage_grouped_camera_projection_outputs,
 )
 from .grouped_camera_projection_validation import (
     GroupedCameraProjectionRuntime,
     object_name as _object_name,
     rna_identity as _rna_identity,
-    validate_grouped_projection_runtime as _validate_group_runtime,
+    validate_grouped_camera_projection_request as _validate_group_runtime,
 )
 from .grouped_camera_projection_visibility import (
     configure_group_camera_visibility as _configure_group_camera_visibility,
