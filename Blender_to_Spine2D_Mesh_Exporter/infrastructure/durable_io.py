@@ -25,16 +25,32 @@ def _normalise(path: Path, field_name: str = "path") -> Path:
 
 
 def fsync_file(path: Path) -> None:
-    """Flush one existing regular file to durable storage."""
+    """Flush one existing regular file to durable storage.
+
+    On Windows, ``os.fsync`` delegates to the CRT ``_commit`` function, which
+    rejects descriptors opened read-only with ``EBADF``. Atomic outputs are
+    owned by this process and are writable, so open an explicit read/write
+    descriptor on every platform. This keeps the same code path observable to
+    tests while avoiding a Windows-only false commit failure.
+    """
 
     resolved = _normalise(path)
     if not resolved.is_file():
         raise DurableIoError(f"cannot fsync missing regular file: {resolved}")
+
+    flags = os.O_RDWR
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+
+    descriptor: int | None = None
     try:
-        with resolved.open("rb") as stream:
-            os.fsync(stream.fileno())
+        descriptor = os.open(resolved, flags)
+        os.fsync(descriptor)
     except OSError as exc:
         raise DurableIoError(f"unable to fsync file '{resolved}': {exc}") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
 
 def fsync_directory(directory: Path) -> None:
