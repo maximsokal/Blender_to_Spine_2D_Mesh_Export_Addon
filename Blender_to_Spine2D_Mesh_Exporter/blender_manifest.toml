@@ -13,7 +13,7 @@ license = [
 tagline = "Blender 3D objects into Spine 2D meshes"
 
 [permissions]
-files = "Export Spine JSON, textures, diagnostics, staging files, and logs"
+files = "Export Spine JSON, textures, diagnostics, staging, and logs"
 
 [build]
 paths_exclude_pattern = [
