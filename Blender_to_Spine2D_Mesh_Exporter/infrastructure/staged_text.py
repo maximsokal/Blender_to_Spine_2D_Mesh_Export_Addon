@@ -28,7 +28,11 @@ def write_staged_utf8_text(
     if ensure_trailing_newline and not payload.endswith("\n"):
         payload += "\n"
     try:
-        path.write_text(payload, encoding="utf-8")
+        # ``newline="\n"`` disables platform newline translation. Without it,
+        # Windows writes CRLF while Linux/macOS write LF, so byte-level golden
+        # outputs and transaction hashes diverge for the same Spine document.
+        with path.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write(payload)
     except OSError as exc:
         raise StagedTextWriteError(
             f"Unable to write staged UTF-8 text '{path}': {exc}"
