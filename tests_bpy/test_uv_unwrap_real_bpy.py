@@ -54,7 +54,9 @@ def test_unwrap_snapshot_uv_runs_real_operators_and_restores_source(quad_object)
     assert _datablock_signature() == datablocks_before
     assert quad_object.mode == "OBJECT"
     assert result.snapshot.active_uv_layer == "SpineBakeUV"
-    assert result.snapshot.render_uv_layer == "SpineBakeUV"
+    # Export layout becomes active while source material sampling keeps the
+    # original renderer UV role. These two roles are intentionally distinct.
+    assert result.snapshot.render_uv_layer == "UVMap"
     assert result.statistics.loop_count == len(snapshot.loops) == 4
     assert result.statistics.outside_unit_square_count == 0
     assert 0.0 <= result.statistics.minimum_u <= result.statistics.maximum_u <= 1.0
