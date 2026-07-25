@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..domain.baking import BakeExecutionSettings, BakePlan, TextureFormat
+from ..domain.baking.texture_format_policy import resolve_texture_color_mode
 from ..infrastructure import AtomicOutputReservation
 from .bake_execution_error import BakeExecutionError
 
@@ -112,8 +113,9 @@ def _create_bake_image(
     float_buffer = force_float_buffer or (
         plan.settings.texture_format is TextureFormat.OPEN_EXR
     )
-    color_mode = plan.settings.texture_format.resolve_color_mode(
-        execution_settings.color_mode
+    color_mode = resolve_texture_color_mode(
+        plan.settings.texture_format,
+        execution_settings.color_mode,
     )
     image = None
     try:
