@@ -63,3 +63,40 @@ def test_real_bpy_files_never_import_legacy_test_fixtures():
         assert "from tests.conftest" not in source, path.name
         assert "import tests.conftest" not in source, path.name
         ast.parse(source, filename=str(path))
+
+
+def test_real_bpy_suite_keeps_physical_cycles_bake_regressions():
+    support = BPY_TESTS / "bake_test_support.py"
+    bake_tests = BPY_TESTS / "test_semantic_bake_real_bpy.py"
+    assert support.is_file()
+    assert bake_tests.is_file()
+
+    support_source = support.read_text(encoding="utf-8")
+    tests_source = bake_tests.read_text(encoding="utf-8")
+    for required in (
+        "bpy.data.images.load",
+        "datablock_signature",
+        "capture_scene_bake_state",
+        "material_fingerprint",
+    ):
+        assert required in support_source
+    for required in (
+        "test_emit_bake_from_edit_mode_writes_valid_png_and_restores_everything",
+        "test_forced_bake_failure_preserves_existing_file_and_has_no_false_completion",
+        "test_surface_and_emission_material_slots_are_composed_into_one_texture",
+        "test_principled_constant_alpha_is_preserved_in_committed_png",
+        "test_sequence_bake_writes_distinct_frames_restores_timeline_and_reports_progress",
+        "test_real_codec_outputs_are_saved_reloaded_and_restore_scene_format_state",
+        "test_selected_to_active_emit_bake_restores_selection_and_cage_settings",
+    ):
+        assert required in tests_source
+    assert "semantic_bake_execution" in tests_source
+    assert "execute_bake_plan" in tests_source
+
+
+def test_real_bpy_cleanup_leaves_edit_mode_before_removing_objects():
+    source = (BPY_TESTS / "conftest.py").read_text(encoding="utf-8")
+    mode_exit = source.index('operator(mode="OBJECT")')
+    object_cleanup = source.index("_remove_all(bpy.data.objects")
+    assert mode_exit < object_cleanup
+    assert '"actions"' in source
