@@ -10,6 +10,8 @@ import shutil
 import subprocess
 import sys
 import tomllib
+import zipfile
+from zipfile import ZipInfo
 
 
 LOGGER = logging.getLogger("prepare_package")
@@ -19,6 +21,154 @@ MINIMUM_BLENDER_VERSION = (5, 2, 0)
 
 class PackageBuildError(RuntimeError):
     """Raised when the Blender extension package cannot be validated or built."""
+
+
+_REQUIRED_ARCHIVE_FILES = frozenset({"__init__.py", "blender_manifest.toml"})
+_FORBIDDEN_ARCHIVE_PARTS = frozenset({
+    ".git", ".github", "tests", "tests_bpy", "docs", "Legacy", "__pycache__",
+})
+_FORBIDDEN_ARCHIVE_BASENAMES = frozenset({
+    "legacy_loader.py",
+    "legacy_multi_facade.py",
+    "json_export.py",
+    "json_merger.py",
+    "main.py",
+    "multi_object_export.py",
+    "plane_cut.py",
+    "seam_marker.py",
+    "texture_baker.py",
+    "texture_baker_integration.py",
+    "utils.py",
+    "uv_operations.py",
+})
+
+
+def _normalise_archive_name(info: ZipInfo) -> tuple[str, ...]:
+    """Return one safe POSIX archive path or fail closed."""
+
+    raw = str(info.filename or "").replace("\\", "/")
+    if not raw or raw.startswith("/"):
+        raise PackageBuildError(f"Archive contains an invalid absolute/empty path: {raw!r}")
+    parts = tuple(part for part in raw.split("/") if part not in {"", "."})
+    if not parts or any(part == ".." for part in parts):
+        raise PackageBuildError(f"Archive path escapes its root: {raw!r}")
+    if ":" in parts[0]:
+        raise PackageBuildError(f"Archive contains a drive-qualified path: {raw!r}")
+    unix_mode = (int(info.external_attr) >> 16) & 0o170000
+    if unix_mode == 0o120000:
+        raise PackageBuildError(f"Archive contains a symbolic link: {raw!r}")
+    return parts
+
+
+def _archive_root_prefix(paths: tuple[tuple[str, ...], ...]) -> tuple[str, ...]:
+    """Resolve either root-level files or one optional enclosing directory."""
+
+    files = tuple(path for path in paths if path)
+    root_names = {path[0] for path in files}
+    if _REQUIRED_ARCHIVE_FILES.issubset(root_names):
+        return ()
+    if len(root_names) != 1:
+        raise PackageBuildError(
+            "Extension archive must place required files at its root or inside "
+            "one enclosing directory"
+        )
+    prefix = (next(iter(root_names)),)
+    nested_names = {path[1] for path in files if len(path) >= 2}
+    if not _REQUIRED_ARCHIVE_FILES.issubset(nested_names):
+        raise PackageBuildError(
+            "Extension archive is missing __init__.py or blender_manifest.toml"
+        )
+    return prefix
+
+
+def _validate_built_archive(
+    archive_path: Path,
+    *,
+    source_manifest: dict[str, object],
+) -> None:
+    """Validate the physical ZIP emitted by Blender before publishing it."""
+
+    if not isinstance(archive_path, Path):
+        raise TypeError("archive_path must be pathlib.Path")
+    if not isinstance(source_manifest, dict):
+        raise TypeError("source_manifest must be dict")
+    try:
+        with zipfile.ZipFile(archive_path, mode="r") as archive:
+            infos = tuple(archive.infolist())
+            if not infos:
+                raise PackageBuildError("Extension archive is empty")
+            bad_member = archive.testzip()
+            if bad_member is not None:
+                raise PackageBuildError(
+                    f"Extension archive contains a corrupt member: {bad_member}"
+                )
+
+            normalised = tuple(_normalise_archive_name(info) for info in infos)
+            folded_names: set[str] = set()
+            for parts in normalised:
+                folded = "/".join(parts).casefold()
+                if folded in folded_names:
+                    raise PackageBuildError(
+                        "Extension archive contains duplicate/case-colliding paths: "
+                        + "/".join(parts)
+                    )
+                folded_names.add(folded)
+
+            root_prefix = _archive_root_prefix(normalised)
+            prefix_length = len(root_prefix)
+            relative_paths = tuple(
+                parts[prefix_length:]
+                for parts in normalised
+                if len(parts) > prefix_length
+            )
+            for parts in relative_paths:
+                folded_parts = {part.casefold() for part in parts}
+                if folded_parts & {part.casefold() for part in _FORBIDDEN_ARCHIVE_PARTS}:
+                    raise PackageBuildError(
+                        "Extension archive contains a forbidden repository path: "
+                        + "/".join(parts)
+                    )
+                if parts[-1].casefold() in {
+                    name.casefold() for name in _FORBIDDEN_ARCHIVE_BASENAMES
+                }:
+                    raise PackageBuildError(
+                        "Extension archive contains a retired runtime source: "
+                        + "/".join(parts)
+                    )
+                if parts[-1].casefold().endswith((".pyc", ".pyo", ".zip")):
+                    raise PackageBuildError(
+                        "Extension archive contains a forbidden generated/nested file: "
+                        + "/".join(parts)
+                    )
+
+            manifest_name = "/".join((*root_prefix, "blender_manifest.toml"))
+            init_name = "/".join((*root_prefix, "__init__.py"))
+            names = {info.filename.rstrip("/"): info for info in infos}
+            if manifest_name not in names or init_name not in names:
+                raise PackageBuildError(
+                    "Extension archive is missing required runtime files"
+                )
+            if names[init_name].file_size <= 0:
+                raise PackageBuildError("Extension archive contains an empty __init__.py")
+            try:
+                packaged_manifest = tomllib.loads(
+                    archive.read(names[manifest_name]).decode("utf-8")
+                )
+            except Exception as exc:
+                raise PackageBuildError(
+                    f"Unable to parse packaged blender_manifest.toml: {exc}"
+                ) from exc
+            for key in ("schema_version", "id", "version", "type", "blender_version_min"):
+                if packaged_manifest.get(key) != source_manifest.get(key):
+                    raise PackageBuildError(
+                        f"Packaged manifest field {key!r} does not match source manifest"
+                    )
+    except PackageBuildError:
+        raise
+    except (OSError, zipfile.BadZipFile, UnicodeError) as exc:
+        raise PackageBuildError(
+            f"Unable to validate built extension archive {archive_path}: {exc}"
+        ) from exc
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -93,16 +243,59 @@ def _read_manifest(source: Path) -> dict[str, object]:
     except Exception as exc:
         raise PackageBuildError(f"Unable to read {manifest_path}: {exc}") from exc
 
-    minimum = str(manifest.get("blender_version_min", "") or "").strip()
+    required_text_fields = (
+        "schema_version",
+        "id",
+        "version",
+        "name",
+        "tagline",
+        "maintainer",
+        "blender_version_min",
+        "type",
+    )
+    for key in required_text_fields:
+        value = manifest.get(key)
+        if not isinstance(value, str) or not value.strip():
+            if key == "blender_version_min":
+                raise PackageBuildError(
+                    "blender_manifest.toml must declare blender_version_min = \"5.2.0\""
+                )
+            raise PackageBuildError(f"Manifest field {key!r} must be a non-empty string")
+        if value != value.strip():
+            raise PackageBuildError(f"Manifest field {key!r} must not have outer whitespace")
+
+    if manifest["schema_version"] != "1.0.0":
+        raise PackageBuildError(
+            "blender_manifest.toml must declare schema_version = \"1.0.0\""
+        )
+    if manifest["type"] != "add-on":
+        raise PackageBuildError(
+            "blender_manifest.toml must declare type = \"add-on\""
+        )
+    minimum = manifest["blender_version_min"]
     if minimum != "5.2.0":
         raise PackageBuildError(
             "blender_manifest.toml must declare blender_version_min = \"5.2.0\"; "
             f"found {minimum!r}"
         )
-    for key in ("id", "version"):
-        value = str(manifest.get(key, "") or "").strip()
-        if not value:
-            raise PackageBuildError(f"Manifest field {key!r} must be non-empty")
+
+    licenses = manifest.get("license")
+    if not isinstance(licenses, list) or not licenses:
+        raise PackageBuildError("Manifest field 'license' must be a non-empty list")
+    if not all(isinstance(value, str) and value.strip() for value in licenses):
+        raise PackageBuildError("Manifest licenses must be non-empty strings")
+
+    permissions = manifest.get("permissions", {})
+    if not isinstance(permissions, dict):
+        raise PackageBuildError("Manifest permissions must be a table")
+    if not all(
+        isinstance(key, str) and key.strip()
+        and isinstance(value, str) and value.strip()
+        for key, value in permissions.items()
+    ):
+        raise PackageBuildError(
+            "Manifest permissions must map non-empty names to non-empty explanations"
+        )
     return manifest
 
 
@@ -196,6 +389,15 @@ def build_extension(
         raise PackageBuildError(
             f"Blender reported success but no non-empty archive was created: {output}"
         )
+    manifest = _read_manifest(source)
+    try:
+        _validate_built_archive(output, source_manifest=manifest)
+    except Exception:
+        try:
+            output.unlink(missing_ok=True)
+        except OSError:
+            LOGGER.exception("Unable to remove invalid extension archive: %s", output)
+        raise
     return output
 
 
