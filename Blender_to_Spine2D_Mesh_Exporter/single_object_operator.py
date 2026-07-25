@@ -25,6 +25,15 @@ class OBJECT_OT_SaveUVAsJSON(bpy.types.Operator):
     bl_label = "Export current object"
     bl_description = "Export the active Mesh to Spine JSON with the Rewrite pipeline"
 
+    @classmethod
+    def poll(cls, context: bpy.types.Context) -> bool:
+        obj = getattr(context, "active_object", None)
+        return bool(
+            obj is not None
+            and getattr(obj, "type", None) == "MESH"
+            and getattr(obj, "data", None) is not None
+        )
+
     @staticmethod
     def _active_mesh(context: bpy.types.Context) -> bpy.types.Object:
         obj = context.active_object
