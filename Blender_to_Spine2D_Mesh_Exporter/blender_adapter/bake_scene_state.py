@@ -83,8 +83,10 @@ class BakeSceneState:
 
 _CAPTURE_PATHS = (
     "render.engine",
-    "render.image_settings.file_format",
+    # Capture color mode first so reverse-order restoration puts the file format
+    # back before assigning a mode whose enum depends on that format (JPEG has no RGBA).
     "render.image_settings.color_mode",
+    "render.image_settings.file_format",
     "render.bake.margin",
     "render.bake.use_clear",
     "render.bake.use_selected_to_active",
@@ -149,7 +151,11 @@ def configure_scene_for_bake(
 
     scene.render.engine = execution_settings.render_engine
     scene.render.image_settings.file_format = plan.settings.texture_format.value
-    scene.render.image_settings.color_mode = execution_settings.color_mode
+    scene.render.image_settings.color_mode = (
+        plan.settings.texture_format.resolve_color_mode(
+            execution_settings.color_mode
+        )
+    )
     scene.render.bake.margin = plan.settings.margin_pixels
     scene.render.bake.use_clear = execution_settings.use_clear
     scene.render.bake.use_selected_to_active = plan.settings.selected_to_active
