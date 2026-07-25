@@ -1,0 +1,30 @@
+{
+  "cases": {
+    "negative_scale_modifier": {
+      "images": [{"alpha_coverage": 0.648148, "height": 48, "mean_rgba": [0.627297, 0.581863, 0.502714, 0.569619], "name": "Hero_Baked.png", "width": 36}],
+      "json_sha256": "75b8b2d1462456e9fcdfff95aa962c3a406a6db07f2df4e01e04f1fedfdf1287",
+      "json_size": 5651,
+      "status": "passed"
+    },
+    "nested_node_groups": {
+      "images": [{"alpha_coverage": 0.604938, "height": 36, "mean_rgba": [0.545534, 0.475445, 0.559731, 0.506245], "name": "Hero_Baked.png", "width": 36}],
+      "json_sha256": "5f77b13c686345577b60cfe63d76c6a37995ba8d855273b7671b320e56f303b3",
+      "json_size": 7233,
+      "status": "passed"
+    },
+    "non_manifold": {"error": "Error: A1_PREPARE_GEOMETRY_FAILED: Segment 0 is non-manifold and cannot be safely decomposed without an explicit repair policy\n", "status": "failed"},
+    "overlapping_uv": {
+      "images": [{"alpha_coverage": 0.675627, "height": 36, "mean_rgba": [0.564066, 0.51455, 0.549814, 0.587315], "name": "Hero_Baked.png", "width": 62}],
+      "json_sha256": "11983b7f57fe0c5bf16872aa07333318a886f57eb9aa5c0684a872a1696a6e01",
+      "json_size": 7237,
+      "status": "passed"
+    },
+    "procedural_noise": {
+      "images": [{"alpha_coverage": 0.604938, "height": 36, "mean_rgba": [0.520812, 0.469402, 0.519853, 0.506245], "name": "Hero_Baked.png", "width": 36}],
+      "json_sha256": "5f77b13c686345577b60cfe63d76c6a37995ba8d855273b7671b320e56f303b3",
+      "json_size": 7233,
+      "status": "passed"
+    }
+  },
+  "schema_version": 1
+}
