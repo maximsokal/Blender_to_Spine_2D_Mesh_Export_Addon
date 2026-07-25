@@ -57,8 +57,8 @@ def test_export_commands_use_distinct_source_backend_and_report_paths(tmp_path):
         rewrite_report,
     )
 
-    assert legacy_source.as_posix() in legacy
-    assert rewrite_source.as_posix() in rewrite
+    assert str(legacy_source) in legacy
+    assert str(rewrite_source) in rewrite
     assert "LEGACY" in legacy
     assert "REWRITE" in rewrite
     assert str(legacy_report) in legacy
