@@ -4,10 +4,30 @@
 from __future__ import annotations
 
 import logging
+from enum import Enum
 from typing import Any, Callable, Tuple
 
 
 logger = logging.getLogger(__package__ or __name__)
+
+
+class ExtensionRegistrationState(str, Enum):
+    """Process-local lifecycle state for the root Rewrite extension owner."""
+
+    UNREGISTERED = "UNREGISTERED"
+    REGISTERING = "REGISTERING"
+    REGISTERED = "REGISTERED"
+    UNREGISTERING = "UNREGISTERING"
+    DEGRADED = "DEGRADED"
+
+
+_REGISTRATION_STATE = ExtensionRegistrationState.UNREGISTERED
+
+
+def get_registration_state() -> ExtensionRegistrationState:
+    """Return the current root registration state for diagnostics and tests."""
+
+    return _REGISTRATION_STATE
 
 try:
     import bpy as _bpy  # type: ignore
@@ -126,12 +146,31 @@ if bpy is not None:
     def register() -> None:
         """Register the complete Blender 5.2+ Rewrite extension transactionally."""
 
-        require_supported_blender_runtime(bpy)
-        config._setup_default_logging()
-        logger.debug("Registering Blender_to_Spine2D_Mesh_Exporter Rewrite")
+        global _REGISTRATION_STATE
+        if _REGISTRATION_STATE is ExtensionRegistrationState.REGISTERED:
+            logger.debug("Rewrite extension is already registered")
+            return
+        if _REGISTRATION_STATE in {
+            ExtensionRegistrationState.REGISTERING,
+            ExtensionRegistrationState.UNREGISTERING,
+        }:
+            raise RuntimeError(
+                "Rewrite extension registration lifecycle is already active: "
+                f"{_REGISTRATION_STATE.value}"
+            )
+        if _REGISTRATION_STATE is ExtensionRegistrationState.DEGRADED:
+            raise RuntimeError(
+                "Rewrite extension is in a degraded registration state; "
+                "run unregister() before registering again"
+            )
 
+        _REGISTRATION_STATE = ExtensionRegistrationState.REGISTERING
         completed: list[RegistrationStep] = []
         try:
+            require_supported_blender_runtime(bpy)
+            config._setup_default_logging()
+            logger.debug("Registering Blender_to_Spine2D_Mesh_Exporter Rewrite")
+
             for step in REGISTRATION_STEPS:
                 _label, register_callback, _unregister_callback = step
                 register_callback()
@@ -143,21 +182,48 @@ if bpy is not None:
             logger.info("User logging and diagnostics preferences applied")
         except Exception as exc:
             logger.exception("Rewrite extension registration failed")
-            unregister_all_best_effort(
-                _registration_cleanup_actions(tuple(completed)),
-                operation="Rewrite extension registration rollback",
-                primary_error=exc,
-            )
+            try:
+                unregister_all_best_effort(
+                    _registration_cleanup_actions(tuple(completed)),
+                    operation="Rewrite extension registration rollback",
+                    primary_error=exc,
+                )
+            except Exception:
+                _REGISTRATION_STATE = ExtensionRegistrationState.DEGRADED
+                raise
+            _REGISTRATION_STATE = ExtensionRegistrationState.UNREGISTERED
             raise
+
+        _REGISTRATION_STATE = ExtensionRegistrationState.REGISTERED
 
     def unregister() -> None:
         """Run every Rewrite owner cleanup in reverse order before reporting failures."""
 
+        global _REGISTRATION_STATE
+        if _REGISTRATION_STATE is ExtensionRegistrationState.UNREGISTERED:
+            logger.debug("Rewrite extension is already unregistered")
+            return
+        if _REGISTRATION_STATE in {
+            ExtensionRegistrationState.REGISTERING,
+            ExtensionRegistrationState.UNREGISTERING,
+        }:
+            raise RuntimeError(
+                "Rewrite extension registration lifecycle is already active: "
+                f"{_REGISTRATION_STATE.value}"
+            )
+
+        _REGISTRATION_STATE = ExtensionRegistrationState.UNREGISTERING
         logger.debug("Unregistering Blender_to_Spine2D_Mesh_Exporter Rewrite")
-        unregister_all_best_effort(
-            _registration_cleanup_actions(REGISTRATION_STEPS),
-            operation="Rewrite extension unregistration",
-        )
+        try:
+            unregister_all_best_effort(
+                _registration_cleanup_actions(REGISTRATION_STEPS),
+                operation="Rewrite extension unregistration",
+            )
+        except Exception:
+            _REGISTRATION_STATE = ExtensionRegistrationState.DEGRADED
+            raise
+        _REGISTRATION_STATE = ExtensionRegistrationState.UNREGISTERED
+
 
 else:
     MODULES: tuple[Any, ...] = ()
