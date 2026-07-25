@@ -95,3 +95,28 @@ def test_duplicate_final_path_is_rejected(tmp_path):
     transaction.reserve(tmp_path / "same.png")
     with pytest.raises(ValueError):
         transaction.reserve(tmp_path / "same.png")
+
+
+def test_unicode_paths_commit_and_rollback_without_partial_outputs(tmp_path):
+    output_directory = tmp_path / "Експорт_日本語"
+    final_path = output_directory / "герой_текстура.json"
+
+    with atomic_file_transaction(recover_stale_work_files=False) as transaction:
+        reservation = transaction.reserve(final_path)
+        reservation.staged_path.write_text("новий результат", encoding="utf-8")
+        committed = transaction.commit()
+
+    assert committed == (final_path.resolve(),)
+    assert final_path.read_text(encoding="utf-8") == "новий результат"
+    assert not tuple(output_directory.glob(".*.spine2d-stage-*"))
+    assert not tuple(output_directory.glob(".*.spine2d-backup-*"))
+
+    with pytest.raises(RuntimeError, match="forced unicode rollback"):
+        with atomic_file_transaction(recover_stale_work_files=False) as transaction:
+            reservation = transaction.reserve(final_path)
+            reservation.staged_path.write_text("частковий результат", encoding="utf-8")
+            raise RuntimeError("forced unicode rollback")
+
+    assert final_path.read_text(encoding="utf-8") == "новий результат"
+    assert not tuple(output_directory.glob(".*.spine2d-stage-*"))
+    assert not tuple(output_directory.glob(".*.spine2d-backup-*"))
