@@ -568,6 +568,15 @@ class OBJECT_OT_Spine2DSingleExport(
     bl_label = "Export Current Object"
     bl_description = "Export the active Mesh with the Rewrite pipeline"
 
+    @classmethod
+    def poll(cls, context: bpy.types.Context) -> bool:
+        obj = getattr(context, "active_object", None)
+        return bool(
+            obj is not None
+            and getattr(obj, "type", None) == "MESH"
+            and getattr(obj, "data", None) is not None
+        )
+
     def execute(self, context: bpy.types.Context) -> Set[str]:
         if not self._require_readiness(context):
             return {"CANCELLED"}
@@ -588,6 +597,14 @@ class OBJECT_OT_Spine2DMultiExport(
     bl_idname = "object.spine2d_multi_export"
     bl_label = "Export Selected Objects"
     bl_description = "Export selected Mesh objects with the Rewrite pipeline"
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context) -> bool:
+        return any(
+            getattr(obj, "type", None) == "MESH"
+            and getattr(obj, "data", None) is not None
+            for obj in getattr(context, "selected_objects", ())
+        )
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
         if not self._require_readiness(context):
