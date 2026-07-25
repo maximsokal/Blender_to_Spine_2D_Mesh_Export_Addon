@@ -20,7 +20,9 @@ def _panel_class(bl_idname: str):
 
 
 def _operator_class(bl_idname: str):
-    return bpy.types.Operator.bl_rna_get_subclass_py(bl_idname)
+    category, operator_name = bl_idname.split(".", 1)
+    rna_identifier = f"{category.upper()}_OT_{operator_name}"
+    return bpy.types.Operator.bl_rna_get_subclass_py(rna_identifier)
 
 
 def _register_all_steps() -> list[tuple[str, object, object]]:
