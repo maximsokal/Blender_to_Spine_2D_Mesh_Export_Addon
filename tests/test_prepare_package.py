@@ -103,6 +103,13 @@ def test_build_extension_runs_validate_then_official_build(tmp_path, monkeypatch
             output.write_bytes(b"zip")
 
     monkeypatch.setattr(prepare_package, "_run_command", run_command)
+    monkeypatch.setattr(
+        prepare_package,
+        "_validate_built_archive",
+        lambda _output, *, source_manifest: commands.append(
+            ("archive", (str(source_manifest["id"]),))
+        ),
+    )
 
     result = prepare_package.build_extension(
         blender=blender,
@@ -128,6 +135,10 @@ def test_build_extension_runs_validate_then_official_build(tmp_path, monkeypatch
             "--output-filepath",
             str(output),
         ),
+    )
+    assert commands[3] == (
+        "archive",
+        ("blender_to_spine2d_mesh_exporter",),
     )
 
 
