@@ -264,3 +264,17 @@ def test_filename_sanitization_is_windows_safe():
     assert sanitize_filename_stem(' Cube:Part/"A". ') == "Cube_Part__A_"
     with pytest.raises(BakePlanError):
         sanitize_filename_stem("...")
+
+
+def test_texture_format_resolves_blender_compatible_color_modes():
+    from Blender_to_Spine2D_Mesh_Exporter.domain.baking.texture_format_policy import (
+        resolve_texture_color_mode,
+    )
+
+    assert resolve_texture_color_mode(TextureFormat.PNG, "RGBA") == "RGBA"
+    assert resolve_texture_color_mode(TextureFormat.WEBP, "rgba") == "RGBA"
+    assert resolve_texture_color_mode(TextureFormat.OPEN_EXR, "RGB") == "RGB"
+    assert resolve_texture_color_mode(TextureFormat.JPEG, "RGBA") == "RGB"
+    assert resolve_texture_color_mode(TextureFormat.JPEG, "BW") == "BW"
+    with pytest.raises(ValueError, match="BW, RGB, or RGBA"):
+        resolve_texture_color_mode(TextureFormat.PNG, "CMYK")
