@@ -186,7 +186,7 @@ def test_single_export_uses_rewrite_and_requires_current_analysis(monkeypatch):
     assert calls == [context]
     operator.report.assert_called_once_with(
         {"INFO"},
-        "Export finished → /exports/result.json",
+        f"Export finished → {expected.output_files[0]}",
     )
 
 
@@ -216,7 +216,7 @@ def test_multi_export_always_calls_rewrite_after_readiness_guard(monkeypatch):
     assert calls == [context]
     operator.report.assert_called_once_with(
         {"INFO"},
-        "Export finished → /exports/result.json",
+        f"Export finished → {expected.output_files[0]}",
     )
 
 
