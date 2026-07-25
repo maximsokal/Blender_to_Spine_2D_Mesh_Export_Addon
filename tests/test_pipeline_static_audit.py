@@ -103,3 +103,100 @@ def test_package_init_relative_import_stays_in_its_layer():
     )
     assert audit.internal_imports == ("application.a1_single_object",)
     assert not [item for item in audit.findings if item.code == "LAYER_IMPORT_VIOLATION"]
+
+
+def test_borrowed_edit_bmesh_must_never_be_freed():
+    source = """
+import bmesh
+
+def broken(mesh):
+    bm = bmesh.from_edit_mesh(mesh)
+    try:
+        return len(bm.verts)
+    finally:
+        bm.free()
+"""
+    audit = audit_module_source(
+        source,
+        module="blender_adapter.borrowed",
+        relative_path="blender_adapter/borrowed.py",
+        layer="blender_adapter",
+        package_name="Blender_to_Spine2D_Mesh_Exporter",
+    )
+    assert "BMESH_BORROWED_FREE" in _codes(audit)
+    finding = next(item for item in audit.findings if item.code == "BMESH_BORROWED_FREE")
+    assert finding.severity is AuditSeverity.ERROR
+
+
+def test_borrowed_edit_bmesh_without_free_is_accepted():
+    source = """
+import bmesh
+
+def safe(mesh):
+    bm = bmesh.from_edit_mesh(mesh)
+    return len(bm.verts)
+"""
+    audit = audit_module_source(
+        source,
+        module="blender_adapter.borrowed_safe",
+        relative_path="blender_adapter/borrowed_safe.py",
+        layer="blender_adapter",
+        package_name="Blender_to_Spine2D_Mesh_Exporter",
+    )
+    assert "BMESH_BORROWED_FREE" not in _codes(audit)
+    assert "BMESH_FREE_MISSING" not in _codes(audit)
+
+
+def test_double_free_is_reported_even_when_one_free_is_in_finally():
+    source = """
+import bmesh
+
+def broken():
+    bm = bmesh.new()
+    try:
+        bm.free()
+    finally:
+        bm.free()
+"""
+    audit = audit_module_source(
+        source,
+        module="blender_adapter.double_free",
+        relative_path="blender_adapter/double_free.py",
+        layer="blender_adapter",
+        package_name="Blender_to_Spine2D_Mesh_Exporter",
+    )
+    assert "BMESH_DOUBLE_FREE_RISK" in _codes(audit)
+
+
+def test_real_rewrite_package_has_no_bmesh_ownership_findings():
+    package = Path(__file__).resolve().parents[1] / "Blender_to_Spine2D_Mesh_Exporter"
+    report = audit_pipeline_package(
+        package,
+        package_name="Blender_to_Spine2D_Mesh_Exporter",
+    )
+    findings = tuple(
+        finding
+        for module in report["modules"]
+        if module["layer"] in {"application", "blender_adapter", "domain", "infrastructure"}
+        for finding in module["findings"]
+        if str(finding["code"]).startswith("BMESH_")
+    )
+    assert findings == ()
+
+
+def test_annotated_bmesh_assignments_are_audited():
+    source = """
+import bmesh
+
+def broken(mesh):
+    bm: object = bmesh.from_edit_mesh(mesh)
+    bm.free()
+"""
+    audit = audit_module_source(
+        source,
+        module="blender_adapter.annotated_borrowed",
+        relative_path="blender_adapter/annotated_borrowed.py",
+        layer="blender_adapter",
+        package_name="Blender_to_Spine2D_Mesh_Exporter",
+    )
+    assert "BMESH_BORROWED_FREE" in _codes(audit)
