@@ -19,20 +19,18 @@ REPOLISH_URL = "https://www.re-polish.com/"
 
 
 class OBJECT_PT_Spine2DRePolishPanel(bpy.types.Panel):
-    """Link users to the related Spine animation optimization project."""
+    """Show one always-visible Re-Polish button below the exporter panel."""
 
-    bl_label = "Spine Animation Optimization"
+    bl_label = "Re-Polish"
     bl_idname = "OBJECT_PT_spine2d_repolish"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "Blender to Spine2D Mesh Exporter"
     bl_parent_id = "OBJECT_PT_spine2d_mesh"
-    bl_options = {"DEFAULT_CLOSED"}
+    bl_options = {"HIDE_HEADER"}
 
     def draw(self, _context: bpy.types.Context) -> None:
-        layout = self.layout
-        layout.label(text="Optimize and clean Spine animations:", icon="INFO")
-        operator = layout.operator(
+        operator = self.layout.operator(
             "wm.url_open",
             text="Open Re-Polish",
             icon="URL",
@@ -44,7 +42,7 @@ CLASSES = (OBJECT_PT_Spine2DRePolishPanel,)
 
 
 def register() -> None:
-    """Register the child panel after the main Rewrite UI panel."""
+    """Register the headerless child panel after the main Rewrite UI panel."""
 
     register_classes_transactionally(
         CLASSES,
