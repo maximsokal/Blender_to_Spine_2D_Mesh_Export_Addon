@@ -14,7 +14,10 @@ import tempfile
 import tomllib
 from typing import Mapping, Sequence
 
-from tools import prepare_package
+if __package__:
+    from tools import prepare_package
+else:
+    import prepare_package
 
 
 ROOT = Path(__file__).resolve().parents[1]
