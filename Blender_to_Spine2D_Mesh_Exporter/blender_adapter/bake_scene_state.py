@@ -8,6 +8,7 @@ import logging
 from typing import Any, Iterator, Tuple
 
 from ..domain.baking import BakeExecutionSettings, BakeMode, BakePlan
+from ..domain.baking.texture_format_policy import resolve_texture_color_mode
 
 
 logger = logging.getLogger(__name__)
@@ -152,8 +153,9 @@ def configure_scene_for_bake(
     scene.render.engine = execution_settings.render_engine
     scene.render.image_settings.file_format = plan.settings.texture_format.value
     scene.render.image_settings.color_mode = (
-        plan.settings.texture_format.resolve_color_mode(
-            execution_settings.color_mode
+        resolve_texture_color_mode(
+            plan.settings.texture_format,
+            execution_settings.color_mode,
         )
     )
     scene.render.bake.margin = plan.settings.margin_pixels
