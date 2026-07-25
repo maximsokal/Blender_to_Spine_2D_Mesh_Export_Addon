@@ -12,6 +12,10 @@ from ..application import (
     ExportIssue,
     ExportResult,
 )
+from ..infrastructure import (
+    A1_EXPORT_OPERATION_KEY,
+    exclusive_operation,
+)
 from .a1_blender_progress import blender_a1_progress_session
 from .a1_mixed_object_output import export_a1_mixed_object
 from .a1_multi_object_output import export_a1_multi_object
@@ -56,21 +60,25 @@ def export_active_object_a1(
 ) -> ExportResult:
     """Export the active Mesh through the complete single-object A1 output service."""
 
-    progress_owner = (
-        blender_a1_progress_session(context, operation_name="Spine2D export")
-        if progress_callback is None
-        else nullcontext(progress_callback)
-    )
-    with progress_owner as resolved_progress:
-        plan = build_active_ui_export_plan(context)
-        scene = context.scene
-        return export_a1_single_object(
-            plan.source_object,
-            plan.settings,
-            context=context,
-            scene=scene,
-            progress_callback=resolved_progress,
+    with exclusive_operation(
+        A1_EXPORT_OPERATION_KEY,
+        label="Spine2D single-object export",
+    ):
+        progress_owner = (
+            blender_a1_progress_session(context, operation_name="Spine2D export")
+            if progress_callback is None
+            else nullcontext(progress_callback)
         )
+        with progress_owner as resolved_progress:
+            plan = build_active_ui_export_plan(context)
+            scene = context.scene
+            return export_a1_single_object(
+                plan.source_object,
+                plan.settings,
+                context=context,
+                scene=scene,
+                progress_callback=resolved_progress,
+            )
 
 
 def export_selected_objects_a1(
@@ -80,43 +88,47 @@ def export_selected_objects_a1(
 ) -> ExportResult:
     """Export selected meshes through standalone, connected, or mixed A1 output."""
 
-    progress_owner = (
-        blender_a1_progress_session(context, operation_name="Spine2D multi-export")
-        if progress_callback is None
-        else nullcontext(progress_callback)
-    )
-    with progress_owner as resolved_progress:
-        plan = build_selected_ui_export_plan(context)
-        scene = context.scene
-        if plan.settings.mode is A1MultiObjectMode.MIXED:
-            result = export_a1_mixed_object(
-                plan.connected_sources,
-                plan.standalone_sources,
-                plan.settings,
-                context=context,
-                scene=scene,
-                progress_callback=resolved_progress,
-            )
-        else:
-            result = export_a1_multi_object(
-                plan.all_sources,
-                plan.settings,
-                context=context,
-                scene=scene,
-                progress_callback=resolved_progress,
-            )
+    with exclusive_operation(
+        A1_EXPORT_OPERATION_KEY,
+        label="Spine2D selected-object export",
+    ):
+        progress_owner = (
+            blender_a1_progress_session(context, operation_name="Spine2D multi-export")
+            if progress_callback is None
+            else nullcontext(progress_callback)
+        )
+        with progress_owner as resolved_progress:
+            plan = build_selected_ui_export_plan(context)
+            scene = context.scene
+            if plan.settings.mode is A1MultiObjectMode.MIXED:
+                result = export_a1_mixed_object(
+                    plan.connected_sources,
+                    plan.standalone_sources,
+                    plan.settings,
+                    context=context,
+                    scene=scene,
+                    progress_callback=resolved_progress,
+                )
+            else:
+                result = export_a1_multi_object(
+                    plan.all_sources,
+                    plan.settings,
+                    context=context,
+                    scene=scene,
+                    progress_callback=resolved_progress,
+                )
 
-        if not plan.issues:
-            return result
-        logger.warning(
-            "Rewrite UI export plan produced %d request warning(s)",
-            len(plan.issues),
-        )
-        return _append_issues(
-            result,
-            plan.issues,
-            statistics={"ui_request_warning_count": len(plan.issues)},
-        )
+            if not plan.issues:
+                return result
+            logger.warning(
+                "Rewrite UI export plan produced %d request warning(s)",
+                len(plan.issues),
+            )
+            return _append_issues(
+                result,
+                plan.issues,
+                statistics={"ui_request_warning_count": len(plan.issues)},
+            )
 
 
 __all__ = ["export_active_object_a1", "export_selected_objects_a1"]
