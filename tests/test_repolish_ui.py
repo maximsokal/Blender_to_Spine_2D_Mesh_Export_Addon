@@ -21,28 +21,23 @@ class _RecordingLayout:
         return operator
 
 
-def test_repolish_panel_is_child_of_main_exporter_panel():
+def test_repolish_button_is_headerless_child_below_main_exporter_panel():
     panel = repolish_ui.OBJECT_PT_Spine2DRePolishPanel
 
     assert panel.bl_parent_id == "OBJECT_PT_spine2d_mesh"
     assert panel.bl_space_type == "VIEW_3D"
     assert panel.bl_region_type == "UI"
     assert panel.bl_category == "Blender to Spine2D Mesh Exporter"
-    assert "DEFAULT_CLOSED" in panel.bl_options
+    assert panel.bl_options == {"HIDE_HEADER"}
 
 
-def test_repolish_panel_opens_exact_project_url():
+def test_repolish_panel_draws_only_one_bottom_button_with_exact_url():
     layout = _RecordingLayout()
     panel_instance = SimpleNamespace(layout=layout)
 
     repolish_ui.OBJECT_PT_Spine2DRePolishPanel.draw(panel_instance, None)
 
-    assert layout.labels == [
-        {
-            "text": "Optimize and clean Spine animations:",
-            "icon": "INFO",
-        }
-    ]
+    assert layout.labels == []
     assert len(layout.operators) == 1
     operator_id, properties, operator = layout.operators[0]
     assert operator_id == "wm.url_open"
