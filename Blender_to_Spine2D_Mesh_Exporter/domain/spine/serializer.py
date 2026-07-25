@@ -282,8 +282,8 @@ class SpineSerializer:
         if not isinstance(output_path, Path):
             raise TypeError("output_path must be pathlib.Path")
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            self.to_json(document, indent=indent),
-            encoding="utf-8",
-        )
+        # Keep standalone serializer output byte-identical on every platform.
+        # Text-mode defaults translate ``\n`` to CRLF on Windows.
+        with output_path.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write(self.to_json(document, indent=indent))
         return output_path
