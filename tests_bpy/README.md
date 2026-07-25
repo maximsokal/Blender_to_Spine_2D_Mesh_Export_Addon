@@ -40,8 +40,17 @@ The runner fails closed when:
 - source mesh snapshot immutability;
 - evaluated depsgraph snapshots and temporary datablock cleanup;
 - real UV unwrap/pack operators on an isolated temporary object;
+- real Cycles EMIT/DIFFUSE/alpha and multi-pass texture baking;
+- JPEG, WEBP, PNG, and OPEN_EXR save/reload codec smoke tests;
+- numeric straight-RGBA checks after Blender decodes committed PNG files;
+- image-alpha, transparent Mix Shader, and pure-transparent material graphs;
+- selected-to-active baking and restoration of cage/selection settings;
+- animated two-frame baking with physical frame-level progress events;
+- atomic rollback after a forced bake-operator failure;
+- restoration of Edit Mode, active object, selection, frame, render engine, and materials;
+- exact temporary Object/Mesh/Collection/Material/Image/NodeGroup cleanup;
 - two complete Rewrite registration/unregistration cycles.
 
 These tests complement rather than replace the full Blender executable matrices.
-GPU rendering, compositor behavior, external image codecs, and UI event-loop behavior
-still require the existing Blender headless/manual fixtures.
+GPU rendering, compositor behavior, cross-platform codec parity, and UI event-loop
+behavior still require the existing Blender headless/manual fixtures.
