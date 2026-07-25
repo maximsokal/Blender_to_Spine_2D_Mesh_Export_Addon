@@ -25,6 +25,22 @@ def _operator_class(bl_idname: str):
     return bpy.types.Operator.bl_rna_get_subclass_py(rna_identifier)
 
 
+def _replace_current_scene_with_fresh() -> None:
+    """Use a new Scene because registration defaults do not overwrite user values."""
+
+    previous_scenes = tuple(bpy.data.scenes)
+    fresh_scene = bpy.data.scenes.new("Spine2D_RegistrationDefaults")
+    windows = tuple(bpy.context.window_manager.windows)
+    if not windows:
+        bpy.data.scenes.remove(fresh_scene)
+        raise RuntimeError("real bpy registration test requires a Blender Window")
+    for window in windows:
+        window.scene = fresh_scene
+    for scene in previous_scenes:
+        if scene != fresh_scene:
+            bpy.data.scenes.remove(scene)
+
+
 def _register_all_steps() -> list[tuple[str, object, object]]:
     completed: list[tuple[str, object, object]] = []
     try:
@@ -82,6 +98,10 @@ def _assert_unregistered() -> None:
 
 
 def test_every_registration_owner_survives_two_real_rna_cycles(clean_blender_data):
+    # Blender preserves existing IDProperty values across RNA re-registration.
+    # Defaults must therefore be asserted on a genuinely fresh Scene.
+    _replace_current_scene_with_fresh()
+
     # A second complete cycle catches stale class/RNA ownership left by unregister().
     for _cycle in range(2):
         completed = _register_all_steps()
