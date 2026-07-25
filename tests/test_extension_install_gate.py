@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from tools.run_extension_install_gate import extension_commands, isolated_environment
+from tools.run_extension_install_gate import (
+    _build_install_archive,
+    extension_commands,
+    isolated_environment,
+)
 
 
 def test_extension_gate_uses_official_repository_install_smoke_remove_sequence(tmp_path):
@@ -14,7 +18,11 @@ def test_extension_gate_uses_official_repository_install_smoke_remove_sequence(t
         smoke_report=tmp_path / "report.json",
     )
     assert tuple(name for name, _ in commands) == (
-        "repo-add", "install-enable", "smoke-export", "remove", "repo-remove",
+        "repo-add",
+        "install-enable",
+        "smoke-export",
+        "remove",
+        "repo-remove",
     )
     assert commands[0][1][1:4] == ("--command", "extension", "repo-add")
     assert "--clear-all" in commands[0][1]
@@ -28,5 +36,54 @@ def test_extension_gate_uses_official_repository_install_smoke_remove_sequence(t
 
 def test_extension_gate_uses_isolated_blender_user_directories(tmp_path):
     environment = isolated_environment(tmp_path)
-    for key in ("BLENDER_USER_CONFIG", "BLENDER_USER_SCRIPTS", "BLENDER_USER_DATAFILES", "BLENDER_SYSTEM_EXTENSIONS"):
-        path = Path(environment[key]); assert path.is_dir(); assert tmp_path.resolve() in path.parents
+    for key in (
+        "BLENDER_USER_CONFIG",
+        "BLENDER_USER_SCRIPTS",
+        "BLENDER_USER_DATAFILES",
+        "BLENDER_SYSTEM_EXTENSIONS",
+    ):
+        path = Path(environment[key])
+        assert path.is_dir()
+        assert tmp_path.resolve() in path.parents
+
+
+def test_extension_gate_uses_current_prepare_package_api(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    repository = tmp_path / "repository"
+    source.mkdir()
+    repository.mkdir()
+    executable = tmp_path / "blender.exe"
+    executable.write_bytes(b"")
+    calls: list[dict[str, Path]] = []
+
+    monkeypatch.setattr(
+        "tools.run_extension_install_gate.prepare_package._resolve_blender_executable",
+        lambda explicit: executable,
+    )
+
+    def build_extension(**kwargs):
+        calls.append(kwargs)
+        kwargs["output"].write_bytes(b"zip")
+        return kwargs["output"]
+
+    monkeypatch.setattr(
+        "tools.run_extension_install_gate.prepare_package.build_extension",
+        build_extension,
+    )
+
+    resolved, archive = _build_install_archive(
+        str(executable),
+        source,
+        repository,
+        {"id": "spine2d", "version": "1.2.3"},
+    )
+
+    assert resolved == str(executable)
+    assert archive == repository / "spine2d-1.2.3.zip"
+    assert calls == [
+        {
+            "blender": executable,
+            "source": source,
+            "output": archive,
+        }
+    ]
