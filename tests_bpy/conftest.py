@@ -1,6 +1,6 @@
 """Fixtures for tests that run against the official Blender 5.2 bpy wheel.
 
-This directory deliberately lives outside ``tests/`` because the legacy test conftest
+This directory deliberately lives outside ``tests/`` because ``tests/conftest.py``
 installs global MagicMock replacements for bpy, bmesh, and mathutils.
 """
 
