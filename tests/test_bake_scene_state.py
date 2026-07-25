@@ -14,6 +14,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     MaterialAnalysis,
     MaterialKind,
     ObjectMaterialAnalysis,
+    TextureFormat,
     build_bake_plan,
 )
 
@@ -41,7 +42,13 @@ class FakeScene:
         self.frame_current = value
 
 
-def make_plan(tmp_path, *, selected_to_active=False, procedural=False):
+def make_plan(
+    tmp_path,
+    *,
+    selected_to_active=False,
+    procedural=False,
+    texture_format=TextureFormat.PNG,
+):
     kind = MaterialKind.PROCEDURAL if procedural else MaterialKind.IMAGE
     analysis = ObjectMaterialAnalysis(
         "Cube",
@@ -54,6 +61,7 @@ def make_plan(tmp_path, *, selected_to_active=False, procedural=False):
             height=128,
             output_directory=tmp_path,
             output_stem="Cube",
+            texture_format=texture_format,
             selected_to_active=selected_to_active,
         ),
     )
@@ -144,6 +152,68 @@ def test_capture_rejects_missing_required_blender_52_bake_property():
 
     with pytest.raises(Exception, match="use_pass_color"):
         BakeSceneState.capture(scene)
+
+
+class FormatAwareImageSettings:
+    """Small RNA-like fake whose color-mode enum depends on file format."""
+
+    def __init__(self, *, file_format: str, color_mode: str):
+        self._file_format = file_format
+        self._color_mode = color_mode
+
+    @property
+    def file_format(self):
+        return self._file_format
+
+    @file_format.setter
+    def file_format(self, value):
+        self._file_format = value
+        if value == "JPEG" and self._color_mode == "RGBA":
+            self._color_mode = "RGB"
+
+    @property
+    def color_mode(self):
+        return self._color_mode
+
+    @color_mode.setter
+    def color_mode(self, value):
+        if self._file_format == "JPEG" and value == "RGBA":
+            raise TypeError("JPEG does not expose RGBA")
+        self._color_mode = value
+
+
+def test_configure_scene_resolves_default_rgba_to_rgb_for_jpeg(tmp_path):
+    scene = FakeScene()
+    scene.render.image_settings = FormatAwareImageSettings(
+        file_format="PNG",
+        color_mode="RGBA",
+    )
+
+    configure_scene_for_bake(
+        scene,
+        make_plan(tmp_path, texture_format=TextureFormat.JPEG),
+        BakeExecutionSettings(),
+        bake_mode=BakeMode.DIFFUSE,
+    )
+
+    assert scene.render.image_settings.file_format == "JPEG"
+    assert scene.render.image_settings.color_mode == "RGB"
+
+
+def test_scene_restore_returns_format_before_dependent_color_mode():
+    scene = FakeScene()
+    scene.render.image_settings = FormatAwareImageSettings(
+        file_format="PNG",
+        color_mode="RGBA",
+    )
+    state_before = BakeSceneState.capture(scene)
+
+    with pytest.raises(RuntimeError, match="forced after format switch"):
+        with preserve_bake_scene_state(scene):
+            scene.render.image_settings.file_format = "JPEG"
+            raise RuntimeError("forced after format switch")
+
+    assert BakeSceneState.capture(scene) == state_before
 
 
 def test_execution_settings_validation():
