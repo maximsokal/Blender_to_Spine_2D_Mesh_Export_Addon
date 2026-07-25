@@ -50,6 +50,15 @@ def _remove_all(collection, *, do_unlink: bool = False) -> None:
 def _reset_blender_data() -> None:
     """Return the bpy module to a deterministic empty-data state."""
 
+    active = getattr(bpy.context, "object", None)
+    if active is not None and getattr(active, "mode", "OBJECT") != "OBJECT":
+        operator = bpy.ops.object.mode_set
+        if not operator.poll():
+            raise RuntimeError("unable to leave non-Object mode during bpy test cleanup")
+        result = operator(mode="OBJECT")
+        if "FINISHED" not in result:
+            raise RuntimeError(f"bpy test cleanup could not enter Object Mode: {result!r}")
+
     _remove_all(bpy.data.objects, do_unlink=True)
     _remove_all(bpy.data.collections, do_unlink=True)
 
@@ -62,6 +71,7 @@ def _reset_blender_data() -> None:
         "lights",
         "curves",
         "armatures",
+        "actions",
         "node_groups",
     ):
         collection = getattr(bpy.data, collection_name, None)
