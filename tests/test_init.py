@@ -37,6 +37,23 @@ def _run_cleanup_actions(actions, **_kwargs) -> None:
         action.callback()
 
 
+def _set_root_registration_state(state_name: str) -> None:
+    state_type = getattr(extension, "ExtensionRegistrationState", None)
+    if state_type is not None:
+        extension._REGISTRATION_STATE = getattr(state_type, state_name)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_root_registration_state():
+    """Keep lifecycle tests independent from idempotent registration state."""
+
+    _set_root_registration_state("UNREGISTERED")
+    try:
+        yield
+    finally:
+        _set_root_registration_state("UNREGISTERED")
+
+
 def test_extension_manifest_targets_blender_52_and_declares_files_permission():
     manifest_path = PACKAGE / "blender_manifest.toml"
     with manifest_path.open("rb") as stream:
@@ -268,6 +285,7 @@ def test_unregister_runs_every_stage_in_reverse_order(monkeypatch):
         (stage("one"), stage("two"), stage("three")),
     )
     monkeypatch.setattr(extension, "unregister_all_best_effort", _run_cleanup_actions)
+    _set_root_registration_state("REGISTERED")
 
     extension.unregister()
 
