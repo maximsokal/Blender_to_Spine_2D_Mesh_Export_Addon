@@ -26,7 +26,7 @@ from .bake_materials import BakeMaterialError
 from .bake_scene_state import BakeSceneStateError
 from .context_state import BlenderContextError
 from .mesh_writer import MeshWriteError
-from .scene_bake_analyzer import SceneBakeAnalysisError
+from .scene_bake_error import SceneBakeAnalysisError
 from .scene_bake_execution import SceneBakeExecutionError
 from .semantic_bake_execution import run_semantic_bake
 from .semantic_bake_validation import (
