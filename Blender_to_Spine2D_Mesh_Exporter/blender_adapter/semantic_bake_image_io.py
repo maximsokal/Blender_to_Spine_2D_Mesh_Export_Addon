@@ -112,20 +112,23 @@ def _create_bake_image(
     float_buffer = force_float_buffer or (
         plan.settings.texture_format is TextureFormat.OPEN_EXR
     )
+    color_mode = plan.settings.texture_format.resolve_color_mode(
+        execution_settings.color_mode
+    )
     image = None
     try:
         image = bpy_module.data.images.new(
             name=f"__Spine2D_{image_name.strip()}",
             width=plan.settings.width,
             height=plan.settings.height,
-            alpha=execution_settings.color_mode == "RGBA",
+            alpha=color_mode == "RGBA",
             float_buffer=float_buffer,
         )
         image.generated_color = execution_settings.generated_color
         image.file_format = plan.settings.texture_format.value
         _configure_image_alpha_mode(
             image,
-            color_mode=execution_settings.color_mode,
+            color_mode=color_mode,
         )
         return image
     except Exception as exc:
