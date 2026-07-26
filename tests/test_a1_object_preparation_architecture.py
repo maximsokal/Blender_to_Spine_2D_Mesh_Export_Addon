@@ -39,6 +39,20 @@ def test_public_orchestrator_is_short_and_calls_typed_stages_in_order():
     ]
 
 
+def test_public_orchestrator_owns_source_uv_integrity_guard():
+    function = _function(_tree("a1_object_preparation.py"), "prepare_a1_object")
+    with_calls = [
+        item.context_expr.func.id
+        for node in ast.walk(function)
+        if isinstance(node, ast.With)
+        for item in node.items
+        if isinstance(item.context_expr, ast.Call)
+        and isinstance(item.context_expr.func, ast.Name)
+    ]
+
+    assert with_calls == ["_source_uv_integrity_guard"]
+
+
 def test_orchestrator_has_no_low_level_blender_preparation_dependencies():
     tree = _tree("a1_object_preparation.py")
     imported = {
