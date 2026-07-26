@@ -13,9 +13,9 @@ MANIFEST = (
 )
 
 
-def test_extension_manifest_version_is_0_37_0():
+def test_extension_manifest_version_is_0_38_0():
     source = MANIFEST.read_text(encoding="utf-8")
     match = re.search(r'^version\s*=\s*"([^"]+)"\s*$', source, re.MULTILINE)
 
     assert match is not None
-    assert match.group(1) == "0.37.0"
+    assert match.group(1) == "0.38.0"
