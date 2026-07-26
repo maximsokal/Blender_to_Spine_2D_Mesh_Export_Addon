@@ -13,8 +13,10 @@ from ..application import (
 )
 from ..application.a1_generated_materials import build_generated_material_plan
 from ..domain.baking import (
+    A1TextureExportMode,
     BakeMode,
     BakePlan,
+    BakePlanError,
     CameraProjectionPlan,
     MaterialAnalysis,
     MaterialKind,
@@ -179,7 +181,7 @@ def prepare_a1_texture_plan(
     context: Any | None = None,
     scene: Any | None = None,
 ) -> A1TexturePlanningResult:
-    """Analyse materials and select a renderer-compatible texture strategy."""
+    """Analyse materials and apply the explicit user-selected texture mode."""
 
     if not isinstance(uv, A1UvPreparationResult):
         raise TypeError("uv must be A1UvPreparationResult")
@@ -187,6 +189,9 @@ def prepare_a1_texture_plan(
     stage = A1SingleObjectStage.ANALYZE_MATERIALS
     warnings = uv.warnings
     statistics = uv.statistics
+    texture_export_mode = source.settings.bake_execution.texture_export_mode
+    if not isinstance(texture_export_mode, A1TextureExportMode):
+        raise TypeError("texture_export_mode must be A1TextureExportMode")
     try:
         source_analysis = analyse_object_materials(
             source.source_object,
@@ -199,7 +204,10 @@ def prepare_a1_texture_plan(
         )
         statistics = freeze_statistics(
             statistics,
-            {"material_slot_count": len(source_analysis.slots)},
+            {
+                "material_slot_count": len(source_analysis.slots),
+                "texture_export_mode": texture_export_mode.value,
+            },
         )
 
         use_generated, generated_reason = _should_generate_material(
@@ -207,6 +215,12 @@ def prepare_a1_texture_plan(
             source_analysis,
         )
         if use_generated:
+            if texture_export_mode is A1TextureExportMode.CAMERA_PROJECTION:
+                raise BakePlanError(
+                    "Camera Projection requires renderable source materials. "
+                    "Set Rewrite Generated Materials to Require Source, or switch "
+                    "Export Mode to Normal — UV Segments."
+                )
             stage = A1SingleObjectStage.PLAN_BAKE
             bake_plan = _build_generated_bake_plan(uv)
             material_analysis = bake_plan.material_analysis
@@ -240,6 +254,7 @@ def prepare_a1_texture_plan(
                     ),
                     "shader_capability": "GENERATED_LOCAL_EMISSION",
                     "shader_capability_audit_count": 0,
+                    "texture_export_mode": texture_export_mode.value,
                     "texture_pipeline": "OBJECT_BAKE",
                     "bake_mode": bake_plan.bake_mode.value,
                     "bake_frame_count": len(bake_plan.frame_tasks),
@@ -285,6 +300,7 @@ def prepare_a1_texture_plan(
             source.renderer,
             object_context=object_bake_context,
             scene_context=scene_bake_context,
+            texture_export_mode=texture_export_mode,
         )
         camera_projection = isinstance(bake_plan, CameraProjectionPlan)
         statistics = freeze_statistics(
@@ -299,6 +315,7 @@ def prepare_a1_texture_plan(
                 ),
                 "shader_capability": required_capability.value,
                 "shader_capability_audit_count": len(capability_audits),
+                "texture_export_mode": texture_export_mode.value,
                 "texture_pipeline": (
                     "CAMERA_RENDER_PROJECTION"
                     if camera_projection
@@ -320,8 +337,9 @@ def prepare_a1_texture_plan(
             },
         )
         logger.debug(
-            "Planned texture pipeline for %s: pipeline=%s passes=%d frames=%d",
+            "Planned texture pipeline for %s: mode=%s pipeline=%s passes=%d frames=%d",
             source.object_id,
+            texture_export_mode.value,
             statistics["texture_pipeline"],
             len(bake_plan.passes),
             len(bake_plan.frame_tasks),
