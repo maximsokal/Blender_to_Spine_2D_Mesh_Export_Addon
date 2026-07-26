@@ -83,6 +83,16 @@ def _update_texture_size(self: Any, _context: bpy.types.Context) -> None:
 
 PROPERTIES = (
     (
+        "spine2d_settings_schema_version",
+        bpy.props.IntProperty(
+            name="Spine2D Settings Schema",
+            description="Internal version marker for one-time Rewrite Scene migrations",
+            default=0,
+            min=0,
+            options={"HIDDEN"},
+        ),
+    ),
+    (
         "spine2d_texture_export_mode",
         bpy.props.EnumProperty(
             name="Export Mode",
