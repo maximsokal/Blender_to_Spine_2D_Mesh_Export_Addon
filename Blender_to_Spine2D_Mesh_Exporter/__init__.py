@@ -56,6 +56,7 @@ if bpy is not None:
         a1_readiness_invalidation,
         generated_material_ui,
         scene_properties,
+        scene_settings_migration,
     )
     from .infrastructure.blender_registration import (
         RegistrationCleanupAction,
@@ -79,6 +80,7 @@ if bpy is not None:
     # Legacy implementation modules are deliberately outside this extension surface.
     MODULES = (
         addon_preferences,
+        scene_settings_migration,
         ui,
         a1_readiness_invalidation,
         auto_readiness,
@@ -121,6 +123,11 @@ if bpy is not None:
             "Scene RNA properties",
             _register_config_rna,
             _unregister_config_rna,
+        ),
+        (
+            "Scene settings migration",
+            scene_settings_migration.register,
+            scene_settings_migration.unregister,
         ),
         (
             "UI",
