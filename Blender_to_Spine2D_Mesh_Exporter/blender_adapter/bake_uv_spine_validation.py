@@ -284,6 +284,9 @@ def validate_staged_normal_bake_coverage(
             # transform is covered by validate_projection_uv_coverage(), while staged
             # file loading is covered by the real Blender headless regression.
             return ()
+    version = getattr(getattr(bpy_module, "app", None), "version", None)
+    if not isinstance(version, tuple) or len(version) < 2:
+        return ()
 
     require_alpha = not _material_may_be_transparent(prepared.material_analysis)
     all_samples: list[TriangleCoverageSample] = []
