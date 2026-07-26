@@ -41,6 +41,11 @@ def _install_common_pipeline(monkeypatch, tmp_path: Path, *, fail_stage=None):
         "prepare_a1_object",
         lambda *_args, **_kwargs: prepared,
     )
+    monkeypatch.setattr(
+        a1_single_object_export,
+        "validate_staged_normal_bake_coverage",
+        lambda *_args, **_kwargs: (),
+    )
 
     def stage_outputs(
         _source,
