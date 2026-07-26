@@ -88,8 +88,8 @@ def _create_valid_source_uv(mesh: bpy.types.Mesh) -> None:
 def _create_pyramid(*, malformed_unused_uv: bool = False) -> bpy.types.Object:
     mesh = bpy.data.meshes.new("PyramidMesh")
     if malformed_unused_uv:
-        # A historical Blender file can retain a zero-length UV attribute created before
-        # topology. Rewrite must ignore it when no material/source-boundary setting uses it.
+        # Historical files can retain a zero-length UV attribute created before topology.
+        # Rewrite must ignore it when no material/source-boundary setting uses it.
         mesh.uv_layers.new(name="BrokenUnused")
     mesh.from_pydata(
         (
@@ -107,6 +107,13 @@ def _create_pyramid(*, malformed_unused_uv: bool = False) -> bpy.types.Object:
         ),
     )
     mesh.update(calc_edges=True)
+    if malformed_unused_uv:
+        broken = mesh.uv_layers.get("BrokenUnused")
+        _assert(broken is not None, "BrokenUnused UV fixture was not retained")
+        _assert(
+            len(broken.uv) == 0,
+            "Blender repaired the malformed UV fixture; regression setup is invalid",
+        )
     _create_valid_source_uv(mesh)
 
     source = bpy.data.objects.new("Pyramid", mesh)
@@ -336,6 +343,7 @@ def test_missing_material_image_fails_before_cycles_bake() -> None:
         output_directory = Path(directory)
         source = _create_pyramid()
         _configure_scene(output_directory, seam_mode="AUTO")
+        source_state = _capture_source_state(source)
 
         material = source.data.materials[0]
         nodes = material.node_tree.nodes
@@ -356,9 +364,41 @@ def test_missing_material_image_fails_before_cycles_bake() -> None:
             any("Relink or pack" in message for message in messages),
             f"Missing-image diagnostic was not returned: {messages}",
         )
+        _assert_source_state(source, source_state)
         _assert(
             not (output_directory / "Pyramid_merged.json").exists(),
             "Failed missing-image export committed JSON",
+        )
+        _assert(
+            not _temporary_datablocks(),
+            f"Missing-image failure leaked temporary datablocks: {_temporary_datablocks()}",
+        )
+
+
+def test_edit_mode_is_rejected_without_mutating_source_or_mode() -> None:
+    _clear_scene()
+    with tempfile.TemporaryDirectory(prefix="spine2d-edit-mode-") as directory:
+        output_directory = Path(directory)
+        source = _create_pyramid()
+        _configure_scene(output_directory, seam_mode="AUTO")
+        source_state = _capture_source_state(source)
+
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            result = export_active_object_a1(bpy.context)
+            _assert(not result.success, "Edit Mode unexpectedly exported")
+            _assert(
+                any("Finish or cancel Edit Mode" in issue.message for issue in result.issues),
+                f"Edit Mode diagnostic was not returned: {result.issues}",
+            )
+            _assert(bpy.context.mode == "EDIT_MESH", "Exporter changed Edit Mode")
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
+
+        _assert_source_state(source, source_state)
+        _assert(
+            not (output_directory / "Pyramid_merged.json").exists(),
+            "Edit Mode failure committed JSON",
         )
 
 
@@ -373,6 +413,8 @@ def main() -> None:
         print("[NORMAL_UV_PYRAMID_CUSTOM] PASS")
         test_missing_material_image_fails_before_cycles_bake()
         print("[MISSING_IMAGE_PREFLIGHT] PASS")
+        test_edit_mode_is_rejected_without_mutating_source_or_mode()
+        print("[EDIT_MODE_CONTRACT] PASS")
         print("[NORMAL_UV_PYRAMID] PASS")
     finally:
         addon.unregister()
