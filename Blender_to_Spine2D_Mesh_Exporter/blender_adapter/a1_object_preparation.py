@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import logging
-from typing import Any, Mapping, Tuple
+from typing import Any, Iterator, Mapping, Tuple
 
 from ..application import (
     A1ExportProgressCallback,
@@ -56,77 +57,44 @@ def _progress(
     )
 
 
-def _prepare_a1_object_impl(
+def _source_object_name(source_obj: Any) -> str:
+    return str(
+        getattr(source_obj, "name_full", None)
+        or getattr(source_obj, "name", None)
+        or "<unknown>"
+    )
+
+
+@contextmanager
+def _source_uv_integrity_guard(
     source_obj: Any,
-    settings: A1SingleObjectExportSettings,
-    *,
-    context: Any | None = None,
-    scene: Any | None = None,
-    progress_callback: A1ExportProgressCallback | None = None,
-) -> PreparedA1Object:
-    """Run the typed A1 preparation stages without writing output files."""
+    context: Any | None,
+) -> Iterator[None]:
+    """Protect source UV state across successful and failed preparation pipelines."""
 
-    stage = A1SingleObjectStage.VALIDATE_REQUEST
-    object_id: str | None = None
-    statistics: Mapping[str, StatisticsValue] = {}
-    warnings: Tuple[ExportIssue, ...] = ()
+    require_object_mode(context)
+    before = capture_source_uv_fingerprint(source_obj)
+    primary_error: BaseException | None = None
     try:
-        _progress(progress_callback, 0, stage)
-        _progress(progress_callback, 10, A1SingleObjectStage.READ_GEOMETRY)
-        source = prepare_a1_source_geometry(source_obj, settings, scene=scene)
-        object_id, statistics, warnings = (
-            source.object_id,
-            source.statistics,
-            source.warnings,
-        )
-
-        stage = A1SingleObjectStage.BUILD_TEXTURING_TOPOLOGY
-        _progress(progress_callback, 45, stage, object_id)
-        uv = prepare_a1_uv(source, context=context, scene=scene)
-        statistics, warnings = uv.statistics, uv.warnings
-
-        stage = A1SingleObjectStage.ANALYZE_MATERIALS
-        _progress(progress_callback, 65, stage, object_id)
-        texture = prepare_a1_texture_plan(uv, context=context, scene=scene)
-        statistics, warnings = texture.statistics, texture.warnings
-
-        stage = A1SingleObjectStage.BUILD_RIG
-        _progress(progress_callback, 82, stage, object_id)
-        document = prepare_a1_document(texture)
-        statistics, warnings = document.statistics, document.warnings
-
-        stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
-        prepared = PreparedA1Object(
-            source_object=source.source_object,
-            object_id=source.object_id,
-            prefix=source.prefix,
-            settings=source.settings,
-            output_paths=source.output_paths,
-            source_snapshot=source.source_snapshot,
-            z_groups=source.z_groups,
-            geometry=source.geometry,
-            texturing_topology=uv.texturing_topology,
-            unwrap_result=uv.unwrap_result,
-            uv_regions=uv.uv_regions,
-            material_analysis=texture.material_analysis,
-            bake_plan=texture.bake_plan,
-            rig=document.rig,
-            document_assembly=document.document_assembly,
-            warnings=warnings,
-            statistics=statistics,
-        )
-        _progress(progress_callback, 100, stage, object_id)
-        return prepared
-    except A1ObjectPreparationError:
+        yield
+    except BaseException as exc:
+        primary_error = exc
         raise
-    except Exception as exc:
-        raise A1ObjectPreparationError(
-            stage=stage,
-            object_id=object_id,
-            cause=exc,
-            statistics=statistics,
-            warnings=warnings,
-        ) from exc
+    finally:
+        try:
+            require_source_uv_unchanged(before, source_obj)
+        except Exception as mutation_error:
+            logger.exception("Rewrite source UV immutability contract failed")
+            wrapped = A1ObjectPreparationError(
+                stage=A1SingleObjectStage.READ_GEOMETRY,
+                object_id=_source_object_name(source_obj),
+                cause=mutation_error,
+                statistics={},
+                warnings=(),
+            )
+            if primary_error is not None:
+                raise wrapped from primary_error
+            raise wrapped from mutation_error
 
 
 def prepare_a1_object(
@@ -137,50 +105,70 @@ def prepare_a1_object(
     scene: Any | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
 ) -> PreparedA1Object:
-    """Prepare one object while enforcing mode safety and source UV immutability."""
+    """Run the typed A1 stages while preserving the source Mesh UV state."""
 
-    require_object_mode(context)
-    before = capture_source_uv_fingerprint(source_obj)
-    primary_error: BaseException | None = None
+    stage = A1SingleObjectStage.VALIDATE_REQUEST
+    object_id: str | None = None
+    statistics: Mapping[str, StatisticsValue] = {}
+    warnings: Tuple[ExportIssue, ...] = ()
     try:
-        return _prepare_a1_object_impl(
-            source_obj,
-            settings,
-            context=context,
-            scene=scene,
-            progress_callback=progress_callback,
-        )
-    except BaseException as exc:
-        primary_error = exc
+        with _source_uv_integrity_guard(source_obj, context):
+            _progress(progress_callback, 0, stage)
+            _progress(progress_callback, 10, A1SingleObjectStage.READ_GEOMETRY)
+            source = prepare_a1_source_geometry(source_obj, settings, scene=scene)
+            object_id, statistics, warnings = (
+                source.object_id,
+                source.statistics,
+                source.warnings,
+            )
+
+            stage = A1SingleObjectStage.BUILD_TEXTURING_TOPOLOGY
+            _progress(progress_callback, 45, stage, object_id)
+            uv = prepare_a1_uv(source, context=context, scene=scene)
+            statistics, warnings = uv.statistics, uv.warnings
+
+            stage = A1SingleObjectStage.ANALYZE_MATERIALS
+            _progress(progress_callback, 65, stage, object_id)
+            texture = prepare_a1_texture_plan(uv, context=context, scene=scene)
+            statistics, warnings = texture.statistics, texture.warnings
+
+            stage = A1SingleObjectStage.BUILD_RIG
+            _progress(progress_callback, 82, stage, object_id)
+            document = prepare_a1_document(texture)
+            statistics, warnings = document.statistics, document.warnings
+
+            stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
+            prepared = PreparedA1Object(
+                source_object=source.source_object,
+                object_id=source.object_id,
+                prefix=source.prefix,
+                settings=source.settings,
+                output_paths=source.output_paths,
+                source_snapshot=source.source_snapshot,
+                z_groups=source.z_groups,
+                geometry=source.geometry,
+                texturing_topology=uv.texturing_topology,
+                unwrap_result=uv.unwrap_result,
+                uv_regions=uv.uv_regions,
+                material_analysis=texture.material_analysis,
+                bake_plan=texture.bake_plan,
+                rig=document.rig,
+                document_assembly=document.document_assembly,
+                warnings=warnings,
+                statistics=statistics,
+            )
+            _progress(progress_callback, 100, stage, object_id)
+            return prepared
+    except A1ObjectPreparationError:
         raise
-    finally:
-        try:
-            require_source_uv_unchanged(before, source_obj)
-        except Exception as mutation_error:
-            logger.exception("Rewrite source UV immutability contract failed")
-            if primary_error is not None:
-                raise A1ObjectPreparationError(
-                    stage=A1SingleObjectStage.READ_GEOMETRY,
-                    object_id=str(
-                        getattr(source_obj, "name_full", None)
-                        or getattr(source_obj, "name", "")
-                        or "<unknown>"
-                    ),
-                    cause=mutation_error,
-                    statistics={},
-                    warnings=(),
-                ) from primary_error
-            raise A1ObjectPreparationError(
-                stage=A1SingleObjectStage.READ_GEOMETRY,
-                object_id=str(
-                    getattr(source_obj, "name_full", None)
-                    or getattr(source_obj, "name", "")
-                    or "<unknown>"
-                ),
-                cause=mutation_error,
-                statistics={},
-                warnings=(),
-            ) from mutation_error
+    except Exception as exc:
+        raise A1ObjectPreparationError(
+            stage=stage,
+            object_id=object_id,
+            cause=exc,
+            statistics=statistics,
+            warnings=warnings,
+        ) from exc
 
 
 __all__ = [
