@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_bridge as bridge
+from Blender_to_Spine2D_Mesh_Exporter.domain.baking import A1TextureExportMode
 
 
 class _RnaObject:
@@ -17,6 +18,9 @@ class _RnaObject:
 
 def _scene():
     return SimpleNamespace(
+        spine2d_texture_export_mode=(
+            A1TextureExportMode.NORMAL_UV_SEGMENTS.value
+        ),
         spine2d_seam_maker_mode="AUTO",
         spine2d_angle_limit=30.0,
         spine2d_control_icons=True,
@@ -65,6 +69,10 @@ def test_multi_sources_share_one_immutable_scene_snapshot(tmp_path):
     assert (
         sources[0].settings.bake_execution
         is sources[1].settings.bake_execution
+    )
+    assert (
+        sources[0].settings.bake_execution.texture_export_mode
+        is A1TextureExportMode.NORMAL_UV_SEGMENTS
     )
     assert sources[1].settings.export.sequence_start_frame == 4
     assert sources[1].settings.export.sequence_frame_count == 3
