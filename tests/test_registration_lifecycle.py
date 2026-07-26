@@ -125,6 +125,7 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
     assert "register_rna_properties_transactionally(CONFIG_RNA_PROPERTIES)" in source
     assert "bpy.utils.register_class" not in source
     assert "bpy.utils.unregister_class" not in source
+    assert "a1_readiness_invalidation" in source
 
     steps_assignment = next(
         node for node in ast.walk(tree)
@@ -137,10 +138,12 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
         "addon preferences",
         "Scene RNA properties",
         "UI",
+        "readiness invalidation",
         "Re-Polish UI",
         "generated material UI",
         "single-object operator",
     ]
+    assert labels.index("UI") < labels.index("readiness invalidation")
     assert "unregister_all_best_effort" in _called_names(_function(tree, "register"))
     assert "unregister_all_best_effort" in _called_names(_function(tree, "unregister"))
 
