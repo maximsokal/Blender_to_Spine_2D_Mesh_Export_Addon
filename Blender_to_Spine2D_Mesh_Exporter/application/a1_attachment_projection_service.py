@@ -75,10 +75,10 @@ def _area_tolerance(points: Tuple[Position2D, ...]) -> float:
     )
 
 
-def _convex_hull_positions(
+def _convex_hull_position_cycle(
     vertices: Tuple[LegacyAttachmentVertex, ...],
-) -> frozenset[Position2D]:
-    """Return unique physical convex-hull positions using monotone chain."""
+) -> Tuple[Position2D, ...]:
+    """Return the deterministic physical convex-hull cycle using monotone chain."""
 
     if not isinstance(vertices, tuple) or not vertices:
         raise ValueError("vertices must be a non-empty tuple")
@@ -116,7 +116,137 @@ def _convex_hull_positions(
             "Spine mesh attachment physical positions are collinear within "
             f"pixel-space tolerance {tolerance}"
         )
-    return frozenset(hull)
+    if len(hull) != len(set(hull)):
+        raise A1AttachmentProjectionError(
+            "Physical convex-hull cycle contains duplicate positions"
+        )
+    return hull
+
+
+def _rotate_cycle(
+    cycle: Tuple[Position2D, ...],
+    start: Position2D,
+) -> Tuple[Position2D, ...]:
+    """Rotate one closed-cycle representation without changing its orientation."""
+
+    if not isinstance(cycle, tuple) or not cycle:
+        raise ValueError("cycle must be a non-empty tuple")
+    try:
+        start_index = cycle.index(start)
+    except ValueError as exc:
+        raise A1AttachmentProjectionError(
+            f"Physical hull cycle does not contain requested start position {start}"
+        ) from exc
+    return cycle[start_index:] + cycle[:start_index]
+
+
+def _order_inversion_count(
+    candidate: Tuple[Position2D, ...],
+    observed: Tuple[Position2D, ...],
+) -> int:
+    """Count pairwise order inversions for one cycle anchored at observed[0]."""
+
+    rank = {position: index for index, position in enumerate(candidate)}
+    try:
+        observed_ranks = tuple(rank[position] for position in observed)
+    except KeyError as exc:
+        raise A1AttachmentProjectionError(
+            "Observed topological hull contains a non-physical hull position"
+        ) from exc
+    return sum(
+        first > second
+        for first_index, first in enumerate(observed_ranks)
+        for second in observed_ranks[first_index + 1 :]
+    )
+
+
+def _ordered_physical_hull_positions(
+    vertices: Tuple[LegacyAttachmentVertex, ...],
+    topological_hull_count: int,
+) -> Tuple[Position2D, ...]:
+    """Align the physical hull to the stable raw boundary whenever possible.
+
+    The raw projector stores the topological boundary first. That order is preserved
+    exactly when it already covers the complete physical convex hull. When a
+    topologically interior vertex becomes physically extreme after XY projection, the
+    monotone-chain cycle supplies the missing point and the observed boundary order is
+    used only to choose the deterministic orientation and rotation.
+    """
+
+    if isinstance(topological_hull_count, bool) or not isinstance(
+        topological_hull_count, int
+    ):
+        raise TypeError("topological_hull_count must be int")
+    if topological_hull_count < 0 or topological_hull_count > len(vertices):
+        raise ValueError("topological_hull_count is outside the vertex range")
+
+    physical_cycle = _convex_hull_position_cycle(vertices)
+    physical_positions = set(physical_cycle)
+    observed: list[Position2D] = []
+    seen: set[Position2D] = set()
+    for old_index in range(topological_hull_count):
+        position = _position(vertices[old_index])
+        if position not in physical_positions or position in seen:
+            continue
+        seen.add(position)
+        observed.append(position)
+
+    observed_cycle = tuple(observed)
+    if seen == physical_positions:
+        # Preserve the existing stable cycle, including its orientation and start.
+        return observed_cycle
+    if not observed_cycle:
+        return physical_cycle
+
+    anchor = observed_cycle[0]
+    forward = _rotate_cycle(physical_cycle, anchor)
+    if len(observed_cycle) == 1:
+        return forward
+
+    reverse = _rotate_cycle(tuple(reversed(physical_cycle)), anchor)
+    forward_inversions = _order_inversion_count(forward, observed_cycle)
+    reverse_inversions = _order_inversion_count(reverse, observed_cycle)
+    if forward_inversions < reverse_inversions:
+        return forward
+    if reverse_inversions < forward_inversions:
+        return reverse
+
+    # Symmetric or incomplete input can leave both orientations equally compatible.
+    # Lexicographic position order keeps the result repeatable.
+    return min(forward, reverse)
+
+
+def _select_physical_hull_indices(
+    vertices: Tuple[LegacyAttachmentVertex, ...],
+    topological_hull_count: int,
+    ordered_positions: Tuple[Position2D, ...],
+) -> Tuple[int, ...]:
+    """Select one deterministic UV representative for every physical hull point."""
+
+    indices_by_position: dict[Position2D, list[int]] = {}
+    for old_index, vertex in enumerate(vertices):
+        indices_by_position.setdefault(_position(vertex), []).append(old_index)
+
+    selected: list[int] = []
+    for position in ordered_positions:
+        candidates = indices_by_position.get(position)
+        if not candidates:
+            raise A1AttachmentProjectionError(
+                f"Physical hull position {position} has no attachment vertex"
+            )
+        topological_candidates = tuple(
+            index for index in candidates if index < topological_hull_count
+        )
+        selected.append(
+            topological_candidates[0] if topological_candidates else candidates[0]
+        )
+
+    resolved = tuple(selected)
+    if len(resolved) != len(set(resolved)):
+        raise A1AttachmentProjectionError(
+            "Physical hull representative selection contains duplicate indices"
+        )
+    return resolved
 
 
 def _validate_projected_triangles(
@@ -184,7 +314,12 @@ def _remap_index_stream(
 def normalize_a1_attachment_projection_hull(
     projection: A1AttachmentProjectionResult,
 ) -> A1AttachmentProjectionResult:
-    """Move the unique physical convex hull to the vertex prefix and remap indices."""
+    """Move the complete physical convex hull to the prefix and remap every index.
+
+    The physical XY hull may contain a vertex that is topologically interior to the
+    decomposed disk. Such a vertex must be promoted from the raw tail instead of
+    rejecting an otherwise valid attachment.
+    """
 
     if not isinstance(projection, A1AttachmentProjectionResult):
         raise TypeError("projection must be A1AttachmentProjectionResult")
@@ -192,26 +327,16 @@ def normalize_a1_attachment_projection_hull(
     request = projection.request
     vertices = request.vertices
     _validate_projected_triangles(vertices, request.triangles)
-    convex_positions = _convex_hull_positions(vertices)
 
-    # The raw projector places the complete topological boundary first. Filter that
-    # stable cycle to the physical convex positions, retaining one UV representative
-    # per position. UV duplicates and concave boundary vertices move to the tail.
-    hull_indices: list[int] = []
-    seen_positions: set[Position2D] = set()
-    for old_index in range(request.hull):
-        position = _position(vertices[old_index])
-        if position not in convex_positions or position in seen_positions:
-            continue
-        seen_positions.add(position)
-        hull_indices.append(old_index)
-
-    missing_positions = convex_positions - seen_positions
-    if missing_positions:
-        raise A1AttachmentProjectionError(
-            "Raw topological hull does not contain every physical convex-hull point; "
-            f"missing={tuple(sorted(missing_positions))}"
-        )
+    ordered_hull_positions = _ordered_physical_hull_positions(
+        vertices,
+        request.hull,
+    )
+    hull_indices = _select_physical_hull_indices(
+        vertices,
+        request.hull,
+        ordered_hull_positions,
+    )
     if len(hull_indices) < 3:
         raise A1AttachmentProjectionError(
             "Normalized Spine convex hull must contain at least three vertices"
@@ -219,7 +344,7 @@ def normalize_a1_attachment_projection_hull(
 
     hull_index_set = set(hull_indices)
     old_order = tuple(range(len(vertices)))
-    new_order = tuple(hull_indices) + tuple(
+    new_order = hull_indices + tuple(
         old_index for old_index in old_order if old_index not in hull_index_set
     )
     old_to_new = {
@@ -274,9 +399,9 @@ def normalize_a1_attachment_projection_hull(
         raise A1AttachmentProjectionError(
             "Normalized Spine hull still contains duplicate physical positions"
         )
-    if set(result_hull_positions) != set(convex_positions):
+    if result_hull_positions != ordered_hull_positions:
         raise A1AttachmentProjectionError(
-            "Normalized Spine hull does not match the physical convex hull"
+            "Normalized Spine hull order does not match the physical convex-hull cycle"
         )
     _validate_projected_triangles(result.request.vertices, result.request.triangles)
     return result
