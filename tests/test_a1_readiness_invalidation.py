@@ -24,16 +24,27 @@ def _identity_matrix():
     )
 
 
+def _translated_matrix(x: float, y: float, z: float):
+    return (
+        (1.0, 0.0, 0.0, x),
+        (0.0, 1.0, 0.0, y),
+        (0.0, 0.0, 1.0, z),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+
+
 def _mesh_object(name: str, pointer: int):
+    vertex = SimpleNamespace(index=0, co=[0.0, 0.0, 0.0])
     mesh = SimpleNamespace(
         id_type="MESH",
         name=f"{name}Mesh",
         name_full=f"{name}Mesh",
         as_pointer=lambda: pointer + 10_000,
-        vertices=(),
+        vertices=(vertex,),
         edges=(),
         loops=(),
         polygons=(),
+        uv_layers=(),
     )
     return SimpleNamespace(
         id_type="OBJECT",
@@ -222,10 +233,33 @@ def test_selection_only_known_object_update_is_ignored():
         a1_readiness_invalidation.clear_a1_export_readiness()
 
 
-def test_known_source_mesh_geometry_update_invalidates_with_precise_reason():
+def test_delayed_unchanged_source_mesh_update_is_ignored():
+    context = _context(351)
+    try:
+        _store(context)
+
+        a1_readiness_invalidation.a1_readiness_depsgraph_update_post(
+            context.scene,
+            _depsgraph(
+                _update(
+                    context.active_object.data,
+                    is_updated_geometry=True,
+                    is_updated_transform=False,
+                    is_updated_shading=False,
+                )
+            ),
+        )
+
+        assert _entry(context).stale is False
+    finally:
+        a1_readiness_invalidation.clear_a1_export_readiness()
+
+
+def test_vertex_change_with_same_topology_invalidates_with_precise_reason():
     context = _context(401)
     try:
         _store(context)
+        context.active_object.data.vertices[0].co[0] = 1.0
 
         a1_readiness_invalidation.a1_readiness_depsgraph_update_post(
             context.scene,
@@ -250,6 +284,8 @@ def test_known_source_transform_update_invalidates_with_precise_reason():
     context = _context(451)
     try:
         _store(context)
+        context.active_object.location = (1.0, 0.0, 0.0)
+        context.active_object.matrix_world = _translated_matrix(1.0, 0.0, 0.0)
 
         a1_readiness_invalidation.a1_readiness_depsgraph_update_post(
             context.scene,
