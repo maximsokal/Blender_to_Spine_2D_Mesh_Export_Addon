@@ -40,8 +40,8 @@ def _rna_identity(value: Any) -> int:
     if callable(pointer):
         try:
             return int(pointer())
-        except Exception:
-            pass
+        except (TypeError, ValueError, OverflowError, RuntimeError, ReferenceError):
+            return id(value)
     return id(value)
 
 
