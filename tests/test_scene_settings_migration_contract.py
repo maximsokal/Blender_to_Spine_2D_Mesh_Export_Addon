@@ -14,6 +14,8 @@ def test_scene_schema_property_is_hidden_and_starts_unmigrated():
     assert "default=0" in source
     assert 'options={"HIDDEN"}' in source
     assert 'default="AUTO"' in source
+    assert "update=_update_seam_maker_mode" in source
+    assert "if not migration_file_loading():" in source
 
 
 def test_migration_is_guarded_before_resetting_custom_to_auto():
@@ -25,6 +27,9 @@ def test_migration_is_guarded_before_resetting_custom_to_auto():
     reset = 'scene.spine2d_seam_maker_mode = "AUTO"'
     marker = "scene.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION"
     assert source.index(guard) < source.index(reset) < source.index(marker)
+    assert "spine2d_scene_settings_load_pre" in source
+    assert "_FILE_LOADING = True" in source
+    assert "_FILE_LOADING = False" in source
 
 
 def test_root_registers_migration_after_scene_rna_and_before_ui():
