@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Mapping, Tuple
 
 from ..application import (
@@ -20,6 +21,14 @@ from .a1_preparation_contracts import (
 from .a1_source_geometry_preparation import prepare_a1_source_geometry
 from .a1_texture_planning import prepare_a1_texture_plan
 from .a1_uv_preparation import prepare_a1_uv
+from .source_uv_integrity import (
+    capture_source_uv_fingerprint,
+    require_object_mode,
+    require_source_uv_unchanged,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 _PROGRESS_MESSAGES = {
@@ -47,7 +56,7 @@ def _progress(
     )
 
 
-def prepare_a1_object(
+def _prepare_a1_object_impl(
     source_obj: Any,
     settings: A1SingleObjectExportSettings,
     *,
@@ -55,7 +64,7 @@ def prepare_a1_object(
     scene: Any | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
 ) -> PreparedA1Object:
-    """Run the four typed A1 preparation stages without writing output files."""
+    """Run the typed A1 preparation stages without writing output files."""
 
     stage = A1SingleObjectStage.VALIDATE_REQUEST
     object_id: str | None = None
@@ -118,6 +127,60 @@ def prepare_a1_object(
             statistics=statistics,
             warnings=warnings,
         ) from exc
+
+
+def prepare_a1_object(
+    source_obj: Any,
+    settings: A1SingleObjectExportSettings,
+    *,
+    context: Any | None = None,
+    scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
+) -> PreparedA1Object:
+    """Prepare one object while enforcing mode safety and source UV immutability."""
+
+    require_object_mode(context)
+    before = capture_source_uv_fingerprint(source_obj)
+    primary_error: BaseException | None = None
+    try:
+        return _prepare_a1_object_impl(
+            source_obj,
+            settings,
+            context=context,
+            scene=scene,
+            progress_callback=progress_callback,
+        )
+    except BaseException as exc:
+        primary_error = exc
+        raise
+    finally:
+        try:
+            require_source_uv_unchanged(before, source_obj)
+        except Exception as mutation_error:
+            logger.exception("Rewrite source UV immutability contract failed")
+            if primary_error is not None:
+                raise A1ObjectPreparationError(
+                    stage=A1SingleObjectStage.READ_GEOMETRY,
+                    object_id=str(
+                        getattr(source_obj, "name_full", None)
+                        or getattr(source_obj, "name", "")
+                        or "<unknown>"
+                    ),
+                    cause=mutation_error,
+                    statistics={},
+                    warnings=(),
+                ) from primary_error
+            raise A1ObjectPreparationError(
+                stage=A1SingleObjectStage.READ_GEOMETRY,
+                object_id=str(
+                    getattr(source_obj, "name_full", None)
+                    or getattr(source_obj, "name", "")
+                    or "<unknown>"
+                ),
+                cause=mutation_error,
+                statistics={},
+                warnings=(),
+            ) from mutation_error
 
 
 __all__ = [
