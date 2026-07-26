@@ -179,6 +179,8 @@ class SemanticBakeRuntime:
             raise TypeError("renderer must be RenderEngineContract")
         if self.context is None or self.scene is None or self.bpy_module is None:
             raise ValueError("bpy_module, context, and scene cannot be None")
+        if self.renderer.uses_eevee:
+            raise ValueError("semantic object-bake runtime must execute with Cycles")
 
 
 def validate_semantic_bake_request(
@@ -206,10 +208,13 @@ def validate_semantic_bake_request(
     )
     if not isinstance(resolved_settings, BakeExecutionSettings):
         raise TypeError("execution_settings must be BakeExecutionSettings or None")
-    if (
-        isinstance(plan, GeneratedBakePlan)
-        and resolved_settings.render_engine != "CYCLES"
-    ):
+
+    # Blender object baking is a Cycles operation. The user's Scene may remain in
+    # EEVEE; preserve_bake_scene_state() captures that live state before execution,
+    # configure_scene_for_bake() temporarily selects Cycles, and finally restores
+    # the original engine. Camera Projection never reaches this semantic-bake path.
+    requested_renderer = render_engine_contract_from_execution(resolved_settings)
+    if requested_renderer.uses_eevee:
         resolved_settings = replace(resolved_settings, render_engine="CYCLES")
 
     used_material_indices, face_material_indices = _validate_execution_input(
@@ -218,11 +223,6 @@ def validate_semantic_bake_request(
         plan,
     )
     renderer = render_engine_contract_from_execution(resolved_settings)
-    if renderer.uses_eevee:
-        raise BakeExecutionError(
-            "Blender object baking is restricted to Cycles; Eevee materials must "
-            "use camera-render projection"
-        )
 
     bpy_module = _load_bpy()
     resolved_context = context if context is not None else bpy_module.context
