@@ -58,6 +58,7 @@ class _DependencySnapshot:
     identities: frozenset[DependencyIdentity]
     labels: Mapping[DependencyIdentity, str]
     values: Mapping[DependencyIdentity, Any]
+    states: Mapping[DependencyIdentity, Mapping[str, object]]
     uses_scene_rendering: bool
 
 
@@ -285,6 +286,105 @@ def _collect_object(
         )
 
 
+def _hash_value(digest: Any, value: object) -> None:
+    digest.update(repr(value).encode("utf-8", errors="backslashreplace"))
+    digest.update(b"\0")
+
+
+def _mesh_geometry_digest(mesh: Any) -> str:
+    """Hash exact source geometry/UV values without allocating a BMesh."""
+
+    digest = sha256()
+    for vertex in _safe_tuple(getattr(mesh, "vertices", ())):
+        _hash_value(
+            digest,
+            (
+                int(getattr(vertex, "index", 0)),
+                _safe_float_tuple(getattr(vertex, "co", ()), 3),
+            ),
+        )
+    for edge in _safe_tuple(getattr(mesh, "edges", ())):
+        _hash_value(
+            digest,
+            (
+                int(getattr(edge, "index", 0)),
+                tuple(int(value) for value in getattr(edge, "vertices", ())),
+            ),
+        )
+    for polygon in _safe_tuple(getattr(mesh, "polygons", ())):
+        _hash_value(
+            digest,
+            (
+                int(getattr(polygon, "index", 0)),
+                tuple(int(value) for value in getattr(polygon, "vertices", ())),
+                int(getattr(polygon, "material_index", 0)),
+                bool(getattr(polygon, "use_smooth", False)),
+            ),
+        )
+    for layer in _safe_tuple(getattr(mesh, "uv_layers", ())):
+        _hash_value(digest, _datablock_name(layer))
+        for loop_uv in _safe_tuple(getattr(layer, "data", ())):
+            _hash_value(
+                digest,
+                _safe_float_tuple(getattr(loop_uv, "uv", ()), 2),
+            )
+    return digest.hexdigest()
+
+
+def _dependency_state(identity: DependencyIdentity, value: Any) -> Mapping[str, object]:
+    id_type = identity[0]
+    state: dict[str, object] = {
+        "id_type": id_type,
+        "identity": identity[1],
+        "name": _datablock_name(value),
+    }
+    if id_type == "OBJECT":
+        state.update(
+            {
+                "object_type": str(getattr(value, "type", "")),
+                "matrix_world": _matrix_signature(getattr(value, "matrix_world", None)),
+                "location": _safe_float_tuple(getattr(value, "location", ()), 3),
+                "rotation": _safe_float_tuple(getattr(value, "rotation_euler", ()), 3),
+                "scale": _safe_float_tuple(getattr(value, "scale", ()), 3),
+                "hide_render": bool(getattr(value, "hide_render", False)),
+                "data": _dependency_identity(getattr(value, "data", None)),
+            }
+        )
+    elif id_type == "MESH":
+        state.update(
+            {
+                "vertices": len(_safe_tuple(getattr(value, "vertices", ()))),
+                "edges": len(_safe_tuple(getattr(value, "edges", ()))),
+                "loops": len(_safe_tuple(getattr(value, "loops", ()))),
+                "polygons": len(_safe_tuple(getattr(value, "polygons", ()))),
+                "geometry_digest": _mesh_geometry_digest(value),
+            }
+        )
+    elif id_type == "NODETREE":
+        state.update(
+            {
+                "nodes": len(_safe_tuple(getattr(value, "nodes", ()))),
+                "links": len(_safe_tuple(getattr(value, "links", ()))),
+            }
+        )
+    elif id_type in {"MATERIAL", "WORLD"}:
+        state.update(
+            {
+                "use_nodes": bool(getattr(value, "use_nodes", False)),
+                "node_tree": _dependency_identity(getattr(value, "node_tree", None)),
+            }
+        )
+    elif id_type == "IMAGE":
+        state.update(
+            {
+                "filepath": str(getattr(value, "filepath", "")),
+                "source": str(getattr(value, "source", "")),
+                "size": _safe_float_tuple(getattr(value, "size", ()), 2),
+            }
+        )
+    return state
+
+
 def _capture_dependencies(
     context: Any,
     report: Any,
@@ -358,65 +458,17 @@ def _capture_dependencies(
                 role="Light",
             )
 
+    states = {
+        identity: _dependency_state(identity, values[identity])
+        for identity in identities
+    }
     return _DependencySnapshot(
         identities=frozenset(identities),
         labels=dict(labels),
         values=dict(values),
+        states=states,
         uses_scene_rendering=uses_scene_rendering,
     )
-
-
-def _dependency_state(identity: DependencyIdentity, value: Any) -> Mapping[str, object]:
-    id_type = identity[0]
-    state: dict[str, object] = {
-        "id_type": id_type,
-        "identity": identity[1],
-        "name": _datablock_name(value),
-    }
-    if id_type == "OBJECT":
-        state.update(
-            {
-                "object_type": str(getattr(value, "type", "")),
-                "matrix_world": _matrix_signature(getattr(value, "matrix_world", None)),
-                "location": _safe_float_tuple(getattr(value, "location", ()), 3),
-                "rotation": _safe_float_tuple(getattr(value, "rotation_euler", ()), 3),
-                "scale": _safe_float_tuple(getattr(value, "scale", ()), 3),
-                "hide_render": bool(getattr(value, "hide_render", False)),
-                "data": _dependency_identity(getattr(value, "data", None)),
-            }
-        )
-    elif id_type == "MESH":
-        state.update(
-            {
-                "vertices": len(_safe_tuple(getattr(value, "vertices", ()))),
-                "edges": len(_safe_tuple(getattr(value, "edges", ()))),
-                "loops": len(_safe_tuple(getattr(value, "loops", ()))),
-                "polygons": len(_safe_tuple(getattr(value, "polygons", ()))),
-            }
-        )
-    elif id_type == "NODETREE":
-        state.update(
-            {
-                "nodes": len(_safe_tuple(getattr(value, "nodes", ()))),
-                "links": len(_safe_tuple(getattr(value, "links", ()))),
-            }
-        )
-    elif id_type in {"MATERIAL", "WORLD"}:
-        state.update(
-            {
-                "use_nodes": bool(getattr(value, "use_nodes", False)),
-                "node_tree": _dependency_identity(getattr(value, "node_tree", None)),
-            }
-        )
-    elif id_type == "IMAGE":
-        state.update(
-            {
-                "filepath": str(getattr(value, "filepath", "")),
-                "source": str(getattr(value, "source", "")),
-                "size": _safe_float_tuple(getattr(value, "size", ()), 2),
-            }
-        )
-    return state
 
 
 def _cached_report(context: Any) -> A1ExportReadinessReport | None:
@@ -453,7 +505,7 @@ def build_a1_readiness_signature(
 
     snapshot = _capture_dependencies(context, resolved_report)
     dependency_state = tuple(
-        _dependency_state(identity, snapshot.values[identity])
+        snapshot.states[identity]
         for identity in sorted(snapshot.identities, key=repr)
     )
     payload = {
@@ -573,6 +625,36 @@ def _reason_for_update(
     return f"{label} changed"
 
 
+def _semantic_state_unchanged(
+    identity: DependencyIdentity,
+    updated_id: Any,
+    flags: Mapping[str, bool],
+    snapshot: _DependencySnapshot,
+) -> bool:
+    id_type = identity[0]
+    compare_state = False
+    if id_type == "MESH" and flags.get("is_updated_geometry", False):
+        compare_state = True
+    elif (
+        id_type == "OBJECT"
+        and flags.get("is_updated_transform", False)
+        and not flags.get("is_updated_geometry", False)
+        and not flags.get("is_updated_shading", False)
+    ):
+        compare_state = True
+    if not compare_state:
+        return False
+    previous = snapshot.states.get(identity)
+    if previous is None:
+        return False
+    try:
+        current = _dependency_state(identity, updated_id)
+    except Exception:
+        logger.debug("Unable to compare delayed depsgraph state", exc_info=True)
+        return False
+    return current == previous
+
+
 def _mark_stale(key: int, entry: Any, reason: str) -> None:
     entry.stale = True
     _STALE_REASONS_BY_SCENE[key] = reason
@@ -620,6 +702,10 @@ def a1_readiness_depsgraph_update_post(scene: Any, depsgraph: Any) -> None:
         flags = _update_flags(update)
         if flags and not any(flags.values()):
             # Selection/active-object restoration publishes zero-semantic updates.
+            continue
+        if _semantic_state_unchanged(identity, updated_id, flags, snapshot):
+            # Blender can deliver a queued source update after Analyze even though the
+            # restored source data is byte-for-byte unchanged.
             continue
 
         label = snapshot.labels.get(
