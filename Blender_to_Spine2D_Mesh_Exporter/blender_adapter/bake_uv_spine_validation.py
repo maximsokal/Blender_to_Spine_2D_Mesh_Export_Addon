@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from ..application import A1AttachmentProjectionResult
-from ..domain.baking import CameraProjectionPlan, ObjectMaterialAnalysis
+from ..domain.baking import (
+    CameraProjectionPlan,
+    MaterialSemanticChannel,
+    ObjectMaterialAnalysis,
+)
 from ..infrastructure import AtomicOutputReservation
 from .a1_preparation_contracts import PreparedA1Object
 
@@ -24,9 +28,17 @@ class RgbaImageBuffer:
     pixels: tuple[float, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.width, int) or isinstance(self.width, bool) or self.width <= 0:
+        if (
+            not isinstance(self.width, int)
+            or isinstance(self.width, bool)
+            or self.width <= 0
+        ):
             raise ValueError("width must be a positive integer")
-        if not isinstance(self.height, int) or isinstance(self.height, bool) or self.height <= 0:
+        if (
+            not isinstance(self.height, int)
+            or isinstance(self.height, bool)
+            or self.height <= 0
+        ):
             raise ValueError("height must be a positive integer")
         expected = self.width * self.height * 4
         if len(self.pixels) != expected:
@@ -39,16 +51,28 @@ class RgbaImageBuffer:
     def rgba(self, u: float, v: float) -> tuple[float, float, float, float]:
         if not isfinite(float(u)) or not isfinite(float(v)):
             raise BakedUvSpineValidationError("UV sample contains a non-finite value")
-        if u < -1.0e-6 or u > 1.0 + 1.0e-6 or v < -1.0e-6 or v > 1.0 + 1.0e-6:
+        if (
+            u < -1.0e-6
+            or u > 1.0 + 1.0e-6
+            or v < -1.0e-6
+            or v > 1.0 + 1.0e-6
+        ):
             raise BakedUvSpineValidationError(
                 f"UV sample {(u, v)} is outside the unit square"
             )
         resolved_u = min(1.0, max(0.0, float(u)))
         resolved_v = min(1.0, max(0.0, float(v)))
-        x = min(self.width - 1, max(0, int(round(resolved_u * (self.width - 1)))))
-        y = min(self.height - 1, max(0, int(round(resolved_v * (self.height - 1)))))
+        x = min(
+            self.width - 1,
+            max(0, int(round(resolved_u * (self.width - 1)))),
+        )
+        y = min(
+            self.height - 1,
+            max(0, int(round(resolved_v * (self.height - 1)))),
+        )
         offset = (y * self.width + x) * 4
-        return tuple(float(self.pixels[offset + index]) for index in range(4))  # type: ignore[return-value]
+        values = tuple(float(self.pixels[offset + index]) for index in range(4))
+        return values[0], values[1], values[2], values[3]
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,10 +98,11 @@ def _triangle_uvs(
             f"Attachment '{request.attachment_name}' has an incomplete triangle stream"
         )
     try:
-        return tuple(
+        values = tuple(
             tuple(float(component) for component in request.vertices[index].uv)
             for index in indices
-        )  # type: ignore[return-value]
+        )
+        return values[0], values[1], values[2]
     except Exception as exc:
         raise BakedUvSpineValidationError(
             f"Unable to resolve UVs for attachment '{request.attachment_name}' "
@@ -114,7 +139,10 @@ def validate_projection_uv_coverage(
 
     if not isinstance(image, RgbaImageBuffer):
         raise TypeError("image must be RgbaImageBuffer")
-    if isinstance(alpha_threshold, bool) or not isinstance(alpha_threshold, (int, float)):
+    if isinstance(alpha_threshold, bool) or not isinstance(
+        alpha_threshold,
+        (int, float),
+    ):
         raise TypeError("alpha_threshold must be numeric")
     threshold = float(alpha_threshold)
     if not isfinite(threshold) or threshold < 0.0 or threshold > 1.0:
@@ -124,13 +152,24 @@ def validate_projection_uv_coverage(
 
     resolved = tuple(projections)
     if not resolved:
-        raise BakedUvSpineValidationError("No Spine attachment projections were supplied")
+        raise BakedUvSpineValidationError(
+            "No Spine attachment projections were supplied"
+        )
 
     samples: list[TriangleCoverageSample] = []
-    empty: list[tuple[str, int, tuple[tuple[float, float], ...]]] = []
+    empty: list[
+        tuple[
+            str,
+            int,
+            tuple[tuple[float, float], ...],
+            tuple[tuple[float, float, float, float], ...],
+        ]
+    ] = []
     for projection in resolved:
         if not isinstance(projection, A1AttachmentProjectionResult):
-            raise TypeError("projections must contain A1AttachmentProjectionResult values")
+            raise TypeError(
+                "projections must contain A1AttachmentProjectionResult values"
+            )
         request = projection.request
         if len(request.triangles) % 3:
             raise BakedUvSpineValidationError(
@@ -149,7 +188,12 @@ def validate_projection_uv_coverage(
             samples.append(sample)
             if require_alpha_coverage and sample.maximum_alpha <= threshold:
                 empty.append(
-                    (request.attachment_name, offset // 3, uv_samples)
+                    (
+                        request.attachment_name,
+                        offset // 3,
+                        uv_samples,
+                        rgba_samples,
+                    )
                 )
 
     if empty:
@@ -169,9 +213,9 @@ def _material_may_be_transparent(analysis: ObjectMaterialAnalysis) -> bool:
         "VOLUME_PRINCIPLED",
     }
     return any(
-        node_type in transparent_types
+        MaterialSemanticChannel.ALPHA in slot.semantic_channels
+        or any(node_type in transparent_types for node_type in slot.node_types)
         for slot in analysis.slots
-        for node_type in slot.node_types
     )
 
 
@@ -187,7 +231,7 @@ def _load_staged_image(
     image = None
     try:
         image = bpy_module.data.images.load(str(path), check_existing=False)
-        width, height = (int(image.size[0]), int(image.size[1]))
+        width, height = int(image.size[0]), int(image.size[1])
         pixel_count = width * height * 4
         values = [0.0] * pixel_count
         foreach_get = getattr(image.pixels, "foreach_get", None)
@@ -205,6 +249,8 @@ def _load_staged_image(
     finally:
         if image is not None:
             try:
+                bpy_module.data.images.remove(image, do_unlink=True)
+            except TypeError:
                 bpy_module.data.images.remove(image)
             except Exception:
                 pass
@@ -227,17 +273,24 @@ def validate_staged_normal_bake_coverage(
     if not resolved_reservations or not all(
         isinstance(item, AtomicOutputReservation) for item in resolved_reservations
     ):
-        raise TypeError("reservations must contain AtomicOutputReservation values")
+        raise TypeError(
+            "reservations must contain AtomicOutputReservation values"
+        )
     if bpy_module is None:
         try:
             import bpy as bpy_module
         except Exception as exc:
-            raise BakedUvSpineValidationError("Blender bpy module is unavailable") from exc
+            raise BakedUvSpineValidationError(
+                "Blender bpy module is unavailable"
+            ) from exc
 
     require_alpha = not _material_may_be_transparent(prepared.material_analysis)
     all_samples: list[TriangleCoverageSample] = []
     for reservation in resolved_reservations:
-        image = _load_staged_image(Path(reservation.staged_path), bpy_module=bpy_module)
+        image = _load_staged_image(
+            Path(reservation.staged_path),
+            bpy_module=bpy_module,
+        )
         all_samples.extend(
             validate_projection_uv_coverage(
                 image,
