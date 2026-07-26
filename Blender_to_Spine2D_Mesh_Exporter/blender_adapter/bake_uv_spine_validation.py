@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from math import isfinite
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -17,6 +18,7 @@ from ..infrastructure import AtomicOutputReservation
 from .a1_preparation_contracts import PreparedA1Object
 
 
+logger = logging.getLogger(__name__)
 _UV_UNIT_EPSILON = 1.0e-6
 
 
@@ -279,8 +281,14 @@ def _load_staged_image(
             f"Staged bake image does not exist: {path}"
         )
     image = None
+    image_name = "<unloaded>"
     try:
         image = bpy_module.data.images.load(str(path), check_existing=False)
+        image_name = str(
+            getattr(image, "name_full", None)
+            or getattr(image, "name", None)
+            or "<unnamed>"
+        )
         width, height = int(image.size[0]), int(image.size[1])
         pixel_count = width * height * 4
         values = [0.0] * pixel_count
@@ -301,9 +309,21 @@ def _load_staged_image(
             try:
                 bpy_module.data.images.remove(image, do_unlink=True)
             except TypeError:
-                bpy_module.data.images.remove(image)
+                try:
+                    bpy_module.data.images.remove(image)
+                except Exception:
+                    logger.exception(
+                        "Unable to remove temporary staged image '%s' from '%s' "
+                        "after compatibility cleanup",
+                        image_name,
+                        path,
+                    )
             except Exception:
-                pass
+                logger.exception(
+                    "Unable to remove temporary staged image '%s' from '%s'",
+                    image_name,
+                    path,
+                )
 
 
 def validate_staged_normal_bake_coverage(
