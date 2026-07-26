@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from Blender_to_Spine2D_Mesh_Exporter.application import (
@@ -89,11 +91,41 @@ def test_vertical_uv_flip_is_detected_as_empty_texture_sampling():
         )
 
 
-def test_out_of_range_spine_uv_is_rejected_before_pixel_lookup():
-    projection = _projection(((-0.1, 0.1), (0.4, 0.1), (0.1, 0.4)))
+@pytest.mark.parametrize(
+    "invalid_uv",
+    (
+        (-0.1, 0.1),
+        (1.1, 0.1),
+        (0.1, -0.1),
+        (0.1, 1.1),
+    ),
+)
+def test_out_of_range_spine_uv_is_rejected_before_pixel_lookup(invalid_uv):
+    projection = _projection((invalid_uv, (0.4, 0.1), (0.1, 0.4)))
 
     with pytest.raises(BakedUvSpineValidationError, match="outside the unit square"):
         validate_projection_uv_coverage(
             _image_with_lower_left_coverage(),
             (projection,),
         )
+
+
+@pytest.mark.parametrize("invalid_value", (math.nan, math.inf, -math.inf))
+def test_non_finite_pixel_sample_uv_is_rejected(invalid_value):
+    with pytest.raises(BakedUvSpineValidationError, match="non-finite"):
+        _image_with_lower_left_coverage().rgba(invalid_value, 0.5)
+
+
+def test_uv_values_inside_boundary_epsilon_are_clamped_deterministically():
+    image = RgbaImageBuffer(
+        width=2,
+        height=2,
+        pixels=(
+            1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 0.0, 1.0,
+        ),
+    )
+
+    assert image.rgba(-5.0e-7, 1.0 + 5.0e-7) == (0.0, 0.0, 1.0, 1.0)
