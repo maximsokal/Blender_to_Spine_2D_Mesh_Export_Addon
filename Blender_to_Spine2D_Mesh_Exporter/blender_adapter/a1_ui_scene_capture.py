@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..application import A1GeometryPreparationSettings
-from ..domain.baking import BakeExecutionSettings
+from ..domain.baking import A1TextureExportMode, BakeExecutionSettings
 from ..domain.baking.generated_materials import (
     A1GeneratedMaterialPattern,
     A1MaterialSourcePolicy,
@@ -41,6 +41,9 @@ class _SceneExportProfile:
         A1GeneratedMaterialPattern.SOLID_GRAY
     )
     generated_gray_color: ColorRGBA = _DEFAULT_GENERATED_GRAY
+    texture_export_mode: A1TextureExportMode = (
+        A1TextureExportMode.NORMAL_UV_SEGMENTS
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.output_directory, Path):
@@ -109,6 +112,12 @@ class _SceneExportProfile:
         if float(self.generated_gray_color[3]) != 1.0:
             raise ValueError(
                 "generated_gray_color[3] must be 1.0 for opaque generated textures"
+            )
+        if not isinstance(self.texture_export_mode, A1TextureExportMode):
+            raise TypeError("texture_export_mode must be A1TextureExportMode")
+        if self.bake_execution.texture_export_mode is not self.texture_export_mode:
+            raise ValueError(
+                "bake_execution.texture_export_mode must match texture_export_mode"
             )
 
 
@@ -286,6 +295,24 @@ def _resolve_generated_gray_color(scene: Any) -> ColorRGBA:
     return resolved[0], resolved[1], resolved[2], 1.0
 
 
+def _resolve_texture_export_mode(scene: Any) -> A1TextureExportMode:
+    raw = str(
+        getattr(
+            scene,
+            "spine2d_texture_export_mode",
+            A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
+        )
+        or A1TextureExportMode.NORMAL_UV_SEGMENTS.value
+    ).strip().upper()
+    try:
+        return A1TextureExportMode(raw)
+    except ValueError as exc:
+        supported = tuple(mode.value for mode in A1TextureExportMode)
+        raise ValueError(
+            f"Unsupported texture export mode {raw!r}; supported={supported}"
+        ) from exc
+
+
 def _capture_scene_profile(
     scene: Any,
     *,
@@ -302,6 +329,12 @@ def _capture_scene_profile(
     render_engine = str(
         getattr(getattr(scene, "render", None), "engine", "CYCLES")
         or "CYCLES"
+    )
+    texture_export_mode = _resolve_texture_export_mode(scene)
+    bake_execution = BakeExecutionSettings(
+        render_engine=render_engine,
+        projection_alpha_threshold=_projection_alpha_threshold(scene),
+        texture_export_mode=texture_export_mode,
     )
     return _SceneExportProfile(
         output_directory=(
@@ -320,10 +353,7 @@ def _capture_scene_profile(
         seam_mode=seam_mode,
         angle_limit_degrees=angle_limit,
         geometry=_resolve_geometry_settings(scene),
-        bake_execution=BakeExecutionSettings(
-            render_engine=render_engine,
-            projection_alpha_threshold=_projection_alpha_threshold(scene),
-        ),
+        bake_execution=bake_execution,
         include_control_icons=bool(
             getattr(scene, "spine2d_control_icons", True)
         ),
@@ -333,6 +363,7 @@ def _capture_scene_profile(
         material_source_policy=_resolve_material_source_policy(scene),
         generated_material_pattern=_resolve_generated_material_pattern(scene),
         generated_gray_color=_resolve_generated_gray_color(scene),
+        texture_export_mode=texture_export_mode,
     )
 
 
@@ -346,5 +377,6 @@ __all__ = [
     "_resolve_images_relative_path",
     "_resolve_material_source_policy",
     "_resolve_output_directory",
+    "_resolve_texture_export_mode",
     "_texture_size",
 ]
