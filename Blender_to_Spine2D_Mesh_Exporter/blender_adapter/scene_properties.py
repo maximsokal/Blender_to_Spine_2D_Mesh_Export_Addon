@@ -9,7 +9,10 @@ import bpy
 
 from .. import config
 from ..domain.baking import A1TextureExportMode
-from .scene_settings_migration import CURRENT_SETTINGS_SCHEMA_VERSION
+from .scene_settings_migration import (
+    CURRENT_SETTINGS_SCHEMA_VERSION,
+    migration_file_loading,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -58,14 +61,15 @@ def _update_texture_export_mode(_self: Any, context: bpy.types.Context) -> None:
 
 
 def _update_seam_maker_mode(self: Any, context: bpy.types.Context) -> None:
-    """Mark a new Scene migrated as soon as the user makes a deliberate choice."""
+    """Mark a new Scene migrated after a deliberate post-load user choice."""
 
-    try:
-        current = int(getattr(self, "spine2d_settings_schema_version", 0) or 0)
-    except (TypeError, ValueError, OverflowError):
-        current = 0
-    if current < CURRENT_SETTINGS_SCHEMA_VERSION:
-        self.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION
+    if not migration_file_loading():
+        try:
+            current = int(getattr(self, "spine2d_settings_schema_version", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            current = 0
+        if current < CURRENT_SETTINGS_SCHEMA_VERSION:
+            self.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION
     _update_ui_for_paths(self, context)
 
 
