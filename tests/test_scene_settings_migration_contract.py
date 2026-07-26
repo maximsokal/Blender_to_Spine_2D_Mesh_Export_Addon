@@ -18,7 +18,7 @@ def test_scene_schema_property_is_hidden_and_starts_unmigrated():
     assert "if not migration_file_loading():" in source
 
 
-def test_migration_is_guarded_before_resetting_custom_to_auto():
+def test_schema_two_repeats_the_one_time_custom_to_auto_reset():
     source = (
         PACKAGE / "blender_adapter" / "scene_settings_migration.py"
     ).read_text(encoding="utf-8")
@@ -26,7 +26,9 @@ def test_migration_is_guarded_before_resetting_custom_to_auto():
     guard = "if current >= CURRENT_SETTINGS_SCHEMA_VERSION:"
     reset = 'scene.spine2d_seam_maker_mode = "AUTO"'
     marker = "scene.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION"
+    assert "CURRENT_SETTINGS_SCHEMA_VERSION = 2" in source
     assert source.index(guard) < source.index(reset) < source.index(marker)
+    assert "Schema 2 deliberately repeats" in source
     assert "spine2d_scene_settings_load_pre" in source
     assert "_FILE_LOADING = True" in source
     assert "_FILE_LOADING = False" in source
