@@ -115,6 +115,14 @@ def _uv_layers(mesh: Any) -> tuple[Any, ...]:
         raise SourceUvIntegrityError("Unable to inspect source Mesh UV layers") from exc
 
 
+def _uv_layer_names(mesh: Any) -> frozenset[str]:
+    return frozenset(
+        name
+        for layer in _uv_layers(mesh)
+        if (name := str(getattr(layer, "name", "") or "").strip())
+    )
+
+
 def _active_uv_name(mesh: Any) -> str | None:
     layers = getattr(mesh, "uv_layers", None)
     active = None if layers is None else getattr(layers, "active", None)
@@ -189,16 +197,17 @@ def _socket_by_name(sockets: Any, name: str) -> Any | None:
 
 
 def material_required_uv_layer_names(obj: Any) -> tuple[str, ...]:
-    """Return explicit/active UV layers referenced by reachable material trees.
+    """Return source UV layers explicitly referenced by material node trees.
 
-    This is deliberately conservative: every nested material node tree is inspected,
-    but only nodes that name a UV attribute or use the Texture Coordinate UV output
-    contribute a requirement. Unused malformed source layers therefore remain ignorable.
+    Every nested material node tree is inspected. Attribute nodes only become UV
+    requirements when their name exactly matches a real UV layer; color and custom
+    geometry attributes therefore cannot create false missing-UV blockers.
     """
 
     mesh = getattr(obj, "data", None)
     if mesh is None:
         return ()
+    available_uv_names = _uv_layer_names(mesh)
     active_name = _active_render_uv_name(mesh)
     required: set[str] = set()
 
@@ -222,7 +231,7 @@ def material_required_uv_layer_names(obj: Any) -> tuple[str, ...]:
                 continue
             if node_type in {"ATTRIBUTE", "SHADERNODEATTRIBUTE"}:
                 value = str(getattr(node, "attribute_name", "") or "").strip()
-                if value:
+                if value in available_uv_names:
                     required.add(value)
 
     return tuple(sorted(required))
@@ -266,8 +275,17 @@ def inspect_source_uv_integrity(
     except Exception as exc:
         raise SourceUvIntegrityError("Unable to inspect source Mesh loops") from exc
 
-    required = tuple(sorted({str(name).strip() for name in required_layer_names if str(name).strip()}))
+    required = tuple(
+        sorted(
+            {
+                str(name).strip()
+                for name in required_layer_names
+                if str(name).strip()
+            }
+        )
+    )
     required_set = set(required)
+    active_name = _active_uv_name(mesh)
     layers: list[SourceUvLayerStatus] = []
     available_names: set[str] = set()
     for layer in _uv_layers(mesh):
@@ -287,7 +305,7 @@ def inspect_source_uv_integrity(
                 name=name,
                 value_count=value_count,
                 loop_count=loop_count,
-                active=name == _active_uv_name(mesh),
+                active=name == active_name,
                 active_render=bool(getattr(layer, "active_render", False)),
                 required=name in required_set,
             )
@@ -301,7 +319,10 @@ def inspect_source_uv_integrity(
     )
 
 
-def resolve_readable_source_uv_layer_names(obj: Any, settings: Any) -> SourceUvIntegrityReport:
+def resolve_readable_source_uv_layer_names(
+    obj: Any,
+    settings: Any,
+) -> SourceUvIntegrityReport:
     """Return a validated report whose readable layers are safe for MeshSnapshot."""
 
     required = required_source_uv_layer_names(obj, settings)
@@ -384,11 +405,13 @@ def require_object_mode(context: Any) -> None:
     if context is None:
         return
     mode = str(getattr(context, "mode", "OBJECT") or "OBJECT").strip().upper()
-    if mode != "OBJECT":
-        raise ObjectModeRequiredError(
-            f"Finish or cancel {mode.replace('_', ' ').title()} before exporting; "
-            "Spine2D Rewrite reads immutable source Mesh data in Object Mode only."
-        )
+    if mode == "OBJECT":
+        return
+    mode_label = "Edit Mode" if mode.startswith("EDIT") else mode.replace("_", " ").title()
+    raise ObjectModeRequiredError(
+        f"Finish or cancel {mode_label} before exporting; Spine2D Rewrite reads "
+        "immutable source Mesh data in Object Mode only."
+    )
 
 
 __all__ = [
