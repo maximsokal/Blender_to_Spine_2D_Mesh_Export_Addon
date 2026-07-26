@@ -6,7 +6,6 @@ import logging
 from typing import Any
 
 import bpy
-
 try:
     from bpy.app.handlers import persistent
 except Exception:  # pragma: no cover - real Blender always provides this decorator.
@@ -15,7 +14,7 @@ except Exception:  # pragma: no cover - real Blender always provides this decora
 
 
 logger = logging.getLogger(__name__)
-CURRENT_SETTINGS_SCHEMA_VERSION = 1
+CURRENT_SETTINGS_SCHEMA_VERSION = 2
 _REGISTERED = False
 _FILE_LOADING = False
 
@@ -35,8 +34,23 @@ def _stored_schema_version(scene: Any) -> int:
     return max(0, value)
 
 
+def _stored_seam_mode(scene: Any) -> str:
+    """Return one normalized persisted seam mode for diagnostics."""
+
+    raw = getattr(scene, "spine2d_seam_maker_mode", "AUTO")
+    value = str(raw or "AUTO").strip().upper()
+    return value or "AUTO"
+
+
 def migrate_scene_settings(scene: Any) -> bool:
-    """Migrate one Scene exactly once without overwriting later user choices."""
+    """Migrate one Scene exactly once without overwriting later user choices.
+
+    Schema 2 deliberately repeats the historical seam-mode reset for Scenes that were
+    already marked as schema 1 by the first migration implementation. Those Scenes could
+    still contain the persisted CUSTOM value because the old marker was written before
+    the load lifecycle was fully covered. Once schema 2 is stored, a later deliberate
+    CUSTOM choice remains stable.
+    """
 
     if scene is None:
         raise ValueError("scene cannot be None")
@@ -45,17 +59,16 @@ def migrate_scene_settings(scene: Any) -> bool:
     if current >= CURRENT_SETTINGS_SCHEMA_VERSION:
         return False
 
-    # Versions before schema 1 persisted the historical CUSTOM value in old .blend
-    # files even after the Rewrite default changed. Reset it once, then mark the Scene
-    # so a deliberate CUSTOM choice made afterwards remains stable.
+    previous_mode = _stored_seam_mode(scene)
     scene.spine2d_seam_maker_mode = "AUTO"
     scene.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION
     logger.info(
         "Migrated Spine2D Rewrite Scene '%s' settings schema %d -> %d; "
-        "Seam Maker reset to AUTO",
+        "Seam Maker %s -> AUTO",
         str(getattr(scene, "name", "<unnamed>")),
         current,
         CURRENT_SETTINGS_SCHEMA_VERSION,
+        previous_mode,
     )
     return True
 
