@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from array import array
+from collections.abc import Sequence
 import logging
 from pathlib import Path
 from typing import Any
@@ -191,25 +193,24 @@ def _image_dimensions(image: Any) -> tuple[int, int]:
     return width, height
 
 
-def _read_image_rgba_pixels(image: Any, width: int, height: int) -> list[float]:
-    """Read one complete bottom-up Blender RGBA buffer."""
+def _read_image_rgba_pixels(image: Any, width: int, height: int) -> array:
+    """Read one complete bottom-up Blender RGBA buffer into compact float storage."""
 
     pixels = getattr(image, "pixels", None)
     if pixels is None:
         raise BakeExecutionError("Bake image has no pixel collection")
     expected = width * height * _PIXEL_CHANNEL_COUNT
-    values = [0.0] * expected
+    values = array("f", [0.0]) * expected
     foreach_get = getattr(pixels, "foreach_get", None)
     try:
         if callable(foreach_get):
             foreach_get(values)
         else:
-            resolved = tuple(float(value) for value in pixels)
-            if len(resolved) != expected:
+            values = array("f", (float(value) for value in pixels))
+            if len(values) != expected:
                 raise BakeExecutionError(
-                    f"Bake image contains {len(resolved)} values; expected {expected}"
+                    f"Bake image contains {len(values)} values; expected {expected}"
                 )
-            values[:] = resolved
     except BakeExecutionError:
         raise
     except Exception as exc:
@@ -217,7 +218,7 @@ def _read_image_rgba_pixels(image: Any, width: int, height: int) -> list[float]:
     return values
 
 
-def _write_image_rgba_pixels(image: Any, values: list[float]) -> None:
+def _write_image_rgba_pixels(image: Any, values: Sequence[float]) -> None:
     """Replace one complete Blender RGBA buffer and notify the image datablock."""
 
     pixels = getattr(image, "pixels", None)
@@ -289,16 +290,17 @@ def _flip_image_rows_for_spine(image: Any) -> bool:
     width, height = _image_dimensions(image)
     values = _read_image_rgba_pixels(image, width, height)
     row_stride = width * _PIXEL_CHANNEL_COUNT
-    flipped = [0.0] * len(values)
-    for destination_row in range(height):
-        source_row = height - 1 - destination_row
-        source_start = source_row * row_stride
-        destination_start = destination_row * row_stride
-        flipped[destination_start : destination_start + row_stride] = values[
-            source_start : source_start + row_stride
+    for first_row in range(height // 2):
+        second_row = height - 1 - first_row
+        first_start = first_row * row_stride
+        second_start = second_row * row_stride
+        first_values = values[first_start : first_start + row_stride]
+        values[first_start : first_start + row_stride] = values[
+            second_start : second_start + row_stride
         ]
+        values[second_start : second_start + row_stride] = first_values
 
-    _write_image_rgba_pixels(image, flipped)
+    _write_image_rgba_pixels(image, values)
     _mark_spine_file_space_flip_applied(image)
     logger.debug(
         "Converted semantic bake image '%s' to Spine file-space (%dx%d)",
