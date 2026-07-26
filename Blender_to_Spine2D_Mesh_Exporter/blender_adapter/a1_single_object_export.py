@@ -31,6 +31,7 @@ from .a1_projection_finalization import finalize_prepared_camera_projection
 from .bake_uv_spine_validation import validate_staged_normal_bake_coverage
 from .source_uv_integrity import (
     capture_source_uv_fingerprint,
+    require_object_mode,
     require_source_uv_unchanged,
 )
 from .texture_executor import stage_texture_plan_outputs
@@ -57,6 +58,7 @@ def export_a1_single_object(
         message="Starting single-object export",
     )
     try:
+        require_object_mode(context)
         export_uv_fingerprint = capture_source_uv_fingerprint(source_obj)
     except Exception as exc:
         return build_a1_failure_result(
