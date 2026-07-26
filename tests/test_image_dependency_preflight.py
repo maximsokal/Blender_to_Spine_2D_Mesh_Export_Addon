@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -24,12 +23,12 @@ class _Tree:
 
 
 class _Image:
-    def __init__(self, name, path, *, packed=False):
+    def __init__(self, name, path=None, *, source="FILE", packed=False):
         self.name = name
         self.name_full = name
-        self.source = "FILE"
-        self.filepath = str(path)
-        self.filepath_raw = str(path)
+        self.source = source
+        self.filepath = "" if path is None else str(path)
+        self.filepath_raw = "" if path is None else str(path)
         self.frame_duration = 1
         self.packed_file = object() if packed else None
         self.packed_files = ()
@@ -50,13 +49,13 @@ class _Object:
         self.material_slots = (SimpleNamespace(material=material),)
 
 
-def _analysis(image_name, path):
+def _analysis(image_name, path=None, *, source="FILE"):
     dependency = ImageDependency(
         image_name=image_name,
-        source="FILE",
-        filepath=str(path),
+        source=source,
+        filepath=None if path is None else str(path),
         frame_duration=1,
-        generated=False,
+        generated=source == "GENERATED",
     )
     return ObjectMaterialAnalysis(
         source_object_id="Object",
@@ -83,6 +82,16 @@ def test_missing_reachable_image_is_blocker(tmp_path):
         )
 
 
+def test_pathless_file_image_is_blocker():
+    image = _Image("Pathless")
+
+    with pytest.raises(ImageDependencyPreflightError, match="no resolvable file path"):
+        preflight_object_image_dependencies(
+            _Object(image),
+            _analysis("Pathless"),
+        )
+
+
 def test_existing_reachable_image_passes(tmp_path):
     path = tmp_path / "texture.png"
     path.write_bytes(b"not decoded by preflight")
@@ -102,3 +111,12 @@ def test_packed_reachable_image_does_not_require_external_file(tmp_path):
         _Object(image),
         _analysis("Packed", path),
     ) == ("Packed",)
+
+
+def test_generated_reachable_image_does_not_require_external_file():
+    image = _Image("Generated", source="GENERATED")
+
+    assert preflight_object_image_dependencies(
+        _Object(image),
+        _analysis("Generated", source="GENERATED"),
+    ) == ("Generated",)
