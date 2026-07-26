@@ -86,6 +86,28 @@ def test_each_stage_function_stays_below_monolith_threshold():
         assert function.end_lineno - function.lineno + 1 < 180, filename
 
 
+def test_texture_planning_decomposition_has_small_explicit_owners():
+    tree = _tree("a1_texture_planning.py")
+    helper_names = (
+        "_analyse_texture_material_inputs",
+        "_build_generated_texture_result",
+        "_preflight_source_material_images",
+        "_build_source_texture_result",
+    )
+    for function_name in helper_names:
+        function = _function(tree, function_name)
+        assert function.end_lineno - function.lineno + 1 < 180, function_name
+
+    public = _function(tree, "prepare_a1_texture_plan")
+    direct_calls = {
+        node.func.id
+        for node in ast.walk(public)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+    }
+    assert set(helper_names).issubset(direct_calls)
+
+
 def test_stage_modules_do_not_write_output_files():
     forbidden_calls = {"open", "write_text", "write_bytes", "unlink"}
     stage_files = (
