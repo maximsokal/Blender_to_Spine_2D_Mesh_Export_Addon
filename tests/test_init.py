@@ -299,7 +299,10 @@ def test_registration_structure_has_current_runtime_owners_only():
 
     assert module_names == (
         "addon_preferences",
+        "scene_settings_migration",
         "ui",
+        "a1_readiness_invalidation",
+        "auto_readiness",
         "repolish_ui",
         "generated_material_ui",
         "single_object_operator",
@@ -309,7 +312,10 @@ def test_registration_structure_has_current_runtime_owners_only():
     assert step_labels == (
         "addon preferences",
         "Scene RNA properties",
+        "Scene settings migration",
         "UI",
+        "readiness invalidation",
+        "automatic readiness",
         "Re-Polish UI",
         "generated material UI",
         "single-object operator",
