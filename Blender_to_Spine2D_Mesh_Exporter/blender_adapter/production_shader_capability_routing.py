@@ -1,10 +1,11 @@
-"""Pure object-level routing from audited shader capability to B1-B4 planning."""
+"""Pure object-level routing from user mode and audited shader capability."""
 
 from __future__ import annotations
 
 from typing import Tuple
 
 from ..domain.baking import (
+    A1TextureExportMode,
     BakePlanError,
     BakeSettings,
     MaterialCapabilityAudit,
@@ -55,6 +56,27 @@ def capability_failure_message(
     return f"shader capability {capability.value} prevents safe export: {tuple(details)}"
 
 
+def normal_mode_camera_requirement_message(
+    audits: Tuple[MaterialCapabilityAudit, ...],
+) -> str:
+    """Explain why an explicit Normal export cannot silently become B4."""
+
+    details = []
+    for audit in audits:
+        codes = tuple(
+            finding.code
+            for finding in audit.findings
+            if finding.capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED
+        )
+        if codes:
+            details.append((audit.material_name, codes))
+    return (
+        "Normal — UV Segments cannot reproduce this material without changing "
+        "the exported topology. Select Export Mode: Camera Projection. "
+        f"Camera-dependent findings: {tuple(details)}"
+    )
+
+
 def build_capability_checked_texture_plan(
     analysis: ObjectMaterialAnalysis,
     settings: BakeSettings,
@@ -63,8 +85,11 @@ def build_capability_checked_texture_plan(
     *,
     object_context: ObjectBakeContext,
     scene_context: SceneBakeContext,
+    texture_export_mode: A1TextureExportMode = (
+        A1TextureExportMode.NORMAL_UV_SEGMENTS
+    ),
 ) -> TexturePlan:
-    """Select B1-B4 or fail explicitly from the strongest audited capability."""
+    """Select Normal UV baking or B4 only from the explicit user mode."""
 
     if not isinstance(analysis, ObjectMaterialAnalysis):
         raise TypeError("analysis must be ObjectMaterialAnalysis")
@@ -76,6 +101,8 @@ def build_capability_checked_texture_plan(
         raise TypeError("object_context must be ObjectBakeContext")
     if not isinstance(scene_context, SceneBakeContext):
         raise TypeError("scene_context must be SceneBakeContext")
+    if not isinstance(texture_export_mode, A1TextureExportMode):
+        raise TypeError("texture_export_mode must be A1TextureExportMode")
 
     capability = strongest_object_capability(audits)
     if capability in {
@@ -83,13 +110,18 @@ def build_capability_checked_texture_plan(
         ShaderBakeCapability.GROUP_RENDER_REQUIRED,
     }:
         raise BakePlanError(capability_failure_message(audits, capability))
-    if renderer.uses_eevee or capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED:
+
+    if texture_export_mode is A1TextureExportMode.CAMERA_PROJECTION:
         return build_camera_projection_plan(
             analysis,
             settings,
             object_context=object_context,
             scene_context=scene_context,
         )
+
+    if capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED:
+        raise BakePlanError(normal_mode_camera_requirement_message(audits))
+
     return build_texture_plan(
         analysis,
         settings,
@@ -101,5 +133,6 @@ def build_capability_checked_texture_plan(
 __all__ = [
     "build_capability_checked_texture_plan",
     "capability_failure_message",
+    "normal_mode_camera_requirement_message",
     "strongest_object_capability",
 ]
