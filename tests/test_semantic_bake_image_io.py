@@ -10,10 +10,11 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.semantic_bake_image_io imp
 
 class _Pixels(list):
     def foreach_get(self, target) -> None:
-        target[:] = self
+        for index, value in enumerate(self):
+            target[index] = value
 
     def foreach_set(self, values) -> None:
-        self[:] = values
+        self[:] = list(values)
 
 
 class _Image(dict):
