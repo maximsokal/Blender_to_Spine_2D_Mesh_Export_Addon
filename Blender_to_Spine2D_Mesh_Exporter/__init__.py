@@ -29,6 +29,7 @@ def get_registration_state() -> ExtensionRegistrationState:
 
     return _REGISTRATION_STATE
 
+
 try:
     import bpy as _bpy  # type: ignore
 except ModuleNotFoundError:
@@ -44,7 +45,11 @@ else:
 
 if bpy is not None:
     from . import addon_preferences, config, repolish_ui, single_object_operator, ui
-    from .blender_adapter import generated_material_ui, scene_properties
+    from .blender_adapter import (
+        a1_readiness_invalidation,
+        generated_material_ui,
+        scene_properties,
+    )
     from .infrastructure.blender_registration import (
         RegistrationCleanupAction,
         RnaPropertyRegistration,
@@ -68,6 +73,7 @@ if bpy is not None:
     MODULES = (
         addon_preferences,
         ui,
+        a1_readiness_invalidation,
         repolish_ui,
         generated_material_ui,
         single_object_operator,
@@ -112,6 +118,11 @@ if bpy is not None:
             "UI",
             ui.register,
             ui.unregister,
+        ),
+        (
+            "readiness invalidation",
+            a1_readiness_invalidation.register,
+            a1_readiness_invalidation.unregister,
         ),
         (
             "Re-Polish UI",
