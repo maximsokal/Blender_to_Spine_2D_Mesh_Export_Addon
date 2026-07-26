@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Tuple
 
@@ -15,6 +16,13 @@ from .contracts import (
 from .projection_coverage import ProjectionCoveragePolicy
 from .projection_layout import ProjectionContourMode
 from .projection_output import ProjectionOutputPolicy
+
+
+class A1TextureExportMode(str, Enum):
+    """User-selected topology and texture representation for one Rewrite export."""
+
+    NORMAL_UV_SEGMENTS = "NORMAL_UV_SEGMENTS"
+    CAMERA_PROJECTION = "CAMERA_PROJECTION"
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +39,9 @@ class BakeExecutionSettings:
     projection_contour_simplify_tolerance_pixels: float = 1.0
     projection_coverage_policy: ProjectionCoveragePolicy = ProjectionCoveragePolicy()
     projection_output_policy: ProjectionOutputPolicy = ProjectionOutputPolicy()
+    texture_export_mode: A1TextureExportMode = (
+        A1TextureExportMode.NORMAL_UV_SEGMENTS
+    )
 
     def __post_init__(self) -> None:
         require_non_empty_string(self.render_engine, "render_engine")
@@ -69,6 +80,8 @@ class BakeExecutionSettings:
             raise TypeError(
                 "projection_output_policy must be ProjectionOutputPolicy"
             )
+        if not isinstance(self.texture_export_mode, A1TextureExportMode):
+            raise TypeError("texture_export_mode must be A1TextureExportMode")
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +128,7 @@ class BakeExecutionResult:
             if artifact.image_name != task.image_name:
                 raise ValueError("artifact image_name does not match plan")
             if artifact.output_path != task.output_path.resolve(strict=False):
-                raise ValueError("artifact output_path does not match plan")
+                raise ValueError("artifact.output_path does not match plan")
 
     @property
     def representative_artifact(self) -> BakeArtifact:
