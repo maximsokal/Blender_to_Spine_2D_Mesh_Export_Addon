@@ -5,10 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import glob
+import logging
 import os
 from typing import Any, Iterator
 
 from ..domain.baking import ObjectMaterialAnalysis
+
+
+logger = logging.getLogger(__name__)
+DependencyKey = tuple[str, str, str | None, int]
 
 
 class ImageDependencyPreflightError(RuntimeError):
@@ -22,6 +27,12 @@ class ImageDependencyFailure:
     raw_path: str | None
     resolved_paths: tuple[str, ...]
     reason: str
+
+
+def _dependency_sort_key(key: DependencyKey) -> tuple[str, str, str, str, int]:
+    name, source, filepath, frame_duration = key
+    path = "" if filepath is None else filepath
+    return name.casefold(), name, source.casefold(), path, frame_duration
 
 
 def _rna_identity(value: Any) -> int:
@@ -64,9 +75,7 @@ def _iter_node_trees(obj: Any) -> Iterator[Any]:
                 pending.append(nested)
 
 
-def _reachable_dependency_keys(
-    analysis: ObjectMaterialAnalysis,
-) -> set[tuple[str, str, str | None, int]]:
+def _reachable_dependency_keys(analysis: ObjectMaterialAnalysis) -> set[DependencyKey]:
     return {
         (
             dependency.image_name,
@@ -79,7 +88,7 @@ def _reachable_dependency_keys(
     }
 
 
-def _image_key(image: Any) -> tuple[str, str, str | None, int]:
+def _image_key(image: Any) -> DependencyKey:
     name = str(
         getattr(image, "name_full", None)
         or getattr(image, "name", None)
@@ -105,7 +114,7 @@ def _reachable_images(
     keys = _reachable_dependency_keys(analysis)
     if not keys:
         return ()
-    resolved: dict[tuple[str, str, str | None, int], Any] = {}
+    resolved: dict[DependencyKey, Any] = {}
     for tree in _iter_node_trees(obj):
         try:
             nodes = tuple(getattr(tree, "nodes", ()) or ())
@@ -125,7 +134,10 @@ def _reachable_images(
             key = _image_key(image)
             if key in keys:
                 resolved[key] = image
-    return tuple(resolved[key] for key in sorted(resolved))
+    return tuple(
+        resolved[key]
+        for key in sorted(resolved, key=_dependency_sort_key)
+    )
 
 
 def _is_packed(image: Any) -> bool:
@@ -154,7 +166,12 @@ def _abspath(raw_path: str, image: Any) -> str:
         return os.path.abspath(os.path.expanduser(raw_path))
 
 
-def _filepath_from_user(image: Any, *, frame: int | None, tile: int | None) -> str | None:
+def _filepath_from_user(
+    image: Any,
+    *,
+    frame: int | None,
+    tile: int | None,
+) -> str | None:
     callback = getattr(image, "filepath_from_user", None)
     if not callable(callback):
         return None
@@ -179,10 +196,12 @@ def _filepath_from_user(image: Any, *, frame: int | None, tile: int | None) -> s
 def _expand_tokenized_path(path: str) -> tuple[str, ...]:
     if "<UDIM>" in path:
         pattern = path.replace("<UDIM>", "[0-9][0-9][0-9][0-9]")
-        return tuple(sorted(glob.glob(pattern)))
+        matches = tuple(sorted(glob.glob(pattern)))
+        return matches or (path,)
     if "####" in path:
         pattern = path.replace("####", "[0-9][0-9][0-9][0-9]")
-        return tuple(sorted(glob.glob(pattern)))
+        matches = tuple(sorted(glob.glob(pattern)))
+        return matches or (path,)
     return (path,)
 
 
@@ -245,7 +264,7 @@ def preflight_object_image_dependencies(
     failures: list[ImageDependencyFailure] = []
     valid_names: list[str] = []
 
-    for key in sorted(expected_keys):
+    for key in sorted(expected_keys, key=_dependency_sort_key):
         image_name, source, raw_path, _frame_duration = key
         image = actual_by_key.get(key)
         if image is None:
@@ -255,7 +274,10 @@ def preflight_object_image_dependencies(
                     source=source,
                     raw_path=raw_path,
                     resolved_paths=(),
-                    reason="reachable image datablock could not be resolved from the material graph",
+                    reason=(
+                        "reachable image datablock could not be resolved from "
+                        "the material graph"
+                    ),
                 )
             )
             continue
@@ -300,6 +322,11 @@ def preflight_object_image_dependencies(
             "before export:\n" + detail
         )
 
+    logger.debug(
+        "Validated %d reachable material image dependencies for '%s'",
+        len(valid_names),
+        str(getattr(obj, "name_full", None) or getattr(obj, "name", "<unnamed>")),
+    )
     return tuple(sorted(dict.fromkeys(valid_names)))
 
 
