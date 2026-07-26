@@ -128,6 +128,7 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
     assert "register_rna_properties_transactionally(CONFIG_RNA_PROPERTIES)" in source
     assert "bpy.utils.register_class" not in source
     assert "bpy.utils.unregister_class" not in source
+    assert "scene_settings_migration" in source
     assert "a1_readiness_invalidation" in source
     assert "auto_readiness" in source
 
@@ -141,6 +142,7 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
     assert labels == [
         "addon preferences",
         "Scene RNA properties",
+        "Scene settings migration",
         "UI",
         "readiness invalidation",
         "automatic readiness",
@@ -148,6 +150,9 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
         "generated material UI",
         "single-object operator",
     ]
+    assert labels.index("Scene RNA properties") < labels.index(
+        "Scene settings migration"
+    ) < labels.index("UI")
     assert labels.index("UI") < labels.index("readiness invalidation")
     assert labels.index("readiness invalidation") < labels.index(
         "automatic readiness"
