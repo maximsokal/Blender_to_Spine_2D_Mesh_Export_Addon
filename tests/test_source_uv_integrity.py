@@ -139,6 +139,17 @@ def test_explicit_uv_map_node_requires_named_layer_even_when_missing():
         resolve_readable_source_uv_layer_names(obj, _settings())
 
 
+def test_explicit_uv_map_node_rejects_zero_length_layer():
+    broken = _UvLayer("UVMap", ())
+    obj = _Object(
+        _Mesh((broken,), loop_count=12, active=broken),
+        nodes=(_UvMapNode("UVMap"),),
+    )
+
+    with pytest.raises(SourceUvIntegrityError, match="malformed required UV"):
+        resolve_readable_source_uv_layer_names(obj, _settings())
+
+
 def test_source_uv_fingerprint_detects_coordinate_mutation():
     layer = _UvLayer("UVMap", ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)))
     obj = _Object(_Mesh((layer,), active=layer))
