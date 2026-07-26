@@ -67,12 +67,36 @@ def _rss_bytes() -> int:
         counters.cb = ctypes.sizeof(counters)
         psapi = ctypes.WinDLL("psapi", use_last_error=True)
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        if not psapi.GetProcessMemoryInfo(
-            kernel32.GetCurrentProcess(),
+
+        get_current_process = kernel32.GetCurrentProcess
+        get_current_process.argtypes = ()
+        get_current_process.restype = wintypes.HANDLE
+
+        get_process_memory_info = psapi.GetProcessMemoryInfo
+        get_process_memory_info.argtypes = (
+            wintypes.HANDLE,
+            ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
+            wintypes.DWORD,
+        )
+        get_process_memory_info.restype = wintypes.BOOL
+
+        process_handle = get_current_process()
+        ctypes.set_last_error(0)
+        if not get_process_memory_info(
+            process_handle,
             ctypes.byref(counters),
-            counters.cb,
+            wintypes.DWORD(counters.cb),
         ):
-            raise MemoryStressError("GetProcessMemoryInfo failed")
+            error_code = ctypes.get_last_error()
+            error_text = (
+                ctypes.FormatError(error_code).strip()
+                if error_code
+                else "unknown Win32 error"
+            )
+            raise MemoryStressError(
+                "GetProcessMemoryInfo failed: "
+                f"WinError {error_code} ({error_text})"
+            )
         return int(counters.WorkingSetSize)
 
     statm = Path("/proc/self/statm")
