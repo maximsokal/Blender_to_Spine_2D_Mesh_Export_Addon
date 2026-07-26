@@ -74,6 +74,19 @@ def _validate_unit_uv(
     )
 
 
+def _spine_uv_to_loaded_image_uv(
+    u: float,
+    v: float,
+) -> tuple[float, float]:
+    """Map top-down Spine PNG UVs to Blender's bottom-up loaded image buffer."""
+
+    resolved_u, resolved_v = _validate_unit_uv(
+        (u, v),
+        label="Spine UV sample",
+    )
+    return resolved_u, 1.0 - resolved_v
+
+
 @dataclass(frozen=True, slots=True)
 class RgbaImageBuffer:
     width: int
@@ -102,9 +115,11 @@ class RgbaImageBuffer:
             raise ValueError("pixels contain non-finite values")
 
     def rgba(self, u: float, v: float) -> tuple[float, float, float, float]:
+        """Sample the raw Blender-loaded image buffer where ``v=0`` is the bottom."""
+
         resolved_u, resolved_v = _validate_unit_uv(
             (u, v),
-            label="UV sample",
+            label="Loaded image UV sample",
         )
         x = min(
             self.width - 1,
@@ -117,6 +132,16 @@ class RgbaImageBuffer:
         offset = (y * self.width + x) * 4
         values = tuple(float(self.pixels[offset + index]) for index in range(4))
         return values[0], values[1], values[2], values[3]
+
+    def rgba_spine_file_space(
+        self,
+        u: float,
+        v: float,
+    ) -> tuple[float, float, float, float]:
+        """Sample a saved PNG exactly as a Spine mesh UV consumes its top-down rows."""
+
+        loaded_u, loaded_v = _spine_uv_to_loaded_image_uv(u, v)
+        return self.rgba(loaded_u, loaded_v)
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,7 +212,7 @@ def validate_projection_uv_coverage(
     alpha_threshold: float = 1.0 / 255.0,
     require_alpha_coverage: bool = True,
 ) -> tuple[TriangleCoverageSample, ...]:
-    """Validate every exported attachment triangle against one baked RGBA image."""
+    """Validate every exported triangle against its saved Spine-oriented PNG."""
 
     if not isinstance(image, RgbaImageBuffer):
         raise TypeError("image must be RgbaImageBuffer")
@@ -230,7 +255,9 @@ def validate_projection_uv_coverage(
         for offset in range(0, len(request.triangles), 3):
             triangle = _triangle_uvs(projection, offset)
             uv_samples = _inset_samples(triangle)
-            rgba_samples = tuple(image.rgba(u, v) for u, v in uv_samples)
+            rgba_samples = tuple(
+                image.rgba_spine_file_space(u, v) for u, v in uv_samples
+            )
             sample = TriangleCoverageSample(
                 attachment_name=request.attachment_name,
                 triangle_index=offset // 3,
