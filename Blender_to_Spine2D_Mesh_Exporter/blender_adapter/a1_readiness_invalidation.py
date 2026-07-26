@@ -331,7 +331,12 @@ def _mesh_geometry_digest(mesh: Any) -> str:
     return digest.hexdigest()
 
 
-def _dependency_state(identity: DependencyIdentity, value: Any) -> Mapping[str, object]:
+def _dependency_state(
+    identity: DependencyIdentity,
+    value: Any,
+    *,
+    include_geometry_digest: bool,
+) -> Mapping[str, object]:
     id_type = identity[0]
     state: dict[str, object] = {
         "id_type": id_type,
@@ -357,9 +362,10 @@ def _dependency_state(identity: DependencyIdentity, value: Any) -> Mapping[str, 
                 "edges": len(_safe_tuple(getattr(value, "edges", ()))),
                 "loops": len(_safe_tuple(getattr(value, "loops", ()))),
                 "polygons": len(_safe_tuple(getattr(value, "polygons", ()))),
-                "geometry_digest": _mesh_geometry_digest(value),
             }
         )
+        if include_geometry_digest:
+            state["geometry_digest"] = _mesh_geometry_digest(value)
     elif id_type == "NODETREE":
         state.update(
             {
@@ -388,6 +394,8 @@ def _dependency_state(identity: DependencyIdentity, value: Any) -> Mapping[str, 
 def _capture_dependencies(
     context: Any,
     report: Any,
+    *,
+    include_exact_states: bool,
 ) -> _DependencySnapshot:
     scene = getattr(context, "scene", None)
     uses_scene_rendering = _report_uses_scene_rendering(report)
@@ -459,7 +467,11 @@ def _capture_dependencies(
             )
 
     states = {
-        identity: _dependency_state(identity, values[identity])
+        identity: _dependency_state(
+            identity,
+            values[identity],
+            include_geometry_digest=include_exact_states,
+        )
         for identity in identities
     }
     return _DependencySnapshot(
@@ -486,7 +498,7 @@ def build_a1_readiness_signature(
     context: Any,
     report: A1ExportReadinessReport | None = None,
 ) -> str:
-    """Build the normal request signature plus exact dependency-manifest state."""
+    """Build a cheap request/dependency signature suitable for every UI redraw."""
 
     base_signature = _BASE_BUILD_SIGNATURE(context)
     scene = getattr(context, "scene", None)
@@ -503,7 +515,11 @@ def build_a1_readiness_signature(
     if resolved_report is None:
         return base_signature
 
-    snapshot = _capture_dependencies(context, resolved_report)
+    snapshot = _capture_dependencies(
+        context,
+        resolved_report,
+        include_exact_states=False,
+    )
     dependency_state = tuple(
         snapshot.states[identity]
         for identity in sorted(snapshot.identities, key=repr)
@@ -571,6 +587,7 @@ def store_a1_export_readiness(context: Any, report: Any) -> None:
         _DEPENDENCIES_BY_SCENE[key] = _capture_dependencies(
             context,
             stabilized_report,
+            include_exact_states=True,
         )
         _STALE_REASONS_BY_SCENE.pop(key, None)
     finally:
@@ -648,7 +665,11 @@ def _semantic_state_unchanged(
     if previous is None:
         return False
     try:
-        current = _dependency_state(identity, updated_id)
+        current = _dependency_state(
+            identity,
+            updated_id,
+            include_geometry_digest=True,
+        )
     except Exception:
         logger.debug("Unable to compare delayed depsgraph state", exc_info=True)
         return False
