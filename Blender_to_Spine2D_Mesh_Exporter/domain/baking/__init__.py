@@ -63,7 +63,12 @@ from .camera_projection import (
     requires_camera_projection,
     texture_plan_output_paths,
 )
-from .execution import BakeArtifact, BakeExecutionResult, BakeExecutionSettings
+from .execution import (
+    A1TextureExportMode,
+    BakeArtifact,
+    BakeExecutionResult,
+    BakeExecutionSettings,
+)
 from .grouped_camera_projection import (
     GroupedCameraProjectionPlan,
     GroupedCameraProjectionPlanError,
@@ -116,6 +121,7 @@ from .strategies import (
 __all__ = [
     "A1GeneratedMaterialPattern",
     "A1MaterialSourcePolicy",
+    "A1TextureExportMode",
     "AlphaBakeStrategy",
     "BakeArtifact",
     "BakeCompositeMode",
