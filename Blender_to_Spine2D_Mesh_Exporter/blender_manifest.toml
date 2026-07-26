@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "blender_to_spine2d_mesh_exporter"
-version = "0.34.0"
+version = "0.35.0"
 name = "Blender to Spine2D Mesh Exporter"
 maintainer = "Maxim Sokolenko"
 blender_version_min = "5.2.0"
@@ -9,35 +9,4 @@ type = "add-on"
 tags = ["Object"]
 license = [
   "SPDX:GPL-3.0-or-later",
-]
-tagline = "Blender 3D objects into Spine 2D meshes"
-
-[permissions]
-files = "Export Spine JSON, textures, diagnostics, staging, and logs"
-
-[build]
-paths_exclude_pattern = [
-  "__pycache__/",
-  "*.py[cod]",
-  "/.git/",
-  "/.github/",
-  "/tests/",
-  "/docs/",
-  "/*.zip",
-
-  # Retained repository sources from the pre-Rewrite add-on. They are not part
-  # of the Blender 5.2+ extension runtime and must not be shipped in its ZIP.
-  "/Legacy/",
-  "/legacy_loader.py",
-  "/legacy_multi_facade.py",
-  "/json_export.py",
-  "/json_merger.py",
-  "/main.py",
-  "/multi_object_export.py",
-  "/plane_cut.py",
-  "/seam_marker.py",
-  "/texture_baker.py",
-  "/texture_baker_integration.py",
-  "/utils.py",
-  "/uv_operations.py",
 ]
