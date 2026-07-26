@@ -18,10 +18,16 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
 )
 
 
-def _image_with_lower_left_coverage():
+def _loaded_image_with_spine_lower_left_coverage():
+    """Return a Blender-loaded buffer for a PNG whose Spine lower-left is opaque.
+
+    Blender exposes loaded pixels bottom-up. A PNG saved for Spine file-space has its
+    lower Spine rows in the upper half of this reloaded buffer.
+    """
+
     width = height = 8
     pixels = [0.0] * (width * height * 4)
-    for y in range(4):
+    for y in range(4, 8):
         for x in range(4):
             offset = (y * width + x) * 4
             pixels[offset : offset + 4] = (1.0, 0.0, 0.0, 1.0)
@@ -66,11 +72,11 @@ def _projection(uvs):
     )
 
 
-def test_spine_uv_triangle_samples_the_baked_island():
+def test_spine_uv_triangle_samples_the_saved_png_island():
     projection = _projection(((0.1, 0.1), (0.4, 0.1), (0.1, 0.4)))
 
     samples = validate_projection_uv_coverage(
-        _image_with_lower_left_coverage(),
+        _loaded_image_with_spine_lower_left_coverage(),
         (projection,),
     )
 
@@ -78,7 +84,7 @@ def test_spine_uv_triangle_samples_the_baked_island():
     assert samples[0].maximum_alpha == 1.0
 
 
-def test_vertical_uv_flip_is_detected_as_empty_texture_sampling():
+def test_missing_spine_file_space_vertical_transform_is_detected():
     projection = _projection(((0.1, 0.9), (0.4, 0.9), (0.1, 0.6)))
 
     with pytest.raises(
@@ -86,9 +92,28 @@ def test_vertical_uv_flip_is_detected_as_empty_texture_sampling():
         match="point only into empty baked pixels",
     ):
         validate_projection_uv_coverage(
-            _image_with_lower_left_coverage(),
+            _loaded_image_with_spine_lower_left_coverage(),
             (projection,),
         )
+
+
+def test_spine_file_space_sampling_inverts_only_the_loaded_image_v_axis():
+    image = RgbaImageBuffer(
+        width=2,
+        height=2,
+        pixels=(
+            # Blender-loaded bottom row.
+            1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,
+            # Blender-loaded top row.
+            0.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 0.0, 1.0,
+        ),
+    )
+
+    assert image.rgba(0.0, 0.0) == (1.0, 0.0, 0.0, 1.0)
+    assert image.rgba_spine_file_space(0.0, 0.0) == (0.0, 0.0, 1.0, 1.0)
+    assert image.rgba_spine_file_space(0.0, 1.0) == (1.0, 0.0, 0.0, 1.0)
 
 
 @pytest.mark.parametrize(
@@ -105,7 +130,7 @@ def test_out_of_range_spine_uv_is_rejected_before_pixel_lookup(invalid_uv):
 
     with pytest.raises(BakedUvSpineValidationError, match="outside the unit square"):
         validate_projection_uv_coverage(
-            _image_with_lower_left_coverage(),
+            _loaded_image_with_spine_lower_left_coverage(),
             (projection,),
         )
 
@@ -113,7 +138,10 @@ def test_out_of_range_spine_uv_is_rejected_before_pixel_lookup(invalid_uv):
 @pytest.mark.parametrize("invalid_value", (math.nan, math.inf, -math.inf))
 def test_non_finite_pixel_sample_uv_is_rejected(invalid_value):
     with pytest.raises(BakedUvSpineValidationError, match="non-finite"):
-        _image_with_lower_left_coverage().rgba(invalid_value, 0.5)
+        _loaded_image_with_spine_lower_left_coverage().rgba_spine_file_space(
+            invalid_value,
+            0.5,
+        )
 
 
 def test_uv_values_inside_boundary_epsilon_are_clamped_deterministically():
@@ -129,3 +157,7 @@ def test_uv_values_inside_boundary_epsilon_are_clamped_deterministically():
     )
 
     assert image.rgba(-5.0e-7, 1.0 + 5.0e-7) == (0.0, 0.0, 1.0, 1.0)
+    assert image.rgba_spine_file_space(
+        -5.0e-7,
+        1.0 + 5.0e-7,
+    ) == (1.0, 0.0, 0.0, 1.0)
