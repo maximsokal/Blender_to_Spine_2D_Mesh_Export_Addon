@@ -214,8 +214,9 @@ def _sample_attachment_centroid(attachment: dict, image_data):
     points = tuple((uvs[index * 2], uvs[index * 2 + 1]) for index in indices)
     u = sum(point[0] for point in points) / 3.0
     v = sum(point[1] for point in points) / 3.0
+    loaded_v = 1.0 - v
     x = min(width - 1, max(0, int(round(u * (width - 1)))))
-    y = min(height - 1, max(0, int(round(v * (height - 1)))))
+    y = min(height - 1, max(0, int(round(loaded_v * (height - 1)))))
     offset = (y * width + x) * 4
     return tuple(pixels[offset + index] for index in range(4))
 
