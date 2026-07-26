@@ -1,5 +1,5 @@
 # pylint: disable=import-error
-"""Small Blender UI owner for the related Re-Polish optimization project."""
+"""Small Blender UI owner for the related re-polish optimization project."""
 
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ REPOLISH_URL = "https://www.re-polish.com/"
 
 
 class OBJECT_PT_Spine2DRePolishPanel(bpy.types.Panel):
-    """Show one always-visible Re-Polish button below the exporter panel."""
+    """Show one always-visible re-polish link below the exporter panel."""
 
-    bl_label = "Re-Polish"
+    bl_label = "re-polish"
     bl_idname = "OBJECT_PT_spine2d_repolish"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -30,9 +30,10 @@ class OBJECT_PT_Spine2DRePolishPanel(bpy.types.Panel):
     bl_options = {"HIDE_HEADER"}
 
     def draw(self, _context: bpy.types.Context) -> None:
+        self.layout.label(text="Try animation optimization")
         operator = self.layout.operator(
             "wm.url_open",
-            text="Open Re-Polish",
+            text="re-polish",
             icon="URL",
         )
         operator.url = REPOLISH_URL
@@ -59,7 +60,7 @@ def unregister() -> None:
             CLASSES,
             unregister_class=bpy.utils.unregister_class,
         ),
-        operation="Re-Polish UI unregistration",
+        operation="re-polish UI unregistration",
     )
 
 
