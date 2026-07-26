@@ -20,6 +20,7 @@ from .a1_multi_object_contracts import (
 )
 from .a1_object_preparation import PreparedA1Object, StatisticsValue
 from .a1_projection_finalization import finalize_prepared_camera_projection
+from .bake_uv_spine_validation import validate_staged_normal_bake_coverage
 from .texture_executor import stage_texture_plan_outputs
 
 
@@ -56,7 +57,7 @@ def stage_and_finalize_a1_objects(
     scene: Any | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
 ) -> A1StagedFinalizedObjects:
-    """Stage every object texture plan and apply its render-derived final layout."""
+    """Stage every texture plan, validate UV pixels, and finalize render layouts."""
 
     if not isinstance(prepared, PreparedA1MultiObject):
         raise TypeError("prepared must be PreparedA1MultiObject")
@@ -108,6 +109,10 @@ def stage_and_finalize_a1_objects(
             progress_callback=object_progress,
         )
         reservations.extend(staged.reservations)
+        coverage_samples = validate_staged_normal_bake_coverage(
+            item,
+            staged.reservations,
+        )
         finalized = finalize_prepared_camera_projection(
             item,
             staged.projection_layout,
@@ -116,7 +121,10 @@ def stage_and_finalize_a1_objects(
         record_object_statistics(
             resolved_statistics,
             source.component_id,
-            finalized.statistics,
+            {
+                **dict(finalized.statistics),
+                "bake_uv_coverage_sample_count": len(coverage_samples),
+            },
         )
         emit_a1_export_progress(
             progress_callback,
