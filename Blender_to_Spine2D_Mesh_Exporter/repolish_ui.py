@@ -19,7 +19,7 @@ REPOLISH_URL = "https://www.re-polish.com/"
 
 
 class OBJECT_PT_Spine2DRePolishPanel(bpy.types.Panel):
-    """Show one always-visible re-polish link below the exporter panel."""
+    """Show one always-visible re-polish link below every exporter child panel."""
 
     bl_label = "re-polish"
     bl_idname = "OBJECT_PT_spine2d_repolish"
@@ -28,6 +28,7 @@ class OBJECT_PT_Spine2DRePolishPanel(bpy.types.Panel):
     bl_category = "Blender to Spine2D Mesh Exporter"
     bl_parent_id = "OBJECT_PT_spine2d_mesh"
     bl_options = {"HIDE_HEADER"}
+    bl_order = 1000
 
     def draw(self, _context: bpy.types.Context) -> None:
         self.layout.label(text="Try animation optimization")
