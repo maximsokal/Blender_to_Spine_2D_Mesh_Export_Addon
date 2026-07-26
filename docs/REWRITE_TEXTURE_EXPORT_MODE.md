@@ -1,6 +1,6 @@
 # Rewrite texture export mode
 
-Version 0.33 removes automatic topology replacement by camera projection.
+Version 0.34 keeps camera projection under explicit user control and hardens Normal attachment hull normalization.
 
 ## User-visible modes
 
@@ -34,6 +34,15 @@ object-bake evaluator.
 
 A camera-dependent material does not silently switch modes. Preparation fails with an explicit
 instruction to select Camera Projection.
+
+### Physical Spine hull
+
+The raw region projector stores the topological disk boundary first, but Spine's `hull` field
+must describe the physical convex hull of the final XY attachment. A vertex that is topologically
+inside a disk can still become physically extreme after 3D-to-XY projection. Version 0.34 promotes
+such a vertex into the hull prefix and remaps vertices, triangles, edges, UV keys, and loop-corner
+indices atomically. Existing topological hull order remains unchanged when it already covers the
+complete physical hull.
 
 ## Camera Projection
 
