@@ -21,7 +21,7 @@ class _RecordingLayout:
         return operator
 
 
-def test_repolish_button_is_headerless_child_below_main_exporter_panel():
+def test_repolish_button_is_headerless_last_child_of_main_exporter_panel():
     panel = repolish_ui.OBJECT_PT_Spine2DRePolishPanel
 
     assert panel.bl_label == "re-polish"
@@ -30,6 +30,7 @@ def test_repolish_button_is_headerless_child_below_main_exporter_panel():
     assert panel.bl_region_type == "UI"
     assert panel.bl_category == "Blender to Spine2D Mesh Exporter"
     assert panel.bl_options == {"HIDE_HEADER"}
+    assert panel.bl_order == 1000
 
 
 def test_repolish_panel_draws_caption_and_lowercase_button_with_exact_url():
