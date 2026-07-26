@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from array import array
 from dataclasses import dataclass
 import logging
 from math import isfinite
@@ -91,7 +92,7 @@ def _spine_uv_to_loaded_image_uv(
 class RgbaImageBuffer:
     width: int
     height: int
-    pixels: tuple[float, ...]
+    pixels: Sequence[float]
 
     def __post_init__(self) -> None:
         if (
@@ -318,13 +319,13 @@ def _load_staged_image(
         )
         width, height = int(image.size[0]), int(image.size[1])
         pixel_count = width * height * 4
-        values = [0.0] * pixel_count
+        values = array("f", [0.0]) * pixel_count
         foreach_get = getattr(image.pixels, "foreach_get", None)
         if callable(foreach_get):
             foreach_get(values)
         else:
-            values[:] = tuple(float(value) for value in image.pixels)
-        return RgbaImageBuffer(width=width, height=height, pixels=tuple(values))
+            values = array("f", (float(value) for value in image.pixels))
+        return RgbaImageBuffer(width=width, height=height, pixels=values)
     except BakedUvSpineValidationError:
         raise
     except Exception as exc:
