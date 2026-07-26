@@ -192,11 +192,16 @@ def prepare_a1_texture_plan(
     texture_export_mode = source.settings.bake_execution.texture_export_mode
     if not isinstance(texture_export_mode, A1TextureExportMode):
         raise TypeError("texture_export_mode must be A1TextureExportMode")
+    analysis_render_target = (
+        "CYCLES"
+        if texture_export_mode is A1TextureExportMode.NORMAL_UV_SEGMENTS
+        else source.renderer.shader_target
+    )
     try:
         source_analysis = analyse_object_materials(
             source.source_object,
             source_object_id=source.source_snapshot.source_object_id,
-            render_target=source.renderer.shader_target,
+            render_target=analysis_render_target,
         )
         warnings = warnings + _material_warnings(
             source_analysis,
@@ -207,6 +212,7 @@ def prepare_a1_texture_plan(
             {
                 "material_slot_count": len(source_analysis.slots),
                 "texture_export_mode": texture_export_mode.value,
+                "shader_analysis_target": analysis_render_target,
             },
         )
 
@@ -255,6 +261,7 @@ def prepare_a1_texture_plan(
                     "shader_capability": "GENERATED_LOCAL_EMISSION",
                     "shader_capability_audit_count": 0,
                     "texture_export_mode": texture_export_mode.value,
+                    "shader_analysis_target": analysis_render_target,
                     "texture_pipeline": "OBJECT_BAKE",
                     "bake_mode": bake_plan.bake_mode.value,
                     "bake_frame_count": len(bake_plan.frame_tasks),
@@ -290,7 +297,7 @@ def prepare_a1_texture_plan(
         capability_audits = audit_object_material_capabilities(
             source.source_object,
             source_analysis,
-            render_target=source.renderer.shader_target,
+            render_target=analysis_render_target,
         )
         required_capability = strongest_object_capability(capability_audits)
         bake_plan = build_capability_checked_texture_plan(
@@ -316,6 +323,7 @@ def prepare_a1_texture_plan(
                 "shader_capability": required_capability.value,
                 "shader_capability_audit_count": len(capability_audits),
                 "texture_export_mode": texture_export_mode.value,
+                "shader_analysis_target": analysis_render_target,
                 "texture_pipeline": (
                     "CAMERA_RENDER_PROJECTION"
                     if camera_projection
@@ -337,9 +345,11 @@ def prepare_a1_texture_plan(
             },
         )
         logger.debug(
-            "Planned texture pipeline for %s: mode=%s pipeline=%s passes=%d frames=%d",
+            "Planned texture pipeline for %s: mode=%s target=%s pipeline=%s "
+            "passes=%d frames=%d",
             source.object_id,
             texture_export_mode.value,
+            analysis_render_target,
             statistics["texture_pipeline"],
             len(bake_plan.passes),
             len(bake_plan.frame_tasks),
