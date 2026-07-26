@@ -30,9 +30,8 @@ from .a1_object_preparation import A1ObjectPreparationError, prepare_a1_object
 from .a1_projection_finalization import finalize_prepared_camera_projection
 from .bake_uv_spine_validation import validate_staged_normal_bake_coverage
 from .source_uv_integrity import (
-    capture_source_uv_fingerprint,
-    require_object_mode,
-    require_source_uv_unchanged,
+    capture_source_uv_fingerprint_if_mesh,
+    require_source_uv_unchanged_if_captured,
 )
 from .texture_executor import stage_texture_plan_outputs
 
@@ -57,18 +56,6 @@ def export_a1_single_object(
         stage=A1SingleObjectStage.VALIDATE_REQUEST,
         message="Starting single-object export",
     )
-    try:
-        require_object_mode(context)
-        export_uv_fingerprint = capture_source_uv_fingerprint(source_obj)
-    except Exception as exc:
-        return build_a1_failure_result(
-            logger=logger,
-            operation=_OPERATION,
-            stage=A1SingleObjectStage.VALIDATE_REQUEST,
-            exc=exc,
-            object_id=None,
-            statistics={},
-        )
 
     preparation_progress = scale_a1_export_progress_callback(
         progress_callback,
@@ -101,6 +88,21 @@ def export_a1_single_object(
             exc=exc,
             object_id=None,
             statistics={},
+        )
+
+    try:
+        export_uv_fingerprint = capture_source_uv_fingerprint_if_mesh(
+            prepared.source_object
+        )
+    except Exception as exc:
+        return build_a1_failure_result(
+            logger=logger,
+            operation=_OPERATION,
+            stage=A1SingleObjectStage.READ_GEOMETRY,
+            exc=exc,
+            object_id=prepared.object_id,
+            statistics=prepared.statistics,
+            warnings=prepared.warnings,
         )
 
     stage = A1SingleObjectStage.STAGE_OUTPUTS
@@ -151,7 +153,10 @@ def export_a1_single_object(
             # The semantic bake owner has restored every Blender context and material
             # transaction at this point. Verify the original source UV datablock before
             # any staged JSON or texture can become visible at its final path.
-            require_source_uv_unchanged(export_uv_fingerprint, source_obj)
+            require_source_uv_unchanged_if_captured(
+                export_uv_fingerprint,
+                prepared.source_object,
+            )
 
             emit_a1_export_progress(
                 progress_callback,
@@ -222,7 +227,10 @@ def export_a1_single_object(
         )
     except Exception as exc:
         try:
-            require_source_uv_unchanged(export_uv_fingerprint, source_obj)
+            require_source_uv_unchanged_if_captured(
+                export_uv_fingerprint,
+                prepared.source_object,
+            )
         except Exception as mutation_exc:
             stage = A1SingleObjectStage.READ_GEOMETRY
             exc = mutation_exc
