@@ -245,13 +245,56 @@ def _candidate_paths(image: Any, scene: Any | None) -> tuple[str, ...]:
     return tuple(dict.fromkeys(expanded))
 
 
+def _blender_decode_failures(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Decode each external file through real Blender without retaining datablocks."""
+
+    try:
+        import bpy
+    except Exception:
+        return ()
+    version = getattr(getattr(bpy, "app", None), "version", None)
+    if not isinstance(version, tuple) or len(version) < 2:
+        # Unit-test stubs do not own Blender's image decoder.
+        return ()
+    images = getattr(getattr(bpy, "data", None), "images", None)
+    loader = getattr(images, "load", None)
+    remover = getattr(images, "remove", None)
+    if not callable(loader) or not callable(remover):
+        return ()
+
+    failures: list[str] = []
+    for path in paths:
+        loaded = None
+        try:
+            loaded = loader(path, check_existing=False)
+            if loaded is None:
+                raise RuntimeError("Blender returned no Image datablock")
+            size = tuple(int(value) for value in loaded.size[:2])
+            if len(size) != 2 or size[0] <= 0 or size[1] <= 0:
+                raise RuntimeError(f"decoded image has invalid size {size}")
+        except Exception as exc:
+            failures.append(f"{path}: {type(exc).__name__}: {exc}")
+        finally:
+            if loaded is not None:
+                try:
+                    remover(loaded, do_unlink=True)
+                except TypeError:
+                    remover(loaded)
+                except Exception:
+                    logger.exception(
+                        "Unable to remove temporary decoded image '%s'",
+                        path,
+                    )
+    return tuple(failures)
+
+
 def preflight_object_image_dependencies(
     obj: Any,
     analysis: ObjectMaterialAnalysis,
     *,
     scene: Any | None = None,
 ) -> tuple[str, ...]:
-    """Require every reachable external image to be packed or loadable on disk."""
+    """Require every reachable external image to exist and decode in Blender."""
 
     if obj is None:
         raise ImageDependencyPreflightError("obj cannot be None")
@@ -306,6 +349,18 @@ def preflight_object_image_dependencies(
                     raw_path=raw_path,
                     resolved_paths=paths,
                     reason="no resolved image file exists",
+                )
+            )
+            continue
+        decode_failures = _blender_decode_failures(existing)
+        if decode_failures:
+            failures.append(
+                ImageDependencyFailure(
+                    image_name=image_name,
+                    source=source,
+                    raw_path=raw_path,
+                    resolved_paths=existing,
+                    reason="Blender could not decode image files: " + repr(decode_failures),
                 )
             )
             continue
