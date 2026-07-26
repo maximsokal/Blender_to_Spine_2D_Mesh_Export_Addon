@@ -1,4 +1,4 @@
-"""Focused tests for the related Re-Polish project link."""
+"""Focused tests for the related re-polish project link."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ class _RecordingLayout:
 def test_repolish_button_is_headerless_child_below_main_exporter_panel():
     panel = repolish_ui.OBJECT_PT_Spine2DRePolishPanel
 
+    assert panel.bl_label == "re-polish"
     assert panel.bl_parent_id == "OBJECT_PT_spine2d_mesh"
     assert panel.bl_space_type == "VIEW_3D"
     assert panel.bl_region_type == "UI"
@@ -31,18 +32,18 @@ def test_repolish_button_is_headerless_child_below_main_exporter_panel():
     assert panel.bl_options == {"HIDE_HEADER"}
 
 
-def test_repolish_panel_draws_only_one_bottom_button_with_exact_url():
+def test_repolish_panel_draws_caption_and_lowercase_button_with_exact_url():
     layout = _RecordingLayout()
     panel_instance = SimpleNamespace(layout=layout)
 
     repolish_ui.OBJECT_PT_Spine2DRePolishPanel.draw(panel_instance, None)
 
-    assert layout.labels == []
+    assert layout.labels == [{"text": "Try animation optimization"}]
     assert len(layout.operators) == 1
     operator_id, properties, operator = layout.operators[0]
     assert operator_id == "wm.url_open"
     assert properties == {
-        "text": "Open Re-Polish",
+        "text": "re-polish",
         "icon": "URL",
     }
     assert operator.url == "https://www.re-polish.com/"
