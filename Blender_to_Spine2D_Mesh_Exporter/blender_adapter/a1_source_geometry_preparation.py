@@ -41,6 +41,10 @@ from .scene_context_contract import (
     BlenderSceneContextError,
     require_depsgraph_scene_consistency,
 )
+from .source_uv_integrity import (
+    SourceUvIntegrityReport,
+    resolve_readable_source_uv_layer_names,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -163,14 +167,49 @@ def _evaluated_source_world_matrix(
     return _matrix_tuple(matrix_world)
 
 
+def _ignored_uv_warnings(
+    report: SourceUvIntegrityReport,
+    *,
+    object_id: str,
+) -> Tuple[ExportIssue, ...]:
+    return tuple(
+        warning_issue(
+            stage=A1SingleObjectStage.READ_GEOMETRY,
+            code="IGNORED_MALFORMED_SOURCE_UV",
+            message=(
+                f"Ignoring malformed unused source UV layer '{layer.name}': "
+                f"{layer.value_count} values for {layer.loop_count} mesh loops. "
+                "Rewrite generated SpineBakeUV remains authoritative."
+            ),
+            object_id=object_id,
+            context={
+                "layer_name": layer.name,
+                "value_count": layer.value_count,
+                "loop_count": layer.loop_count,
+            },
+        )
+        for layer in report.layers
+        if layer.name in report.ignored_malformed_layer_names
+    )
+
+
 def _read_source_snapshot(
     source_obj: Any,
     object_id: str,
     settings: A1SingleObjectExportSettings,
     *,
     scene: Any | None,
-) -> tuple[MeshSnapshot, int, Tuple[ExportIssue, ...]]:
+) -> tuple[
+    MeshSnapshot,
+    int,
+    Tuple[ExportIssue, ...],
+    SourceUvIntegrityReport,
+]:
     stage = A1SingleObjectStage.READ_GEOMETRY
+    uv_report = resolve_readable_source_uv_layer_names(source_obj, settings)
+    readable_uv_layers = uv_report.readable_layer_names
+    uv_warnings = _ignored_uv_warnings(uv_report, object_id=object_id)
+
     if settings.source_geometry_mode is A1SourceGeometryMode.EVALUATED:
         resolved_scene, resolved_depsgraph = _resolved_evaluation_owners(scene)
         evaluated = read_evaluated_mesh_snapshot(
@@ -179,6 +218,7 @@ def _read_source_snapshot(
             depsgraph=resolved_depsgraph,
             source_object_id=object_id,
             snapshot_id=f"{object_id}:a1-evaluated",
+            uv_layer_names=readable_uv_layers,
             lineage_policy=settings.modifier_lineage_policy,
         )
         # The evaluated Mesh and matrix must come from one dependency-graph state.
@@ -192,7 +232,7 @@ def _read_source_snapshot(
                 resolved_depsgraph,
             ),
         )
-        warnings = tuple(
+        modifier_warnings = tuple(
             warning_issue(
                 stage=stage,
                 code=f"MODIFIER_{issue.code}",
@@ -203,13 +243,20 @@ def _read_source_snapshot(
             for issue in evaluated.lineage_report.issues
             if issue.severity is LineageSeverity.WARNING
         )
-        return evaluated_snapshot, len(evaluated.modifier_stack), warnings
+        return (
+            evaluated_snapshot,
+            len(evaluated.modifier_stack),
+            uv_warnings + modifier_warnings,
+            uv_report,
+        )
+
     snapshot = read_source_mesh_snapshot(
         source_obj,
         source_object_id=object_id,
         snapshot_id=f"{object_id}:a1-source",
+        uv_layer_names=readable_uv_layers,
     )
-    return snapshot, 0, ()
+    return snapshot, 0, uv_warnings, uv_report
 
 
 def _resolve_source_uv_boundary_layer(
@@ -284,7 +331,7 @@ def prepare_a1_source_geometry(
         )
 
         stage = A1SingleObjectStage.READ_GEOMETRY
-        source_snapshot, modifier_count, warnings = _read_source_snapshot(
+        source_snapshot, modifier_count, warnings, uv_report = _read_source_snapshot(
             source_obj,
             object_id,
             settings,
@@ -322,6 +369,12 @@ def prepare_a1_source_geometry(
                 "source_vertices": len(source_snapshot.vertices),
                 "source_edges": len(source_snapshot.edges),
                 "source_faces": len(source_snapshot.faces),
+                "source_uv_layer_count": len(uv_report.layers),
+                "source_uv_readable_layer_count": len(uv_report.readable_layer_names),
+                "source_uv_ignored_malformed_count": len(
+                    uv_report.ignored_malformed_layer_names
+                ),
+                "source_uv_required_layers": ",".join(uv_report.required_layer_names),
                 "object_linear_transform_baked": int(world_transform.changed),
                 "object_world_determinant": world_transform.determinant,
                 "object_world_mirrored": int(world_transform.mirrored),
@@ -357,7 +410,8 @@ def prepare_a1_source_geometry(
         logger.debug(
             "Prepared source geometry for %s: vertices=%d faces=%d regions=%d "
             "world_transform_baked=%s determinant=%s mirrored=%s "
-            "source_uv_boundary_mode=%s source_uv_boundary_layer=%s",
+            "source_uv_boundary_mode=%s source_uv_boundary_layer=%s "
+            "ignored_malformed_uv=%s",
             object_id,
             len(source_snapshot.vertices),
             len(source_snapshot.faces),
@@ -367,6 +421,7 @@ def prepare_a1_source_geometry(
             world_transform.mirrored,
             settings.source_uv_boundary_mode.value,
             resolved_source_uv_boundary_layer,
+            uv_report.ignored_malformed_layer_names,
         )
         return A1SourceGeometryPreparationResult(
             source_object=source_obj,
