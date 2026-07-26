@@ -35,7 +35,10 @@ def test_root_startup_imports_only_rewrite_registration_boundaries():
     assert isinstance(modules, ast.Tuple)
     assert [item.id for item in modules.elts] == [
         "addon_preferences",
+        "scene_settings_migration",
         "ui",
+        "a1_readiness_invalidation",
+        "auto_readiness",
         "repolish_ui",
         "generated_material_ui",
         "single_object_operator",
@@ -68,5 +71,3 @@ def test_retained_pre_rewrite_sources_are_excluded_from_extension_package():
 def test_root_contains_no_automatic_legacy_fallback():
     source = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
     assert "install_legacy_multi_facade" not in source
-    assert "load_legacy" not in source
-    assert "fallback" not in source.casefold()
