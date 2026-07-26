@@ -167,6 +167,30 @@ if bpy is not None:
             )
         )
 
+    def _initialize_registered_logging() -> bool:
+        """Apply user preferences when available, otherwise keep safe defaults.
+
+        Blender creates an entry in ``preferences.addons`` only when a package is
+        enabled through the add-on/extension manager. Repository headless tests import
+        and register the package directly, so the registered AddonPreferences class may
+        exist without a corresponding enabled-add-on entry. That is a valid lifecycle
+        state and must not roll back otherwise successful RNA registration.
+        """
+
+        prefs = config._addon_preferences()
+        if prefs is None:
+            config.setup_logging()
+            logger.debug(
+                "No enabled-addon preference entry is available; using default "
+                "Rewrite logging and diagnostics settings"
+            )
+            return False
+
+        initialize_logging_preferences(prefs)
+        config.setup_logging()
+        logger.info("User logging and diagnostics preferences applied")
+        return True
+
     def register() -> None:
         """Register the complete Blender 5.2+ Rewrite extension transactionally."""
 
@@ -200,10 +224,7 @@ if bpy is not None:
                 register_callback()
                 completed.append(step)
 
-            prefs = bpy.context.preferences.addons[__name__].preferences
-            initialize_logging_preferences(prefs)
-            config.setup_logging()
-            logger.info("User logging and diagnostics preferences applied")
+            _initialize_registered_logging()
         except Exception as exc:
             logger.exception("Rewrite extension registration failed")
             try:
