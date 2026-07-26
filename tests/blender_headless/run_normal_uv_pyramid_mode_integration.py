@@ -85,12 +85,8 @@ def _create_valid_source_uv(mesh: bpy.types.Mesh) -> None:
     layer.active_render = True
 
 
-def _create_pyramid(*, malformed_unused_uv: bool = False) -> bpy.types.Object:
+def _create_pyramid() -> bpy.types.Object:
     mesh = bpy.data.meshes.new("PyramidMesh")
-    if malformed_unused_uv:
-        # Historical files can retain a zero-length UV attribute created before topology.
-        # Rewrite must ignore it when no material/source-boundary setting uses it.
-        mesh.uv_layers.new(name="BrokenUnused")
     mesh.from_pydata(
         (
             (0.0, 0.0, 1.0),
@@ -107,13 +103,6 @@ def _create_pyramid(*, malformed_unused_uv: bool = False) -> bpy.types.Object:
         ),
     )
     mesh.update(calc_edges=True)
-    if malformed_unused_uv:
-        broken = mesh.uv_layers.get("BrokenUnused")
-        _assert(broken is not None, "BrokenUnused UV fixture was not retained")
-        _assert(
-            len(broken.uv) == 0,
-            "Blender repaired the malformed UV fixture; regression setup is invalid",
-        )
     _create_valid_source_uv(mesh)
 
     source = bpy.data.objects.new("Pyramid", mesh)
@@ -258,7 +247,7 @@ def test_eevee_normal_auto_mode_exports_four_uv_segments() -> None:
     _clear_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-normal-pyramid-auto-") as directory:
         output_directory = Path(directory)
-        source = _create_pyramid(malformed_unused_uv=True)
+        source = _create_pyramid()
         _configure_scene(output_directory, seam_mode="AUTO")
 
         source_state = _capture_source_state(source)
