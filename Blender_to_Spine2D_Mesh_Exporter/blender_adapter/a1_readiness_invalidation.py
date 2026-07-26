@@ -642,6 +642,17 @@ def _reason_for_update(
     return f"{label} changed"
 
 
+def _exact_state(
+    identity: DependencyIdentity,
+    value: Any,
+) -> Mapping[str, object]:
+    return _dependency_state(
+        identity,
+        value,
+        include_geometry_digest=True,
+    )
+
+
 def _semantic_state_unchanged(
     identity: DependencyIdentity,
     updated_id: Any,
@@ -649,31 +660,40 @@ def _semantic_state_unchanged(
     snapshot: _DependencySnapshot,
 ) -> bool:
     id_type = identity[0]
-    compare_state = False
-    if id_type == "MESH" and flags.get("is_updated_geometry", False):
-        compare_state = True
-    elif (
-        id_type == "OBJECT"
-        and flags.get("is_updated_transform", False)
-        and not flags.get("is_updated_geometry", False)
-        and not flags.get("is_updated_shading", False)
-    ):
-        compare_state = True
-    if not compare_state:
-        return False
     previous = snapshot.states.get(identity)
     if previous is None:
         return False
+
     try:
-        current = _dependency_state(
-            identity,
-            updated_id,
-            include_geometry_digest=True,
-        )
+        if id_type == "MESH" and flags.get("is_updated_geometry", False):
+            return _exact_state(identity, updated_id) == previous
+
+        if id_type != "OBJECT":
+            return False
+
+        if (
+            flags.get("is_updated_transform", False)
+            and not flags.get("is_updated_geometry", False)
+            and not flags.get("is_updated_shading", False)
+        ):
+            return _exact_state(identity, updated_id) == previous
+
+        if flags.get("is_updated_geometry", False):
+            if _exact_state(identity, updated_id) != previous:
+                return False
+            data = getattr(updated_id, "data", None)
+            data_identity = _dependency_identity(data)
+            if data_identity is None:
+                return False
+            previous_data = snapshot.states.get(data_identity)
+            if previous_data is None:
+                return False
+            return _exact_state(data_identity, data) == previous_data
     except Exception:
         logger.debug("Unable to compare delayed depsgraph state", exc_info=True)
         return False
-    return current == previous
+
+    return False
 
 
 def _mark_stale(key: int, entry: Any, reason: str) -> None:
@@ -721,7 +741,11 @@ def a1_readiness_depsgraph_update_post(scene: Any, depsgraph: Any) -> None:
             continue
 
         flags = _update_flags(update)
-        if flags and not any(flags.values()):
+        if (
+            identity[0] == "OBJECT"
+            and flags
+            and not any(flags.values())
+        ):
             # Selection/active-object restoration publishes zero-semantic updates.
             continue
         if _semantic_state_unchanged(identity, updated_id, flags, snapshot):
