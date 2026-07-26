@@ -7,9 +7,11 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.source_uv_integrity import
     SourceUvIntegrityError,
     SourceUvMutationError,
     capture_source_uv_fingerprint,
+    capture_source_uv_fingerprint_if_mesh,
     material_required_uv_layer_names,
     require_object_mode,
     require_source_uv_unchanged,
+    require_source_uv_unchanged_if_captured,
     resolve_readable_source_uv_layer_names,
 )
 
@@ -160,6 +162,20 @@ def test_source_uv_fingerprint_detects_coordinate_mutation():
 
     with pytest.raises(SourceUvMutationError, match="changed the source Mesh UV state"):
         require_source_uv_unchanged(before, obj)
+
+
+def test_optional_fingerprint_defers_non_mesh_validation_to_typed_stage():
+    opaque = object()
+
+    assert capture_source_uv_fingerprint_if_mesh(opaque) is None
+    require_source_uv_unchanged_if_captured(None, opaque)
+
+
+def test_optional_fingerprint_keeps_declared_mesh_strict():
+    broken_mesh_object = SimpleNamespace(type="MESH", data=None)
+
+    with pytest.raises(SourceUvIntegrityError, match="obj.data is missing"):
+        capture_source_uv_fingerprint_if_mesh(broken_mesh_object)
 
 
 def test_object_mode_contract_rejects_edit_mode():
