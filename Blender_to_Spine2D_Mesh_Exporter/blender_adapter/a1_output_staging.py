@@ -21,6 +21,10 @@ from .a1_multi_object_contracts import (
 from .a1_object_preparation import PreparedA1Object, StatisticsValue
 from .a1_projection_finalization import finalize_prepared_camera_projection
 from .bake_uv_spine_validation import validate_staged_normal_bake_coverage
+from .source_uv_integrity import (
+    capture_source_uv_fingerprint,
+    require_source_uv_unchanged,
+)
 from .texture_executor import stage_texture_plan_outputs
 
 
@@ -98,21 +102,39 @@ def stage_and_finalize_a1_objects(
             object_index=index + 1,
             object_count=object_count,
         )
-        staged = stage_texture_plan_outputs(
-            item.source_object,
-            item.bake_target_snapshot,
-            item.bake_plan,
-            transaction,
-            item.settings.bake_execution,
-            context=context,
-            scene=scene,
-            progress_callback=object_progress,
-        )
+        uv_fingerprint = capture_source_uv_fingerprint(item.source_object)
+        primary_error: BaseException | None = None
+        try:
+            staged = stage_texture_plan_outputs(
+                item.source_object,
+                item.bake_target_snapshot,
+                item.bake_plan,
+                transaction,
+                item.settings.bake_execution,
+                context=context,
+                scene=scene,
+                progress_callback=object_progress,
+            )
+            coverage_samples = validate_staged_normal_bake_coverage(
+                item,
+                staged.reservations,
+            )
+        except BaseException as exc:
+            primary_error = exc
+            raise
+        finally:
+            try:
+                require_source_uv_unchanged(uv_fingerprint, item.source_object)
+            except Exception as mutation_error:
+                logger.exception(
+                    "Source UV state changed while staging component '%s'",
+                    source.component_id,
+                )
+                if primary_error is not None:
+                    raise mutation_error from primary_error
+                raise
+
         reservations.extend(staged.reservations)
-        coverage_samples = validate_staged_normal_bake_coverage(
-            item,
-            staged.reservations,
-        )
         finalized = finalize_prepared_camera_projection(
             item,
             staged.projection_layout,
