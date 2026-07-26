@@ -9,17 +9,18 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.scene_settings_migration i
 )
 
 
-def test_old_scene_migrates_to_auto_once_and_preserves_later_custom_choice():
+def test_schema_one_scene_migrates_to_auto_and_preserves_later_custom_choice():
     extension.register()
     try:
         scene = bpy.context.scene
 
-        # Simulate old persisted RNA after file loading: the seam value exists but the
-        # schema marker does not. Set the marker last because normal post-load user edits
-        # intentionally mark a Scene current through the EnumProperty update callback.
+        # Reproduce the affected 0.38 state: the first migration marker was already
+        # persisted, but the Scene still contains CUSTOM. Set the marker last because a
+        # normal post-load user edit intentionally marks the Scene current.
         scene.spine2d_seam_maker_mode = "CUSTOM"
-        scene.spine2d_settings_schema_version = 0
+        scene.spine2d_settings_schema_version = 1
 
+        assert CURRENT_SETTINGS_SCHEMA_VERSION == 2
         assert migrate_scene_settings(scene)
         assert scene.spine2d_seam_maker_mode == "AUTO"
         assert (
@@ -27,6 +28,7 @@ def test_old_scene_migrates_to_auto_once_and_preserves_later_custom_choice():
             == CURRENT_SETTINGS_SCHEMA_VERSION
         )
 
+        # A deliberate choice made after schema 2 must remain stable.
         scene.spine2d_seam_maker_mode = "CUSTOM"
         assert (
             scene.spine2d_settings_schema_version
