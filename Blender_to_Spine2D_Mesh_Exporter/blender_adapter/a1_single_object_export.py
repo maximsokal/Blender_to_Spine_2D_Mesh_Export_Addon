@@ -29,6 +29,10 @@ from .a1_export_result import build_a1_failure_result
 from .a1_object_preparation import A1ObjectPreparationError, prepare_a1_object
 from .a1_projection_finalization import finalize_prepared_camera_projection
 from .bake_uv_spine_validation import validate_staged_normal_bake_coverage
+from .source_uv_integrity import (
+    capture_source_uv_fingerprint,
+    require_source_uv_unchanged,
+)
 from .texture_executor import stage_texture_plan_outputs
 
 
@@ -44,7 +48,7 @@ def export_a1_single_object(
     scene: Any | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
 ) -> ExportResult:
-    """Prepare, stage textures, validate UV coverage, and atomically commit output."""
+    """Prepare, bake, validate UV pixels, and atomically commit one object."""
 
     emit_a1_export_progress(
         progress_callback,
@@ -52,6 +56,18 @@ def export_a1_single_object(
         stage=A1SingleObjectStage.VALIDATE_REQUEST,
         message="Starting single-object export",
     )
+    try:
+        export_uv_fingerprint = capture_source_uv_fingerprint(source_obj)
+    except Exception as exc:
+        return build_a1_failure_result(
+            logger=logger,
+            operation=_OPERATION,
+            stage=A1SingleObjectStage.VALIDATE_REQUEST,
+            exc=exc,
+            object_id=None,
+            statistics={},
+        )
+
     preparation_progress = scale_a1_export_progress_callback(
         progress_callback,
         start_percent=5.0,
@@ -130,6 +146,11 @@ def export_a1_single_object(
             )
             statistics["bake_uv_coverage_sample_count"] = len(coverage_samples)
 
+            # The semantic bake owner has restored every Blender context and material
+            # transaction at this point. Verify the original source UV datablock before
+            # any staged JSON or texture can become visible at its final path.
+            require_source_uv_unchanged(export_uv_fingerprint, source_obj)
+
             emit_a1_export_progress(
                 progress_callback,
                 percent=84,
@@ -198,6 +219,11 @@ def export_a1_single_object(
             statistics=statistics,
         )
     except Exception as exc:
+        try:
+            require_source_uv_unchanged(export_uv_fingerprint, source_obj)
+        except Exception as mutation_exc:
+            stage = A1SingleObjectStage.READ_GEOMETRY
+            exc = mutation_exc
         return build_a1_failure_result(
             logger=logger,
             operation=_OPERATION,
