@@ -24,6 +24,7 @@ from .blender_adapter.a1_ui_bridge import (
     export_selected_objects_a1,
 )
 from .config import get_default_output_dir
+from .domain.baking import A1TextureExportMode
 from .infrastructure.blender_registration import (
     RegistrationCleanupAction,
     RnaPropertyRegistration,
@@ -67,6 +68,9 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
     def execute(self, context: bpy.types.Context) -> Set[str]:
         try:
             scene = context.scene
+            scene.spine2d_texture_export_mode = (
+                A1TextureExportMode.NORMAL_UV_SEGMENTS.value
+            )
             scene.spine2d_texture_size = 1024
             scene.spine2d_json_path = get_default_output_dir()
             scene.spine2d_images_path = "images/"
@@ -281,6 +285,31 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         context: bpy.types.Context,
     ) -> None:
         scene = context.scene
+        column.prop(scene, "spine2d_texture_export_mode", text="Export mode")
+        texture_mode = str(
+            getattr(
+                scene,
+                "spine2d_texture_export_mode",
+                A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
+            )
+        ).upper()
+        if texture_mode == A1TextureExportMode.CAMERA_PROJECTION.value:
+            column.label(
+                text="Active camera render → one screen-space mesh",
+                icon="CAMERA_DATA",
+            )
+            column.prop(
+                scene,
+                "spine2d_projection_alpha_threshold",
+                text="Projection alpha threshold",
+            )
+        else:
+            column.label(
+                text="Preserves cut regions and generated UV meshes",
+                icon="UV",
+            )
+        column.separator()
+
         column.prop(scene, "spine2d_texture_size", text="Texture size")
         column.separator()
         column.prop(scene, "spine2d_json_path", text="JSON")
@@ -407,6 +436,9 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         box.label(text=f"Source: {source_vertices} vertices / {source_faces} faces")
         box.label(text=f"Export: {exported_vertices} vertices / {triangles} triangles")
         box.label(text=f"Rig: {bones} bones / {regions} regions / {attachments} attachments")
+        mode = str(statistics.get("texture_export_mode", ""))
+        if mode:
+            box.label(text=f"Mode: {mode}")
         pipeline = str(statistics.get("texture_pipeline", ""))
         if pipeline:
             frames = int(statistics.get("bake_frame_count", 0))
