@@ -1,4 +1,4 @@
-"""Real Blender 5.2 regression for explicit Normal — UV Segments mode."""
+"""Real Blender 5.2 regressions for explicit Normal — UV Segments mode."""
 
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ def _create_pyramid() -> bpy.types.Object:
     return source
 
 
-def _configure_scene(output_directory: Path) -> None:
+def _configure_scene(output_directory: Path, *, seam_mode: str) -> None:
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_EEVEE"
     scene.spine2d_texture_export_mode = (
@@ -95,7 +95,7 @@ def _configure_scene(output_directory: Path) -> None:
     scene.spine2d_angle_limit = 30
     scene.spine2d_angular_mode = "SEED_CONE"
     scene.spine2d_local_angle_limit = 30.0
-    scene.spine2d_seam_maker_mode = "AUTO"
+    scene.spine2d_seam_maker_mode = seam_mode
     scene.spine2d_frames_for_render = 0
     scene.spine2d_bake_frame_start = 0
     scene.spine2d_control_icons = False
@@ -120,49 +120,70 @@ def _temporary_datablocks() -> tuple[str, ...]:
     return tuple(sorted(names))
 
 
-def test_eevee_normal_mode_exports_four_uv_segments() -> None:
+def _capture_source_state(source: bpy.types.Object) -> tuple[int, int, int]:
+    return (
+        source.data.as_pointer(),
+        len(source.data.vertices),
+        len(source.data.polygons),
+    )
+
+
+def _assert_source_state(
+    source: bpy.types.Object,
+    expected: tuple[int, int, int],
+) -> None:
+    mesh_pointer, vertex_count, face_count = expected
+    _assert(source.data.as_pointer() == mesh_pointer, "Source Mesh was replaced")
+    _assert(len(source.data.vertices) == vertex_count, "Source vertex count changed")
+    _assert(len(source.data.polygons) == face_count, "Source face count changed")
+
+
+def _load_exported_document(output_directory: Path) -> dict:
+    json_path = output_directory / "Pyramid_merged.json"
+    texture_path = output_directory / "images" / "Pyramid_Baked.png"
+    _assert(json_path.is_file(), f"JSON was not created: {json_path}")
+    _assert(texture_path.is_file(), f"Texture was not created: {texture_path}")
+    return json.loads(json_path.read_text(encoding="utf-8"))
+
+
+def _assert_no_camera_projection(document: dict) -> tuple[str, ...]:
+    slots = tuple(slot["name"] for slot in document["slots"])
+    _assert(slots, "Normal export produced no Spine slots")
+    _assert(
+        not any("CameraProjection" in name for name in slots),
+        "Normal export produced camera-projection topology",
+    )
+    return slots
+
+
+def test_eevee_normal_auto_mode_exports_four_uv_segments() -> None:
     _clear_scene()
-    with tempfile.TemporaryDirectory(prefix="spine2d-normal-pyramid-") as directory:
+    with tempfile.TemporaryDirectory(prefix="spine2d-normal-pyramid-auto-") as directory:
         output_directory = Path(directory)
         source = _create_pyramid()
-        _configure_scene(output_directory)
+        _configure_scene(output_directory, seam_mode="AUTO")
 
-        source_mesh_pointer = source.data.as_pointer()
-        source_vertex_count = len(source.data.vertices)
-        source_face_count = len(source.data.polygons)
+        source_state = _capture_source_state(source)
         engine_before = bpy.context.scene.render.engine
 
         result = export_active_object_a1(bpy.context)
 
-        _assert(result.success, f"Normal pyramid export failed: {result.issues}")
+        _assert(result.success, f"Normal AUTO pyramid export failed: {result.issues}")
         _assert(
             bpy.context.scene.render.engine == engine_before == "BLENDER_EEVEE",
-            "Normal object bake did not restore the EEVEE Scene engine",
+            "Normal AUTO object bake did not restore the EEVEE Scene engine",
         )
-        _assert(source.data.as_pointer() == source_mesh_pointer, "Source Mesh was replaced")
-        _assert(
-            len(source.data.vertices) == source_vertex_count == 4,
-            "Source vertex count changed",
-        )
-        _assert(
-            len(source.data.polygons) == source_face_count == 4,
-            "Source face count changed",
-        )
+        _assert_source_state(source, source_state)
 
-        json_path = output_directory / "Pyramid_merged.json"
-        texture_path = output_directory / "images" / "Pyramid_Baked.png"
-        _assert(json_path.is_file(), f"JSON was not created: {json_path}")
-        _assert(texture_path.is_file(), f"Texture was not created: {texture_path}")
-
-        document = json.loads(json_path.read_text(encoding="utf-8"))
-        slots = tuple(slot["name"] for slot in document["slots"])
+        document = _load_exported_document(output_directory)
+        slots = _assert_no_camera_projection(document)
         expected_slots = tuple(f"Pyramid_Segment_{index}" for index in range(4))
-        _assert(slots == expected_slots, f"Unexpected Normal slots: {slots}")
+        _assert(slots == expected_slots, f"Unexpected Normal AUTO slots: {slots}")
 
         attachments = document["skins"][0]["attachments"]
         _assert(
             tuple(attachments) == expected_slots,
-            f"Normal export did not preserve four attachments: {tuple(attachments)}",
+            f"Normal AUTO export did not preserve four attachments: {tuple(attachments)}",
         )
         for slot_name in expected_slots:
             _assert(
@@ -170,12 +191,46 @@ def test_eevee_normal_mode_exports_four_uv_segments() -> None:
                 f"Unexpected attachment mapping for {slot_name}",
             )
         _assert(
-            not any("CameraProjection" in name for name in slots),
-            "Normal export produced camera-projection topology",
+            not _temporary_datablocks(),
+            f"Normal AUTO export leaked temporary datablocks: {_temporary_datablocks()}",
+        )
+
+
+def test_eevee_normal_custom_mode_accepts_promoted_physical_hull_points() -> None:
+    """Custom topology may place a topological interior vertex on the XY hull."""
+
+    _clear_scene()
+    with tempfile.TemporaryDirectory(prefix="spine2d-normal-pyramid-custom-") as directory:
+        output_directory = Path(directory)
+        source = _create_pyramid()
+        _configure_scene(output_directory, seam_mode="CUSTOM")
+
+        source_state = _capture_source_state(source)
+        engine_before = bpy.context.scene.render.engine
+
+        result = export_active_object_a1(bpy.context)
+
+        _assert(result.success, f"Normal CUSTOM pyramid export failed: {result.issues}")
+        _assert(
+            bpy.context.scene.render.engine == engine_before == "BLENDER_EEVEE",
+            "Normal CUSTOM object bake did not restore the EEVEE Scene engine",
+        )
+        _assert_source_state(source, source_state)
+
+        document = _load_exported_document(output_directory)
+        slots = _assert_no_camera_projection(document)
+        _assert(
+            all(name.startswith("Pyramid_Segment_") for name in slots),
+            f"Unexpected Normal CUSTOM slots: {slots}",
+        )
+        attachments = document["skins"][0]["attachments"]
+        _assert(
+            tuple(attachments) == slots,
+            "Normal CUSTOM attachment groups do not match their slots",
         )
         _assert(
             not _temporary_datablocks(),
-            f"Normal export leaked temporary datablocks: {_temporary_datablocks()}",
+            f"Normal CUSTOM export leaked temporary datablocks: {_temporary_datablocks()}",
         )
 
 
@@ -184,7 +239,10 @@ def main() -> None:
     _assert(bpy.app.version >= (5, 2, 0), "Blender 5.2+ is required")
     addon.register()
     try:
-        test_eevee_normal_mode_exports_four_uv_segments()
+        test_eevee_normal_auto_mode_exports_four_uv_segments()
+        print("[NORMAL_UV_PYRAMID_AUTO] PASS")
+        test_eevee_normal_custom_mode_accepts_promoted_physical_hull_points()
+        print("[NORMAL_UV_PYRAMID_CUSTOM] PASS")
         print("[NORMAL_UV_PYRAMID] PASS")
     finally:
         addon.unregister()
