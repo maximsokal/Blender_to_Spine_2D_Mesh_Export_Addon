@@ -17,8 +17,59 @@ from ..infrastructure import AtomicOutputReservation
 from .a1_preparation_contracts import PreparedA1Object
 
 
+_UV_UNIT_EPSILON = 1.0e-6
+
+
 class BakedUvSpineValidationError(RuntimeError):
-    """Raised when exported Spine UV triangles point into empty baked pixels."""
+    """Raised when exported Spine UV triangles cannot sample the baked image safely."""
+
+
+def _validate_unit_uv(
+    value: Any,
+    *,
+    label: str,
+) -> tuple[float, float]:
+    """Return one finite UV pair clamped only inside the accepted boundary epsilon."""
+
+    if not isinstance(label, str) or not label.strip():
+        raise ValueError("label must be a non-empty string")
+    try:
+        components = tuple(value)
+    except Exception as exc:
+        raise BakedUvSpineValidationError(
+            f"{label} must contain exactly two numeric components"
+        ) from exc
+    if len(components) != 2:
+        raise BakedUvSpineValidationError(
+            f"{label} must contain exactly two numeric components, got {len(components)}"
+        )
+    if any(isinstance(component, bool) for component in components):
+        raise BakedUvSpineValidationError(
+            f"{label} contains a boolean component: {components!r}"
+        )
+    try:
+        u, v = (float(component) for component in components)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise BakedUvSpineValidationError(
+            f"{label} contains a non-numeric component: {components!r}"
+        ) from exc
+    if not isfinite(u) or not isfinite(v):
+        raise BakedUvSpineValidationError(
+            f"{label} contains a non-finite value: {(u, v)!r}"
+        )
+    if (
+        u < -_UV_UNIT_EPSILON
+        or u > 1.0 + _UV_UNIT_EPSILON
+        or v < -_UV_UNIT_EPSILON
+        or v > 1.0 + _UV_UNIT_EPSILON
+    ):
+        raise BakedUvSpineValidationError(
+            f"{label} {(u, v)} is outside the unit square"
+        )
+    return (
+        min(1.0, max(0.0, u)),
+        min(1.0, max(0.0, v)),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,19 +100,10 @@ class RgbaImageBuffer:
             raise ValueError("pixels contain non-finite values")
 
     def rgba(self, u: float, v: float) -> tuple[float, float, float, float]:
-        if not isfinite(float(u)) or not isfinite(float(v)):
-            raise BakedUvSpineValidationError("UV sample contains a non-finite value")
-        if (
-            u < -1.0e-6
-            or u > 1.0 + 1.0e-6
-            or v < -1.0e-6
-            or v > 1.0 + 1.0e-6
-        ):
-            raise BakedUvSpineValidationError(
-                f"UV sample {(u, v)} is outside the unit square"
-            )
-        resolved_u = min(1.0, max(0.0, float(u)))
-        resolved_v = min(1.0, max(0.0, float(v)))
+        resolved_u, resolved_v = _validate_unit_uv(
+            (u, v),
+            label="UV sample",
+        )
         x = min(
             self.width - 1,
             max(0, int(round(resolved_u * (self.width - 1)))),
@@ -99,10 +141,18 @@ def _triangle_uvs(
         )
     try:
         values = tuple(
-            tuple(float(component) for component in request.vertices[index].uv)
+            _validate_unit_uv(
+                request.vertices[index].uv,
+                label=(
+                    f"Attachment '{request.attachment_name}' triangle "
+                    f"{triangle_offset // 3} vertex {index} UV"
+                ),
+            )
             for index in indices
         )
         return values[0], values[1], values[2]
+    except BakedUvSpineValidationError:
+        raise
     except Exception as exc:
         raise BakedUvSpineValidationError(
             f"Unable to resolve UVs for attachment '{request.attachment_name}' "
