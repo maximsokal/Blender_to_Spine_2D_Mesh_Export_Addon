@@ -12,6 +12,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.render_engine_contract imp
     render_engine_contract,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
+    A1TextureExportMode,
     BakePlan,
     BakePlanError,
     BakeSettings,
@@ -106,10 +107,10 @@ def _analysis(graph):
     )
 
 
-def _audit(capability):
+def _audit(capability, *, render_target="CYCLES"):
     return MaterialCapabilityAudit(
         material_name="Material",
-        render_target="CYCLES",
+        render_target=render_target,
         required_capability=capability,
         findings=(
             ShaderCapabilityFinding(
@@ -138,10 +139,10 @@ def _object_context():
     )
 
 
-def _scene_context():
+def _scene_context(*, render_engine="CYCLES"):
     return SceneBakeContext(
         scene_name="Scene",
-        render_engine="CYCLES",
+        render_engine=render_engine,
         analysis_frame=1,
         world=None,
         camera=CameraBakeSnapshot(
@@ -196,15 +197,49 @@ def test_local_capability_keeps_object_bake(tmp_path: Path):
     assert not isinstance(plan, CameraProjectionPlan)
 
 
-def test_camera_capability_routes_whole_object_to_b4(tmp_path: Path):
+def test_eevee_local_capability_does_not_force_camera_projection(tmp_path: Path):
     graph = _graph()
     plan = build_capability_checked_texture_plan(
         _analysis(graph),
         _settings(tmp_path),
-        (_audit(ShaderBakeCapability.CAMERA_RENDER_REQUIRED),),
+        (_audit(ShaderBakeCapability.LOCAL_UV_SAFE, render_target="EEVEE"),),
+        render_engine_contract("BLENDER_EEVEE"),
+        object_context=_object_context(),
+        scene_context=_scene_context(render_engine="BLENDER_EEVEE"),
+        texture_export_mode=A1TextureExportMode.NORMAL_UV_SEGMENTS,
+    )
+
+    assert isinstance(plan, BakePlan)
+    assert not isinstance(plan, CameraProjectionPlan)
+
+
+def test_camera_capability_in_normal_mode_fails_with_switch_instruction(
+    tmp_path: Path,
+):
+    graph = _graph()
+
+    with pytest.raises(BakePlanError, match="Select Export Mode: Camera Projection"):
+        build_capability_checked_texture_plan(
+            _analysis(graph),
+            _settings(tmp_path),
+            (_audit(ShaderBakeCapability.CAMERA_RENDER_REQUIRED),),
+            render_engine_contract("CYCLES"),
+            object_context=_object_context(),
+            scene_context=_scene_context(),
+            texture_export_mode=A1TextureExportMode.NORMAL_UV_SEGMENTS,
+        )
+
+
+def test_explicit_camera_projection_routes_local_material_to_b4(tmp_path: Path):
+    graph = _graph()
+    plan = build_capability_checked_texture_plan(
+        _analysis(graph),
+        _settings(tmp_path),
+        (_audit(ShaderBakeCapability.LOCAL_UV_SAFE),),
         render_engine_contract("CYCLES"),
         object_context=_object_context(),
         scene_context=_scene_context(),
+        texture_export_mode=A1TextureExportMode.CAMERA_PROJECTION,
     )
 
     assert isinstance(plan, CameraProjectionPlan)
