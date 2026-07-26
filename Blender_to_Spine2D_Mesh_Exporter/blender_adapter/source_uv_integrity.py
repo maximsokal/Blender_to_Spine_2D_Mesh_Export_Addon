@@ -100,8 +100,8 @@ def _rna_identity(value: Any) -> int:
     if callable(pointer):
         try:
             return int(pointer())
-        except Exception:
-            pass
+        except (TypeError, ValueError, OverflowError, RuntimeError, ReferenceError):
+            return id(value)
     return id(value)
 
 
@@ -386,6 +386,22 @@ def capture_source_uv_fingerprint(obj: Any) -> SourceUvFingerprint:
     )
 
 
+def capture_source_uv_fingerprint_if_mesh(
+    obj: Any,
+) -> SourceUvFingerprint | None:
+    """Capture a strict fingerprint only when the input declares Blender Mesh type.
+
+    Opaque application-test doubles and non-Mesh objects are intentionally left to the
+    typed geometry preparation stage. A value that declares ``type == 'MESH'`` is never
+    silently ignored: malformed or missing Mesh data still raises the strict integrity
+    error from ``capture_source_uv_fingerprint``.
+    """
+
+    if obj is None or getattr(obj, "type", None) != "MESH":
+        return None
+    return capture_source_uv_fingerprint(obj)
+
+
 def require_source_uv_unchanged(before: SourceUvFingerprint, obj: Any) -> None:
     """Fail when Analyze/export replaced or modified source UV state."""
 
@@ -397,6 +413,17 @@ def require_source_uv_unchanged(before: SourceUvFingerprint, obj: Any) -> None:
             "Rewrite changed the source Mesh UV state. The operation was aborted to "
             f"protect user data; before={before!r}, after={after!r}"
         )
+
+
+def require_source_uv_unchanged_if_captured(
+    before: SourceUvFingerprint | None,
+    obj: Any,
+) -> None:
+    """Validate a previously captured optional Mesh fingerprint."""
+
+    if before is None:
+        return
+    require_source_uv_unchanged(before, obj)
 
 
 def require_object_mode(context: Any) -> None:
@@ -423,10 +450,12 @@ __all__ = [
     "SourceUvLayerStatus",
     "SourceUvMutationError",
     "capture_source_uv_fingerprint",
+    "capture_source_uv_fingerprint_if_mesh",
     "inspect_source_uv_integrity",
     "material_required_uv_layer_names",
     "required_source_uv_layer_names",
     "require_object_mode",
     "require_source_uv_unchanged",
+    "require_source_uv_unchanged_if_captured",
     "resolve_readable_source_uv_layer_names",
 ]
