@@ -204,11 +204,6 @@ def prepare_a1_texture_plan(
             source_object_id=source.source_snapshot.source_object_id,
             render_target=analysis_render_target,
         )
-        valid_image_names = preflight_object_image_dependencies(
-            source.source_object,
-            source_analysis,
-            scene=scene,
-        )
         warnings = warnings + _material_warnings(
             source_analysis,
             object_id=source.object_id,
@@ -220,7 +215,7 @@ def prepare_a1_texture_plan(
                 "material_image_dependency_count": sum(
                     len(slot.image_dependencies) for slot in source_analysis.slots
                 ),
-                "material_image_preflight_count": len(valid_image_names),
+                "material_image_preflight_count": 0,
                 "texture_export_mode": texture_export_mode.value,
                 "shader_analysis_target": analysis_render_target,
             },
@@ -296,6 +291,16 @@ def prepare_a1_texture_plan(
                 warnings=warnings,
                 statistics=statistics,
             )
+
+        valid_image_names = preflight_object_image_dependencies(
+            source.source_object,
+            source_analysis,
+            scene=scene,
+        )
+        statistics = freeze_statistics(
+            statistics,
+            {"material_image_preflight_count": len(valid_image_names)},
+        )
 
         stage = A1SingleObjectStage.PLAN_BAKE
         object_bake_context, scene_bake_context = analyse_bake_contexts(
