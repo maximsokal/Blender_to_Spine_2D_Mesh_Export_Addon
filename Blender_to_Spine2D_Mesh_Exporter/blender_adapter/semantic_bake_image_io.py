@@ -13,6 +13,8 @@ from .bake_execution_error import BakeExecutionError
 
 
 logger = logging.getLogger(__name__)
+_PIXEL_CHANNEL_COUNT = 4
+_SPINE_FILE_SPACE_FLIP_MARKER = "spine2d_spine_file_space_rows_flipped_v1"
 
 
 def _activate_uv_layer(mesh: Any, layer_name: str) -> None:
@@ -171,12 +173,148 @@ def _set_timeline_frame(scene: Any, context: Any, frame: int | None) -> None:
         raise BakeExecutionError(f"Unable to set timeline frame {frame}") from exc
 
 
+def _image_dimensions(image: Any) -> tuple[int, int]:
+    """Read and validate the immutable dimensions of one Blender image."""
+
+    if image is None:
+        raise BakeExecutionError("image cannot be None")
+    size = getattr(image, "size", None)
+    try:
+        width = int(size[0])
+        height = int(size[1])
+    except (TypeError, ValueError, OverflowError, IndexError) as exc:
+        raise BakeExecutionError("Bake image exposes an invalid size") from exc
+    if width <= 0 or height <= 0:
+        raise BakeExecutionError(
+            f"Bake image dimensions must be positive, got {(width, height)}"
+        )
+    return width, height
+
+
+def _read_image_rgba_pixels(image: Any, width: int, height: int) -> list[float]:
+    """Read one complete bottom-up Blender RGBA buffer."""
+
+    pixels = getattr(image, "pixels", None)
+    if pixels is None:
+        raise BakeExecutionError("Bake image has no pixel collection")
+    expected = width * height * _PIXEL_CHANNEL_COUNT
+    values = [0.0] * expected
+    foreach_get = getattr(pixels, "foreach_get", None)
+    try:
+        if callable(foreach_get):
+            foreach_get(values)
+        else:
+            resolved = tuple(float(value) for value in pixels)
+            if len(resolved) != expected:
+                raise BakeExecutionError(
+                    f"Bake image contains {len(resolved)} values; expected {expected}"
+                )
+            values[:] = resolved
+    except BakeExecutionError:
+        raise
+    except Exception as exc:
+        raise BakeExecutionError("Unable to read bake image pixels") from exc
+    return values
+
+
+def _write_image_rgba_pixels(image: Any, values: list[float]) -> None:
+    """Replace one complete Blender RGBA buffer and notify the image datablock."""
+
+    pixels = getattr(image, "pixels", None)
+    if pixels is None:
+        raise BakeExecutionError("Bake image has no pixel collection")
+    foreach_set = getattr(pixels, "foreach_set", None)
+    try:
+        if callable(foreach_set):
+            foreach_set(values)
+        else:
+            pixels[:] = values
+    except Exception as exc:
+        raise BakeExecutionError("Unable to write flipped bake image pixels") from exc
+
+    update = getattr(image, "update", None)
+    if not callable(update):
+        raise BakeExecutionError("Bake image update() is unavailable")
+    try:
+        update()
+    except Exception as exc:
+        raise BakeExecutionError("Unable to update flipped bake image") from exc
+
+
+def _spine_file_space_flip_applied(image: Any) -> bool:
+    """Return whether this temporary image was already converted for Spine file-space."""
+
+    getter = getattr(image, "get", None)
+    if callable(getter):
+        try:
+            return bool(getter(_SPINE_FILE_SPACE_FLIP_MARKER, False))
+        except Exception as exc:
+            raise BakeExecutionError(
+                "Unable to read the Spine file-space image marker"
+            ) from exc
+    return bool(getattr(image, _SPINE_FILE_SPACE_FLIP_MARKER, False))
+
+
+def _mark_spine_file_space_flip_applied(image: Any) -> None:
+    """Persist an idempotence marker on one temporary image datablock."""
+
+    try:
+        image[_SPINE_FILE_SPACE_FLIP_MARKER] = True
+        return
+    except Exception:
+        logger.debug(
+            "Image ID properties are unavailable for the Spine file-space marker",
+            exc_info=True,
+        )
+    try:
+        setattr(image, _SPINE_FILE_SPACE_FLIP_MARKER, True)
+    except Exception as exc:
+        raise BakeExecutionError(
+            "Unable to mark the Spine file-space image conversion"
+        ) from exc
+
+
+def _flip_image_rows_for_spine(image: Any) -> bool:
+    """Convert Blender's bottom-up bake buffer to Spine PNG top-down file-space.
+
+    Blender UV coordinates use ``v=0`` at the bottom. Spine mesh UV values are retained
+    numerically, while the exported image is consumed in top-down file-space. Reversing
+    the rows once restores the legacy exporter contract without mutating source UVs.
+    The temporary Image marker makes retries idempotent and prevents a double flip.
+    """
+
+    if _spine_file_space_flip_applied(image):
+        return False
+
+    width, height = _image_dimensions(image)
+    values = _read_image_rgba_pixels(image, width, height)
+    row_stride = width * _PIXEL_CHANNEL_COUNT
+    flipped = [0.0] * len(values)
+    for destination_row in range(height):
+        source_row = height - 1 - destination_row
+        source_start = source_row * row_stride
+        destination_start = destination_row * row_stride
+        flipped[destination_start : destination_start + row_stride] = values[
+            source_start : source_start + row_stride
+        ]
+
+    _write_image_rgba_pixels(image, flipped)
+    _mark_spine_file_space_flip_applied(image)
+    logger.debug(
+        "Converted semantic bake image '%s' to Spine file-space (%dx%d)",
+        str(getattr(image, "name", "<unnamed>")),
+        width,
+        height,
+    )
+    return True
+
+
 def _save_bake_image(
     image: Any,
     reservation: AtomicOutputReservation,
     plan: BakePlan,
 ) -> None:
-    """Save one Blender Image only to its reserved staged path."""
+    """Save one Spine-oriented Blender Image only to its reserved staged path."""
 
     if image is None:
         raise BakeExecutionError("image cannot be None")
@@ -188,9 +326,12 @@ def _save_bake_image(
     staged_path = Path(reservation.staged_path)
     try:
         staged_path.parent.mkdir(parents=True, exist_ok=True)
+        _flip_image_rows_for_spine(image)
         image.filepath_raw = str(staged_path)
         image.file_format = plan.settings.texture_format.value
         image.save()
+    except BakeExecutionError:
+        raise
     except Exception as exc:
         raise BakeExecutionError(
             f"Unable to save staged bake image '{staged_path}'"
@@ -213,6 +354,7 @@ __all__ = [
     "_activate_uv_layer",
     "_configure_image_alpha_mode",
     "_create_bake_image",
+    "_flip_image_rows_for_spine",
     "_remove_image",
     "_save_bake_image",
     "_set_timeline_frame",
