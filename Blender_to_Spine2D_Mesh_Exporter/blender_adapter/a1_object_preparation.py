@@ -23,9 +23,9 @@ from .a1_source_geometry_preparation import prepare_a1_source_geometry
 from .a1_texture_planning import prepare_a1_texture_plan
 from .a1_uv_preparation import prepare_a1_uv
 from .source_uv_integrity import (
-    capture_source_uv_fingerprint,
+    capture_source_uv_fingerprint_if_mesh,
     require_object_mode,
-    require_source_uv_unchanged,
+    require_source_uv_unchanged_if_captured,
 )
 
 
@@ -70,10 +70,10 @@ def _source_uv_integrity_guard(
     source_obj: Any,
     context: Any | None,
 ) -> Iterator[None]:
-    """Protect source UV state across successful and failed preparation pipelines."""
+    """Protect real source Mesh UV state without pre-empting typed stage validation."""
 
     require_object_mode(context)
-    before = capture_source_uv_fingerprint(source_obj)
+    before = capture_source_uv_fingerprint_if_mesh(source_obj)
     primary_error: BaseException | None = None
     try:
         yield
@@ -82,7 +82,7 @@ def _source_uv_integrity_guard(
         raise
     finally:
         try:
-            require_source_uv_unchanged(before, source_obj)
+            require_source_uv_unchanged_if_captured(before, source_obj)
         except Exception as mutation_error:
             logger.exception("Rewrite source UV immutability contract failed")
             wrapped = A1ObjectPreparationError(
