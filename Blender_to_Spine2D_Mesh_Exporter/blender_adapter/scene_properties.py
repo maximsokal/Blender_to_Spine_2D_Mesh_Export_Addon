@@ -8,6 +8,7 @@ from typing import Any
 import bpy
 
 from .. import config
+from ..domain.baking import A1TextureExportMode
 
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,36 @@ def _update_ui_for_paths(_self: Any, context: bpy.types.Context) -> None:
         for area in getattr(screen, "areas", ()):
             if getattr(area, "type", None) == "VIEW_3D":
                 area.tag_redraw()
+
+
+def _update_texture_export_mode(_self: Any, context: bpy.types.Context) -> None:
+    """Invalidate diagnostics and schedule one debounced analysis for the new mode."""
+
+    scene = getattr(context, "scene", None)
+    try:
+        if scene is not None:
+            from .a1_export_readiness import clear_a1_export_readiness
+
+            clear_a1_export_readiness(scene)
+    except Exception:
+        logger.exception("Unable to invalidate readiness after export-mode change")
+
+    try:
+        from .. import auto_readiness
+
+        auto_readiness.request_auto_analysis(
+            context,
+            reason="texture export mode changed",
+        )
+    except Exception:
+        # Registration, file loading, and test doubles may not expose the automatic
+        # readiness owner yet. The cache has already been invalidated above.
+        logger.debug(
+            "Automatic readiness is unavailable during export-mode update",
+            exc_info=True,
+        )
+
+    _update_ui_for_paths(_self, context)
 
 
 def _update_texture_size(self: Any, _context: bpy.types.Context) -> None:
@@ -51,6 +82,29 @@ def _update_texture_size(self: Any, _context: bpy.types.Context) -> None:
 
 
 PROPERTIES = (
+    (
+        "spine2d_texture_export_mode",
+        bpy.props.EnumProperty(
+            name="Export Mode",
+            description=(
+                "Choose segmented UV object baking or an explicit active-camera projection"
+            ),
+            items=(
+                (
+                    A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
+                    "Normal — UV Segments",
+                    "Preserve cut regions and bake textures onto their generated UV layout",
+                ),
+                (
+                    A1TextureExportMode.CAMERA_PROJECTION.value,
+                    "Camera Projection",
+                    "Render from the active camera and export a screen-space projection mesh",
+                ),
+            ),
+            default=A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
+            update=_update_texture_export_mode,
+        ),
+    ),
     (
         "spine2d_angle_limit",
         bpy.props.IntProperty(
