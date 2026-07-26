@@ -78,6 +78,40 @@ class A1TexturePlanningResult:
             raise TypeError("statistics must be a mapping")
 
 
+@dataclass(frozen=True, slots=True)
+class _TextureMaterialInputs:
+    """Immutable material-analysis inputs shared by generated and source routes."""
+
+    analysis: ObjectMaterialAnalysis
+    warnings: Tuple[ExportIssue, ...]
+    statistics: Mapping[str, StatisticsValue]
+    texture_export_mode: A1TextureExportMode
+    analysis_render_target: str
+    use_generated: bool
+    generated_reason: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.analysis, ObjectMaterialAnalysis):
+            raise TypeError("analysis must be ObjectMaterialAnalysis")
+        if not isinstance(self.warnings, tuple) or not all(
+            isinstance(issue, ExportIssue) for issue in self.warnings
+        ):
+            raise TypeError("warnings must be a tuple of ExportIssue values")
+        if not isinstance(self.statistics, Mapping):
+            raise TypeError("statistics must be a mapping")
+        if not isinstance(self.texture_export_mode, A1TextureExportMode):
+            raise TypeError("texture_export_mode must be A1TextureExportMode")
+        if (
+            not isinstance(self.analysis_render_target, str)
+            or not self.analysis_render_target.strip()
+        ):
+            raise ValueError("analysis_render_target must be a non-empty string")
+        if not isinstance(self.use_generated, bool):
+            raise TypeError("use_generated must be bool")
+        if not isinstance(self.generated_reason, str):
+            raise TypeError("generated_reason must be str")
+
+
 def _material_warnings(
     analysis: ObjectMaterialAnalysis,
     *,
@@ -137,8 +171,7 @@ def _should_generate_material(
     if missing_used_slots:
         return (
             True,
-            "source geometry uses missing material slots "
-            + str(missing_used_slots),
+            "source geometry uses missing material slots " + str(missing_used_slots),
         )
     return False, ""
 
@@ -176,6 +209,247 @@ def _build_generated_bake_plan(
     return GeneratedBakePlan.from_bake_plan(base_plan, generated_material)
 
 
+def _analyse_texture_material_inputs(
+    uv: A1UvPreparationResult,
+) -> _TextureMaterialInputs:
+    """Analyse reachable materials and freeze route-independent diagnostics."""
+
+    source = uv.source
+    texture_export_mode = source.settings.bake_execution.texture_export_mode
+    if not isinstance(texture_export_mode, A1TextureExportMode):
+        raise TypeError("texture_export_mode must be A1TextureExportMode")
+    analysis_render_target = (
+        "CYCLES"
+        if texture_export_mode is A1TextureExportMode.NORMAL_UV_SEGMENTS
+        else source.renderer.shader_target
+    )
+    analysis = analyse_object_materials(
+        source.source_object,
+        source_object_id=source.source_snapshot.source_object_id,
+        render_target=analysis_render_target,
+    )
+    warnings = uv.warnings + _material_warnings(
+        analysis,
+        object_id=source.object_id,
+    )
+    statistics = freeze_statistics(
+        uv.statistics,
+        {
+            "material_slot_count": len(analysis.slots),
+            "material_image_dependency_count": sum(
+                len(slot.image_dependencies) for slot in analysis.slots
+            ),
+            "material_image_preflight_count": 0,
+            "texture_export_mode": texture_export_mode.value,
+            "shader_analysis_target": analysis_render_target,
+        },
+    )
+    use_generated, generated_reason = _should_generate_material(uv, analysis)
+    return _TextureMaterialInputs(
+        analysis=analysis,
+        warnings=warnings,
+        statistics=statistics,
+        texture_export_mode=texture_export_mode,
+        analysis_render_target=analysis_render_target,
+        use_generated=use_generated,
+        generated_reason=generated_reason,
+    )
+
+
+def _generated_plan_statistics(
+    uv: A1UvPreparationResult,
+    inputs: _TextureMaterialInputs,
+    bake_plan: GeneratedBakePlan,
+) -> Mapping[str, StatisticsValue]:
+    source = uv.source
+    return freeze_statistics(
+        inputs.statistics,
+        {
+            "generated_material_active": 1,
+            "generated_material_policy": source.settings.material_source_policy.value,
+            "generated_material_pattern": source.settings.generated_material_pattern.value,
+            "generated_material_face_count": len(
+                bake_plan.generated_material.target_snapshot.faces
+            ),
+            "shader_capability": "GENERATED_LOCAL_EMISSION",
+            "shader_capability_audit_count": 0,
+            "texture_export_mode": inputs.texture_export_mode.value,
+            "shader_analysis_target": inputs.analysis_render_target,
+            "texture_pipeline": "OBJECT_BAKE",
+            "bake_mode": bake_plan.bake_mode.value,
+            "bake_frame_count": len(bake_plan.frame_tasks),
+            "bake_pass_count": len(bake_plan.passes),
+            "bake_scene_aware": 0,
+            "bake_strategy_ids": ",".join(
+                pass_plan.strategy_id.value for pass_plan in bake_plan.passes
+            ),
+            "bake_evaluation_scopes": ",".join(
+                pass_plan.evaluation_scope.value for pass_plan in bake_plan.passes
+            ),
+            "scene_light_count": 0,
+            "scene_has_camera": 0,
+        },
+    )
+
+
+def _build_generated_texture_result(
+    uv: A1UvPreparationResult,
+    inputs: _TextureMaterialInputs,
+) -> A1TexturePlanningResult:
+    """Build the isolated generated-material object-bake route."""
+
+    source = uv.source
+    if inputs.texture_export_mode is A1TextureExportMode.CAMERA_PROJECTION:
+        raise BakePlanError(
+            "Camera Projection requires renderable source materials. "
+            "Set Rewrite Generated Materials to Require Source, or switch "
+            "Export Mode to Normal — UV Segments."
+        )
+    bake_plan = _build_generated_bake_plan(uv)
+    warnings = inputs.warnings + (
+        warning_issue(
+            stage=A1SingleObjectStage.PLAN_BAKE,
+            code="GENERATED_MATERIAL_ACTIVE",
+            message=(
+                f"Using {source.settings.generated_material_pattern.value}: "
+                f"{inputs.generated_reason}"
+            ),
+            object_id=source.object_id,
+            context={
+                "source_policy": source.settings.material_source_policy.value,
+                "pattern": source.settings.generated_material_pattern.value,
+            },
+        ),
+    )
+    return A1TexturePlanningResult(
+        uv=uv,
+        material_analysis=bake_plan.material_analysis,
+        bake_plan=bake_plan,
+        warnings=warnings,
+        statistics=_generated_plan_statistics(uv, inputs, bake_plan),
+    )
+
+
+def _preflight_source_material_images(
+    uv: A1UvPreparationResult,
+    inputs: _TextureMaterialInputs,
+    *,
+    scene: Any | None,
+) -> Mapping[str, StatisticsValue]:
+    """Validate every reachable source image before any bake planning occurs."""
+
+    valid_image_names = preflight_object_image_dependencies(
+        uv.source.source_object,
+        inputs.analysis,
+        scene=scene,
+    )
+    return freeze_statistics(
+        inputs.statistics,
+        {"material_image_preflight_count": len(valid_image_names)},
+    )
+
+
+def _source_plan_statistics(
+    uv: A1UvPreparationResult,
+    inputs: _TextureMaterialInputs,
+    statistics: Mapping[str, StatisticsValue],
+    *,
+    bake_plan: BakePlan,
+    required_capability: Any,
+    capability_audit_count: int,
+    scene_bake_context: Any,
+) -> Mapping[str, StatisticsValue]:
+    source = uv.source
+    camera_projection = isinstance(bake_plan, CameraProjectionPlan)
+    return freeze_statistics(
+        statistics,
+        {
+            "generated_material_active": 0,
+            "generated_material_policy": source.settings.material_source_policy.value,
+            "generated_material_pattern": source.settings.generated_material_pattern.value,
+            "shader_capability": required_capability.value,
+            "shader_capability_audit_count": capability_audit_count,
+            "texture_export_mode": inputs.texture_export_mode.value,
+            "shader_analysis_target": inputs.analysis_render_target,
+            "texture_pipeline": (
+                "CAMERA_RENDER_PROJECTION" if camera_projection else "OBJECT_BAKE"
+            ),
+            "bake_mode": bake_plan.bake_mode.value,
+            "bake_frame_count": len(bake_plan.frame_tasks),
+            "bake_pass_count": len(bake_plan.passes),
+            "bake_scene_aware": int(bake_plan.scene_aware),
+            "bake_strategy_ids": ",".join(
+                pass_plan.strategy_id.value for pass_plan in bake_plan.passes
+            ),
+            "bake_evaluation_scopes": ",".join(
+                pass_plan.evaluation_scope.value for pass_plan in bake_plan.passes
+            ),
+            "scene_light_count": len(scene_bake_context.lights),
+            "scene_has_camera": int(scene_bake_context.has_camera),
+        },
+    )
+
+
+def _build_source_texture_result(
+    uv: A1UvPreparationResult,
+    inputs: _TextureMaterialInputs,
+    statistics: Mapping[str, StatisticsValue],
+    *,
+    context: Any | None,
+    scene: Any | None,
+) -> A1TexturePlanningResult:
+    """Build the capability-routed source-material bake or camera plan."""
+
+    source = uv.source
+    object_bake_context, scene_bake_context = analyse_bake_contexts(
+        source.source_object,
+        scene=scene,
+        context=context,
+    )
+    source.renderer.validate_scene(scene_bake_context)
+    capability_audits = audit_object_material_capabilities(
+        source.source_object,
+        inputs.analysis,
+        render_target=inputs.analysis_render_target,
+    )
+    required_capability = strongest_object_capability(capability_audits)
+    bake_plan = build_capability_checked_texture_plan(
+        inputs.analysis,
+        build_a1_bake_settings(source.object_id, source.settings),
+        capability_audits,
+        source.renderer,
+        object_context=object_bake_context,
+        scene_context=scene_bake_context,
+        texture_export_mode=inputs.texture_export_mode,
+    )
+    resolved_statistics = _source_plan_statistics(
+        uv,
+        inputs,
+        statistics,
+        bake_plan=bake_plan,
+        required_capability=required_capability,
+        capability_audit_count=len(capability_audits),
+        scene_bake_context=scene_bake_context,
+    )
+    logger.debug(
+        "Planned texture pipeline for %s: mode=%s target=%s pipeline=%s "
+        "passes=%d frames=%d",
+        source.object_id,
+        inputs.texture_export_mode.value,
+        inputs.analysis_render_target,
+        resolved_statistics["texture_pipeline"],
+        len(bake_plan.passes),
+        len(bake_plan.frame_tasks),
+    )
+    return A1TexturePlanningResult(
+        uv=uv,
+        material_analysis=inputs.analysis,
+        bake_plan=bake_plan,
+        warnings=inputs.warnings,
+        statistics=resolved_statistics,
+    )
+
+
 def prepare_a1_texture_plan(
     uv: A1UvPreparationResult,
     *,
@@ -190,191 +464,26 @@ def prepare_a1_texture_plan(
     stage = A1SingleObjectStage.ANALYZE_MATERIALS
     warnings = uv.warnings
     statistics = uv.statistics
-    texture_export_mode = source.settings.bake_execution.texture_export_mode
-    if not isinstance(texture_export_mode, A1TextureExportMode):
-        raise TypeError("texture_export_mode must be A1TextureExportMode")
-    analysis_render_target = (
-        "CYCLES"
-        if texture_export_mode is A1TextureExportMode.NORMAL_UV_SEGMENTS
-        else source.renderer.shader_target
-    )
     try:
-        source_analysis = analyse_object_materials(
-            source.source_object,
-            source_object_id=source.source_snapshot.source_object_id,
-            render_target=analysis_render_target,
-        )
-        warnings = warnings + _material_warnings(
-            source_analysis,
-            object_id=source.object_id,
-        )
-        statistics = freeze_statistics(
-            statistics,
-            {
-                "material_slot_count": len(source_analysis.slots),
-                "material_image_dependency_count": sum(
-                    len(slot.image_dependencies) for slot in source_analysis.slots
-                ),
-                "material_image_preflight_count": 0,
-                "texture_export_mode": texture_export_mode.value,
-                "shader_analysis_target": analysis_render_target,
-            },
-        )
-
-        use_generated, generated_reason = _should_generate_material(
-            uv,
-            source_analysis,
-        )
-        if use_generated:
-            if texture_export_mode is A1TextureExportMode.CAMERA_PROJECTION:
-                raise BakePlanError(
-                    "Camera Projection requires renderable source materials. "
-                    "Set Rewrite Generated Materials to Require Source, or switch "
-                    "Export Mode to Normal — UV Segments."
-                )
+        inputs = _analyse_texture_material_inputs(uv)
+        warnings = inputs.warnings
+        statistics = inputs.statistics
+        if inputs.use_generated:
             stage = A1SingleObjectStage.PLAN_BAKE
-            bake_plan = _build_generated_bake_plan(uv)
-            material_analysis = bake_plan.material_analysis
-            warnings = warnings + (
-                warning_issue(
-                    stage=stage,
-                    code="GENERATED_MATERIAL_ACTIVE",
-                    message=(
-                        f"Using {source.settings.generated_material_pattern.value}: "
-                        f"{generated_reason}"
-                    ),
-                    object_id=source.object_id,
-                    context={
-                        "source_policy": source.settings.material_source_policy.value,
-                        "pattern": source.settings.generated_material_pattern.value,
-                    },
-                ),
-            )
-            statistics = freeze_statistics(
-                statistics,
-                {
-                    "generated_material_active": 1,
-                    "generated_material_policy": (
-                        source.settings.material_source_policy.value
-                    ),
-                    "generated_material_pattern": (
-                        source.settings.generated_material_pattern.value
-                    ),
-                    "generated_material_face_count": len(
-                        bake_plan.generated_material.target_snapshot.faces
-                    ),
-                    "shader_capability": "GENERATED_LOCAL_EMISSION",
-                    "shader_capability_audit_count": 0,
-                    "texture_export_mode": texture_export_mode.value,
-                    "shader_analysis_target": analysis_render_target,
-                    "texture_pipeline": "OBJECT_BAKE",
-                    "bake_mode": bake_plan.bake_mode.value,
-                    "bake_frame_count": len(bake_plan.frame_tasks),
-                    "bake_pass_count": len(bake_plan.passes),
-                    "bake_scene_aware": 0,
-                    "bake_strategy_ids": ",".join(
-                        pass_plan.strategy_id.value
-                        for pass_plan in bake_plan.passes
-                    ),
-                    "bake_evaluation_scopes": ",".join(
-                        pass_plan.evaluation_scope.value
-                        for pass_plan in bake_plan.passes
-                    ),
-                    "scene_light_count": 0,
-                    "scene_has_camera": 0,
-                },
-            )
-            return A1TexturePlanningResult(
-                uv=uv,
-                material_analysis=material_analysis,
-                bake_plan=bake_plan,
-                warnings=warnings,
-                statistics=statistics,
-            )
+            return _build_generated_texture_result(uv, inputs)
 
-        valid_image_names = preflight_object_image_dependencies(
-            source.source_object,
-            source_analysis,
+        statistics = _preflight_source_material_images(
+            uv,
+            inputs,
             scene=scene,
         )
-        statistics = freeze_statistics(
-            statistics,
-            {"material_image_preflight_count": len(valid_image_names)},
-        )
-
         stage = A1SingleObjectStage.PLAN_BAKE
-        object_bake_context, scene_bake_context = analyse_bake_contexts(
-            source.source_object,
-            scene=scene,
-            context=context,
-        )
-        source.renderer.validate_scene(scene_bake_context)
-        capability_audits = audit_object_material_capabilities(
-            source.source_object,
-            source_analysis,
-            render_target=analysis_render_target,
-        )
-        required_capability = strongest_object_capability(capability_audits)
-        bake_plan = build_capability_checked_texture_plan(
-            source_analysis,
-            build_a1_bake_settings(source.object_id, source.settings),
-            capability_audits,
-            source.renderer,
-            object_context=object_bake_context,
-            scene_context=scene_bake_context,
-            texture_export_mode=texture_export_mode,
-        )
-        camera_projection = isinstance(bake_plan, CameraProjectionPlan)
-        statistics = freeze_statistics(
+        return _build_source_texture_result(
+            uv,
+            inputs,
             statistics,
-            {
-                "generated_material_active": 0,
-                "generated_material_policy": (
-                    source.settings.material_source_policy.value
-                ),
-                "generated_material_pattern": (
-                    source.settings.generated_material_pattern.value
-                ),
-                "shader_capability": required_capability.value,
-                "shader_capability_audit_count": len(capability_audits),
-                "texture_export_mode": texture_export_mode.value,
-                "shader_analysis_target": analysis_render_target,
-                "texture_pipeline": (
-                    "CAMERA_RENDER_PROJECTION"
-                    if camera_projection
-                    else "OBJECT_BAKE"
-                ),
-                "bake_mode": bake_plan.bake_mode.value,
-                "bake_frame_count": len(bake_plan.frame_tasks),
-                "bake_pass_count": len(bake_plan.passes),
-                "bake_scene_aware": int(bake_plan.scene_aware),
-                "bake_strategy_ids": ",".join(
-                    pass_plan.strategy_id.value for pass_plan in bake_plan.passes
-                ),
-                "bake_evaluation_scopes": ",".join(
-                    pass_plan.evaluation_scope.value
-                    for pass_plan in bake_plan.passes
-                ),
-                "scene_light_count": len(scene_bake_context.lights),
-                "scene_has_camera": int(scene_bake_context.has_camera),
-            },
-        )
-        logger.debug(
-            "Planned texture pipeline for %s: mode=%s target=%s pipeline=%s "
-            "passes=%d frames=%d",
-            source.object_id,
-            texture_export_mode.value,
-            analysis_render_target,
-            statistics["texture_pipeline"],
-            len(bake_plan.passes),
-            len(bake_plan.frame_tasks),
-        )
-        return A1TexturePlanningResult(
-            uv=uv,
-            material_analysis=source_analysis,
-            bake_plan=bake_plan,
-            warnings=warnings,
-            statistics=statistics,
+            context=context,
+            scene=scene,
         )
     except A1ObjectPreparationError:
         raise
