@@ -28,6 +28,7 @@ from ..infrastructure import (
 from .a1_export_result import build_a1_failure_result
 from .a1_object_preparation import A1ObjectPreparationError, prepare_a1_object
 from .a1_projection_finalization import finalize_prepared_camera_projection
+from .bake_uv_spine_validation import validate_staged_normal_bake_coverage
 from .texture_executor import stage_texture_plan_outputs
 
 
@@ -43,13 +44,7 @@ def export_a1_single_object(
     scene: Any | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
 ) -> ExportResult:
-    """Prepare, stage textures, finalize JSON, and atomically commit one export.
-
-    Source Object, Mesh, materials, selection, active object, mode, frame, render settings,
-    and temporary image datablocks are restored on success and failure. JSON is reserved
-    before textures to preserve the public output order, but its bytes are written only after
-    a camera render has produced the final sequence-union crop and screen-space hull.
-    """
+    """Prepare, stage textures, validate UV coverage, and atomically commit output."""
 
     emit_a1_export_progress(
         progress_callback,
@@ -124,7 +119,20 @@ def export_a1_single_object(
             stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
             emit_a1_export_progress(
                 progress_callback,
-                percent=82,
+                percent=81,
+                stage=stage,
+                message="Validating baked UV-to-Spine pixel coverage",
+                object_id=prepared.object_id,
+            )
+            coverage_samples = validate_staged_normal_bake_coverage(
+                prepared,
+                texture_stage.reservations,
+            )
+            statistics["bake_uv_coverage_sample_count"] = len(coverage_samples)
+
+            emit_a1_export_progress(
+                progress_callback,
+                percent=84,
                 stage=stage,
                 message="Finalizing render-derived attachment layout",
                 object_id=prepared.object_id,
@@ -133,7 +141,8 @@ def export_a1_single_object(
                 prepared,
                 texture_stage.projection_layout,
             )
-            statistics = dict(finalized.statistics)
+            statistics.update(finalized.statistics)
+            statistics["bake_uv_coverage_sample_count"] = len(coverage_samples)
             emit_a1_export_progress(
                 progress_callback,
                 percent=90,
