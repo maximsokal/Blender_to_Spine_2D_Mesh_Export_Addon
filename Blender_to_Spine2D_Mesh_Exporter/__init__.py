@@ -44,7 +44,14 @@ else:
 
 
 if bpy is not None:
-    from . import addon_preferences, config, repolish_ui, single_object_operator, ui
+    from . import (
+        addon_preferences,
+        auto_readiness,
+        config,
+        repolish_ui,
+        single_object_operator,
+        ui,
+    )
     from .blender_adapter import (
         a1_readiness_invalidation,
         generated_material_ui,
@@ -74,6 +81,7 @@ if bpy is not None:
         addon_preferences,
         ui,
         a1_readiness_invalidation,
+        auto_readiness,
         repolish_ui,
         generated_material_ui,
         single_object_operator,
@@ -123,6 +131,11 @@ if bpy is not None:
             "readiness invalidation",
             a1_readiness_invalidation.register,
             a1_readiness_invalidation.unregister,
+        ),
+        (
+            "automatic readiness",
+            auto_readiness.register,
+            auto_readiness.unregister,
         ),
         (
             "Re-Polish UI",
