@@ -61,11 +61,14 @@ def test_registration_infrastructure_is_blender_independent():
 def test_runtime_operators_route_directly_to_rewrite_services():
     single = _source("single_object_operator.py")
     ui = _source("ui.py")
+    automatic = _source("auto_readiness.py")
     assert "export_active_object_a1" in single
     assert "load_legacy_single_backend" not in single
     assert "DEFAULT_SINGLE_BACKEND" not in single
     assert "export_active_object_a1" in ui
     assert "export_selected_objects_a1" in ui
+    assert "export_active_object_a1" in automatic
+    assert "export_selected_objects_a1" in automatic
     assert "DEFAULT_MULTI_BACKEND" not in ui
     assert "resolve_multi_backend" not in ui
 
@@ -126,6 +129,7 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
     assert "bpy.utils.register_class" not in source
     assert "bpy.utils.unregister_class" not in source
     assert "a1_readiness_invalidation" in source
+    assert "auto_readiness" in source
 
     steps_assignment = next(
         node for node in ast.walk(tree)
@@ -139,11 +143,15 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
         "Scene RNA properties",
         "UI",
         "readiness invalidation",
+        "automatic readiness",
         "Re-Polish UI",
         "generated material UI",
         "single-object operator",
     ]
     assert labels.index("UI") < labels.index("readiness invalidation")
+    assert labels.index("readiness invalidation") < labels.index(
+        "automatic readiness"
+    )
     assert "unregister_all_best_effort" in _called_names(_function(tree, "register"))
     assert "unregister_all_best_effort" in _called_names(_function(tree, "unregister"))
 
