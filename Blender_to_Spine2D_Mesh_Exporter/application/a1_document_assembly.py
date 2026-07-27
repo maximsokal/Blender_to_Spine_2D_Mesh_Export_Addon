@@ -21,6 +21,7 @@ from .a1_attachment_projection_service import (
     A1AttachmentProjectionSettings,
     project_triangulated_disk_attachment,
 )
+from .a1_material_correspondence import validate_document_material_correspondence
 from .a1_z_groups import A1ZGroupAssignmentPlan
 
 
@@ -171,6 +172,10 @@ def assemble_a1_document(
             rig,
             tuple(projection.request for projection in resolved_projections),
             skeleton_metadata=skeleton_metadata,
+        )
+        validate_document_material_correspondence(
+            resolved_projections,
+            document_build,
         )
         document = apply_legacy_visual_options(
             document_build.document,
