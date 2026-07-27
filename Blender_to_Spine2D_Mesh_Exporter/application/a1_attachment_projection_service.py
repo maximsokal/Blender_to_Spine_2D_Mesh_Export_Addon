@@ -26,34 +26,20 @@ from .a1_attachment_projection import (
     A1VertexZBinding,
     project_triangulated_disk_attachment as _project_raw_attachment,
 )
-from .a1_material_correspondence import (
-    Position2D,
-    validate_projection_material_correspondence,
-)
 
 
+Position2D = Tuple[float, float]
 _RELATIVE_AREA_EPSILON = 1.0e-10
 _MINIMUM_AREA_EPSILON = 1.0e-12
 
 
 def _position(vertex: LegacyAttachmentVertex) -> Position2D:
-    """Return the legacy local position used by compatibility-only unit fixtures."""
-
     if not isinstance(vertex, LegacyAttachmentVertex):
         raise TypeError("vertex must be LegacyAttachmentVertex")
     return (
         float(vertex.bone_position_pixels[0]),
         float(vertex.bone_position_pixels[1]),
     )
-
-
-def _resolved_setup_positions(
-    projection: A1AttachmentProjectionResult,
-    rig: LegacyRigBuildResult | None,
-) -> Tuple[Position2D, ...]:
-    if rig is None:
-        return tuple(_position(vertex) for vertex in projection.request.vertices)
-    return validate_projection_material_correspondence(projection, rig)
 
 
 def _cross(first: Position2D, second: Position2D, third: Position2D) -> float:
@@ -90,24 +76,19 @@ def _area_tolerance(points: Tuple[Position2D, ...]) -> float:
 
 
 def _convex_hull_position_cycle(
-    positions: Tuple[Position2D, ...],
+    vertices: Tuple[LegacyAttachmentVertex, ...],
 ) -> Tuple[Position2D, ...]:
-    """Return the deterministic setup-pose convex-hull cycle."""
+    """Return the deterministic physical convex-hull cycle using monotone chain."""
 
-    if not isinstance(positions, tuple) or not positions:
-        raise ValueError("positions must be a non-empty tuple")
-    if not all(
-        isinstance(position, tuple)
-        and len(position) == 2
-        and all(isinstance(component, float) for component in position)
-        for position in positions
-    ):
-        raise TypeError("positions must contain float coordinate pairs")
+    if not isinstance(vertices, tuple) or not vertices:
+        raise ValueError("vertices must be a non-empty tuple")
+    if not all(isinstance(vertex, LegacyAttachmentVertex) for vertex in vertices):
+        raise TypeError("vertices must contain LegacyAttachmentVertex values")
 
-    points = tuple(sorted(set(positions)))
+    points = tuple(sorted({_position(vertex) for vertex in vertices}))
     if len(points) < 3:
         raise A1AttachmentProjectionError(
-            "Spine mesh attachment requires at least three unique setup-pose positions"
+            "Spine mesh attachment requires at least three unique physical positions"
         )
     tolerance = _area_tolerance(points)
 
@@ -132,12 +113,12 @@ def _convex_hull_position_cycle(
     hull = tuple(lower[:-1] + upper[:-1])
     if len(hull) < 3:
         raise A1AttachmentProjectionError(
-            "Spine mesh attachment setup-pose positions are collinear within "
+            "Spine mesh attachment physical positions are collinear within "
             f"pixel-space tolerance {tolerance}"
         )
     if len(hull) != len(set(hull)):
         raise A1AttachmentProjectionError(
-            "Setup-pose convex-hull cycle contains duplicate positions"
+            "Physical convex-hull cycle contains duplicate positions"
         )
     return hull
 
@@ -180,31 +161,31 @@ def _order_inversion_count(
 
 
 def _ordered_physical_hull_positions(
-    positions: Tuple[Position2D, ...],
+    vertices: Tuple[LegacyAttachmentVertex, ...],
     topological_hull_count: int,
 ) -> Tuple[Position2D, ...]:
-    """Align the setup-pose hull to the stable raw boundary whenever possible.
+    """Align the physical hull to the stable raw boundary whenever possible.
 
     The raw projector stores the topological boundary first. That order is preserved
-    exactly when it already covers the complete setup-pose convex hull. When a
-    topologically interior vertex becomes physically extreme after the Z-group parent
-    translation is applied, the monotone-chain cycle supplies the missing point and
-    the observed boundary order is used only to choose deterministic orientation.
+    exactly when it already covers the complete physical convex hull. When a
+    topologically interior vertex becomes physically extreme after XY projection, the
+    monotone-chain cycle supplies the missing point and the observed boundary order is
+    used only to choose the deterministic orientation and rotation.
     """
 
     if isinstance(topological_hull_count, bool) or not isinstance(
         topological_hull_count, int
     ):
         raise TypeError("topological_hull_count must be int")
-    if topological_hull_count < 0 or topological_hull_count > len(positions):
+    if topological_hull_count < 0 or topological_hull_count > len(vertices):
         raise ValueError("topological_hull_count is outside the vertex range")
 
-    physical_cycle = _convex_hull_position_cycle(positions)
+    physical_cycle = _convex_hull_position_cycle(vertices)
     physical_positions = set(physical_cycle)
     observed: list[Position2D] = []
     seen: set[Position2D] = set()
     for old_index in range(topological_hull_count):
-        position = positions[old_index]
+        position = _position(vertices[old_index])
         if position not in physical_positions or position in seen:
             continue
         seen.add(position)
@@ -212,6 +193,7 @@ def _ordered_physical_hull_positions(
 
     observed_cycle = tuple(observed)
     if seen == physical_positions:
+        # Preserve the existing stable cycle, including its orientation and start.
         return observed_cycle
     if not observed_cycle:
         return physical_cycle
@@ -229,19 +211,21 @@ def _ordered_physical_hull_positions(
     if reverse_inversions < forward_inversions:
         return reverse
 
+    # Symmetric or incomplete input can leave both orientations equally compatible.
+    # Lexicographic position order keeps the result repeatable.
     return min(forward, reverse)
 
 
 def _select_physical_hull_indices(
-    positions: Tuple[Position2D, ...],
+    vertices: Tuple[LegacyAttachmentVertex, ...],
     topological_hull_count: int,
     ordered_positions: Tuple[Position2D, ...],
 ) -> Tuple[int, ...]:
-    """Select one deterministic UV representative for every setup-pose hull point."""
+    """Select one deterministic UV representative for every physical hull point."""
 
     indices_by_position: dict[Position2D, list[int]] = {}
-    for old_index, position in enumerate(positions):
-        indices_by_position.setdefault(position, []).append(old_index)
+    for old_index, vertex in enumerate(vertices):
+        indices_by_position.setdefault(_position(vertex), []).append(old_index)
 
     selected: list[int] = []
     for position in ordered_positions:
@@ -266,13 +250,13 @@ def _select_physical_hull_indices(
 
 
 def _validate_projected_triangles(
-    positions: Tuple[Position2D, ...],
+    vertices: Tuple[LegacyAttachmentVertex, ...],
     triangles: Tuple[int, ...],
 ) -> None:
-    """Reject triangles that collapse in the effective Spine setup pose."""
+    """Reject triangles that collapse after UVs become Spine pixel positions."""
 
-    if not isinstance(positions, tuple) or not positions:
-        raise ValueError("positions must be a non-empty tuple")
+    if not isinstance(vertices, tuple) or not vertices:
+        raise ValueError("vertices must be a non-empty tuple")
     if not isinstance(triangles, tuple) or not triangles:
         raise ValueError("triangles must be a non-empty tuple")
     if len(triangles) % 3 != 0:
@@ -280,12 +264,13 @@ def _validate_projected_triangles(
             "triangles must contain complete index triples"
         )
 
-    tolerance = _area_tolerance(positions)
+    all_positions = tuple(_position(vertex) for vertex in vertices)
+    tolerance = _area_tolerance(all_positions)
     for triangle_index in range(0, len(triangles), 3):
         indices = triangles[triangle_index : triangle_index + 3]
         try:
             first, second, third = (
-                positions[vertex_index] for vertex_index in indices
+                all_positions[vertex_index] for vertex_index in indices
             )
         except IndexError as exc:
             raise A1AttachmentProjectionError(
@@ -294,7 +279,7 @@ def _validate_projected_triangles(
         area_twice = _cross(first, second, third)
         if abs(area_twice) <= tolerance:
             raise A1AttachmentProjectionError(
-                f"Triangle {triangle_index // 3} collapses within Spine setup-pose "
+                f"Triangle {triangle_index // 3} collapses within Spine pixel-space "
                 f"area tolerance {tolerance}; indices={indices}, "
                 f"positions={(first, second, third)}, twice_area={area_twice}"
             )
@@ -328,31 +313,27 @@ def _remap_index_stream(
 
 def normalize_a1_attachment_projection_hull(
     projection: A1AttachmentProjectionResult,
-    rig: LegacyRigBuildResult | None = None,
 ) -> A1AttachmentProjectionResult:
-    """Move the complete setup-pose convex hull to the prefix and remap all indices.
+    """Move the complete physical convex hull to the prefix and remap every index.
 
-    ``rig`` is optional only for compatibility with low-level fixtures that construct
-    already-resolved pixel positions. Production callers always provide it so Z-group
-    parent translations participate in area and physical-hull calculations.
+    The physical XY hull may contain a vertex that is topologically interior to the
+    decomposed disk. Such a vertex must be promoted from the raw tail instead of
+    rejecting an otherwise valid attachment.
     """
 
     if not isinstance(projection, A1AttachmentProjectionResult):
         raise TypeError("projection must be A1AttachmentProjectionResult")
-    if rig is not None and not isinstance(rig, LegacyRigBuildResult):
-        raise TypeError("rig must be LegacyRigBuildResult or None")
 
     request = projection.request
     vertices = request.vertices
-    setup_positions = _resolved_setup_positions(projection, rig)
-    _validate_projected_triangles(setup_positions, request.triangles)
+    _validate_projected_triangles(vertices, request.triangles)
 
     ordered_hull_positions = _ordered_physical_hull_positions(
-        setup_positions,
+        vertices,
         request.hull,
     )
     hull_indices = _select_physical_hull_indices(
-        setup_positions,
+        vertices,
         request.hull,
         ordered_hull_positions,
     )
@@ -377,7 +358,6 @@ def normalize_a1_attachment_projection_hull(
         replace(vertices[old_index], index=new_index)
         for new_index, old_index in enumerate(new_order)
     )
-    normalized_positions = tuple(setup_positions[old_index] for old_index in new_order)
     normalized_triangles = _remap_index_stream(
         request.triangles,
         old_to_new,
@@ -412,18 +392,18 @@ def normalize_a1_attachment_projection_hull(
         loop_to_attachment_index=normalized_loop_mapping,
     )
 
-    result_hull_positions = normalized_positions[: result.request.hull]
+    result_hull_positions = tuple(
+        _position(vertex) for vertex in result.request.vertices[: result.request.hull]
+    )
     if len(result_hull_positions) != len(set(result_hull_positions)):
         raise A1AttachmentProjectionError(
-            "Normalized Spine hull still contains duplicate setup-pose positions"
+            "Normalized Spine hull still contains duplicate physical positions"
         )
     if result_hull_positions != ordered_hull_positions:
         raise A1AttachmentProjectionError(
-            "Normalized Spine hull order does not match the setup-pose convex-hull cycle"
+            "Normalized Spine hull order does not match the physical convex-hull cycle"
         )
-    _validate_projected_triangles(normalized_positions, result.request.triangles)
-    if rig is not None:
-        validate_projection_material_correspondence(result, rig)
+    _validate_projected_triangles(result.request.vertices, result.request.triangles)
     return result
 
 
@@ -432,10 +412,10 @@ def project_triangulated_disk_attachment(
     rig: LegacyRigBuildResult,
     settings: A1AttachmentProjectionSettings,
 ) -> A1AttachmentProjectionResult:
-    """Project exact loop UV identity, then enforce the setup-pose hull contract."""
+    """Project loop-level UV identity, then enforce the Spine physical hull contract."""
 
     raw = _project_raw_attachment(snapshot, rig, settings)
-    return normalize_a1_attachment_projection_hull(raw, rig=rig)
+    return normalize_a1_attachment_projection_hull(raw)
 
 
 __all__ = [
