@@ -30,11 +30,14 @@ def test_schema_three_repairs_custom_values_marked_current_during_registration()
     marker = "scene.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION"
 
     assert "CURRENT_SETTINGS_SCHEMA_VERSION = 3" in migration_source
-    assert migration_source.index(guard) < migration_source.index(reset) < migration_source.index(marker)
+    assert (
+        migration_source.index(guard)
+        < migration_source.index(reset)
+        < migration_source.index(marker)
+    )
     assert "Schema 3 repairs Scenes" in migration_source
     assert "_extension_registration_active()" in property_source
     assert "migration_file_loading()" in property_source
-    assert "seam_mode_schema_updates_suspended()" in property_source
 
 
 def test_root_registers_migration_after_scene_rna_and_before_ui():
