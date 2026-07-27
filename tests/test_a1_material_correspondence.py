@@ -76,7 +76,7 @@ def _raw_layered_projection() -> A1AttachmentProjectionResult:
     )
 
 
-def test_setup_positions_include_z_group_parent_translation():
+def test_setup_positions_include_z_group_parent_translation_for_diagnostics():
     rig = _layered_rig()
     raw = _raw_layered_projection()
 
@@ -88,26 +88,27 @@ def test_setup_positions_include_z_group_parent_translation():
     )
 
 
-def test_setup_pose_hull_promotion_remaps_every_dependent_index_stream():
+def test_z_group_pose_translation_does_not_redefine_attachment_hull_topology():
     rig = _layered_rig()
     raw = _raw_layered_projection()
 
     normalized = normalize_a1_attachment_projection_hull(raw, rig=rig)
 
-    assert normalized.request.hull == 4
+    assert normalized == raw
+    assert normalized.request.hull == 3
     assert normalized.ordered_vertex_ids == (
         VertexId(0),
         VertexId(1),
-        VertexId(3),
         VertexId(2),
+        VertexId(3),
     )
     assert tuple(vertex.uv for vertex in normalized.request.vertices) == (
         (0.0, 0.0),
         (1.0, 0.0),
-        (0.5, 0.5),
         (0.0, 1.0),
+        (0.5, 0.5),
     )
-    assert normalized.request.triangles == (0, 1, 2, 0, 2, 3)
+    assert normalized.request.triangles == (0, 1, 3, 0, 3, 2)
     assert tuple(
         attachment_index
         for _loop_id, attachment_index in normalized.loop_to_attachment_index
@@ -115,8 +116,8 @@ def test_setup_pose_hull_promotion_remaps_every_dependent_index_stream():
     assert attachment_setup_positions(normalized.request.vertices, rig) == (
         (-1.0, -1.0),
         (1.0, -1.0),
-        (0.0, 100.0),
         (-1.0, 1.0),
+        (0.0, 100.0),
     )
 
 
