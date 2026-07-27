@@ -265,6 +265,7 @@ def run_semantic_bake(
                 with temporary_bake_materials(
                     runtime.source_object,
                     temporary.object,
+                    target_snapshot=runtime.target_snapshot,
                     used_material_indices=runtime.used_material_indices,
                     face_material_indices=runtime.face_material_indices,
                     render_target=runtime.renderer.shader_target,
