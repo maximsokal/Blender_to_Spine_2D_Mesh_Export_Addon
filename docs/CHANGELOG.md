@@ -8,16 +8,18 @@ This changelog records public product releases. Internal development milestones 
 
 - Exact post-assembly correspondence validation for projected UVs, triangle corners, physical hull data, and weighted vertex-bone indices.
 - Setup-pose position evaluation that includes per-Z-group parent translation.
-- Pure regressions for Z-group-aware physical hull promotion and weighted-stream corruption.
+- Pure regressions for Z-group-aware physical hull promotion, polygon-order-independent material binding, and weighted-stream corruption.
 - A Blender 5.2 asymmetric material fixture whose geometry order and source-material UV order intentionally differ.
 
 ### Changed
 
+- Temporary bake material slots are assigned through exact `FaceId` to Blender polygon correspondence instead of positional polygon iteration.
 - Physical Spine hull normalization now uses effective setup-pose positions instead of vertex-bone local coordinates alone.
 - Triangle collapse checks now evaluate the same setup-plane coordinates used by the final Spine rig.
 
 ### Fixed
 
+- Blender could materialize temporary polygons in a different order while the bake material stage still assigned source material slots positionally, placing correct source materials on the wrong baked faces.
 - Z-group translations could be omitted while selecting and validating the physical hull.
 - A shifted weighted bone index or serialized UV/triangle reorder could reach output without an explicit correspondence failure.
 - The previous directional texture test used matching geometry and UV orientation and could not independently prove source-material corner identity.
