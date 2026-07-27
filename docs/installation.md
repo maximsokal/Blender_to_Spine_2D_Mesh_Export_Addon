@@ -2,43 +2,94 @@
 
 ## Requirements
 
-- Blender 5.2 or newer. Blender 4.x and Blender 5.0/5.1 are not supported.
+- Blender 5.2 or newer.
 - Windows is the currently tested desktop platform.
-- 4 GB RAM minimum; 8 GB or more is recommended for complex meshes and baking.
-- A writable output directory for Spine JSON, textures, staging files, diagnostics, and logs.
+- A writable directory for JSON, textures, temporary stage files, backups, diagnostics, and logs.
+- Enough memory and disk space for the selected texture resolution and frame count.
 
-The minimum version is declared in
-`Blender_to_Spine2D_Mesh_Exporter/blender_manifest.toml` and is checked again
-before registration mutates Blender state.
+Blender 4.x and Blender 5.0/5.1 are not supported. The minimum version is declared in `Blender_to_Spine2D_Mesh_Exporter/blender_manifest.toml` and checked again before registration mutates Blender state.
 
 ## Install a release ZIP
 
-1. Open **Edit > Preferences > Extensions** in Blender 5.2 or newer.
-2. Open the Extensions menu and choose **Install from Disk**.
-3. Select the release ZIP.
-4. Enable **Blender to Spine2D Mesh Exporter**.
-5. Open the 3D View sidebar and locate the exporter panel.
+1. Close any Blender process that is using an older build of the extension.
+2. Open Blender 5.2 or newer.
+3. Open **Edit > Preferences > Extensions**.
+4. Open the Extensions menu and choose **Install from Disk**.
+5. Select `blender_to_spine2d_mesh_exporter-<version>.zip`.
+6. Enable **Blender to Spine2D Mesh Exporter**.
+7. Open a 3D View, press `N`, and select the **Blender to Spine2D Mesh Exporter** tab.
 
-Do not unpack the release ZIP. Its root must contain `blender_manifest.toml` and
-`__init__.py`.
+Do not unpack the release ZIP. Its root must contain `blender_manifest.toml` and `__init__.py`.
+
+## Update an existing installation
+
+1. Remove or disable the old extension in **Preferences > Extensions**.
+2. Close Blender completely.
+3. Start Blender again.
+4. Install the new ZIP through **Install from Disk**.
+5. Reopen the project file.
+
+Closing Blender prevents loaded Python modules and cached extension metadata from keeping the previous implementation active.
+
+## Scene settings migration
+
+The extension owns a hidden Scene settings schema. Older scenes are migrated after the saved RNA values have been restored.
+
+For version 0.40.0, every scene below schema 3 is migrated once to:
+
+```text
+Seam Maker = Auto
+Settings schema = 3
+```
+
+After that migration, a deliberate user choice of Custom is preserved.
+
+The current values can be inspected in Blender's Python Console:
+
+```python
+print(
+    bpy.context.scene.spine2d_settings_schema_version,
+    bpy.context.scene.spine2d_seam_maker_mode,
+)
+```
+
+Expected result after migrating an older scene:
+
+```text
+3 AUTO
+```
 
 ## Build locally
 
-The repository uses Blender's official extension validator and builder. The old
-file-selection cleaner and `fake-bpy-module-4.1` dependency are no longer used.
+The repository uses Blender's official extension validator and builder through `tools/prepare_package.py`.
 
-From the repository root:
+From the repository root on PowerShell:
 
-```text
-python tools/prepare_package.py --blender <path-to-Blender-5.2-executable>
+```powershell
+$Blender = "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
+
+if (-not (Test-Path -LiteralPath $Blender -PathType Leaf)) {
+    throw "Blender executable not found: $Blender"
+}
+
+Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
+
+& .\.venv-tests\Scripts\python.exe `
+    tools\prepare_package.py `
+    --blender $Blender
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Extension package build failed with exit code $LASTEXITCODE"
+}
 ```
 
 The script:
 
-1. verifies the Blender runtime is 5.2 or newer;
-2. validates the extension source and manifest;
-3. invokes `blender --command extension build`;
-4. verifies that a non-empty ZIP was created in `dist`.
+1. resolves and validates the Blender executable;
+2. checks that Blender is 5.2 or newer;
+3. validates the source directory and manifest;
+4. invokes Blender's official extension build command;
+5. verifies that a non-empty ZIP was created in `dist`.
 
 Optional arguments:
 
@@ -47,12 +98,11 @@ Optional arguments:
 --output <output-archive.zip>
 ```
 
-The executable can also be supplied through `BLENDER_EXECUTABLE` or found as
-`blender` on `PATH`.
+The executable may also be supplied through `BLENDER_EXECUTABLE` or found as `blender` on `PATH`.
 
 ## Validate manually
 
-Validate the source directory:
+Validate the extension source directory:
 
 ```text
 blender --command extension validate Blender_to_Spine2D_Mesh_Exporter
@@ -64,30 +114,12 @@ Validate a built ZIP:
 blender --command extension validate <archive.zip>
 ```
 
-## Troubleshooting
+## Remove the extension
 
-### Incompatible extension
+Remove it through **Preferences > Extensions** and restart Blender. The extension unregisters classes, Scene and Object RNA properties, handlers, cached readiness data, and preference classes through its normal lifecycle.
 
-Upgrade to Blender 5.2 or newer. This branch intentionally has no Blender 4.x
-compatibility path.
+Existing custom properties stored in a `.blend` may remain serialized until the file is saved without them; they do not execute code after the extension is removed.
 
-### Registration failure
+## Next steps
 
-Open Blender's system console and inspect the complete traceback. Registration
-is transactional: completed classes and Scene properties are rolled back when a
-later step fails.
-
-### Export failure
-
-Confirm that:
-
-- the destination is writable;
-- the selected object is a supported mesh;
-- the active renderer is Cycles or Blender 5.2 EEVEE;
-- source materials expose valid node trees;
-- enough disk space exists for temporary and final textures.
-
-### Remove the extension
-
-Remove it from **Preferences > Extensions**. The add-on does not invoke legacy
-`addon_disable` or `addon_remove` operators.
+Continue with the [Usage Guide](usage.md) and [Settings Reference](settings-reference.md).
