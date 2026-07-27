@@ -319,34 +319,27 @@ def _remove_color_attribute(mesh: Any, attribute: Any | None) -> None:
 
 
 def _apply_face_material_indices(
+    target_snapshot: MeshSnapshot,
     target_mesh: Any,
     face_material_indices: Iterable[int],
     *,
     material_slot_count: int,
-    target_snapshot: MeshSnapshot | None = None,
 ) -> None:
-    """Restore face-slot bindings through exact snapshot-to-polygon correspondence.
+    """Restore face-slot bindings through exact snapshot-to-polygon correspondence."""
 
-    ``target_snapshot`` is required by production callers. The optional compatibility
-    path is retained for focused fake-mesh tests that do not expose Blender topology.
-    It may only use positional assignment when no snapshot was supplied explicitly.
-    """
-
+    if not isinstance(target_snapshot, MeshSnapshot):
+        raise TypeError("target_snapshot must be MeshSnapshot")
     if not isinstance(material_slot_count, int) or isinstance(material_slot_count, bool):
         raise TypeError("material_slot_count must be int")
     if material_slot_count < 0:
         raise ValueError("material_slot_count must be a non-negative integer")
-    if target_snapshot is not None and not isinstance(target_snapshot, MeshSnapshot):
-        raise TypeError("target_snapshot must be MeshSnapshot or None")
 
     try:
         resolved = tuple(face_material_indices)
     except TypeError as exc:
         raise TypeError("face_material_indices must be iterable") from exc
     polygons = tuple(getattr(target_mesh, "polygons", ()))
-    expected_face_count = (
-        len(polygons) if target_snapshot is None else len(target_snapshot.faces)
-    )
+    expected_face_count = len(target_snapshot.faces)
     if len(resolved) != expected_face_count:
         raise BakeMaterialError(
             f"Received {len(resolved)} face material indices for "
@@ -369,23 +362,20 @@ def _apply_face_material_indices(
                 f"only {material_slot_count} slots exist"
             )
 
-    if target_snapshot is None:
-        polygon_index_by_face_position = tuple(range(len(polygons)))
-    else:
-        try:
-            correspondence = build_mesh_topology_correspondence(
-                target_snapshot,
-                target_mesh,
-                stage="bake-material-index-assignment",
-            )
-            polygon_index_by_face_id = dict(correspondence.face_to_polygon_index)
-            polygon_index_by_face_position = tuple(
-                polygon_index_by_face_id[face.id] for face in target_snapshot.faces
-            )
-        except Exception as exc:
-            raise BakeMaterialError(
-                "Unable to map snapshot faces to temporary bake polygons"
-            ) from exc
+    try:
+        correspondence = build_mesh_topology_correspondence(
+            target_snapshot,
+            target_mesh,
+            stage="bake-material-index-assignment",
+        )
+        polygon_index_by_face_id = dict(correspondence.face_to_polygon_index)
+        polygon_index_by_face_position = tuple(
+            polygon_index_by_face_id[face.id] for face in target_snapshot.faces
+        )
+    except Exception as exc:
+        raise BakeMaterialError(
+            "Unable to map snapshot faces to temporary bake polygons"
+        ) from exc
 
     try:
         for face_position, material_index in enumerate(resolved):
@@ -442,7 +432,10 @@ def temporary_bake_materials(
     normalized_target = render_engine_contract(render_target).shader_target
     source_slots = tuple(getattr(source_obj, "material_slots", ()))
     used = tuple(sorted(set(used_material_indices)))
-    if any(not isinstance(index, int) or isinstance(index, bool) or index < 0 for index in used):
+    if any(
+        not isinstance(index, int) or isinstance(index, bool) or index < 0
+        for index in used
+    ):
         raise ValueError("used_material_indices must contain non-negative integers")
     if generated_material is None and used and max(used) >= len(source_slots):
         raise BakeMaterialError(
@@ -475,10 +468,10 @@ def temporary_bake_materials(
             copied_materials.append(generated_copy)
             target_mesh.materials.append(generated_copy)
             _apply_face_material_indices(
+                target_snapshot,
                 target_mesh,
                 face_material_indices,
                 material_slot_count=1,
-                target_snapshot=target_snapshot,
             )
             generated_attribute = _write_generated_corner_colors(
                 target_mesh,
@@ -514,10 +507,10 @@ def temporary_bake_materials(
                     )
 
             _apply_face_material_indices(
+                target_snapshot,
                 target_mesh,
                 face_material_indices,
                 material_slot_count=len(copied_materials),
-                target_snapshot=target_snapshot,
             )
 
         if not image_nodes:
