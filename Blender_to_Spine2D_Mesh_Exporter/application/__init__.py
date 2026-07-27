@@ -49,6 +49,12 @@ from .a1_grouped_camera_projection import (
     GroupedCameraOverlayResult,
     apply_grouped_camera_overlay,
 )
+from .a1_material_correspondence import (
+    A1MaterialCorrespondenceError,
+    attachment_setup_positions,
+    validate_document_material_correspondence,
+    validate_projection_material_correspondence,
+)
 from .a1_multi_object import (
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
@@ -118,6 +124,7 @@ __all__ = [
     "A1GeometryPreparationError",
     "A1GeometryPreparationResult",
     "A1GeometryPreparationSettings",
+    "A1MaterialCorrespondenceError",
     "A1MeshBounds",
     "A1MultiObjectExportSettings",
     "A1MultiObjectMode",
@@ -156,6 +163,7 @@ __all__ = [
     "apply_grouped_camera_overlay",
     "assemble_a1_camera_projection_document",
     "assemble_a1_document",
+    "attachment_setup_positions",
     "build_a1_attachment_path",
     "build_a1_attachment_sequence",
     "build_a1_bake_settings",
@@ -180,4 +188,6 @@ __all__ = [
     "scale_a1_export_progress_callback",
     "validate_a1_output_claims",
     "validate_a1_realized_output_namespace",
+    "validate_document_material_correspondence",
+    "validate_projection_material_correspondence",
 ]
