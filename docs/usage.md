@@ -1,273 +1,218 @@
 # Usage Guide
 
-After installation, the addon can be found in **3D View → Sidebar → Blender_to_Spine_2D_Mesh_Export**. This comprehensive interface provides all necessary tools for converting 3D mesh objects into Spine2D-compatible skeletal animation data.
+## Open the exporter
 
-## Main Interface Overview
-![ui_addon](../assets/ui_addon.png)
-The addon interface is organized into collapsible sections for optimal workflow management. Each section contains specific controls and configuration options for different aspects of the export pipeline.
+1. Open Blender 5.2 or newer.
+2. Save the `.blend` file.
+3. Select at least one Mesh object.
+4. Switch the active object to Object Mode.
+5. In a 3D View, press `N` and open the **Blender to Spine2D Mesh Exporter** tab.
 
----
+The main panel contains Export, Cut, and Bake sections, readiness analysis, and the final export button. A separate child panel contains Generated Materials settings.
 
-## Settings Section
+## Prepare the source scene
 
-### Reset Button
-**Function**: Restores all addon settings to their default values
-**Usage**: Click to reset texture size (1024px), angle limit (30°), enable control icons, enable preview animation, and restore default output paths
-**Note**: This operation affects all global settings but does not modify per-object properties
+Before analysis or export:
 
----
+- save the `.blend` file;
+- keep source Mesh objects in Object Mode;
+- ensure required source images exist or are packed/generated inside Blender;
+- select a supported renderer and a valid active camera when Camera Projection is used;
+- choose a writable output directory;
+- confirm that the intended UV layer and material graph are valid;
+- avoid changing geometry, UVs, materials, selection, or export settings after analysis without running analysis again.
 
-## Export Configuration
+The exporter reads evaluated geometry through isolated temporary objects and verifies that source mesh, UV, material, and Blender state remain unchanged.
 
-### Texture Size
-**Parameter**: Baked texture resolution (128px - 4096px)
-**Default**: 1024px
-**Performance Impact**:
-- 1024px: Standard processing time (~30-60 seconds)
-- 2048px: Extended processing time (~2-5 minutes)
-- 4096px: Maximum resolution with significantly longer processing (~10-15 minutes)
+## Choose an export mode
 
-**Critical Warning**: Texture baking is the most resource-intensive operation in the export pipeline. Higher resolutions exponentially increase processing time and memory usage.
+### Normal - UV Segments
 
-### JSON Output Path
-**Function**: Destination directory for exported JSON files
-**Default**: Directory containing the current .blend file
-**Requirements**:
-- .blend file must be saved before export
-- Directory must have write permissions
-- Absolute paths are recommended for consistency
+Normal mode is the default. It is intended for deformable Spine mesh attachments.
 
-### Images Subfolder Path
-**Function**: Relative path within JSON directory for texture assets
-**Default**: `images/`
-**Behavior**: Creates subdirectory structure for organized asset management
-**Example**: If JSON path is `/project/export/` and images path is `textures/`, final texture location will be `/project/export/textures/`
+Pipeline summary:
 
-### Control Icons
-**Function**: Adds visual bounding box indicators to exported skeleton
-**Purpose**: Provides spatial reference points in Spine2D editor for easier animation setup
-**Performance**: Minimal impact on export time
-**Recommendation**: Enable for complex rigs requiring precise positioning
+```text
+source Mesh
+  -> evaluated geometry capture
+  -> automatic or custom-seam segmentation
+  -> manifold disk decomposition
+  -> generated SpineBakeUV layout
+  -> per-region Spine attachments
+  -> semantic texture bake
+  -> JSON and texture commit
+```
 
-### Preview Animation
-**Function**: Generates test rotation animations for immediate skeleton validation
-**Output**: Creates basic X/Y/Z rotation keyframes
-**Use Case**: Quality assurance for bone hierarchy and constraint functionality
-**Note**: Does not affect static mesh exports
+The source Scene may use Blender 5.2 EEVEE. Semantic object baking temporarily uses the validated Cycles path and restores the original render engine and related Scene state.
 
----
+Materials that require camera-space evaluation do not trigger an automatic mode switch. Select Camera Projection explicitly when the readiness report requires it.
 
-## Cut Configuration
+### Camera Projection
 
-### Angle Limit
-**Parameter**: Edge angle threshold for automatic segmentation (0° - 180°)
-**Default**: 30°
-**Algorithm**: When angle between adjacent faces exceeds threshold, creates segmentation boundary
-**Precision**: Lower values create more segments; higher values preserve surface continuity
-**Recommendation**: 15 - 30°
+Camera Projection renders the selected source through the active camera and exports one screen-space projection attachment.
 
-### Seam Maker Mode
-**Options**:
-- **Auto**: Fully automated segmentation based on angle limit
-- **Custom**: User-defined seams with algorithmic validation and enhancement
+Pipeline summary:
 
-**Custom Mode Workflow**:
-1. Enter Edit Mode on target object
-2. Select edges for manual seam placement
-3. Mark seams using **Edge → Mark Seam**
-4. Return to Object Mode
-5. Execute export with Custom mode selected
+```text
+active camera render
+  -> sequence coverage union
+  -> alpha cleanup and stable crop
+  -> contour and triangulation
+  -> projection attachment
+  -> JSON and texture commit
+```
 
-**Important**: Custom seams undergo algorithmic validation. Additional automated cuts may be applied to ensure topological correctness and UV unwrapping compatibility.
+Use it for camera-dependent, volume, screen-space, or other supported render-dependent appearances that cannot be represented by the Normal object-bake contract.
 
----
+Camera Projection requires a valid active camera and a supported render context.
 
-## Bake Configuration
+## Configure cutting
 
-### Frames for Render
-**Parameter**: Total frame count for sequence baking
-**Default**: 0 (single frame baking)
-**Range**: 0-250 frames
-**Behavior**:
-- 0: Bakes current frame only
-- >0: Creates animated texture sequence
+### Seam Maker: Auto
 
-### Start Frame
-**Parameter**: Beginning frame for sequence baking
-**Default**: 0
-**Use Case**: Allows partial sequence baking for specific animation segments
-**Constraint**: Cannot exceed scene frame range
+Auto is the default. The exporter uses the Seed angle limit and Angular mode to grow deterministic face regions.
 
-### Last Frame Display
-**Function**: Calculated read-only field showing final frame of baking range
-**Calculation**: `Start Frame + Frames for Render - 1`
-**Purpose**: Visual confirmation of baking scope
+- **Seed cone** compares candidates with the segment seed normal.
+- **Seed cone + local dihedral** also limits the angle across each traversed shared edge.
 
-### Playback End Constraint
-**Parameter**: Scene timeline limitation (250 frames maximum)
-**Function**: Prevents frame range overflow beyond scene boundaries
-**Automatic Adjustment**: Values exceeding scene length are clamped to maximum available frames
+Lower angle values usually create more regions. Higher values allow broader normal variation inside a region.
 
----
+### Seam Maker: Custom
 
-## Object Information Panel
+Custom uses seams marked by the user on the source Mesh. Angular splitting is disabled in this mode.
 
-### Refresh Button
-**Function**: Updates cached object analysis data
-**Necessity**: Click after modifying mesh geometry, materials, or object properties
-**Performance**: Offloads expensive calculations from real-time UI updates
-**Coverage**: Refreshes vertex count, face orientation analysis, and material preview icons
+Typical workflow:
 
-### Vertex Count Analysis
-**Display**: Total vertex count with performance implications
-**Performance Benchmarks**:
-- **<1,000 vertices**: ~30-60 seconds export time
-- **1,000-5,000 vertices**: ~1-5 minutes export time
-- **5,000-10,000 vertices**: ~5-10 minutes export time
-- **>10,000 vertices**: Extended processing with potential viewport performance issues in Spine2D
+1. Enter Edit Mode.
+2. Select the intended boundary edges.
+3. Use **Edge > Mark Seam**.
+4. Return to Object Mode.
+5. Select Custom in the exporter.
+6. Run analysis again.
 
-**Optimization Note**: High vertex counts may cause performance degradation in Spine2D viewport. Consider mesh decimation for complex models.
+The topology pipeline may still decompose a seam-defined region when required to produce valid manifold disk attachments. It does not enable the Auto angular split policy.
 
-### Material Count
-**Display**: Number of materials assigned to object
-**Limitation**: Multi-material objects undergo material merging during baking process
-**Recommendation**: Minimize material count for optimal texture baking performance
+## Configure textures and output paths
 
-### Face Orientation Validation
-**Analysis**: Detects inverted (inside-out) faces that can cause rendering artifacts
-**Display**:
-- "All faces oriented correctly" (green) - No issues detected
-- "Inverted faces: X / Total" (red) - Manual correction required
+Set:
 
-**Resolution**: Use **Mesh → Normals → Recalculate Outside** in Edit Mode to fix orientation issues
+- Texture size;
+- JSON output directory;
+- Images Subfolder;
+- Control icons;
+- Preview animation;
+- Projection alpha threshold when Camera Projection is selected.
 
-### Scale Application Warning
-**Validation**: Ensures object transforms are applied before export
-**Requirement**: Object scale must be (1.0, 1.0, 1.0)
-**Resolution**: **Object → Apply → All Transforms** before export
-**Critical**: Unapplied transforms cause coordinate system misalignment in exported data
+Texture size must be an even integer from 64 through 4096. The default is 1024.
 
----
+The JSON path is a directory. The Images Subfolder is normalized as a relative path below that directory; the default is `images/`.
 
-## Export Execution
+## Configure generated materials
 
-### Export Current Object Button
-**Function**: Initiates complete export pipeline for active object
-**Prerequisites**:
-- .blend file must be saved
-- Object scale must be applied
-- Valid output paths configured
-- Sufficient disk space available
+The Generated Materials panel controls what happens when source materials are missing or intentionally ignored.
 
-**Process Overview**:
-1. Object validation and preprocessing
-2. UV layout generation and optimization
-3. Mesh segmentation based on cut settings
-4. Texture baking (if materials present)
-5. JSON data generation and export
-6. Asset cleanup and finalization
+- **Require Source** blocks export when required source material data is unavailable.
+- **Generate If Missing** creates a temporary generated material only when required material data is missing.
+- **Force Generated** ignores source materials and always uses the selected generated pattern.
 
----
+Patterns:
 
-## Addon Preferences
-![ui_preferences](../assets/ui_preferences.png)
-Access through **Edit → Preferences → Add-ons → Blender_to_Spine_2D_Mesh_Export**
+- **Solid Gray**;
+- **One Region - One Color**;
+- **One Polygon - One Color**.
 
-### Information & Help Section
+Generated materials are temporary. The exporter removes generated materials, node trees, images, meshes, objects, and color attributes on success and failure paths.
 
-#### Project Website Button
-**Function**: Opens addon documentation and support resources
-**Target**: Links to official project repository and user guides
+## Configure frame output
 
-### Logging Configuration
+For one selected object, Bake settings are stored on the Scene:
 
-#### Enable File Logging
-**Function**: Activates persistent log file creation
-**Default**: Disabled for performance optimization
-**Recommendation**: Enable only during troubleshooting or development
+- Frames for render;
+- Start frame;
+- calculated last frame.
 
-#### Log File Path
-**Configuration**: Absolute path for log file storage
-**Default**: User home directory
-**Automatic Creation**: Creates directory structure if non-existent
-**File Management**: Logs are appended; manual cleanup may be required for large files
+`Frames for render = 0` exports the current frame only.
 
-#### Module Log Levels
-**Granular Control**: Independent logging levels for each addon component
-**Available Levels**:
-- **Error**: Critical failures only (recommended for production)
-- **Warning**: Potential issues and errors
-- **Info**: General operational information
-- **Debug**: Comprehensive diagnostic output
+For multiple selected objects, each object has independent Frames and Start values. This allows static and sequence objects to participate in the same multi-object request.
 
-**Performance Warning**: Debug level logging creates additional temporary files in both scene directory and export folder. Use only for troubleshooting specific issues.
+## Configure multi-object composition
 
-**Module Categories**:
-- **ModelToSpine2D**: Core addon functionality
-- **config**: Configuration management
-- **ui**: User interface operations
-- **main**: Export pipeline orchestration
-- **plane_cut**: Mesh segmentation algorithms
-- **uv_operations**: UV layout processing
-- **texture_baker**: Material baking system
-- **json_export**: Spine2D format generation
-- **json_merger**: Multi-object data merging
-- **multi_object_export**: Batch processing workflows
+When more than one Mesh is selected, each object receives a Connect checkbox.
 
-### Addon Management
+- No connected objects: standalone multi-object composition.
+- At least two connected objects and no standalone objects: connected composition.
+- Connected and standalone objects together: mixed composition.
+- Exactly one Connect checkbox: the request falls back to standalone export with a warning.
 
-#### Uninstall Function
-**Purpose**: Complete addon removal with cleanup
-**Process**: Removes all addon files, preferences, and temporary data
-**Note**: Scene-specific addon properties may persist until project reload
+Connected objects share the connected rig contract. Standalone objects retain independent component rigs inside the final document.
 
----
+## Run readiness analysis
 
-## Performance Optimization Guidelines
+Press **Analyze** before export.
 
-### System Requirements
-- **RAM**: Minimum 8GB, 16GB+ recommended for high-resolution textures
-- **Storage**: 500MB+ free space for temporary files during processing
-- **CPU**: Multi-core processor recommended for texture baking operations
+The readiness report can include:
 
-### Workflow Optimization
-1. **Start with low texture resolution** (128px) for testing
-2. **Apply object transforms** before beginning export process
-3. **Simplify complex materials** to reduce baking time
-4. **Use Custom cut mode** for precise control over mesh segmentation
-5. **Monitor vertex count** to maintain Spine2D viewport performance
+- source and exported vertex/triangle counts;
+- region, attachment, and bone counts;
+- texture pipeline and frame count;
+- topology statistics;
+- structured blockers and warnings.
 
-### Troubleshooting Performance Issues
-- **Reduce texture size** if Blender becomes unresponsive
-- **Disable preview animation** for faster exports
-- **Use Error-level logging** to minimize diagnostic overhead
-- **Close unnecessary Blender windows** during processing
-- **Save project frequently** before running export operations
+The cached report becomes stale when relevant selection, geometry, UV, material, Scene, renderer, camera, or export settings change. Run analysis again after any such change.
 
----
+The export button is enabled only when the current report allows export.
 
-## Common Workflow Patterns
+## Export one object
 
-### Basic Single Object Export
-1. Prepare mesh with applied transforms
-2. Configure texture size (1024px recommended)
-3. Set output paths
-4. Choose Auto cut mode with 30° angle limit
-5. Execute export
+1. Make the Mesh active.
+2. Configure settings.
+3. Run Analyze.
+4. Resolve every blocker.
+5. Press **Export Current Object**.
 
-### Multi-Material Complex Model
-1. Reduce material count through merging where possible
-2. Increase texture resolution (2048px-4096px)
-3. Use Custom cut mode for material-based segmentation
-4. Enable debug logging for troubleshooting
-5. Monitor system performance during baking
+The JSON stem is derived from the object name and ends with `_merged.json`. Texture paths are written below the configured Images Subfolder.
 
-### Animation Sequence Export
-1. Configure frame range in Bake section
-2. Verify scene timeline settings
-3. Ensure adequate storage space for sequence files
-4. Use lower texture resolution for faster processing
-5. Review sequence continuity in Spine2D editor
+## Export multiple objects
 
-This interface provides comprehensive control over the 3D-to-2D conversion pipeline while maintaining workflow efficiency through intelligent defaults and performance optimizations.
+1. Select at least two Mesh objects.
+2. Choose the active object and Connect flags.
+3. Configure Scene and per-object Bake settings.
+4. Run Analyze.
+5. Resolve every blocker.
+6. Press **Export Selected Objects**.
 
+The output stem uses the first ordered selected object name plus the number of additional selected objects.
+
+## Import into Spine
+
+1. Keep the JSON and image directory relationship unchanged.
+2. Open or create a Spine 4.2 project.
+3. Import the generated Spine JSON.
+4. Point Spine to the exported images directory when needed.
+5. Inspect setup pose, attachments, UV placement, constraints, preview animation, and texture sequences.
+
+Normal-mode textures are saved with the file-space orientation expected by the exported Spine UV coordinates.
+
+## Reset settings
+
+The main Reset button restores:
+
+- Normal - UV Segments;
+- texture size 1024;
+- default output paths;
+- control icons enabled;
+- preview animation enabled;
+- angle limit 30;
+- Seed cone angular mode;
+- local angle limit 30;
+- Seam Maker Auto;
+- current-frame baking.
+
+The Generated Materials panel has its own Reset button and restores Require Source, Solid Gray, and gray RGB `(0.5, 0.5, 0.5)`.
+
+## Continue reading
+
+- [Settings Reference](settings-reference.md)
+- [Output Format](output-format.md)
+- [Troubleshooting](troubleshooting.md)
+- [Examples](../examples/examples.md)
