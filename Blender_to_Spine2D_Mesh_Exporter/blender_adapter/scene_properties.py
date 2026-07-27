@@ -48,6 +48,19 @@ def seam_mode_schema_updates_suspended() -> bool:
     return _SEAM_SCHEMA_UPDATE_SUSPEND_DEPTH > 0
 
 
+def _extension_registration_active() -> bool:
+    """Return whether the root extension is currently registering its RNA surface."""
+
+    try:
+        from .. import get_registration_state
+
+        state = get_registration_state()
+    except Exception:
+        # Isolated tests and partial imports may not expose the root lifecycle owner.
+        return False
+    return str(getattr(state, "value", state)).upper() == "REGISTERING"
+
+
 def _update_ui_for_paths(_self: Any, context: bpy.types.Context) -> None:
     """Refresh visible 3D View panels after an output path changes."""
 
@@ -92,7 +105,11 @@ def _update_texture_export_mode(_self: Any, context: bpy.types.Context) -> None:
 def _update_seam_maker_mode(self: Any, context: bpy.types.Context) -> None:
     """Mark only a deliberate post-registration Seam Maker choice as current."""
 
-    lifecycle_update = migration_file_loading() or seam_mode_schema_updates_suspended()
+    lifecycle_update = (
+        migration_file_loading()
+        or seam_mode_schema_updates_suspended()
+        or _extension_registration_active()
+    )
     if not lifecycle_update:
         try:
             current = int(getattr(self, "spine2d_settings_schema_version", 0) or 0)
