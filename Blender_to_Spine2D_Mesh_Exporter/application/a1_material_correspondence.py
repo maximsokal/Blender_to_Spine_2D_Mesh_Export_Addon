@@ -2,20 +2,22 @@
 
 The object-bake pipeline owns several independent index streams: source loops,
 UV-specific attachment vertices, triangle corners, vertex bones, and Spine's compact
-weighted-vertex stream.  A visually plausible bake is not sufficient evidence that
-those streams still describe the same corners.  This module validates the exact
+weighted-vertex stream. A visually plausible bake is not sufficient evidence that
+those streams still describe the same corners. This module validates the exact
 relationships after projection and again after the final Spine component is built.
 """
 
 from __future__ import annotations
 
 from math import isfinite
-from typing import Tuple
+from typing import TYPE_CHECKING, Tuple
 
 from ..domain.spine import LegacyAttachmentVertex, LegacyRigBuildResult
 from ..domain.spine.legacy_attachment_builder import LegacyMeshDocumentBuildResult
 from ..domain.spine.weighted_vertices import decode_weighted_vertices
-from .a1_attachment_projection import A1AttachmentProjectionResult
+
+if TYPE_CHECKING:
+    from .a1_attachment_projection_service import A1AttachmentProjectionResult
 
 
 Position2D = Tuple[float, float]
@@ -25,10 +27,25 @@ class A1MaterialCorrespondenceError(ValueError):
     """Raised when one projected corner no longer matches its Spine representation."""
 
 
+def _require_projection(value: object) -> A1AttachmentProjectionResult:
+    """Resolve the normalized public projection type without a module import cycle."""
+
+    from .a1_attachment_projection_service import A1AttachmentProjectionResult
+
+    if not isinstance(value, A1AttachmentProjectionResult):
+        raise TypeError("projection must be A1AttachmentProjectionResult")
+    return value
+
+
 def _finite_position(value: object, *, label: str) -> Position2D:
     if not isinstance(value, tuple) or len(value) != 2:
         raise A1MaterialCorrespondenceError(f"{label} must contain two coordinates")
-    resolved = tuple(float(component) for component in value)
+    try:
+        resolved = tuple(float(component) for component in value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise A1MaterialCorrespondenceError(
+            f"{label} must contain numeric coordinates"
+        ) from exc
     if not all(isfinite(component) for component in resolved):
         raise A1MaterialCorrespondenceError(f"{label} contains a non-finite coordinate")
     return resolved[0], resolved[1]
@@ -62,9 +79,9 @@ def attachment_setup_positions(
 ) -> Tuple[Position2D, ...]:
     """Return attachment vertex positions in the effective Spine setup plane.
 
-    ``bone_position_pixels`` is local to the vertex bone's Z-group parent.  The
+    ``bone_position_pixels`` is local to the vertex bone's Z-group parent. The
     parent Z-group contributes a per-group Y translation before the weighted mesh is
-    evaluated.  Common ancestors are intentionally omitted: a shared translation or
+    evaluated. Common ancestors are intentionally omitted: a shared translation or
     rotation cannot change triangle area, physical hull membership, or UV-to-corner
     correspondence.
     """
@@ -103,19 +120,18 @@ def validate_projection_material_correspondence(
 ) -> Tuple[Position2D, ...]:
     """Validate projection-owned UV, triangle-corner, and setup-position identity."""
 
-    if not isinstance(projection, A1AttachmentProjectionResult):
-        raise TypeError("projection must be A1AttachmentProjectionResult")
+    resolved_projection = _require_projection(projection)
     if not isinstance(rig, LegacyRigBuildResult):
         raise TypeError("rig must be LegacyRigBuildResult")
 
-    request = projection.request
-    if len(request.vertices) != len(projection.ordered_vertex_keys):
+    request = resolved_projection.request
+    if len(request.vertices) != len(resolved_projection.ordered_vertex_keys):
         raise A1MaterialCorrespondenceError(
             "Projection vertex count does not match ordered UV-specific keys"
         )
 
     for vertex_index, (vertex, key) in enumerate(
-        zip(request.vertices, projection.ordered_vertex_keys, strict=True)
+        zip(request.vertices, resolved_projection.ordered_vertex_keys, strict=True)
     ):
         if vertex.index != vertex_index:
             raise A1MaterialCorrespondenceError(
@@ -129,7 +145,7 @@ def validate_projection_material_correspondence(
 
     mapped_indices = tuple(
         attachment_index
-        for _loop_id, attachment_index in projection.loop_to_attachment_index
+        for _loop_id, attachment_index in resolved_projection.loop_to_attachment_index
     )
     if mapped_indices != request.triangles:
         raise A1MaterialCorrespondenceError(
@@ -147,19 +163,18 @@ def validate_document_material_correspondence(
 
     if not isinstance(projections, tuple) or not projections:
         raise ValueError("projections must be a non-empty tuple")
-    if not all(isinstance(item, A1AttachmentProjectionResult) for item in projections):
-        raise TypeError("projections must contain A1AttachmentProjectionResult values")
+    resolved_projections = tuple(_require_projection(item) for item in projections)
     if not isinstance(document_build, LegacyMeshDocumentBuildResult):
         raise TypeError("document_build must be LegacyMeshDocumentBuildResult")
-    if len(projections) != len(document_build.components):
+    if len(resolved_projections) != len(document_build.components):
         raise A1MaterialCorrespondenceError(
             f"Built {len(document_build.components)} Spine components for "
-            f"{len(projections)} projections"
+            f"{len(resolved_projections)} projections"
         )
 
     document_bones = document_build.document.bones
     for component_index, (projection, component) in enumerate(
-        zip(projections, document_build.components, strict=True)
+        zip(resolved_projections, document_build.components, strict=True)
     ):
         request = projection.request
         if component.request != request:
