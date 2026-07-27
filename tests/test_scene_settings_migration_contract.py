@@ -15,23 +15,26 @@ def test_scene_schema_property_is_hidden_and_starts_unmigrated():
     assert 'options={"HIDDEN"}' in source
     assert 'default="AUTO"' in source
     assert "update=_update_seam_maker_mode" in source
-    assert "if not migration_file_loading():" in source
 
 
-def test_schema_two_repeats_the_one_time_custom_to_auto_reset():
-    source = (
+def test_schema_three_repairs_custom_values_marked_current_during_registration():
+    migration_source = (
         PACKAGE / "blender_adapter" / "scene_settings_migration.py"
+    ).read_text(encoding="utf-8")
+    property_source = (
+        PACKAGE / "blender_adapter" / "scene_properties.py"
     ).read_text(encoding="utf-8")
 
     guard = "if current >= CURRENT_SETTINGS_SCHEMA_VERSION:"
     reset = 'scene.spine2d_seam_maker_mode = "AUTO"'
     marker = "scene.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION"
-    assert "CURRENT_SETTINGS_SCHEMA_VERSION = 2" in source
-    assert source.index(guard) < source.index(reset) < source.index(marker)
-    assert "Schema 2 deliberately repeats" in source
-    assert "spine2d_scene_settings_load_pre" in source
-    assert "_FILE_LOADING = True" in source
-    assert "_FILE_LOADING = False" in source
+
+    assert "CURRENT_SETTINGS_SCHEMA_VERSION = 3" in migration_source
+    assert migration_source.index(guard) < migration_source.index(reset) < migration_source.index(marker)
+    assert "Schema 3 repairs Scenes" in migration_source
+    assert "_extension_registration_active()" in property_source
+    assert "migration_file_loading()" in property_source
+    assert "seam_mode_schema_updates_suspended()" in property_source
 
 
 def test_root_registers_migration_after_scene_rna_and_before_ui():
