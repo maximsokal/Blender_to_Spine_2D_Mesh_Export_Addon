@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 import bpy
+
 try:
     from bpy.app.handlers import persistent
 except Exception:  # pragma: no cover - real Blender always provides this decorator.
@@ -14,7 +15,7 @@ except Exception:  # pragma: no cover - real Blender always provides this decora
 
 
 logger = logging.getLogger(__name__)
-CURRENT_SETTINGS_SCHEMA_VERSION = 2
+CURRENT_SETTINGS_SCHEMA_VERSION = 3
 _REGISTERED = False
 _FILE_LOADING = False
 
@@ -45,11 +46,12 @@ def _stored_seam_mode(scene: Any) -> str:
 def migrate_scene_settings(scene: Any) -> bool:
     """Migrate one Scene exactly once without overwriting later user choices.
 
-    Schema 2 deliberately repeats the historical seam-mode reset for Scenes that were
-    already marked as schema 1 by the first migration implementation. Those Scenes could
-    still contain the persisted CUSTOM value because the old marker was written before
-    the load lifecycle was fully covered. Once schema 2 is stored, a later deliberate
-    CUSTOM choice remains stable.
+    Schema 3 repairs Scenes that reached schema 2 with CUSTOM while RNA properties were
+    being registered. Blender can invoke EnumProperty update callbacks when persisted
+    ID-property values are rebound to newly registered RNA. Before the registration guard
+    existed, that callback marked the Scene current before this migration owner ran.
+    Every schema below 3 is therefore reset to AUTO once; a deliberate CUSTOM choice made
+    after schema 3 remains stable.
     """
 
     if scene is None:
