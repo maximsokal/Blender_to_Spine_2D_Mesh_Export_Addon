@@ -2,6 +2,26 @@
 
 This changelog records public product releases. Internal development milestones are intentionally omitted.
 
+## [0.41.0] - 2026-07-27
+
+### Added
+
+- Exact post-assembly correspondence validation for projected UVs, triangle corners, physical hull data, and weighted vertex-bone indices.
+- Setup-pose position evaluation that includes per-Z-group parent translation.
+- Pure regressions for Z-group-aware physical hull promotion and weighted-stream corruption.
+- A Blender 5.2 asymmetric material fixture whose geometry order and source-material UV order intentionally differ.
+
+### Changed
+
+- Physical Spine hull normalization now uses effective setup-pose positions instead of vertex-bone local coordinates alone.
+- Triangle collapse checks now evaluate the same setup-plane coordinates used by the final Spine rig.
+
+### Fixed
+
+- Z-group translations could be omitted while selecting and validating the physical hull.
+- A shifted weighted bone index or serialized UV/triangle reorder could reach output without an explicit correspondence failure.
+- The previous directional texture test used matching geometry and UV orientation and could not independently prove source-material corner identity.
+
 ## [0.40.0] - 2026-07-27
 
 ### Added
