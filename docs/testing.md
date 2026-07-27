@@ -59,6 +59,20 @@ if ($LASTEXITCODE -ne 0) {
 
 Do not use `--maxfail=1` for the final run. Fail-fast is useful while debugging but hides later regressions.
 
+## Focused material correspondence tests
+
+```powershell
+& .\.venv-tests\Scripts\python.exe `
+    -m pytest `
+    tests/test_a1_material_correspondence.py `
+    tests/test_a1_attachment_projection.py `
+    tests/test_physical_hull_promotion.py `
+    tests/test_legacy_attachment_builder.py `
+    -vv
+```
+
+These tests validate setup-pose Z-group translation, physical hull promotion, exact UV and triangle order, and compact weighted vertex-bone indices.
+
 ## Focused documentation contract
 
 ```powershell
@@ -184,7 +198,56 @@ Expected marker:
 [SPINE_UV_FILE_SPACE_DIRECTIONAL] PASS
 ```
 
-This test uses an asymmetric image and links geometry vertices, JSON attachment vertices, JSON UVs, and directed image regions. It detects missing or double vertical conversion, swapped axes, corner reordering, and incorrect UV lineage.
+This test detects missing or double vertical conversion, swapped axes, and basic corner reordering. Its geometry and source UV orientation are intentionally simple.
+
+## Asymmetric source-material correspondence regression
+
+```powershell
+& $Blender `
+    --background `
+    --factory-startup `
+    --python-exit-code 1 `
+    --python "tests\blender_headless\run_spine_material_correspondence_integration.py"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Spine material correspondence integration failed with exit code $LASTEXITCODE"
+}
+```
+
+Expected marker:
+
+```text
+[SPINE_MATERIAL_CORRESPONDENCE] PASS
+```
+
+This fixture intentionally assigns source-material UV corners in a different order from geometry corners. It independently verifies:
+
+```text
+source geometry corner
+-> source material UV
+-> semantic bake
+-> generated Spine UV
+-> final attachment vertex
+-> sampled PNG color
+```
+
+A geometry-derived expected color is used, so the test cannot pass by comparing one exported stream with another exported stream.
+
+## Source render UV role regression
+
+```powershell
+& $Blender `
+    --background `
+    --factory-startup `
+    --python-exit-code 1 `
+    --python "tests\blender_headless\run_uv_sampling_role_integration.py"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Source render UV role integration failed with exit code $LASTEXITCODE"
+}
+```
+
+This test verifies that an unlinked Image Texture Vector continues to sample the source `active_render` UV while the bake operator writes into the independently active `SpineBakeUV` layer.
 
 ## Other Blender headless coverage
 
@@ -221,11 +284,11 @@ if ($LASTEXITCODE -ne 0) {
 
 The wrapper validates the source and manifest before calling Blender's official extension build command.
 
-For version 0.40.0, verify:
+For version 0.41.0, verify:
 
 ```powershell
 Get-Item `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.40.0.zip" |
+    ".\dist\blender_to_spine2d_mesh_exporter-0.41.0.zip" |
     Select-Object FullName, Length, LastWriteTime
 ```
 
@@ -234,7 +297,7 @@ Get-Item `
 ```powershell
 & $Blender `
     --command extension validate `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.40.0.zip"
+    ".\dist\blender_to_spine2d_mesh_exporter-0.41.0.zip"
 
 if ($LASTEXITCODE -ne 0) {
     throw "Built extension validation failed with exit code $LASTEXITCODE"
