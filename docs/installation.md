@@ -35,7 +35,7 @@ Closing Blender prevents loaded Python modules and cached extension metadata fro
 
 The extension owns a hidden Scene settings schema. Older scenes are migrated after the saved RNA values have been restored.
 
-For version 0.40.0, every scene below schema 3 is migrated once to:
+For version 0.41.0, every scene below schema 3 is migrated once to:
 
 ```text
 Seam Maker = Auto
