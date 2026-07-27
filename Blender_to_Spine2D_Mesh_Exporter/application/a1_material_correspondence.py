@@ -1,10 +1,15 @@
-"""Validate exact material, attachment, and setup-pose correspondence for A1.
+"""Validate exact material, attachment, and weighted-vertex correspondence for A1.
 
 The object-bake pipeline owns several independent index streams: source loops,
 UV-specific attachment vertices, triangle corners, vertex bones, and Spine's compact
 weighted-vertex stream. A visually plausible bake is not sufficient evidence that
 those streams still describe the same corners. This module validates the exact
 relationships after projection and again after the final Spine component is built.
+
+Attachment topology is defined in the projected local pixel plane stored in
+``LegacyAttachmentVertex.bone_position_pixels``. Z-group parent transforms belong to
+the animated rig and may legitimately collapse or unfold triangles in a particular
+Spine pose; they must never redefine attachment hull membership or topology validity.
 """
 
 from __future__ import annotations
@@ -73,17 +78,49 @@ def _z_offset_by_index(rig: LegacyRigBuildResult) -> dict[int, float]:
     return offsets
 
 
+def _attachment_projection_positions(
+    vertices: Tuple[LegacyAttachmentVertex, ...],
+    rig: LegacyRigBuildResult,
+) -> Tuple[Position2D, ...]:
+    """Return the local projected positions that own attachment topology.
+
+    Every vertex must still reference a real Z-group, but the parent translation is
+    deliberately not applied here. The rig can fold a valid attachment into a
+    collinear setup pose and unfold it through controls; topology and hull validation
+    therefore remain in the stable local projection plane used before rig animation.
+    """
+
+    if not isinstance(vertices, tuple) or not vertices:
+        raise ValueError("vertices must be a non-empty tuple")
+    if not all(isinstance(vertex, LegacyAttachmentVertex) for vertex in vertices):
+        raise TypeError("vertices must contain LegacyAttachmentVertex values")
+
+    valid_z_groups = _z_offset_by_index(rig)
+    positions: list[Position2D] = []
+    for vertex_index, vertex in enumerate(vertices):
+        if vertex.z_group_index not in valid_z_groups:
+            raise A1MaterialCorrespondenceError(
+                f"Attachment vertex {vertex_index} references unknown Z-group index "
+                f"{vertex.z_group_index}; available={tuple(sorted(valid_z_groups))}"
+            )
+        positions.append(
+            _finite_position(
+                vertex.bone_position_pixels,
+                label=f"vertices[{vertex_index}].bone_position_pixels",
+            )
+        )
+    return tuple(positions)
+
+
 def attachment_setup_positions(
     vertices: Tuple[LegacyAttachmentVertex, ...],
     rig: LegacyRigBuildResult,
 ) -> Tuple[Position2D, ...]:
-    """Return attachment vertex positions in the effective Spine setup plane.
+    """Return diagnostic positions after applying Z-group setup translations.
 
-    ``bone_position_pixels`` is local to the vertex bone's Z-group parent. The
-    parent Z-group contributes a per-group Y translation before the weighted mesh is
-    evaluated. Common ancestors are intentionally omitted: a shared translation or
-    rotation cannot change triangle area, physical hull membership, or UV-to-corner
-    correspondence.
+    This representation describes one rig pose only. It is useful for diagnostics,
+    but it is intentionally not used to validate attachment triangle area or physical
+    hull membership because valid animated rigs may collapse triangles in that pose.
     """
 
     if not isinstance(vertices, tuple) or not vertices:
@@ -118,7 +155,7 @@ def validate_projection_material_correspondence(
     projection: A1AttachmentProjectionResult,
     rig: LegacyRigBuildResult,
 ) -> Tuple[Position2D, ...]:
-    """Validate projection-owned UV, triangle-corner, and setup-position identity."""
+    """Validate projection identity and return stable local topology positions."""
 
     resolved_projection = _require_projection(projection)
     if not isinstance(rig, LegacyRigBuildResult):
@@ -152,7 +189,7 @@ def validate_projection_material_correspondence(
             "Projection loop-to-attachment mapping does not match triangle corners"
         )
 
-    return attachment_setup_positions(request.vertices, rig)
+    return _attachment_projection_positions(request.vertices, rig)
 
 
 def validate_document_material_correspondence(
