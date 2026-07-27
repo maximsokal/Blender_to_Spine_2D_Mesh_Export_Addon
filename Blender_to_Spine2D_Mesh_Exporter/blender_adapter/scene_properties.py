@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import logging
-from typing import Any
+from typing import Any, Iterator
 
 import bpy
 
@@ -17,6 +18,34 @@ from .scene_settings_migration import (
 
 logger = logging.getLogger(__name__)
 _TEXTURE_SIZE_SYNCING = False
+_SEAM_SCHEMA_UPDATE_SUSPEND_DEPTH = 0
+
+
+@contextmanager
+def suspend_seam_mode_schema_updates() -> Iterator[None]:
+    """Temporarily prevent RNA restore callbacks from marking a Scene current.
+
+    Blender may invoke EnumProperty update callbacks while Scene RNA properties are being
+    registered over already persisted ID-property values. Those callbacks are not user
+    interaction and must not advance the migration marker before the migration owner runs.
+    The depth counter keeps nested registration or test scopes safe and deterministic.
+    """
+
+    global _SEAM_SCHEMA_UPDATE_SUSPEND_DEPTH
+    _SEAM_SCHEMA_UPDATE_SUSPEND_DEPTH += 1
+    try:
+        yield
+    finally:
+        _SEAM_SCHEMA_UPDATE_SUSPEND_DEPTH -= 1
+        if _SEAM_SCHEMA_UPDATE_SUSPEND_DEPTH < 0:
+            _SEAM_SCHEMA_UPDATE_SUSPEND_DEPTH = 0
+            raise RuntimeError("Seam schema update suspension depth became negative")
+
+
+def seam_mode_schema_updates_suspended() -> bool:
+    """Return whether Seam Maker callbacks must avoid advancing the schema marker."""
+
+    return _SEAM_SCHEMA_UPDATE_SUSPEND_DEPTH > 0
 
 
 def _update_ui_for_paths(_self: Any, context: bpy.types.Context) -> None:
@@ -61,9 +90,10 @@ def _update_texture_export_mode(_self: Any, context: bpy.types.Context) -> None:
 
 
 def _update_seam_maker_mode(self: Any, context: bpy.types.Context) -> None:
-    """Mark a new Scene migrated after a deliberate post-load user choice."""
+    """Mark only a deliberate post-registration Seam Maker choice as current."""
 
-    if not migration_file_loading():
+    lifecycle_update = migration_file_loading() or seam_mode_schema_updates_suspended()
+    if not lifecycle_update:
         try:
             current = int(getattr(self, "spine2d_settings_schema_version", 0) or 0)
         except (TypeError, ValueError, OverflowError):
@@ -210,4 +240,8 @@ PROPERTIES = (
 )
 
 
-__all__ = ["PROPERTIES"]
+__all__ = [
+    "PROPERTIES",
+    "seam_mode_schema_updates_suspended",
+    "suspend_seam_mode_schema_updates",
+]
