@@ -39,7 +39,6 @@ def _resolve_local_target(document: Path, raw_target: str) -> Path | None:
     if not target or target.startswith(("#", "http://", "https://", "mailto:")):
         return None
 
-    # Markdown titles are not used by maintained docs, but remove one defensively.
     target = target.split(" ", 1)[0].strip("<>")
     target = unquote(target.split("#", 1)[0].split("?", 1)[0])
     if not target:
@@ -120,7 +119,7 @@ def test_documentation_matches_manifest_and_current_defaults():
     )
     assert match is not None
     version = match.group(1)
-    assert version == "0.40.0"
+    assert version == "0.41.0"
 
     for relative_path in (
         "docs/README.md",
