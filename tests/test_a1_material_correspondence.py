@@ -92,7 +92,7 @@ def test_z_group_pose_translation_does_not_redefine_attachment_hull_topology():
     rig = _layered_rig()
     raw = _raw_layered_projection()
 
-    normalized = normalize_a1_attachment_projection_hull(raw, rig=rig)
+    normalized = normalize_a1_attachment_projection_hull(raw)
 
     assert normalized == raw
     assert normalized.request.hull == 3
@@ -124,8 +124,7 @@ def test_z_group_pose_translation_does_not_redefine_attachment_hull_topology():
 def test_final_document_preserves_uv_triangle_and_weighted_bone_correspondence():
     rig = _layered_rig()
     projection = normalize_a1_attachment_projection_hull(
-        _raw_layered_projection(),
-        rig=rig,
+        _raw_layered_projection()
     )
     document_build = build_legacy_mesh_document(rig, (projection.request,))
 
@@ -135,8 +134,7 @@ def test_final_document_preserves_uv_triangle_and_weighted_bone_correspondence()
 def test_correspondence_validator_rejects_shifted_weighted_bone_index():
     rig = _layered_rig()
     projection = normalize_a1_attachment_projection_hull(
-        _raw_layered_projection(),
-        rig=rig,
+        _raw_layered_projection()
     )
     document_build = build_legacy_mesh_document(rig, (projection.request,))
     component = document_build.components[0]
