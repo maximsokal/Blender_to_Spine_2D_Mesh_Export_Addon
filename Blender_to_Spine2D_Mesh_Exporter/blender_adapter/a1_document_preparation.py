@@ -1,4 +1,4 @@
-"""Build the legacy-compatible Spine rig and typed A1 document."""
+"""Build the selected Spine rig and typed A1 document."""
 
 from __future__ import annotations
 
@@ -19,11 +19,11 @@ from ..application import (
     calculate_a1_object_bake_main_position_pixels,
 )
 from ..domain.baking import CameraProjectionPlan
-from ..domain.spine.legacy_rig_assembly import build_legacy_rig
 from ..domain.spine.legacy_rig_contracts import (
     LegacyRigBuildRequest,
     LegacyRigBuildResult,
 )
+from ..domain.spine.rig_builder import build_rig
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
     StatisticsValue,
@@ -66,7 +66,7 @@ class A1DocumentPreparationResult:
 def prepare_a1_document(
     texture: A1TexturePlanningResult,
 ) -> A1DocumentPreparationResult:
-    """Build the A1 rig and document from fully analysed geometry and shading."""
+    """Build the selected A1 rig and document from analysed geometry and shading."""
 
     if not isinstance(texture, A1TexturePlanningResult):
         raise TypeError("texture must be A1TexturePlanningResult")
@@ -87,7 +87,7 @@ def prepare_a1_document(
             )
         )
 
-        rig = build_legacy_rig(
+        rig = build_rig(
             LegacyRigBuildRequest(
                 prefix=source.prefix,
                 texture_width=source.settings.export.texture_width,
@@ -95,11 +95,15 @@ def prepare_a1_document(
                 z_groups=source.z_groups.groups,
                 main_position_pixels=main_position_pixels,
                 scale_mode=source.settings.rig_scale_mode,
-            )
+            ),
+            source.settings.export.rig_profile,
         )
         statistics = freeze_statistics(
             statistics,
-            {"base_rig_bone_count": len(rig.bones)},
+            {
+                "base_rig_bone_count": len(rig.bones),
+                "rig_profile": rig.profile.profile_id,
+            },
         )
 
         stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
@@ -153,8 +157,9 @@ def prepare_a1_document(
             },
         )
         logger.debug(
-            "Prepared Spine document for %s: bones=%d slots=%d attachments=%d",
+            "Prepared Spine document for %s: profile=%s bones=%d slots=%d attachments=%d",
             source.object_id,
+            rig.profile.profile_id,
             len(document.bones),
             len(document.slots),
             statistics["attachment_count"],
