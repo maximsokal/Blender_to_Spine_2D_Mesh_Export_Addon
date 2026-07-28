@@ -22,6 +22,7 @@ TOP_LEVEL = (
     PACKAGE / "rig_ui.py",
     PACKAGE / "single_object_operator.py",
     PACKAGE / "ui.py",
+    PACKAGE / "ui_layout.py",
 )
 
 
