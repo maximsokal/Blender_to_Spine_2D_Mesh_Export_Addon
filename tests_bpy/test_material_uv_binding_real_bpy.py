@@ -65,6 +65,11 @@ def test_temporary_material_binds_only_implicit_uv_consumers(clean_blender_data)
     linked_image.name = "Linked Source Image"
     unlinked_image = source.node_tree.nodes.new(type="ShaderNodeTexImage")
     unlinked_image.name = "Unlinked Source Image"
+    explicit_uv = source.node_tree.nodes.new(type="ShaderNodeUVMap")
+    explicit_uv.name = "User Explicit UV"
+    explicit_uv.uv_map = "DetailUV"
+    explicit_image = source.node_tree.nodes.new(type="ShaderNodeTexImage")
+    explicit_image.name = "Explicit Source Image"
 
     source.node_tree.links.new(
         texture_coordinate.outputs["UV"],
@@ -73,6 +78,10 @@ def test_temporary_material_binds_only_implicit_uv_consumers(clean_blender_data)
     source.node_tree.links.new(
         mapping.outputs["Vector"],
         linked_image.inputs["Vector"],
+    )
+    source.node_tree.links.new(
+        explicit_uv.outputs["UV"],
+        explicit_image.inputs["Vector"],
     )
     source_before = _graph_signature(source)
 
@@ -89,19 +98,32 @@ def test_temporary_material_binds_only_implicit_uv_consumers(clean_blender_data)
 
     assert report.texture_coordinate_link_count == 1
     assert report.unlinked_image_texture_count == 1
-    explicit_nodes = tuple(
+    generated_uv_nodes = tuple(
         node
         for node in temporary.node_tree.nodes
         if node.name.startswith("__Spine2D_SourceUV_")
     )
-    assert len(explicit_nodes) == 1
-    explicit_uv = explicit_nodes[0]
-    assert explicit_uv.bl_idname == "ShaderNodeUVMap"
-    assert explicit_uv.uv_map == "SourceUV"
+    assert len(generated_uv_nodes) == 1
+    generated_source_uv = generated_uv_nodes[0]
+    assert generated_source_uv.bl_idname == "ShaderNodeUVMap"
+    assert generated_source_uv.uv_map == "SourceUV"
 
     temporary_mapping = temporary.node_tree.nodes["Mapping"]
     temporary_unlinked = temporary.node_tree.nodes["Unlinked Source Image"]
-    assert _incoming_source_node(temporary_mapping.inputs["Vector"]) == explicit_uv
-    assert _incoming_source_node(temporary_unlinked.inputs["Vector"]) == explicit_uv
+    temporary_explicit_uv = temporary.node_tree.nodes["User Explicit UV"]
+    temporary_explicit_image = temporary.node_tree.nodes["Explicit Source Image"]
+    assert (
+        _incoming_source_node(temporary_mapping.inputs["Vector"])
+        == generated_source_uv
+    )
+    assert (
+        _incoming_source_node(temporary_unlinked.inputs["Vector"])
+        == generated_source_uv
+    )
+    assert (
+        _incoming_source_node(temporary_explicit_image.inputs["Vector"])
+        == temporary_explicit_uv
+    )
+    assert temporary_explicit_uv.uv_map == "DetailUV"
     assert len(tuple(bake_target.inputs["Vector"].links)) == 0
     assert _graph_signature(source) == source_before
