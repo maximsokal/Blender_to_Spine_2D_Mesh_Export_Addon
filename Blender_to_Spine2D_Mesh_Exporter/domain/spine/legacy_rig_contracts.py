@@ -1,4 +1,4 @@
-"""Immutable contracts for the legacy A1 control rig."""
+"""Immutable contracts for the legacy-compatible A1 control rigs."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import Tuple
 
 from .legacy_profile import LegacyRigProfile
 from .model import Bone, IKConstraint, TransformConstraint
+from .rig_profiles import A1RigSetupPoseMode
 
 
 def _require_canonical_string(value: object, field_name: str) -> str:
@@ -57,7 +58,7 @@ class LegacyZGroup:
 
 @dataclass(frozen=True, slots=True)
 class LegacyRigBuildRequest:
-    """All data required to build one legacy rig in Spine pixel coordinates."""
+    """All data required to build one selectable rig in Spine pixel coordinates."""
 
     prefix: str
     texture_width: int
@@ -66,6 +67,8 @@ class LegacyRigBuildRequest:
     average_y_pixels: float = 0.0
     main_position_pixels: Tuple[float, float] | None = None
     scale_mode: UniformScaleMode = UniformScaleMode.AVERAGE
+    # Appended so historical positional construction remains stable.
+    setup_pose_mode: A1RigSetupPoseMode = A1RigSetupPoseMode.PRESERVE_COMPOSITION
 
     def __post_init__(self) -> None:
         _require_canonical_string(self.prefix, "prefix")
@@ -93,6 +96,8 @@ class LegacyRigBuildRequest:
                 _require_finite_number(value, f"main_position_pixels[{index}]")
         if not isinstance(self.scale_mode, UniformScaleMode):
             raise TypeError("scale_mode must be UniformScaleMode")
+        if not isinstance(self.setup_pose_mode, A1RigSetupPoseMode):
+            raise TypeError("setup_pose_mode must be A1RigSetupPoseMode")
 
 
 @dataclass(frozen=True, slots=True)
