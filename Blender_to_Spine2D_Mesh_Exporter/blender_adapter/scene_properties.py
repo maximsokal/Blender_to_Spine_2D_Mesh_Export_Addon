@@ -181,7 +181,7 @@ PROPERTIES = (
                 (profile.value, profile.label, profile.description)
                 for profile in A1RigProfile
             ),
-            default=A1RigProfile.THREE_AXIS_ROTATION.value,
+            default=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
             update=_update_rig_profile,
         ),
     ),
