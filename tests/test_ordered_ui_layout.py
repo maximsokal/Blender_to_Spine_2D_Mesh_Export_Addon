@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
 from Blender_to_Spine2D_Mesh_Exporter import rig_ui, ui, ui_layout
@@ -25,15 +24,6 @@ def _source(module) -> str:
 
 def test_ordered_main_panel_uses_exact_requested_foldout_order():
     source = _source(ui_layout)
-    tree = ast.parse(source, filename=str(ui_layout.__file__))
-    draw = next(
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "draw"
-        and isinstance(getattr(node, "parent", None), ast.ClassDef)
-    ) if False else None
-    del draw  # The source-order assertion below is clearer for literal UI labels.
 
     offsets = tuple(source.index(f'title="{title}"') for title in EXPECTED_TITLES)
     assert offsets == tuple(sorted(offsets))
@@ -84,5 +74,7 @@ def test_readiness_is_the_final_foldout_and_owns_the_export_action():
 
     assert single_export < readiness_title
     assert multi_export < readiness_title
-    # The calls live in the helper referenced by the final foldout rather than below it.
-    assert "_draw_readiness_and_export" in source[readiness_title:]
+    # The action helper is referenced by the final foldout and nothing is drawn below it.
+    tail = source[readiness_title:source.index("except Exception:", readiness_title)]
+    assert "_draw_readiness_and_export" in tail
+    assert "self._draw_foldout(" not in tail[tail.index("_draw_readiness_and_export") + 1:]
