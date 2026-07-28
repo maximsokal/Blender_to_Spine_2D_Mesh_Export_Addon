@@ -38,14 +38,29 @@ from .semantic_bake_validation import (
 logger = logging.getLogger(__name__)
 
 
-def _call_bake_operator(bpy_module: Any, bake_type: str) -> None:
-    """Invoke Blender 5.2 object baking through the physical execution owner."""
+def _call_bake_operator(
+    bpy_module: Any,
+    bake_type: str,
+    *,
+    uv_layer_name: str,
+) -> None:
+    """Invoke Blender 5.2 baking with an explicit destination UV layer.
+
+    The bake destination must not be inferred from ``active_render`` because that
+    role belongs to source material sampling. Passing ``uv_layer`` lets material
+    nodes continue to read the original render UV while Blender writes the result
+    into the generated Spine bake layout.
+    """
 
     if bpy_module is None:
         raise BakeExecutionError("bpy_module cannot be None")
     if not isinstance(bake_type, str) or not bake_type.strip():
         raise ValueError("bake_type must be a non-empty string")
+    if not isinstance(uv_layer_name, str) or not uv_layer_name.strip():
+        raise ValueError("uv_layer_name must be a non-empty string")
+
     resolved_type = bake_type.strip().upper()
+    resolved_uv_layer = uv_layer_name.strip()
     try:
         operator = bpy_module.ops.object.bake
     except Exception as exc:
@@ -61,10 +76,14 @@ def _call_bake_operator(bpy_module: Any, bake_type: str) -> None:
         if not available:
             raise BakeExecutionError("bpy.ops.object.bake.poll() returned False")
     try:
-        result = operator(type=resolved_type)
+        result = operator(
+            type=resolved_type,
+            uv_layer=resolved_uv_layer,
+        )
     except Exception as exc:
         raise BakeExecutionError(
-            f"bpy.ops.object.bake(type={resolved_type!r}) failed"
+            "bpy.ops.object.bake failed with "
+            f"type={resolved_type!r}, uv_layer={resolved_uv_layer!r}"
         ) from exc
     try:
         finished = "FINISHED" in result
@@ -74,7 +93,8 @@ def _call_bake_operator(bpy_module: Any, bake_type: str) -> None:
         ) from exc
     if not finished:
         raise BakeExecutionError(
-            f"bpy.ops.object.bake did not finish: {result!r}"
+            "bpy.ops.object.bake did not finish for "
+            f"type={resolved_type!r}, uv_layer={resolved_uv_layer!r}: {result!r}"
         )
 
 
@@ -116,6 +136,7 @@ def _bake_pass_to_buffer(
             _call_bake_operator(
                 runtime.bpy_module,
                 pass_plan.bake_mode.value,
+                uv_layer_name=runtime.plan.settings.uv_layer_name,
             )
             return read_bake_image_pixels(image)
     finally:
@@ -149,6 +170,7 @@ def _bake_single_frame(
             _call_bake_operator(
                 runtime.bpy_module,
                 pass_plan.bake_mode.value,
+                uv_layer_name=runtime.plan.settings.uv_layer_name,
             )
             _save_bake_image(image, reservation, runtime.plan)
     finally:
@@ -248,6 +270,7 @@ def run_semantic_bake(
             _activate_uv_layer(
                 temporary.mesh,
                 runtime.plan.settings.uv_layer_name,
+                render_layer_name=runtime.target_snapshot.render_uv_layer,
             )
             with temporarily_exclude_source_from_render(
                 runtime.source_object,
