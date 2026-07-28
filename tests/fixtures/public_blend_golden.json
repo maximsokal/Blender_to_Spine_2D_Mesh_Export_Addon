@@ -1,9 +1,9 @@
 {
   "cases": {
     "negative_scale_modifier": {
-      "images": [{"alpha_coverage": 0.648148, "height": 48, "mean_rgba": [0.627297, 0.581863, 0.502714, 0.569619], "name": "Hero_Baked.png", "width": 36}],
-      "json_sha256": "75b8b2d1462456e9fcdfff95aa962c3a406a6db07f2df4e01e04f1fedfdf1287",
-      "json_size": 5651,
+      "images": [{"alpha_coverage": 1.0, "height": 64, "mean_rgba": [0.941177, 0.756863, 0.243137, 1.0], "name": "Hero_Baked.png", "width": 64}],
+      "json_sha256": "4b8d10078f5278d07659590aab69e5a7400d45d8ab90979ca18c8ec8fc55900a",
+      "json_size": 5662,
       "status": "passed"
     },
     "nested_node_groups": {
