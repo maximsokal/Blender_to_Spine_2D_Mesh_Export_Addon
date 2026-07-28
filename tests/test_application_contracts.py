@@ -3,13 +3,17 @@ from pathlib import Path
 import pytest
 
 from Blender_to_Spine2D_Mesh_Exporter.application import (
+    A1SingleObjectExportSettings,
     ExportIssue,
     ExportRequest,
     ExportResult,
     ExportSettings,
 )
 from Blender_to_Spine2D_Mesh_Exporter.application.contracts import IssueSeverity
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
+    A1RigProfile,
+    A1RigSetupPoseMode,
+)
 
 
 def test_export_request_is_immutable_and_validated(tmp_path: Path):
@@ -40,6 +44,26 @@ def test_export_settings_accept_only_supported_rig_profiles(tmp_path: Path):
             texture_height=512,
             output_directory=tmp_path,
             rig_profile="UNKNOWN_RIG",
+        )
+
+
+def test_single_object_settings_require_typed_setup_pose_mode(tmp_path: Path):
+    export = ExportSettings(
+        texture_width=512,
+        texture_height=512,
+        output_directory=tmp_path,
+        rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
+    )
+    settings = A1SingleObjectExportSettings(
+        export=export,
+        rig_setup_pose_mode=A1RigSetupPoseMode.NORMALIZED_SINGLE,
+    )
+    assert settings.rig_setup_pose_mode is A1RigSetupPoseMode.NORMALIZED_SINGLE
+
+    with pytest.raises(TypeError, match="rig_setup_pose_mode"):
+        A1SingleObjectExportSettings(
+            export=export,
+            rig_setup_pose_mode="NORMALIZED_SINGLE",
         )
 
 
