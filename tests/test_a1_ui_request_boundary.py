@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_bridge as bridge
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import A1TextureExportMode
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
 
 
 class _RnaObject:
@@ -16,11 +17,14 @@ class _RnaObject:
         return self._pointer
 
 
-def _scene():
+def _scene(
+    rig_profile: A1RigProfile = A1RigProfile.THREE_AXIS_ROTATION,
+):
     return SimpleNamespace(
         spine2d_texture_export_mode=(
             A1TextureExportMode.NORMAL_UV_SEGMENTS.value
         ),
+        spine2d_rig_profile=rig_profile.value,
         spine2d_seam_maker_mode="AUTO",
         spine2d_angle_limit=30.0,
         spine2d_control_icons=True,
@@ -58,7 +62,7 @@ def test_multi_sources_share_one_immutable_scene_snapshot(tmp_path):
             _object("A"),
             _object("B", frame_start=4, frame_count=3),
         ),
-        _scene(),
+        _scene(A1RigProfile.TWO_AXIS_ROTATION_SCALE),
         output_directory=tmp_path,
         texture_size=128,
         images_relative_path="images",
@@ -73,6 +77,14 @@ def test_multi_sources_share_one_immutable_scene_snapshot(tmp_path):
     assert (
         sources[0].settings.bake_execution.texture_export_mode
         is A1TextureExportMode.NORMAL_UV_SEGMENTS
+    )
+    assert (
+        sources[0].settings.export.rig_profile
+        == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+    )
+    assert (
+        sources[1].settings.export.rig_profile
+        == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
     )
     assert sources[1].settings.export.sequence_start_frame == 4
     assert sources[1].settings.export.sequence_frame_count == 3
