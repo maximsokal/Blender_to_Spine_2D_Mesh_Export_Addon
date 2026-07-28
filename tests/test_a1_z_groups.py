@@ -86,6 +86,22 @@ def test_source_z_values_are_canonicalized_before_grouping():
     )
 
 
+def test_noisy_source_depth_does_not_explode_final_rig_bone_count():
+    plan = build_a1_z_group_assignment(source_with_legacy_z_noise())
+    rig = build_legacy_rig(
+        LegacyRigBuildRequest(
+            prefix="NoisyDepth",
+            texture_width=256,
+            texture_height=256,
+            z_groups=plan.groups,
+        )
+    )
+
+    assert len(plan.groups) == 2
+    assert len(rig.info.z_groups) == 2
+    assert len(rig.bones) == 16
+
+
 def test_height_overrides_follow_the_same_canonical_z_identity():
     plan = build_a1_z_group_assignment(
         source_with_two_z_groups(),
