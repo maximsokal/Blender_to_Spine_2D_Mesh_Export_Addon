@@ -57,6 +57,7 @@ def _assert_registered() -> None:
         assert hasattr(registration.owner, registration.name), registration.name
     handler = extension.ui.a1_readiness_depsgraph_update_post
     assert tuple(bpy.app.handlers.depsgraph_update_post).count(handler) == 1
+    assert _operator_class("spine2d.reset_rig_profile") is not None
     assert _operator_class("object.spine2d_single_export") is not None
     assert _operator_class("object.spine2d_multi_export") is not None
     assert _operator_class("object.save_uv_as_json") is not None
@@ -67,6 +68,7 @@ def _assert_unregistered() -> None:
         assert not hasattr(registration.owner, registration.name), registration.name
     handler = extension.ui.a1_readiness_depsgraph_update_post
     assert handler not in bpy.app.handlers.depsgraph_update_post
+    assert _operator_class("spine2d.reset_rig_profile") is None
     assert _operator_class("object.spine2d_single_export") is None
     assert _operator_class("object.spine2d_multi_export") is None
     assert _operator_class("object.save_uv_as_json") is None
@@ -105,6 +107,7 @@ ALLOWED_TOP_LEVEL = {
     "addon_preferences",
     "config",
     "repolish_ui",
+    "rig_ui",
     "single_object_operator",
     "ui",
 }
