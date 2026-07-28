@@ -7,7 +7,7 @@ from typing import Any
 
 import bpy
 
-from ..domain.spine.rig_profiles import A1RigProfile
+from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
 
 try:
     from bpy.app.handlers import persistent
@@ -17,9 +17,11 @@ except Exception:  # pragma: no cover - real Blender always provides this decora
 
 
 logger = logging.getLogger(__name__)
-CURRENT_SETTINGS_SCHEMA_VERSION = 4
+CURRENT_SETTINGS_SCHEMA_VERSION = 5
 _REGISTERED = False
 _FILE_LOADING = False
+_SCHEMA_PROPERTY = "spine2d_settings_schema_version"
+_RIG_PROPERTY = "spine2d_rig_profile"
 
 
 def migration_file_loading() -> bool:
@@ -29,7 +31,7 @@ def migration_file_loading() -> bool:
 
 
 def _stored_schema_version(scene: Any) -> int:
-    raw = getattr(scene, "spine2d_settings_schema_version", 0)
+    raw = getattr(scene, _SCHEMA_PROPERTY, 0)
     try:
         value = int(raw)
     except (TypeError, ValueError, OverflowError):
@@ -45,13 +47,46 @@ def _stored_seam_mode(scene: Any) -> str:
     return value or "AUTO"
 
 
-def migrate_scene_settings(scene: Any) -> bool:
-    """Migrate one Scene exactly once without overwriting later user choices.
+def _persisted_scene_keys(scene: Any) -> frozenset[str]:
+    """Read actual ID-property keys without treating RNA defaults as persisted data."""
 
-    Schema 3 repaired Scenes that reached schema 2 with CUSTOM while RNA properties were
-    being rebound during registration. Schema 4 introduces explicit rig profiles and
-    assigns every older Scene to the byte-compatible three-axis profile. A deliberate
-    two-axis choice made after schema 4 is never overwritten.
+    keys = getattr(scene, "keys", None)
+    if not callable(keys):
+        return frozenset()
+    try:
+        return frozenset(str(key) for key in keys())
+    except Exception:
+        logger.debug("Unable to inspect Scene ID-property keys", exc_info=True)
+        return frozenset()
+
+
+def _is_fresh_scene(scene: Any, current_schema: int) -> bool:
+    """Return True only when no previous Rewrite setting was stored in the Scene."""
+
+    if current_schema != 0:
+        return False
+    persisted = _persisted_scene_keys(scene)
+    return not any(
+        key.startswith("spine2d_") and key != _SCHEMA_PROPERTY
+        for key in persisted
+    )
+
+
+def _stored_rig_profile(scene: Any) -> A1RigProfile:
+    raw = getattr(scene, _RIG_PROPERTY, A1RigProfile.TWO_AXIS_ROTATION_SCALE.value)
+    try:
+        return resolve_a1_rig_profile(raw)
+    except (TypeError, ValueError):
+        logger.warning("Invalid persisted rig profile %r; using two-axis default", raw)
+        return A1RigProfile.TWO_AXIS_ROTATION_SCALE
+
+
+def migrate_scene_settings(scene: Any) -> bool:
+    """Migrate one Scene once without overwriting established rig choices.
+
+    Schema 4 introduced selectable rig profiles and assigned older saved projects to the
+    byte-compatible three-axis rig. Schema 5 changes only the default for genuinely fresh
+    Scenes. Existing schema-4 Scenes keep the profile already chosen by the user.
     """
 
     if scene is None:
@@ -61,22 +96,32 @@ def migrate_scene_settings(scene: Any) -> bool:
     if current >= CURRENT_SETTINGS_SCHEMA_VERSION:
         return False
 
+    fresh_scene = _is_fresh_scene(scene, current)
     previous_mode = _stored_seam_mode(scene)
-    seam_changed = current < 3
+    seam_changed = current < 3 and not fresh_scene
     if seam_changed:
         scene.spine2d_seam_maker_mode = "AUTO"
 
-    scene.spine2d_rig_profile = A1RigProfile.THREE_AXIS_ROTATION.value
+    if current >= 4:
+        rig_profile = _stored_rig_profile(scene)
+    elif fresh_scene:
+        rig_profile = A1RigProfile.TWO_AXIS_ROTATION_SCALE
+    else:
+        # Never silently change established pre-profile projects.
+        rig_profile = A1RigProfile.THREE_AXIS_ROTATION
+
+    scene.spine2d_rig_profile = rig_profile.value
     scene.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION
     logger.info(
         "Migrated Spine2D Rewrite Scene '%s' settings schema %d -> %d; "
-        "Seam Maker %s -> %s; Rig -> %s",
+        "fresh=%s; Seam Maker %s -> %s; Rig -> %s",
         str(getattr(scene, "name", "<unnamed>")),
         current,
         CURRENT_SETTINGS_SCHEMA_VERSION,
+        fresh_scene,
         previous_mode,
         "AUTO" if seam_changed else previous_mode,
-        A1RigProfile.THREE_AXIS_ROTATION.value,
+        rig_profile.value,
     )
     return True
 
