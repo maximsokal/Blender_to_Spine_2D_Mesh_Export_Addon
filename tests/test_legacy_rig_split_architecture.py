@@ -90,10 +90,10 @@ def test_physical_owners_keep_separate_responsibilities():
     assert "validate_legacy_rig_result" in assembly
 
 
-def test_production_callers_use_physical_legacy_rig_owners():
+def test_production_callers_use_physical_rig_owners_and_profile_router():
     expected = {
         ROOT / "blender_adapter" / "a1_document_preparation.py": (
-            "domain.spine.legacy_rig_assembly",
+            "domain.spine.rig_builder",
             "domain.spine.legacy_rig_contracts",
         ),
         ROOT / "application" / "a1_single_object.py": (
@@ -124,6 +124,10 @@ def test_production_callers_use_physical_legacy_rig_owners():
         assert "legacy_rig_builder" not in source
         for fragment in fragments:
             assert fragment in source
+
+    preparation = _source(ROOT / "blender_adapter" / "a1_document_preparation.py")
+    assert "build_rig(" in preparation
+    assert "domain.spine.legacy_rig_assembly" not in preparation
 
 
 def test_historical_facade_aliases_point_to_physical_functions():
