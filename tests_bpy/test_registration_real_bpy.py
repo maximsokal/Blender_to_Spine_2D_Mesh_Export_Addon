@@ -12,6 +12,7 @@ RNA_REGISTRATIONS = (
     *extension.CONFIG_RNA_PROPERTIES,
     *extension.ui.RNA_PROPERTIES,
     *extension.generated_material_ui.RNA_PROPERTIES,
+    *extension.ui_layout.RNA_PROPERTIES,
     *extension.single_object_operator.RNA_PROPERTIES,
 )
 
@@ -78,15 +79,17 @@ def _assert_registered() -> None:
     assert bpy.context.scene.spine2d_seam_maker_mode == "AUTO"
     assert (
         bpy.context.scene.spine2d_rig_profile
-        == A1RigProfile.THREE_AXIS_ROTATION.value
+        == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
     )
     assert bpy.context.scene.spine2d_material_source_policy == "REQUIRE_SOURCE"
     assert hasattr(bpy.types.Object, "spine2d_bake_settings")
     assert hasattr(bpy.types.Object, "spine2d_connect_settings")
-    assert _panel_class("OBJECT_PT_spine2d_mesh") is not None
-    assert _panel_class("OBJECT_PT_spine2d_rig") is not None
+    assert _panel_class("OBJECT_PT_spine2d_mesh") is (
+        extension.ui_layout.OBJECT_PT_Spine2DOrderedMeshPanel
+    )
+    assert _panel_class("OBJECT_PT_spine2d_rig") is None
     assert _panel_class("OBJECT_PT_spine2d_repolish") is not None
-    assert _panel_class("OBJECT_PT_spine2d_generated_materials") is not None
+    assert _panel_class("OBJECT_PT_spine2d_generated_materials") is None
     assert _operator_class("spine2d.reset_rig_profile") is not None
     assert _operator_class("object.spine2d_single_export") is not None
     assert _operator_class("object.spine2d_multi_export") is not None
