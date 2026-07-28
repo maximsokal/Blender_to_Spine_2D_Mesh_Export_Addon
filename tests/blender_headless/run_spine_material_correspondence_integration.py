@@ -30,7 +30,6 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
 from run_spine_uv_file_space_integration import (  # noqa: E402
     _assert,
     _clear_scene,
-    _create_directional_material,
     _create_directional_source_image,
     _inset_uv,
     _load_rgba,
@@ -40,6 +39,46 @@ from run_spine_uv_file_space_integration import (  # noqa: E402
 
 SOURCE_NAME = "MaterialCorrespondence"
 SOURCE_UV_LAYER = "UVMap"
+
+
+def _create_sword_style_material(image: bpy.types.Image) -> bpy.types.Material:
+    """Create the representative sword's implicit render-UV material graph.
+
+    Texture Coordinate ``UV`` reads the mesh's ``active_render`` UV layer. The
+    exporter must therefore keep ``UVMap`` as the shader-sampling role while Blender
+    writes the semantic bake into the independent ``SpineBakeUV`` destination.
+    """
+
+    material = bpy.data.materials.new("MaterialCorrespondenceSwordStyle")
+    material.use_nodes = True
+    node_tree = material.node_tree
+    _assert(node_tree is not None, "Sword-style material has no node tree")
+    nodes = node_tree.nodes
+    links = node_tree.links
+    nodes.clear()
+
+    output = nodes.new(type="ShaderNodeOutputMaterial")
+    principled = nodes.new(type="ShaderNodeBsdfPrincipled")
+    texture_coordinate = nodes.new(type="ShaderNodeTexCoord")
+    mapping = nodes.new(type="ShaderNodeMapping")
+    texture = nodes.new(type="ShaderNodeTexImage")
+
+    output.name = "Material Output"
+    output.target = "ALL"
+    principled.name = "Principled BSDF"
+    principled.inputs["Roughness"].default_value = 1.0
+    texture_coordinate.name = "Texture Coordinate"
+    mapping.name = "Mapping"
+    texture.name = "Image Texture"
+    texture.image = image
+    texture.interpolation = "Closest"
+    texture.extension = "CLIP"
+
+    links.new(texture_coordinate.outputs["UV"], mapping.inputs["Vector"])
+    links.new(mapping.outputs["Vector"], texture.inputs["Vector"])
+    links.new(texture.outputs["Color"], principled.inputs["Base Color"])
+    links.new(principled.outputs["BSDF"], output.inputs["Surface"])
+    return material
 
 
 def _create_permuted_source_triangle() -> bpy.types.Object:
@@ -73,7 +112,7 @@ def _create_permuted_source_triangle() -> bpy.types.Object:
     source = bpy.data.objects.new(SOURCE_NAME, mesh)
     bpy.context.scene.collection.objects.link(source)
     source_image = _create_directional_source_image()
-    material = _create_directional_material(source_image)
+    material = _create_sword_style_material(source_image)
     mesh.materials.append(material)
     polygon.material_index = 0
 
@@ -149,7 +188,7 @@ def _temporary_datablock_names() -> tuple[str, ...]:
     )
 
 
-def test_permuted_source_material_uv_matches_final_spine_vertices() -> None:
+def test_sword_style_source_material_uv_matches_final_spine_vertices() -> None:
     _clear_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-material-correspondence-") as path:
         output_directory = Path(path)
@@ -214,7 +253,7 @@ def main() -> None:
     _assert(bpy.app.version >= (5, 2, 0), "Blender 5.2 or newer is required")
     addon.register()
     try:
-        test_permuted_source_material_uv_matches_final_spine_vertices()
+        test_sword_style_source_material_uv_matches_final_spine_vertices()
         print("[SPINE_MATERIAL_CORRESPONDENCE] PASS")
     finally:
         addon.unregister()
