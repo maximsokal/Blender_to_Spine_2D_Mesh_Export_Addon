@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import bpy
 import pytest
@@ -14,11 +15,10 @@ from tools.create_public_blend_fixtures import create_all
 
 
 ROOT = Path(__file__).resolve().parents[1]
-GOLDEN = json.loads(
-    (ROOT / "tests" / "fixtures" / "public_blend_golden.json").read_text(
-        encoding="utf-8"
-    )
-)["cases"]
+GOLDEN_PATH = ROOT / "tests" / "fixtures" / "public_blend_golden.json"
+CANDIDATE_PATH = ROOT / ".pytest_cache" / "public_blend_golden_candidate.json"
+GOLDEN_DOCUMENT = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
+GOLDEN = GOLDEN_DOCUMENT["cases"]
 
 
 @pytest.fixture(scope="session")
@@ -84,7 +84,7 @@ def _source_fingerprint(obj):
     )
 
 
-def _image_metrics(path):
+def _image_metrics(path: Path) -> dict[str, object]:
     image = bpy.data.images.load(str(path), check_existing=False)
     try:
         width = int(image.size[0])
@@ -92,16 +92,17 @@ def _image_metrics(path):
         channels = int(image.channels)
         values = tuple(float(value) for value in image.pixels[:])
         count = width * height
-        means = []
+        means: list[float] = []
         for channel in range(4):
+            if channel >= channels:
+                means.append(1.0)
+                continue
             means.append(
                 sum(
                     values[index * channels + channel]
                     for index in range(count)
                 )
                 / count
-                if channel < channels
-                else 1.0
             )
         alpha_index = 3 if channels >= 4 else None
         coverage = (
@@ -115,16 +116,18 @@ def _image_metrics(path):
             else 1.0
         )
         return {
+            "name": path.name,
             "width": width,
             "height": height,
-            "mean_rgba": tuple(means),
-            "alpha_coverage": coverage,
+            "mean_rgba": [round(value, 6) for value in means],
+            "alpha_coverage": round(coverage, 6),
         }
     finally:
         bpy.data.images.remove(image)
 
 
-def _configure(output_root):
+def _configure(output_root: Path):
+    output_root.mkdir(parents=True, exist_ok=True)
     scene = bpy.context.scene
     scene.spine2d_json_path = str(output_root)
     scene.spine2d_images_path = "images"
@@ -143,86 +146,189 @@ def _configure(output_root):
     return obj
 
 
-def _assert_json_matches_golden(path: Path, expected: dict[str, object]) -> None:
-    payload = path.read_bytes()
-    actual_size = len(payload)
-    expected_size = int(expected["json_size"])
-    assert actual_size == expected_size, (
-        f"{path.name} size mismatch: expected {expected_size}, got {actual_size}"
-    )
-
-    actual_sha256 = hashlib.sha256(payload).hexdigest()
-    expected_sha256 = str(expected["json_sha256"])
-    assert actual_sha256 == expected_sha256, (
-        f"{path.name} SHA-256 mismatch: "
-        f"expected {expected_sha256}, got {actual_sha256}"
-    )
-
+def _collect_passed_case(output_root: Path) -> dict[str, object]:
+    json_files = tuple(sorted(output_root.glob("*.json")))
+    assert len(json_files) == 1, f"expected one JSON output, got: {json_files}"
+    json_path = json_files[0]
+    payload = json_path.read_bytes()
     parsed = json.loads(payload.decode("utf-8"))
-    assert isinstance(parsed, dict), f"{path.name} root must be a JSON object"
+    assert isinstance(parsed, dict), f"{json_path.name} root must be a JSON object"
+
+    images = tuple(
+        path
+        for path in sorted((output_root / "images").glob("*"))
+        if path.is_file()
+    )
+    return {
+        "status": "passed",
+        "json_sha256": hashlib.sha256(payload).hexdigest(),
+        "json_size": len(payload),
+        "images": [_image_metrics(path) for path in images],
+    }
 
 
-@pytest.mark.parametrize("case_id", tuple(sorted(GOLDEN)))
-def test_public_blend_fixture_matches_reviewed_golden(
-    case_id,
+def _compare_number(
+    *,
+    case_id: str,
+    field: str,
+    expected: object,
+    actual: object,
+    tolerance: float,
+) -> list[str]:
+    expected_value = float(expected)
+    actual_value = float(actual)
+    if abs(expected_value - actual_value) <= tolerance:
+        return []
+    return [
+        f"{case_id}.{field}: expected {expected_value}, got {actual_value}"
+    ]
+
+
+def _compare_case(
+    case_id: str,
+    expected: dict[str, object],
+    actual: dict[str, object],
+) -> list[str]:
+    mismatches: list[str] = []
+    expected_status = str(expected.get("status"))
+    actual_status = str(actual.get("status"))
+    if actual_status != expected_status:
+        return [
+            f"{case_id}.status: expected {expected_status!r}, got {actual_status!r}"
+        ]
+    if expected_status != "passed":
+        return mismatches
+
+    for field in ("json_size", "json_sha256"):
+        if actual.get(field) != expected.get(field):
+            mismatches.append(
+                f"{case_id}.{field}: expected {expected.get(field)!r}, "
+                f"got {actual.get(field)!r}"
+            )
+
+    expected_images = tuple(expected.get("images", ()))
+    actual_images = tuple(actual.get("images", ()))
+    if len(actual_images) != len(expected_images):
+        mismatches.append(
+            f"{case_id}.images: expected {len(expected_images)} outputs, "
+            f"got {len(actual_images)}"
+        )
+        return mismatches
+
+    for index, (expected_image, actual_image) in enumerate(
+        zip(expected_images, actual_images, strict=True)
+    ):
+        prefix = f"images[{index}]"
+        for field in ("name", "width", "height"):
+            if actual_image.get(field) != expected_image.get(field):
+                mismatches.append(
+                    f"{case_id}.{prefix}.{field}: "
+                    f"expected {expected_image.get(field)!r}, "
+                    f"got {actual_image.get(field)!r}"
+                )
+
+        mismatches.extend(
+            _compare_number(
+                case_id=case_id,
+                field=f"{prefix}.alpha_coverage",
+                expected=expected_image["alpha_coverage"],
+                actual=actual_image["alpha_coverage"],
+                tolerance=0.01,
+            )
+        )
+
+        expected_rgba = tuple(expected_image["mean_rgba"])
+        actual_rgba = tuple(actual_image["mean_rgba"])
+        if len(expected_rgba) != len(actual_rgba):
+            mismatches.append(
+                f"{case_id}.{prefix}.mean_rgba: expected {len(expected_rgba)} "
+                f"channels, got {len(actual_rgba)}"
+            )
+            continue
+        for channel, (expected_value, actual_value) in enumerate(
+            zip(expected_rgba, actual_rgba, strict=True)
+        ):
+            mismatches.extend(
+                _compare_number(
+                    case_id=case_id,
+                    field=f"{prefix}.mean_rgba[{channel}]",
+                    expected=expected_value,
+                    actual=actual_value,
+                    tolerance=0.03,
+                )
+            )
+    return mismatches
+
+
+def _write_candidate(actual_cases: dict[str, dict[str, object]]) -> str:
+    document = {
+        "schema_version": int(GOLDEN_DOCUMENT.get("schema_version", 1)),
+        "cases": actual_cases,
+    }
+    rendered = json.dumps(
+        document,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+    CANDIDATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CANDIDATE_PATH.write_text(rendered, encoding="utf-8")
+    return rendered
+
+
+def test_public_blend_fixtures_match_reviewed_goldens(
     tmp_path,
     generated_public_blend_fixtures,
 ):
-    fixture = generated_public_blend_fixtures / f"{case_id}.blend"
-    assert fixture.is_file()
-    assert fixture.stat().st_size > 1024
-    assert "FINISHED" in bpy.ops.wm.open_mainfile(
-        filepath=str(fixture),
-        load_ui=False,
-    )
+    actual_cases: dict[str, dict[str, object]] = {}
+    mismatches: list[str] = []
 
-    completed = _register_steps()
-    try:
-        obj = _configure(tmp_path)
-        source_before = _source_fingerprint(obj)
-        expected = GOLDEN[case_id]
+    for case_id in sorted(GOLDEN):
+        fixture = generated_public_blend_fixtures / f"{case_id}.blend"
+        assert fixture.is_file()
+        assert fixture.stat().st_size > 1024
+        assert "FINISHED" in bpy.ops.wm.open_mainfile(
+            filepath=str(fixture),
+            load_ui=False,
+        )
 
-        if expected["status"] == "failed":
-            with pytest.raises(RuntimeError, match="A1_PREPARE_GEOMETRY_FAILED"):
-                bpy.ops.object.save_uv_as_json()
-            assert not tuple(tmp_path.rglob("*.json"))
-            assert not tuple(tmp_path.rglob("*.png"))
-        else:
-            result = set(bpy.ops.object.save_uv_as_json())
-            assert "FINISHED" in result
+        completed = _register_steps()
+        try:
+            output_root = tmp_path / case_id
+            obj = _configure(output_root)
+            source_before = _source_fingerprint(obj)
+            expected = GOLDEN[case_id]
 
-            json_files = tuple(sorted(tmp_path.glob("*.json")))
-            assert len(json_files) == 1, (
-                f"expected one JSON output, got: {json_files}"
-            )
-            _assert_json_matches_golden(json_files[0], expected)
+            if expected["status"] == "failed":
+                with pytest.raises(
+                    RuntimeError,
+                    match="A1_PREPARE_GEOMETRY_FAILED",
+                ):
+                    bpy.ops.object.save_uv_as_json()
+                assert not tuple(output_root.rglob("*.json"))
+                assert not tuple(output_root.rglob("*.png"))
+                actual = dict(expected)
+            else:
+                result = set(bpy.ops.object.save_uv_as_json())
+                assert "FINISHED" in result
+                actual = _collect_passed_case(output_root)
 
-            images = tuple(sorted((tmp_path / "images").glob("*")))
-            expected_images = tuple(expected["images"])
-            assert len(images) == len(expected_images), (
-                f"expected {len(expected_images)} image outputs, got: {images}"
-            )
+            assert _source_fingerprint(obj) == source_before
+            assert not tuple(output_root.glob("*.spine2d.lock"))
+            assert not tuple(output_root.glob(".spine2d-journal-*.json"))
+        finally:
+            _unregister_steps(completed)
 
-            for path, expected_image in zip(
-                images,
-                expected_images,
-                strict=True,
-            ):
-                actual = _image_metrics(path)
-                assert path.name == expected_image["name"]
-                assert actual["width"] == expected_image["width"]
-                assert actual["height"] == expected_image["height"]
-                assert actual["alpha_coverage"] == pytest.approx(
-                    expected_image["alpha_coverage"],
-                    abs=0.01,
-                )
-                assert actual["mean_rgba"] == pytest.approx(
-                    expected_image["mean_rgba"],
-                    abs=0.03,
-                )
+        actual_cases[case_id] = actual
+        mismatches.extend(_compare_case(case_id, expected, actual))
 
-        assert _source_fingerprint(obj) == source_before
-        assert not tuple(tmp_path.glob("*.spine2d.lock"))
-        assert not tuple(tmp_path.glob(".spine2d-journal-*.json"))
-    finally:
-        _unregister_steps(completed)
+    candidate = _write_candidate(actual_cases)
+    if mismatches:
+        details = "\n".join(f"- {message}" for message in mismatches)
+        pytest.fail(
+            "Public blend golden catalog is stale.\n"
+            f"Candidate written to: {CANDIDATE_PATH}\n"
+            f"Mismatches:\n{details}\n"
+            f"Candidate JSON:\n{candidate}",
+            pytrace=False,
+        )
