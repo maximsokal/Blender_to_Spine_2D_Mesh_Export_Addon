@@ -1,8 +1,23 @@
 # Settings Reference
 
-This document describes the user-facing settings registered by the Blender 5.2 extension. Defaults are the values used by a new or migrated Scene.
+This document describes the user-facing settings registered by the Blender 5.2 extension. Defaults below apply to a genuinely new Scene. Migration rules for saved Scenes are described in the Rig section.
 
-## Main panel: Export
+## Main panel order
+
+Every section uses the same boxed foldout style and is rendered in this exact order:
+
+```text
+Export
+Rig
+Rewrite Generated Materials
+Cut
+Bake
+Export Readiness
+```
+
+Analysis results and the guarded export action are contained inside the final **Export Readiness** foldout. Rig and generated-material settings are no longer separate child panels below the export action.
+
+## Export
 
 ### Export mode
 
@@ -59,18 +74,39 @@ At least two selected objects must have Connect enabled to create a connected su
 
 `TWO_AXIS_ROTATION_SCALE` currently supports single-object and standalone multi-object composition. Connected composition remains blocked with an explicit readiness/export diagnostic until its five-phase constraint schedule receives a dedicated connected-group implementation. The exporter never substitutes a fake sixth constraint.
 
-## Child panel: Rig
+## Rig
 
 ### Rig profile
 
-| Value | Persisted ID | Default | Behavior |
+| Value | Persisted ID | Fresh Scene default | Behavior |
 | --- | --- | --- | --- |
-| 3-Axis Rotation | `LEGACY_ROTATABLE_MESH` | Yes | Existing X/Y/Z compatibility rig. Existing output remains the default for old Scenes. |
-| 2-Axis Rotation + Scale | `TWO_AXIS_ROTATION_SCALE` | No | Generates X/Y pseudo-rotation controls and one independent uniform Scale control. No Rotation Z control is generated. |
+| 3-Axis Rotation | `LEGACY_ROTATABLE_MESH` | No | Existing X/Y/Z compatibility rig. |
+| 2-Axis Rotation + Scale | `TWO_AXIS_ROTATION_SCALE` | Yes | Generates X/Y pseudo-rotation controls and one independent uniform Scale control. No Rotation Z control is generated. |
 
 Changing Rig profile invalidates cached readiness and schedules a new analysis because bone names, constraint order, weighted bone indices, control attachments, and preview animation change.
 
 The two-axis profile follows the complete Spine 4.2.43 reference stored in [Rig Profiles](rig-profiles.md). Model-specific `BOX`, `TOP`, and `BOTTOM` names are not copied. They are generalized through the object prefix, ordered Z groups, and existing per-vertex bones.
+
+### Single-object setup pose
+
+A single-object export uses `NORMALIZED_SINGLE` setup policy:
+
+```text
+<prefix>_main.x = 0
+<prefix>_main.y = 0
+<prefix>_rotation_X.rotation = 0
+<prefix>_rotation_Y.rotation = 0
+```
+
+The original object placement is transferred to the internal `<prefix>` base bone and to the control layout. This keeps the exported mesh in the same world-space position while giving the animator a neutral visible setup pose.
+
+The reference X/Y setup angles are retained as transform-constraint rotation offsets. They are not discarded.
+
+### Multi-object setup pose
+
+Standalone and connected multi-object preparation use `PRESERVE_COMPOSITION` policy. Each object's existing nonzero `<prefix>_main` placement and reference X/Y setup rotations remain unchanged so document composition cannot flatten or overlap the scene.
+
+The selected policy is explicit immutable data passed through UI settings into the rig build request. It is never inferred from object names or coordinate values.
 
 ### 2-Axis controls
 
@@ -81,6 +117,16 @@ The generated control set is:
 <prefix>_rotation_Y
 <prefix>_scale
 <prefix>_main
+```
+
+X, Y, and Scale controls share one editor X coordinate. Their Y positions are separated by one control length:
+
+```text
+Rotation X
+    one control length
+Rotation Y
+    one control length
+Scale
 ```
 
 The Scale transform affects `<prefix>_rotate_X` and every Z-group rotation bone. Constraint evaluation uses the reference order:
@@ -98,7 +144,7 @@ The Scale transform affects `<prefix>_rotate_X` and every Z-group rotation bone.
 The reset button beside the profile selector restores:
 
 ```text
-3-Axis Rotation (LEGACY_ROTATABLE_MESH)
+2-Axis Rotation + Scale (TWO_AXIS_ROTATION_SCALE)
 ```
 
 It does not modify texture, cutting, baking, material, or path settings.
@@ -114,8 +160,6 @@ The generated control attachments match the selected profile:
 - 3-Axis: X, Y, Z, Main;
 - 2-Axis + Scale: X, Y, Scale, Main.
 
-The current transition UI also mirrors this toggle in the Export foldout; both controls edit the same Scene property.
-
 ### Preview animation
 
 | Type | Default |
@@ -124,9 +168,42 @@ The current transition UI also mirrors this toggle in the Export foldout; both c
 
 The preview matches the selected profile. The two-axis preview references only X, Y, and Scale controls and contains no Z timeline.
 
-The current transition UI also mirrors this toggle in the Export foldout; both controls edit the same Scene property.
+### Saved Scene migration
 
-## Main panel: Cut
+Schema 5 changes the default only for genuinely fresh Scenes:
+
+- a new Scene with no persisted Rewrite settings receives `TWO_AXIS_ROTATION_SCALE`;
+- a saved pre-profile project is assigned `LEGACY_ROTATABLE_MESH` for compatibility;
+- a schema-4 Scene preserves whichever rig profile the user already selected;
+- current schema values are never overwritten on registration or file loading.
+
+## Rewrite Generated Materials
+
+### Material Source
+
+| Value | Default | Behavior |
+| --- | --- | --- |
+| Require Source | Yes | Missing required source material data blocks export. |
+| Generate If Missing | No | Uses generated material only when required source material data is missing. |
+| Force Generated | No | Ignores source materials and always uses the generated pattern. |
+
+### Generated Pattern
+
+| Value | Default | Behavior |
+| --- | --- | --- |
+| Solid Gray | Yes | Uses one opaque RGB color. |
+| One Region - One Color | No | Assigns a deterministic color to each final region. |
+| One Polygon - One Color | No | Assigns a deterministic color to each final triangulated exported polygon. |
+
+### Generated Gray
+
+| Type | Range | Default |
+| --- | --- | --- |
+| RGB color | Each channel 0.0 through 1.0 | `(0.5, 0.5, 0.5)` |
+
+Generated output is always opaque; alpha is fixed to 1.0.
+
+## Cut
 
 ### Seam Maker
 
@@ -135,7 +212,7 @@ The current transition UI also mirrors this toggle in the Export foldout; both c
 | Auto | Yes | Uses angular segmentation controls. |
 | Custom | No | Uses user-marked seams and disables angular splitting controls. |
 
-Older development scenes are migrated once to the current Scene settings schema with Auto and 3-Axis Rotation selected. Deliberate choices made after migration are preserved.
+Older development scenes are migrated once to the current Scene settings schema. Deliberate choices made after migration are preserved.
 
 ### Seed angle limit
 
@@ -162,7 +239,7 @@ Visible only for **Seed cone + local dihedral**.
 
 The value limits local face-to-face angle changes across shared edges while the seed-cone condition remains active.
 
-## Main panel: Bake
+## Bake
 
 ### Frames for render
 
@@ -189,33 +266,7 @@ Frames = 0: Start
 Frames > 0: Start + Frames - 1
 ```
 
-## Generated Materials panel
-
-### Material Source
-
-| Value | Default | Behavior |
-| --- | --- | --- |
-| Require Source | Yes | Missing required source material data blocks export. |
-| Generate If Missing | No | Uses generated material only when required source material data is missing. |
-| Force Generated | No | Ignores source materials and always uses the generated pattern. |
-
-### Generated Pattern
-
-| Value | Default | Behavior |
-| --- | --- | --- |
-| Solid Gray | Yes | Uses one opaque RGB color. |
-| One Region - One Color | No | Assigns a deterministic color to each final region. |
-| One Polygon - One Color | No | Assigns a deterministic color to each final triangulated exported polygon. |
-
-### Generated Gray
-
-| Type | Range | Default |
-| --- | --- | --- |
-| RGB color | Each channel 0.0 through 1.0 | `(0.5, 0.5, 0.5)` |
-
-Generated output is always opaque; alpha is fixed to 1.0.
-
-## Readiness analysis
+## Export Readiness
 
 ### Analyze
 
@@ -224,10 +275,10 @@ Runs the production preparation pipeline without committing final export files. 
 - overall READY, WARNING, BLOCKED, NOT_ANALYSED, or STALE state;
 - object-level issues;
 - geometry, topology, UV, material, texture, rig, and attachment statistics;
-- selected rig profile;
+- selected rig profile and setup-pose policy;
 - blocker and warning counts.
 
-Export requires a current report that allows export.
+The single-object or multi-object export button is inside this foldout and remains disabled until the current report allows export.
 
 ## Add-on Preferences: diagnostics
 
@@ -298,7 +349,7 @@ Frames for render            0
 Start frame                  0
 ```
 
-Use the dedicated Rig reset control to restore the default rig profile.
+Use the dedicated Rig reset control to restore the default two-axis rig profile.
 
 The Generated Materials Reset operator restores:
 
