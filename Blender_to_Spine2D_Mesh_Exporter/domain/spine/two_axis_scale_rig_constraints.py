@@ -6,6 +6,7 @@ from typing import Tuple
 
 from .legacy_rig_plan import LegacyRigBuildPlan
 from .model import IKConstraint, TransformConstraint
+from .rig_profiles import A1RigSetupPoseMode
 from .two_axis_scale_profile import TwoAxisScaleRigProfile
 from .two_axis_scale_rig_contracts import TwoAxisScaleRigLayout
 
@@ -14,7 +15,12 @@ def build_two_axis_scale_constraints(
     plan: LegacyRigBuildPlan,
     layout: TwoAxisScaleRigLayout,
 ) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
-    """Build the exact five-phase schedule generalized from the reference rig."""
+    """Build the exact five-phase schedule generalized from the reference rig.
+
+    In normalized single-object mode visible X/Y controls have zero setup rotation. The
+    reference setup angles are therefore moved to the matching transform-constraint
+    offsets. Multi-object mode retains the previously validated setup-pose payload.
+    """
 
     if not isinstance(plan, LegacyRigBuildPlan):
         raise TypeError("plan must be LegacyRigBuildPlan")
@@ -24,6 +30,9 @@ def build_two_axis_scale_constraints(
         raise TypeError("plan.profile must be TwoAxisScaleRigProfile")
 
     profile = plan.profile
+    normalized_single = (
+        plan.request.setup_pose_mode is A1RigSetupPoseMode.NORMALIZED_SINGLE
+    )
     control_x, control_y, scale_control = plan.control_bone_names
     constraint_bone, _scale_ik, rotate_ik, ik_target = plan.ik_chain_bone_names
     front_to_back_rotation_bones = tuple(reversed(plan.info.sub_bone_names))
@@ -38,37 +47,43 @@ def build_two_axis_scale_constraints(
         ),
     )
 
+    rotation_x_extras = {
+        "local": True,
+        "relative": True,
+        "x": -plan.uniform_scale,
+        "y": plan.uniform_scale,
+        "scaleX": -1,
+        "mixX": 0,
+        "mixScaleX": 0,
+        "mixShearY": 0,
+    }
+    rotation_y_extras = {
+        "local": True,
+        "relative": True,
+        "x": -plan.uniform_scale,
+        "y": layout.maximum_depth_y,
+        "mixX": 0,
+        "mixScaleX": 0,
+        "mixShearY": 0,
+    }
+    if normalized_single:
+        rotation_x_extras["rotation"] = profile.rotation_x_setup_degrees
+        rotation_y_extras["rotation"] = profile.rotation_y_setup_degrees
+
     transform = (
         TransformConstraint(
             name=profile.rotation_x_constraint(plan.prefix),
             order=0,
             bones=(rotate_ik, plan.main_rotation_bone_name),
             target=control_x,
-            extras={
-                "local": True,
-                "relative": True,
-                "x": -plan.uniform_scale,
-                "y": plan.uniform_scale,
-                "scaleX": -1,
-                "mixX": 0,
-                "mixScaleX": 0,
-                "mixShearY": 0,
-            },
+            extras=rotation_x_extras,
         ),
         TransformConstraint(
             name=profile.rotation_y_constraint(plan.prefix),
             order=4,
             bones=front_to_back_rotation_bones,
             target=control_y,
-            extras={
-                "local": True,
-                "relative": True,
-                "x": -plan.uniform_scale,
-                "y": layout.maximum_depth_y,
-                "mixX": 0,
-                "mixScaleX": 0,
-                "mixShearY": 0,
-            },
+            extras=rotation_y_extras,
         ),
         TransformConstraint(
             name=profile.scale_constraint(plan.prefix),
