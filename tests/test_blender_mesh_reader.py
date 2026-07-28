@@ -44,6 +44,14 @@ class FakeMatrix:
         )[row]
 
 
+def _uv_layer(name, coordinates, *, active_render=False):
+    return SimpleNamespace(
+        name=name,
+        active_render=active_render,
+        uv=[SimpleNamespace(vector=coordinate) for coordinate in coordinates],
+    )
+
+
 def make_fake_quad():
     vertices = [
         SimpleNamespace(index=0, co=(0, 0, 0), normal=(0, 0, 1)),
@@ -93,15 +101,10 @@ def make_fake_quad():
             use_smooth=True,
         )
     ]
-    uv_layer = SimpleNamespace(
-        name="UVMap",
+    uv_layer = _uv_layer(
+        "UVMap",
+        ((0, 0), (1, 0), (1, 1), (0, 1)),
         active_render=True,
-        uv=[
-            SimpleNamespace(vector=(0, 0)),
-            SimpleNamespace(vector=(1, 0)),
-            SimpleNamespace(vector=(1, 1)),
-            SimpleNamespace(vector=(0, 1)),
-        ],
     )
     mesh = SimpleNamespace(
         vertices=vertices,
@@ -134,6 +137,7 @@ def test_read_source_mesh_snapshot_preserves_face_corner_identity():
     assert snapshot.snapshot_id == "source-123:source"
     assert snapshot.object_name == "Collection/Quad"
     assert snapshot.active_uv_layer == "UVMap"
+    assert snapshot.render_uv_layer == "UVMap"
     assert snapshot.world_matrix[3] == 2.0
     assert snapshot.world_matrix[7] == 3.0
     assert snapshot.world_matrix[11] == 4.0
@@ -146,6 +150,25 @@ def test_read_source_mesh_snapshot_preserves_face_corner_identity():
     assert snapshot.edges[1].seam is True
     assert snapshot.edges[2].sharp is True
     assert snapshot.faces[0].material_index == 2
+
+
+def test_active_uv_layer_overrides_stale_active_render_flag():
+    obj = make_fake_quad()
+    uv_map = obj.data.uv_layers[0]
+    source_uv = _uv_layer(
+        "SourceUV",
+        ((0.25, 0.5), (0.25, 0.5), (0.25, 0.5), (0.25, 0.5)),
+        active_render=False,
+    )
+    obj.data.uv_layers.append(source_uv)
+    obj.data.uv_layers.active = source_uv
+    uv_map.active_render = True
+
+    snapshot = read_source_mesh_snapshot(obj)
+
+    assert snapshot.uv_layer_names == ("UVMap", "SourceUV")
+    assert snapshot.active_uv_layer == "SourceUV"
+    assert snapshot.render_uv_layer == "SourceUV"
 
 
 def test_reader_rejects_non_mesh_and_missing_uv_layer():
