@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Callable
 
 import bpy
 
@@ -27,14 +28,72 @@ _ORDERED_PANEL_REGISTERED = False
 _REGISTERED_RNA: tuple[RnaPropertyRegistration, ...] = ()
 
 
-class OBJECT_PT_Spine2DOrderedMeshPanel(ui.OBJECT_PT_Spine2DMeshPanel):
-    """Render every user-facing section with one standard foldout implementation."""
+class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
+    """Render every user-facing section with one standard foldout implementation.
+
+    The class deliberately derives directly from ``bpy.types.Panel`` rather than from
+    the replaceable base panel Python class. Blender development reloads may reload
+    modules in reverse order; direct inheritance prevents this owner from retaining a
+    stale, already-unregistered RNA parent class.
+    """
 
     bl_idname = ui.OBJECT_PT_Spine2DMeshPanel.bl_idname
     bl_label = ui.OBJECT_PT_Spine2DMeshPanel.bl_label
     bl_space_type = ui.OBJECT_PT_Spine2DMeshPanel.bl_space_type
     bl_region_type = ui.OBJECT_PT_Spine2DMeshPanel.bl_region_type
     bl_category = ui.OBJECT_PT_Spine2DMeshPanel.bl_category
+
+    def _draw_foldout(
+        self,
+        layout: bpy.types.UILayout,
+        scene: bpy.types.Scene,
+        *,
+        property_name: str,
+        title: str,
+        draw_content: Callable[[bpy.types.UILayout], None],
+    ) -> None:
+        """Delegate the standard foldout appearance to the current UI module."""
+
+        ui.OBJECT_PT_Spine2DMeshPanel._draw_foldout(
+            self,
+            layout,
+            scene,
+            property_name=property_name,
+            title=title,
+            draw_content=draw_content,
+        )
+
+    @staticmethod
+    def _draw_cut_settings(
+        column: bpy.types.UILayout,
+        scene: bpy.types.Scene,
+    ) -> None:
+        ui.OBJECT_PT_Spine2DMeshPanel._draw_cut_settings(column, scene)
+
+    @staticmethod
+    def _draw_bake_settings(
+        column: bpy.types.UILayout,
+        context: bpy.types.Context,
+    ) -> None:
+        ui.OBJECT_PT_Spine2DMeshPanel._draw_bake_settings(column, context)
+
+    @staticmethod
+    def _issue_icon(severity) -> str:
+        return ui.OBJECT_PT_Spine2DMeshPanel._issue_icon(severity)
+
+    @staticmethod
+    def _state_icon(state) -> str:
+        return ui.OBJECT_PT_Spine2DMeshPanel._state_icon(state)
+
+    def _draw_object_readiness(self, layout: bpy.types.UILayout, item) -> None:
+        ui.OBJECT_PT_Spine2DMeshPanel._draw_object_readiness(self, layout, item)
+
+    def _draw_readiness(
+        self,
+        layout: bpy.types.UILayout,
+        context: bpy.types.Context,
+    ) -> bool:
+        return ui.OBJECT_PT_Spine2DMeshPanel._draw_readiness(self, layout, context)
 
     def _draw_export_settings(
         self,
