@@ -313,9 +313,17 @@ def test_source_render_uv_is_not_replaced_by_spine_bake_uv() -> None:
 
         result = export_a1_single_object(source, settings)
         _assert(result.success, f"UV-role export failed: {result.issues}")
-        _assert(len(result.image_paths) == 1, f"unexpected image paths: {result.image_paths}")
+        image_paths = tuple(
+            Path(path)
+            for path in result.output_files
+            if Path(path).suffix.lower() == ".png"
+        )
+        _assert(
+            len(image_paths) == 1,
+            f"expected one PNG in output_files, got: {result.output_files}",
+        )
 
-        pixels = _read_pixels(Path(result.image_paths[0]))
+        pixels = _read_pixels(image_paths[0])
         covered = [
             (
                 float(pixels[offset]),
