@@ -7,6 +7,8 @@ from typing import Any
 
 import bpy
 
+from ..domain.spine.rig_profiles import A1RigProfile
+
 try:
     from bpy.app.handlers import persistent
 except Exception:  # pragma: no cover - real Blender always provides this decorator.
@@ -15,7 +17,7 @@ except Exception:  # pragma: no cover - real Blender always provides this decora
 
 
 logger = logging.getLogger(__name__)
-CURRENT_SETTINGS_SCHEMA_VERSION = 3
+CURRENT_SETTINGS_SCHEMA_VERSION = 4
 _REGISTERED = False
 _FILE_LOADING = False
 
@@ -46,12 +48,10 @@ def _stored_seam_mode(scene: Any) -> str:
 def migrate_scene_settings(scene: Any) -> bool:
     """Migrate one Scene exactly once without overwriting later user choices.
 
-    Schema 3 repairs Scenes that reached schema 2 with CUSTOM while RNA properties were
-    being registered. Blender can invoke EnumProperty update callbacks when persisted
-    ID-property values are rebound to newly registered RNA. Before the registration guard
-    existed, that callback marked the Scene current before this migration owner ran.
-    Every schema below 3 is therefore reset to AUTO once; a deliberate CUSTOM choice made
-    after schema 3 remains stable.
+    Schema 3 repaired Scenes that reached schema 2 with CUSTOM while RNA properties were
+    being rebound during registration. Schema 4 introduces explicit rig profiles and
+    assigns every older Scene to the byte-compatible three-axis profile. A deliberate
+    two-axis choice made after schema 4 is never overwritten.
     """
 
     if scene is None:
@@ -62,15 +62,21 @@ def migrate_scene_settings(scene: Any) -> bool:
         return False
 
     previous_mode = _stored_seam_mode(scene)
-    scene.spine2d_seam_maker_mode = "AUTO"
+    seam_changed = current < 3
+    if seam_changed:
+        scene.spine2d_seam_maker_mode = "AUTO"
+
+    scene.spine2d_rig_profile = A1RigProfile.THREE_AXIS_ROTATION.value
     scene.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION
     logger.info(
         "Migrated Spine2D Rewrite Scene '%s' settings schema %d -> %d; "
-        "Seam Maker %s -> AUTO",
+        "Seam Maker %s -> %s; Rig -> %s",
         str(getattr(scene, "name", "<unnamed>")),
         current,
         CURRENT_SETTINGS_SCHEMA_VERSION,
         previous_mode,
+        "AUTO" if seam_changed else previous_mode,
+        A1RigProfile.THREE_AXIS_ROTATION.value,
     )
     return True
 
