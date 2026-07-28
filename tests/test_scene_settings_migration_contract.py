@@ -2,8 +2,12 @@ from pathlib import Path
 
 import pytest
 
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (
+    scene_settings_migration as migration,
+)
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.scene_settings_migration import (
     CURRENT_SETTINGS_SCHEMA_VERSION,
+    clear_pre_registration_scene_state,
     migrate_scene_settings,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
@@ -30,6 +34,32 @@ class _Scene:
 
     def keys(self):
         return self._persisted_keys
+
+
+class _RnaReboundScene:
+    """Simulate Blender exposing RNA defaults over older raw ID-properties."""
+
+    def __init__(self):
+        self.name = "Schema 2 Rebound Fixture"
+        self.spine2d_settings_schema_version = 0
+        self.spine2d_seam_maker_mode = "AUTO"
+        self.spine2d_rig_profile = A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+        self._raw = {
+            "spine2d_settings_schema_version": 2,
+            "spine2d_seam_maker_mode": "CUSTOM",
+        }
+
+    def as_pointer(self):
+        return id(self)
+
+    def keys(self):
+        return tuple(self._raw)
+
+    def get(self, key, default=None):
+        return self._raw.get(key, default)
+
+    def __getitem__(self, key):
+        return self._raw[key]
 
 
 def test_scene_schema_property_is_hidden_and_fresh_default_is_two_axis():
@@ -76,6 +106,19 @@ def test_pre_profile_saved_scene_remains_on_compatibility_three_axis():
     assert scene.spine2d_seam_maker_mode == "CUSTOM"
 
 
+def test_pre_registration_snapshot_survives_rna_default_rebind():
+    scene = _RnaReboundScene()
+    clear_pre_registration_scene_state()
+    try:
+        assert migration._capture_pre_registration_scene_state_for_scenes((scene,)) == 1
+        assert migrate_scene_settings(scene) is True
+        assert scene.spine2d_settings_schema_version == CURRENT_SETTINGS_SCHEMA_VERSION
+        assert scene.spine2d_seam_maker_mode == "AUTO"
+        assert scene.spine2d_rig_profile == A1RigProfile.THREE_AXIS_ROTATION.value
+    finally:
+        clear_pre_registration_scene_state()
+
+
 @pytest.mark.parametrize("profile", tuple(A1RigProfile))
 def test_schema_four_preserves_the_users_selected_rig(profile):
     scene = _Scene(
@@ -105,9 +148,16 @@ def test_current_schema_is_idempotent():
     assert migrate_scene_settings(scene) is False
 
 
-def test_root_registers_migration_after_scene_rna_and_before_ui():
+def test_root_registers_snapshot_before_scene_rna_and_migration_before_ui():
     source = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
+    register_config_start = source.index("def _register_config_rna()")
+    unregister_config_start = source.index("def _unregister_config_rna()")
+    register_config = source[register_config_start:unregister_config_start]
 
+    assert register_config.index("capture_pre_registration_scene_state()") < (
+        register_config.index("register_rna_properties_transactionally(")
+    )
+    assert "clear_pre_registration_scene_state()" in register_config
     assert source.index('"Scene RNA properties"') < source.index(
         '"Scene settings migration"'
     ) < source.index('"UI"')
