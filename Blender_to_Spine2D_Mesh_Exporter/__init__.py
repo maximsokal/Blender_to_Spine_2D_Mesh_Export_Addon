@@ -109,7 +109,12 @@ if bpy is not None:
         return module in MODULES
 
     def _register_config_rna() -> None:
-        register_rna_properties_transactionally(CONFIG_RNA_PROPERTIES)
+        scene_settings_migration.capture_pre_registration_scene_state()
+        try:
+            register_rna_properties_transactionally(CONFIG_RNA_PROPERTIES)
+        except Exception:
+            scene_settings_migration.clear_pre_registration_scene_state()
+            raise
 
     def _unregister_config_rna() -> None:
         unregister_all_best_effort(
