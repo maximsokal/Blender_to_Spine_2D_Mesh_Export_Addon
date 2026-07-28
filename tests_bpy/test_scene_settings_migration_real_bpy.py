@@ -33,7 +33,7 @@ def test_schema_two_custom_scene_is_repaired_during_extension_registration():
     # Reproduce the actual user path: the .blend already contains values written by 0.39,
     # while the extension RNA surface is not registered yet. Registering EnumProperty over
     # these ID properties may invoke its update callback, which must not advance the current
-    # schema before the migration owner resets CUSTOM and assigns the compatibility rig.
+    # schema before migration resets CUSTOM and assigns the compatibility rig.
     extension.unregister()
     scene = bpy.context.scene
     _remove_persisted_test_values(scene)
@@ -42,18 +42,18 @@ def test_schema_two_custom_scene_is_repaired_during_extension_registration():
 
     extension.register()
     try:
-        assert CURRENT_SETTINGS_SCHEMA_VERSION == 4
-        assert scene.spine2d_settings_schema_version == 4
+        assert CURRENT_SETTINGS_SCHEMA_VERSION == 5
+        assert scene.spine2d_settings_schema_version == 5
         assert scene.spine2d_seam_maker_mode == "AUTO"
         assert (
             scene.spine2d_rig_profile
             == A1RigProfile.THREE_AXIS_ROTATION.value
         )
 
-        # Deliberate choices made after schema 4 remain stable.
+        # Deliberate choices made after schema 5 remain stable.
         scene.spine2d_seam_maker_mode = "CUSTOM"
         scene.spine2d_rig_profile = A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
-        assert scene.spine2d_settings_schema_version == 4
+        assert scene.spine2d_settings_schema_version == 5
         assert not migrate_scene_settings(scene)
         assert scene.spine2d_seam_maker_mode == "CUSTOM"
         assert (
@@ -69,3 +69,20 @@ def test_schema_two_custom_scene_is_repaired_during_extension_registration():
 
     assert spine2d_scene_settings_load_pre not in bpy.app.handlers.load_pre
     assert spine2d_scene_settings_load_post not in bpy.app.handlers.load_post
+
+
+def test_genuinely_fresh_scene_gets_two_axis_default_in_real_bpy():
+    extension.unregister()
+    scene = bpy.data.scenes.new("Spine2D Fresh Rig Default")
+    _remove_persisted_test_values(scene)
+    try:
+        extension.register()
+        assert scene.spine2d_settings_schema_version == 5
+        assert (
+            scene.spine2d_rig_profile
+            == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+        )
+    finally:
+        extension.unregister()
+        if scene.name in bpy.data.scenes:
+            bpy.data.scenes.remove(scene)
