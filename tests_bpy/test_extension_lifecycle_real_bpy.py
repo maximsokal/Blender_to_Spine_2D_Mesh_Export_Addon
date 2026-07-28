@@ -16,6 +16,7 @@ RNA_REGISTRATIONS = (
     *extension.CONFIG_RNA_PROPERTIES,
     *extension.ui.RNA_PROPERTIES,
     *extension.generated_material_ui.RNA_PROPERTIES,
+    *extension.ui_layout.RNA_PROPERTIES,
     *extension.single_object_operator.RNA_PROPERTIES,
 )
 
@@ -57,6 +58,9 @@ def _assert_registered() -> None:
         assert hasattr(registration.owner, registration.name), registration.name
     handler = extension.ui.a1_readiness_depsgraph_update_post
     assert tuple(bpy.app.handlers.depsgraph_update_post).count(handler) == 1
+    assert bpy.types.Panel.bl_rna_get_subclass_py("OBJECT_PT_spine2d_mesh") is (
+        extension.ui_layout.OBJECT_PT_Spine2DOrderedMeshPanel
+    )
     assert _operator_class("spine2d.reset_rig_profile") is not None
     assert _operator_class("object.spine2d_single_export") is not None
     assert _operator_class("object.spine2d_multi_export") is not None
@@ -68,6 +72,7 @@ def _assert_unregistered() -> None:
         assert not hasattr(registration.owner, registration.name), registration.name
     handler = extension.ui.a1_readiness_depsgraph_update_post
     assert handler not in bpy.app.handlers.depsgraph_update_post
+    assert bpy.types.Panel.bl_rna_get_subclass_py("OBJECT_PT_spine2d_mesh") is None
     assert _operator_class("spine2d.reset_rig_profile") is None
     assert _operator_class("object.spine2d_single_export") is None
     assert _operator_class("object.spine2d_multi_export") is None
@@ -110,6 +115,7 @@ ALLOWED_TOP_LEVEL = {
     "rig_ui",
     "single_object_operator",
     "ui",
+    "ui_layout",
 }
 
 
@@ -134,6 +140,7 @@ def registration_absent(extension):
         *extension.CONFIG_RNA_PROPERTIES,
         *extension.ui.RNA_PROPERTIES,
         *extension.generated_material_ui.RNA_PROPERTIES,
+        *extension.ui_layout.RNA_PROPERTIES,
         *extension.single_object_operator.RNA_PROPERTIES,
     ):
         assert not hasattr(registration.owner, registration.name), registration.name
@@ -187,6 +194,9 @@ for order in (owner_names, tuple(reversed(owner_names))):
     try:
         handler = extension.ui.a1_readiness_depsgraph_update_post
         assert tuple(bpy.app.handlers.depsgraph_update_post).count(handler) == 1
+        assert bpy.types.Panel.bl_rna_get_subclass_py("OBJECT_PT_spine2d_mesh") is (
+            extension.ui_layout.OBJECT_PT_Spine2DOrderedMeshPanel
+        )
     finally:
         unregister_steps(completed)
     registration_absent(extension)
