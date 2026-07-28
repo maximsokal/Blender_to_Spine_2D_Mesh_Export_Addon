@@ -40,9 +40,9 @@ def test_root_startup_imports_only_rewrite_registration_boundaries():
         "rig_ui",
         "a1_readiness_invalidation",
         "auto_readiness",
-        "repolish_ui",
         "generated_material_ui",
         "ui_layout",
+        "repolish_ui",
         "single_object_operator",
     ]
 
