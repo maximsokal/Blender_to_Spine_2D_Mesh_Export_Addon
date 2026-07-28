@@ -122,7 +122,6 @@ def test_blender_version_gate_rejects_missing_or_malformed_version():
 
     with pytest.raises(module.UnsupportedBlenderVersionError, match="unavailable"):
         module.require_supported_blender_runtime(MissingBpy())
-
     with pytest.raises(module.UnsupportedBlenderVersionError, match="at least three"):
         module.normalize_blender_version((5, 2))
 
@@ -301,6 +300,7 @@ def test_registration_structure_has_current_runtime_owners_only():
         "addon_preferences",
         "scene_settings_migration",
         "ui",
+        "rig_ui",
         "a1_readiness_invalidation",
         "auto_readiness",
         "repolish_ui",
@@ -314,6 +314,7 @@ def test_registration_structure_has_current_runtime_owners_only():
         "Scene RNA properties",
         "Scene settings migration",
         "UI",
+        "Rig UI",
         "readiness invalidation",
         "automatic readiness",
         "Re-Polish UI",
