@@ -14,6 +14,7 @@ This directory contains the maintained public documentation for Blender to Spine
 ## Developer documentation
 
 - [Architecture](architecture.md) - package boundaries and production data flow.
+- [Rig Profiles](rig-profiles.md) - selectable rig plan, two-axis-plus-scale design, and the complete Spine 4.2.43 reference skeleton.
 - [Testing and Release Validation](testing.md) - pure Python, real bpy, Blender headless, and packaging gates.
 - [Contributing](CONTRIBUTING.md) - coding, Blender state, tests, and documentation requirements.
 - [Changelog](CHANGELOG.md) - public release history.
@@ -26,5 +27,6 @@ This directory contains the maintained public documentation for Blender to Spine
 - Currently tested desktop platform: Windows.
 - Default texture mode: Normal - UV Segments.
 - Default Seam Maker mode: Auto.
+- Default rig profile: 3-Axis Rotation (`LEGACY_ROTATABLE_MESH`).
 
 Development journals and temporary Rewrite milestone documents are intentionally not part of the public documentation set. Permanent behavior belongs in the documents listed above and in executable tests.
