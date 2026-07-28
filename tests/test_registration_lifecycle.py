@@ -157,9 +157,9 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
         "Rig UI",
         "readiness invalidation",
         "automatic readiness",
-        "Re-Polish UI",
         "generated material UI",
         "ordered UI layout",
+        "Re-Polish UI",
         "single-object operator",
     ]
     assert labels.index("Scene RNA properties") < labels.index(
@@ -172,7 +172,7 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
     )
     assert labels.index("generated material UI") < labels.index(
         "ordered UI layout"
-    ) < labels.index("single-object operator")
+    ) < labels.index("Re-Polish UI") < labels.index("single-object operator")
     assert "unregister_all_best_effort" in _called_names(_function(tree, "register"))
     assert "unregister_all_best_effort" in _called_names(_function(tree, "unregister"))
 
