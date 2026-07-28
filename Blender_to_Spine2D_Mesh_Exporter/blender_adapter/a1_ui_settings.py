@@ -11,6 +11,7 @@ from ..application import (
     ExportSettings,
 )
 from ..domain.baking import sanitize_filename_stem
+from ..domain.spine.rig_profiles import A1RigSetupPoseMode
 from ..domain.uv import UvUnwrapSettings
 from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_ui_scene_capture import (
@@ -34,11 +35,16 @@ def _settings_from_profiles(
     scene: _SceneExportProfile,
     *,
     json_output_stem: str | None = None,
+    rig_setup_pose_mode: A1RigSetupPoseMode = (
+        A1RigSetupPoseMode.PRESERVE_COMPOSITION
+    ),
 ) -> A1SingleObjectExportSettings:
     if not isinstance(obj, _ObjectExportProfile):
         raise TypeError("obj must be _ObjectExportProfile")
     if not isinstance(scene, _SceneExportProfile):
         raise TypeError("scene must be _SceneExportProfile")
+    if not isinstance(rig_setup_pose_mode, A1RigSetupPoseMode):
+        raise TypeError("rig_setup_pose_mode must be A1RigSetupPoseMode")
     return A1SingleObjectExportSettings(
         export=ExportSettings(
             texture_width=scene.texture_size,
@@ -64,6 +70,7 @@ def _settings_from_profiles(
         material_source_policy=scene.material_source_policy,
         generated_material_pattern=scene.generated_material_pattern,
         generated_gray_color=scene.generated_gray_color,
+        rig_setup_pose_mode=rig_setup_pose_mode,
     )
 
 
@@ -77,6 +84,9 @@ def _common_object_settings(
     sequence_start_frame: int,
     sequence_frame_count: int,
     json_output_stem: str | None = None,
+    rig_setup_pose_mode: A1RigSetupPoseMode = (
+        A1RigSetupPoseMode.PRESERVE_COMPOSITION
+    ),
 ) -> A1SingleObjectExportSettings:
     """Compatibility helper retained for focused bridge tests and external callers."""
 
@@ -96,6 +106,7 @@ def _common_object_settings(
         object_profile,
         scene_profile,
         json_output_stem=json_output_stem,
+        rig_setup_pose_mode=rig_setup_pose_mode,
     )
 
 
@@ -116,6 +127,7 @@ def _build_multi_object_settings(
         images_relative_path=images_relative_path,
         sequence_start_frame=int(getattr(bake, "bake_frame_start", 0)),
         sequence_frame_count=int(getattr(bake, "frames_for_render", 0)),
+        rig_setup_pose_mode=A1RigSetupPoseMode.PRESERVE_COMPOSITION,
     )
 
 
@@ -141,6 +153,7 @@ def _build_single_object_settings(
             getattr(scene, "spine2d_frames_for_render", 0)
         ),
         json_output_stem=f"{sanitize_filename_stem(object_name)}_merged",
+        rig_setup_pose_mode=A1RigSetupPoseMode.NORMALIZED_SINGLE,
     )
 
 
@@ -159,7 +172,11 @@ def _build_sources_from_profiles(
             source_object=obj.source_object,
             component_id=f"object_{index}:{obj.object_name}",
             animation_namespace=f"object_{index}",
-            settings=_settings_from_profiles(obj, scene),
+            settings=_settings_from_profiles(
+                obj,
+                scene,
+                rig_setup_pose_mode=A1RigSetupPoseMode.PRESERVE_COMPOSITION,
+            ),
         )
         for index, obj in enumerate(objects, start=1)
     )
