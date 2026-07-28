@@ -1,4 +1,4 @@
-"""Focused contracts for the dedicated selectable Rig UI category."""
+"""Focused contracts for the selectable Rig foldout content."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import scene_properties
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
 
 
-def test_rig_reset_restores_three_axis_without_touching_other_settings():
+def test_rig_reset_restores_two_axis_without_touching_other_settings():
     scene = SimpleNamespace(
-        spine2d_rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
+        spine2d_rig_profile=A1RigProfile.THREE_AXIS_ROTATION.value,
         spine2d_texture_size=2048,
         spine2d_seam_maker_mode="CUSTOM",
     )
@@ -24,27 +24,33 @@ def test_rig_reset_restores_three_axis_without_touching_other_settings():
     result = operator.execute(context)
 
     assert result == {"FINISHED"}
-    assert scene.spine2d_rig_profile == A1RigProfile.THREE_AXIS_ROTATION.value
+    assert scene.spine2d_rig_profile == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
     assert scene.spine2d_texture_size == 2048
     assert scene.spine2d_seam_maker_mode == "CUSTOM"
     operator.report.assert_called_once_with(
         {"INFO"},
-        "Rig profile reset to 3-Axis Rotation",
+        "Rig profile reset to 2-Axis Rotation + Scale",
     )
 
 
-def test_rig_panel_is_a_separate_child_category_with_profile_specific_copy():
+def test_rig_content_is_drawn_by_the_ordered_main_foldout_not_a_child_panel():
     source = Path(rig_ui.__file__).read_text(encoding="utf-8")
 
-    assert rig_ui.OBJECT_PT_Spine2DRigPanel.bl_parent_id == "OBJECT_PT_spine2d_mesh"
-    assert rig_ui.OBJECT_PT_Spine2DRigPanel.bl_label == "Rig"
-    assert 'layout.prop(scene, "spine2d_rig_profile"' not in source
-    assert 'header.prop(scene, "spine2d_rig_profile"' in source
+    assert "class OBJECT_PT_Spine2DRigPanel" not in source
+    assert "def draw_rig_settings(" in source
+    assert 'row.prop(scene, "spine2d_rig_profile"' in source
     assert "Controls: Rotation X / Y / Z" in source
     assert "Controls: Rotation X / Y + Scale" in source
-    assert "No Rotation Z control is generated" in source
+    assert "Single export uses a neutral setup pose" in source
+    assert "Multi export preserves scene placement" in source
     assert "spine2d_control_icons" in source
     assert "spine2d_export_preview_animation" in source
+    assert rig_ui.CLASSES == (rig_ui.SPINE2D_OT_ResetRigProfile,)
+
+
+def test_rig_scene_property_default_is_two_axis():
+    source = Path(scene_properties.__file__).read_text(encoding="utf-8")
+    assert "default=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value" in source
 
 
 def test_rig_profile_update_invalidates_readiness_and_requests_redraw(monkeypatch):
