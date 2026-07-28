@@ -87,9 +87,9 @@ if bpy is not None:
         rig_ui,
         a1_readiness_invalidation,
         auto_readiness,
-        repolish_ui,
         generated_material_ui,
         ui_layout,
+        repolish_ui,
         single_object_operator,
     )
 
@@ -154,11 +154,6 @@ if bpy is not None:
             auto_readiness.unregister,
         ),
         (
-            "Re-Polish UI",
-            repolish_ui.register,
-            repolish_ui.unregister,
-        ),
-        (
             "generated material UI",
             generated_material_ui.register,
             generated_material_ui.unregister,
@@ -167,6 +162,11 @@ if bpy is not None:
             "ordered UI layout",
             ui_layout.register,
             ui_layout.unregister,
+        ),
+        (
+            "Re-Polish UI",
+            repolish_ui.register,
+            repolish_ui.unregister,
         ),
         (
             "single-object operator",
