@@ -19,6 +19,7 @@ from .bake_execution_error import BakeExecutionError
 from .bake_materials import temporary_bake_materials
 from .bake_scene_state import configure_scene_for_bake, preserve_bake_scene_state
 from .context_state import activate_object_for_operator
+from .material_uv_binding import bind_materials_implicit_uv_sampling
 from .mesh_writer import temporary_mesh_object
 from .scene_bake_execution import temporarily_exclude_source_from_render
 from .scene_bake_runtime import validate_runtime_object_transform
@@ -294,6 +295,17 @@ def run_semantic_bake(
                     render_target=runtime.renderer.shader_target,
                     generated_material=generated_material,
                 ) as prepared_materials:
+                    source_uv_name = runtime.target_snapshot.render_uv_layer
+                    if source_uv_name is None:
+                        raise BakeExecutionError(
+                            "Semantic bake target has no source render UV layer"
+                        )
+                    bind_materials_implicit_uv_sampling(
+                        prepared_materials.materials,
+                        source_uv_name,
+                        used_material_indices=prepared_materials.used_material_indices,
+                        excluded_nodes=prepared_materials.image_nodes,
+                    )
                     with activate_object_for_operator(
                         temporary.object,
                         context=runtime.context,
