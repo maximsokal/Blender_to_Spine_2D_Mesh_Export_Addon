@@ -45,6 +45,30 @@ def test_source_uv_roles_override_evaluated_role_drift():
     assert render_name == "SourceUV"
 
 
+def test_source_active_uv_overrides_stale_active_render_flag():
+    evaluated_uv = _layer("UVMap", active_render=True)
+    evaluated_source_uv = _layer("SourceUV", active_render=False)
+    source_uv = _layer("UVMap", active_render=True)
+    source_render_uv = _layer("SourceUV", active_render=False)
+
+    active_name, render_name = _resolve_evaluated_uv_roles(
+        evaluated_mesh=_mesh(
+            evaluated_uv,
+            evaluated_source_uv,
+            active=evaluated_uv,
+        ),
+        source_mesh=_mesh(
+            source_uv,
+            source_render_uv,
+            active=source_render_uv,
+        ),
+        resolved_uv_layers=(evaluated_uv, evaluated_source_uv),
+    )
+
+    assert active_name == "SourceUV"
+    assert render_name == "SourceUV"
+
+
 def test_evaluated_roles_remain_fallback_for_modifier_generated_layers():
     evaluated_uv = _layer("GeneratedUV", active_render=True)
     source_uv = _layer("UVMap", active_render=True)
