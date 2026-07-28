@@ -1,7 +1,7 @@
-"""Supported selectable Spine rig profiles.
+"""Supported selectable Spine rig profiles and setup-pose policies.
 
-The enum is Blender-independent and is the single source of truth used by the UI,
-application settings, rig router, documentation tests, and serializers.
+The enums are Blender-independent and are the single source of truth used by the UI,
+application settings, rig router, builders, documentation tests, and serializers.
 """
 
 from __future__ import annotations
@@ -28,6 +28,21 @@ class A1RigProfile(str, Enum):
         return "X/Y pseudo-rotation with an independent uniform scale control"
 
 
+class A1RigSetupPoseMode(str, Enum):
+    """Control whether exported setup pose may be normalized for authoring.
+
+    ``NORMALIZED_SINGLE`` is safe only when one object owns the whole Spine document.
+    It keeps the visible main and X/Y controls neutral while moving the existing object
+    placement into internal rig coordinates.
+
+    ``PRESERVE_COMPOSITION`` retains the historical setup pose used by standalone and
+    connected multi-object composition so authored scene placement is never flattened.
+    """
+
+    NORMALIZED_SINGLE = "NORMALIZED_SINGLE"
+    PRESERVE_COMPOSITION = "PRESERVE_COMPOSITION"
+
+
 def resolve_a1_rig_profile(value: object) -> A1RigProfile:
     """Resolve one enum or persisted string without accepting silent fallbacks."""
 
@@ -47,4 +62,8 @@ def resolve_a1_rig_profile(value: object) -> A1RigProfile:
         ) from exc
 
 
-__all__ = ["A1RigProfile", "resolve_a1_rig_profile"]
+__all__ = [
+    "A1RigProfile",
+    "A1RigSetupPoseMode",
+    "resolve_a1_rig_profile",
+]
