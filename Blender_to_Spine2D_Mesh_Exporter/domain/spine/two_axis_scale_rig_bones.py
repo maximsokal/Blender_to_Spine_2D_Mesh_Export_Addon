@@ -7,11 +7,9 @@ from typing import Tuple
 from .legacy_rig_plan import LegacyRigBuildPlan
 from .legacy_rig_scale import require_finite_derived
 from .model import Bone
+from .rig_profiles import A1RigSetupPoseMode
+from .two_axis_scale_profile import TwoAxisScaleRigProfile
 from .two_axis_scale_rig_contracts import TwoAxisScaleRigLayout
-
-
-_REFERENCE_ROTATION_X_SETUP = -134.67
-_REFERENCE_ROTATION_Y_SETUP = -17.43
 
 
 def _rounded(value: float, field_name: str) -> float:
@@ -22,15 +20,38 @@ def build_two_axis_scale_bones(
     plan: LegacyRigBuildPlan,
     layout: TwoAxisScaleRigLayout,
 ) -> Tuple[Bone, ...]:
-    """Build the namespaced reference hierarchy in deterministic JSON order."""
+    """Build the namespaced reference hierarchy in deterministic JSON order.
+
+    Single-object documents expose a neutral ``main`` and neutral X/Y controls. The
+    original object placement is moved into the internal base bone and into the control
+    coordinates, preserving the same final world-space geometry. Multi-object documents
+    keep the historical setup pose because composition owns those offsets.
+    """
 
     if not isinstance(plan, LegacyRigBuildPlan):
         raise TypeError("plan must be LegacyRigBuildPlan")
     if not isinstance(layout, TwoAxisScaleRigLayout):
         raise TypeError("layout must be TwoAxisScaleRigLayout")
+    if not isinstance(plan.profile, TwoAxisScaleRigProfile):
+        raise TypeError("plan.profile must be TwoAxisScaleRigProfile")
 
+    profile = plan.profile
+    normalized_single = (
+        plan.request.setup_pose_mode is A1RigSetupPoseMode.NORMALIZED_SINGLE
+    )
     control_x, control_y, scale_control = plan.control_bone_names
     constraint_bone, scale_ik, rotate_ik, ik_target = plan.ik_chain_bone_names
+
+    # In a single-object document main is the user-facing neutral origin. The existing
+    # placement moves to the internal base layer so mesh output remains unchanged.
+    main_x = 0.0 if normalized_single else plan.main_x
+    main_y = 0.0 if normalized_single else plan.main_y
+    base_x = plan.main_x if normalized_single else None
+    base_y = plan.main_y if normalized_single else None
+    control_origin_x = plan.main_x if normalized_single else 0.0
+    control_origin_y = plan.main_y if normalized_single else 0.0
+    control_x_rotation = 0.0 if normalized_single else profile.rotation_x_setup_degrees
+    control_y_rotation = 0.0 if normalized_single else profile.rotation_y_setup_degrees
 
     z_bones: list[Bone] = []
     for group in plan.z_groups:
@@ -56,14 +77,16 @@ def build_two_axis_scale_bones(
         Bone(
             name=plan.main_bone_name,
             parent=plan.root_bone_name,
-            x=plan.main_x,
-            y=plan.main_y,
+            x=main_x,
+            y=main_y,
             color="faff00ff",
             icon="square",
         ),
         Bone(
             name=plan.base_bone_name,
             parent=plan.main_bone_name,
+            x=base_x,
+            y=base_y,
             color="faff00ff",
         ),
         Bone(
@@ -80,8 +103,9 @@ def build_two_axis_scale_bones(
             name=control_y,
             parent=plan.main_bone_name,
             length=layout.control_length,
-            rotation=_REFERENCE_ROTATION_Y_SETUP,
-            x=layout.control_x,
+            rotation=control_y_rotation,
+            x=_rounded(control_origin_x + layout.control_x, "rotation_y.x"),
+            y=_rounded(control_origin_y, "rotation_y.y"),
             color="1aff00ff",
         ),
         Bone(
@@ -113,9 +137,12 @@ def build_two_axis_scale_bones(
             name=control_x,
             parent=plan.main_bone_name,
             length=layout.control_length,
-            rotation=_REFERENCE_ROTATION_X_SETUP,
-            x=layout.control_x,
-            y=layout.control_y_spacing,
+            rotation=control_x_rotation,
+            x=_rounded(control_origin_x + layout.control_x, "rotation_x.x"),
+            y=_rounded(
+                control_origin_y + layout.control_y_spacing,
+                "rotation_x.y",
+            ),
             color="ff0000ff",
         ),
         Bone(
