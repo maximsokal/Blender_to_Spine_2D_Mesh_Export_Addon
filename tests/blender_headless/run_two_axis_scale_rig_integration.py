@@ -146,8 +146,7 @@ def test_two_axis_scale_rig_serializes_in_blender_runtime() -> None:
     component = built.components[0]
     decoded = decode_weighted_vertices(
         component.attachment.vertices,
-        vertex_count=4,
-        bone_count=len(document.bones),
+        expected_vertex_count=4,
     )
     expected_indices = tuple(
         component.vertex_bone_start_index + index for index in range(4)
