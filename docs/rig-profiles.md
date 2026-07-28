@@ -1,45 +1,63 @@
-# Rig profiles implementation plan
+# Rig profiles implementation and reference
 
-## Goal
+## Supported profiles
 
-The exporter must expose rig generation as an explicit Scene-level category independent from texture, cutting, and baking settings.
+The exporter exposes rig generation as an explicit Scene-level category independent from texture, cutting, and baking settings.
 
-Supported profiles:
+- `LEGACY_ROTATABLE_MESH` — the existing three-axis rotation rig. Its builder and serialized output remain available for compatibility.
+- `TWO_AXIS_ROTATION_SCALE` — X/Y pseudo-rotation with an independent uniform scale control, generalized from the complete Spine 4.2.43 reference embedded below.
 
-- `LEGACY_ROTATABLE_MESH` — current three-axis rotation rig. This remains the default and must stay byte-compatible with existing exports.
-- `TWO_AXIS_ROTATION_SCALE` — X/Y pseudo-rotation with an independent uniform scale control, generalized from the reference Spine 4.2.43 skeleton embedded below.
+A genuinely fresh Blender Scene defaults to `TWO_AXIS_ROTATION_SCALE`. Existing saved projects are not silently changed: pre-profile projects migrate to the compatibility three-axis rig, while schema-4 projects preserve the profile already selected by the user.
 
-## UI
+## UI order
 
-Add a dedicated **Rig** foldout between **Export** and **Cut**. It contains:
+All sections use the same main-panel foldout style in this exact order:
 
-- Rig profile enum.
-- Control icons toggle.
-- Preview animation toggle.
-- A short profile-specific description.
+```text
+Export
+Rig
+Rewrite Generated Materials
+Cut
+Bake
+Export Readiness
+```
 
-Changing the profile invalidates cached readiness and schedules a new analysis. Reset restores `LEGACY_ROTATABLE_MESH`.
+The Rig foldout contains the profile selector, control-icon toggle, preview-animation toggle, and a profile-specific description. Changing the profile invalidates cached readiness and schedules a new analysis. The dedicated Rig reset restores `TWO_AXIS_ROTATION_SCALE`.
 
-## Settings pipeline
+## Immutable settings pipeline
 
-The selected profile must travel through the complete immutable path:
+The selected profile and setup-pose policy travel through the complete immutable path:
 
-`Scene RNA -> _SceneExportProfile -> ExportSettings -> A1SingleObjectExportSettings -> rig builder router -> document assembly -> Spine JSON`.
+```text
+Scene RNA
+-> _SceneExportProfile
+-> ExportSettings
+-> A1SingleObjectExportSettings
+-> LegacyRigBuildRequest
+-> rig builder router
+-> document assembly
+-> Spine JSON
+```
 
-Single-object and multi-object exports use one Scene-level profile. Mixed profiles inside one document are not supported in the first implementation.
+Single-object and multi-object exports use one Scene-level profile. Mixed profiles inside one document are rejected.
+
+The setup-pose policy is separate from the selected profile:
+
+- `NORMALIZED_SINGLE` is used only when one object owns the document.
+- `PRESERVE_COMPOSITION` is used by every multi-object source.
+
+The policy is explicit typed data. It is never inferred from object names, prefixes, or coordinate values.
 
 ## Builder architecture
 
-Do not branch inside the existing legacy bone and constraint builders. Add an explicit router:
+The legacy bone and constraint builders remain unchanged. An explicit router selects the physical owner:
 
 - `LEGACY_ROTATABLE_MESH -> build_legacy_rig`
 - `TWO_AXIS_ROTATION_SCALE -> build_two_axis_scale_rig`
 
-The new profile reuses the stable attachment contract: one generated vertex bone per exported mesh vertex, parented to its resolved Z-group rotation bone, with one full-weight influence. The reference `TOP1..TOP4` and `BOTTOM5..BOTTOM8` bones therefore generalize to the existing per-vertex bones and are not hard-coded.
+The two-axis implementation is split into contracts, plan, bones, constraints, validation, and assembly modules. It reuses the stable attachment contract: one generated vertex bone per exported mesh vertex, parented to its resolved Z-group rotation bone, with one full-weight influence. Reference bones `TOP1..TOP4` and `BOTTOM5..BOTTOM8` therefore generalize to existing per-vertex bones and are not hard-coded.
 
 ## Two-axis hierarchy
-
-Generalized hierarchy:
 
 ```text
 root
@@ -61,9 +79,49 @@ root
 └── <prefix>_scale
 ```
 
+## Single-object neutral setup pose
+
+For `NORMALIZED_SINGLE`:
+
+```text
+<prefix>_main.x = 0
+<prefix>_main.y = 0
+<prefix>_rotation_X.rotation = 0
+<prefix>_rotation_Y.rotation = 0
+```
+
+The previous main placement is transferred to the internal `<prefix>` base bone and to the control coordinates. This preserves the same visible object position while exposing a clean neutral setup pose to the animator.
+
+The reference setup rotations `-134.67` and `-17.43` are moved to the X/Y transform-constraint rotation offsets. They are not discarded.
+
+## Multi-object preserved setup pose
+
+For `PRESERVE_COMPOSITION`:
+
+- `<prefix>_main` retains its calculated nonzero position;
+- the internal base receives no duplicate placement;
+- X/Y controls retain the reference setup rotations;
+- no additional constraint rotation offsets are inserted.
+
+This keeps standalone and future connected compositions from flattening object placement or overlapping multiple exported components.
+
+## Control layout
+
+The visible two-axis controls form one editor column:
+
+```text
+<prefix>_rotation_X
+    one control length
+<prefix>_rotation_Y
+    one control length
+<prefix>_scale
+```
+
+All three controls share the same world-space X coordinate. Their spacing is derived from the generated control length rather than from one model-specific pixel value.
+
 ## Constraint order
 
-The reference evaluation order must be preserved semantically:
+The reference evaluation order is preserved semantically:
 
 1. X transform constraint (`order=0`).
 2. IK (`order=1`).
@@ -71,38 +129,37 @@ The reference evaluation order must be preserved semantically:
 4. X depth scale transform (`order=3`).
 5. Y transform constraint (`order=4`).
 
-The scale transform targets `<prefix>_rotate_X` and every Z-group rotation bone. The second profile does not generate a Z rotation control or the three-axis scale compensator.
+The scale transform targets `<prefix>_rotate_X` and every Z-group rotation bone. The two-axis profile does not generate a Z rotation control or the three-axis scale compensator.
 
 ## Generalization rules
 
 The embedded JSON is a behavior reference, not a literal template:
 
 - Names are always prefixed; global names such as `scale`, `IK`, and `null` are forbidden.
-- Fixed model values (`500`, `600`, `818.36`, and similar) are converted to centralized layout ratios derived from texture dimensions and Z-group offsets.
+- Fixed model values (`500`, `600`, `818.36`, and similar) become centralized layout ratios derived from texture dimensions and Z-group offsets.
 - The number of Z groups and exported vertices is unrestricted.
 - The existing three-axis profile remains unchanged.
-
-## Visual controls and preview
-
-- Three-axis profile: current X/Y/Z/main controls and current preview.
-- Two-axis profile: X/Y/scale/main controls and a profile-specific preview covering X, Y, X+Y, scale, and rotation+scale.
+- Connected composition remains explicitly blocked for the two-axis profile until a dedicated five-phase connected schedule is implemented.
 
 ## Validation
 
-Required tests:
+Required regression coverage includes:
 
 - Scene property registration, reset, readiness invalidation, and settings propagation.
+- Exact UI foldout order and reversible main-panel replacement.
 - Exact two-axis bone and constraint order.
+- Normalized single-object and preserved multi-object setup poses.
 - Arbitrary Z-group counts and vertex counts.
 - No Z rotation control in the two-axis profile.
-- Scale target set contains the X owner and all Z-group rotation bones.
+- One shared X control column and deterministic vertical spacing.
+- Scale target set containing the X owner and all Z-group rotation bones.
 - Spine cross-reference validation and weighted-index validation.
-- Existing three-axis golden output remains unchanged.
-- Blender headless export and manual Spine 4.2.43 validation for X, Y, X+Y, scale, and X+Y+scale.
+- Existing three-axis golden output remaining unchanged.
+- Blender headless export and manual Spine 4.2.43 validation for X, Y, X+Y, Scale, and X+Y+Scale.
 
 ## Reference Spine 4.2.43 skeleton
 
-This is the complete user-provided reference and must remain available in the repository for implementation and regression review.
+This is the complete user-provided reference and must remain available in the repository for implementation and regression review. It is also stored as machine-readable fixture `tests/fixtures/two_axis_scale_reference.json`.
 
 ```json
 {
