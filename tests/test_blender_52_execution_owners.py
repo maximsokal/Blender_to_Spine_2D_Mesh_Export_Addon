@@ -56,25 +56,40 @@ def _bpy(*, bake=None, render=None):
 def test_semantic_execution_owns_blender_bake_operator():
     operator = _Operator()
 
-    _call_bake_operator(_bpy(bake=operator), "diffuse")
+    _call_bake_operator(
+        _bpy(bake=operator),
+        "diffuse",
+        uv_layer_name="SpineBakeUV",
+    )
 
-    assert operator.calls == [{"type": "DIFFUSE"}]
+    assert operator.calls == [
+        {
+            "type": "DIFFUSE",
+            "uv_layer": "SpineBakeUV",
+        }
+    ]
 
 
 def test_bake_operator_rejects_poll_cancel_and_invalid_result():
     with pytest.raises(BakeExecutionError, match=r"poll\(\) returned False"):
-        _call_bake_operator(_bpy(bake=_Operator(poll=False)), "DIFFUSE")
+        _call_bake_operator(
+            _bpy(bake=_Operator(poll=False)),
+            "DIFFUSE",
+            uv_layer_name="SpineBakeUV",
+        )
 
     with pytest.raises(BakeExecutionError, match="did not finish"):
         _call_bake_operator(
             _bpy(bake=_Operator(result={"CANCELLED"})),
             "DIFFUSE",
+            uv_layer_name="SpineBakeUV",
         )
 
     with pytest.raises(BakeExecutionError, match="invalid result"):
         _call_bake_operator(
             _bpy(bake=_Operator(result=None)),
             "DIFFUSE",
+            uv_layer_name="SpineBakeUV",
         )
 
 
@@ -124,6 +139,7 @@ def test_active_adapter_contains_no_execution_compatibility_facades():
     package = (ADAPTER / "__init__.py").read_text(encoding="utf-8")
 
     assert "bpy_module.ops.object.bake" in semantic
+    assert "uv_layer=resolved_uv_layer" in semantic
     assert "from . import bake_executor" not in semantic
     assert "bpy_module.ops.render.render" in camera
     assert "from . import bake_executor" not in camera
