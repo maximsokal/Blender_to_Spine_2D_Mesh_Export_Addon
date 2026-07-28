@@ -157,7 +157,13 @@ def test_forced_bake_failure_preserves_existing_file_and_has_no_false_completion
     material_before = (material_fingerprint(material),)
     progress_updates = []
 
-    def _fail_bake(_bpy_module, _bake_type: str) -> None:
+    def _fail_bake(
+        _bpy_module,
+        _bake_type: str,
+        *,
+        uv_layer_name: str,
+    ) -> None:
+        assert uv_layer_name == "SpineBakeUV"
         raise BakeExecutionError("forced real-bpy bake failure")
 
     monkeypatch.setattr(
