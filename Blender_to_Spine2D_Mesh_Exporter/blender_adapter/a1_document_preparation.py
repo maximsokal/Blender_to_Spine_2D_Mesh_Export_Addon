@@ -95,6 +95,7 @@ def prepare_a1_document(
                 z_groups=source.z_groups.groups,
                 main_position_pixels=main_position_pixels,
                 scale_mode=source.settings.rig_scale_mode,
+                setup_pose_mode=source.settings.rig_setup_pose_mode,
             ),
             source.settings.export.rig_profile,
         )
@@ -103,6 +104,7 @@ def prepare_a1_document(
             {
                 "base_rig_bone_count": len(rig.bones),
                 "rig_profile": rig.profile.profile_id,
+                "rig_setup_pose_mode": rig.request.setup_pose_mode.value,
             },
         )
 
@@ -157,9 +159,11 @@ def prepare_a1_document(
             },
         )
         logger.debug(
-            "Prepared Spine document for %s: profile=%s bones=%d slots=%d attachments=%d",
+            "Prepared Spine document for %s: profile=%s setup=%s "
+            "bones=%d slots=%d attachments=%d",
             source.object_id,
             rig.profile.profile_id,
+            rig.request.setup_pose_mode.value,
             len(document.bones),
             len(document.slots),
             statistics["attachment_count"],
