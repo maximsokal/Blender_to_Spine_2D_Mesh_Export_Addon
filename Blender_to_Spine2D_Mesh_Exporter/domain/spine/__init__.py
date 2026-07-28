@@ -74,7 +74,16 @@ from .parity import (
     A1ParitySeverity,
     compare_a1_exports,
 )
+from .rig_builder import build_rig
+from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from .serializer import SpineSerializer
+from .two_axis_scale_profile import TwoAxisScaleRigProfile
+from .two_axis_scale_rig import (
+    TwoAxisScaleRigLayout,
+    build_two_axis_scale_layout,
+    build_two_axis_scale_rig,
+    validate_two_axis_scale_rig_result,
+)
 from .validator import SpineValidationError, SpineValidationIssue, SpineValidator
 from .weighted_vertices import (
     WeightedVertex,
@@ -89,6 +98,7 @@ __all__ = [
     "A1ParityReport",
     "A1ParitySettings",
     "A1ParitySeverity",
+    "A1RigProfile",
     "AnimationNameAssignment",
     "AttachmentSequenceAnimationError",
     "Bone",
@@ -133,6 +143,8 @@ __all__ = [
     "SpineValidationIssue",
     "SpineValidator",
     "TransformConstraint",
+    "TwoAxisScaleRigLayout",
+    "TwoAxisScaleRigProfile",
     "UniformScaleMode",
     "WeightedVertex",
     "WeightedVertexInfluence",
@@ -146,9 +158,14 @@ __all__ = [
     "build_legacy_mesh_document",
     "build_legacy_preview_animation",
     "build_legacy_rig",
+    "build_rig",
+    "build_two_axis_scale_layout",
+    "build_two_axis_scale_rig",
     "calculate_uniform_scale",
     "compare_a1_exports",
     "compose_spine_documents",
     "decode_weighted_vertices",
     "encode_weighted_vertices",
+    "resolve_a1_rig_profile",
+    "validate_two_axis_scale_rig_result",
 ]
