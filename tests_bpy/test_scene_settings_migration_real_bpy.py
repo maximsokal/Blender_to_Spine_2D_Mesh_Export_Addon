@@ -7,14 +7,20 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.scene_settings_migration i
     spine2d_scene_settings_load_post,
     spine2d_scene_settings_load_pre,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
 
 
 _SEAM_MODE_PROPERTY = "spine2d_seam_maker_mode"
+_RIG_PROFILE_PROPERTY = "spine2d_rig_profile"
 _SCHEMA_PROPERTY = "spine2d_settings_schema_version"
 
 
 def _remove_persisted_test_values(scene) -> None:
-    for property_name in (_SEAM_MODE_PROPERTY, _SCHEMA_PROPERTY):
+    for property_name in (
+        _SEAM_MODE_PROPERTY,
+        _RIG_PROFILE_PROPERTY,
+        _SCHEMA_PROPERTY,
+    ):
         try:
             if property_name in scene:
                 del scene[property_name]
@@ -26,8 +32,8 @@ def _remove_persisted_test_values(scene) -> None:
 def test_schema_two_custom_scene_is_repaired_during_extension_registration():
     # Reproduce the actual user path: the .blend already contains values written by 0.39,
     # while the extension RNA surface is not registered yet. Registering EnumProperty over
-    # these ID properties may invoke its update callback, which must not advance schema 3
-    # before the migration owner resets CUSTOM to AUTO.
+    # these ID properties may invoke its update callback, which must not advance the current
+    # schema before the migration owner resets CUSTOM and assigns the compatibility rig.
     extension.unregister()
     scene = bpy.context.scene
     _remove_persisted_test_values(scene)
@@ -36,15 +42,24 @@ def test_schema_two_custom_scene_is_repaired_during_extension_registration():
 
     extension.register()
     try:
-        assert CURRENT_SETTINGS_SCHEMA_VERSION == 3
-        assert scene.spine2d_settings_schema_version == 3
+        assert CURRENT_SETTINGS_SCHEMA_VERSION == 4
+        assert scene.spine2d_settings_schema_version == 4
         assert scene.spine2d_seam_maker_mode == "AUTO"
+        assert (
+            scene.spine2d_rig_profile
+            == A1RigProfile.THREE_AXIS_ROTATION.value
+        )
 
-        # A deliberate choice made after schema 3 remains stable.
+        # Deliberate choices made after schema 4 remain stable.
         scene.spine2d_seam_maker_mode = "CUSTOM"
-        assert scene.spine2d_settings_schema_version == 3
+        scene.spine2d_rig_profile = A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+        assert scene.spine2d_settings_schema_version == 4
         assert not migrate_scene_settings(scene)
         assert scene.spine2d_seam_maker_mode == "CUSTOM"
+        assert (
+            scene.spine2d_rig_profile
+            == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+        )
 
         assert spine2d_scene_settings_load_pre in bpy.app.handlers.load_pre
         assert spine2d_scene_settings_load_post in bpy.app.handlers.load_post
