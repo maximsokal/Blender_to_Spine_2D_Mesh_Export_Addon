@@ -19,7 +19,10 @@ from .bake_execution_error import BakeExecutionError
 from .bake_materials import temporary_bake_materials
 from .bake_scene_state import configure_scene_for_bake, preserve_bake_scene_state
 from .context_state import activate_object_for_operator
-from .material_uv_binding import bind_materials_implicit_uv_sampling
+from .material_uv_binding import (
+    MaterialUvBindingError,
+    bind_materials_implicit_uv_sampling,
+)
 from .mesh_writer import temporary_mesh_object
 from .scene_bake_execution import temporarily_exclude_source_from_render
 from .scene_bake_runtime import validate_runtime_object_transform
@@ -97,6 +100,71 @@ def _call_bake_operator(
             "bpy.ops.object.bake did not finish for "
             f"type={resolved_type!r}, uv_layer={resolved_uv_layer!r}: {result!r}"
         )
+
+
+def _bind_temporary_source_uv_sampling(
+    runtime: SemanticBakeRuntime,
+    prepared_materials: Any,
+    *,
+    generated_material: Any | None,
+) -> None:
+    """Bind implicit UV consumers on owned temporary material copies.
+
+    Generated materials read an owned color attribute and do not sample a source UV.
+    Selected-to-active baking evaluates the original selected source objects, so mutating
+    the active target's copied shader graph would not control source sampling. Both paths
+    are deliberately skipped.
+    """
+
+    if not isinstance(runtime, SemanticBakeRuntime):
+        raise TypeError("runtime must be SemanticBakeRuntime")
+    if prepared_materials is None:
+        raise TypeError("prepared_materials cannot be None")
+
+    if generated_material is not None:
+        logger.debug(
+            "Skipping source-UV material binding for generated bake '%s'",
+            runtime.plan.source_object_id,
+        )
+        return
+    if runtime.plan.settings.selected_to_active:
+        logger.debug(
+            "Skipping temporary target source-UV binding for selected-to-active bake '%s'",
+            runtime.plan.source_object_id,
+        )
+        return
+
+    source_uv_name = runtime.target_snapshot.render_uv_layer
+    if source_uv_name is None:
+        raise BakeExecutionError(
+            "Semantic bake target has no source render UV layer for implicit material sampling"
+        )
+    available_uv_names = tuple(runtime.target_snapshot.uv_layer_names)
+    if source_uv_name not in available_uv_names:
+        raise BakeExecutionError(
+            f"Semantic bake source render UV '{source_uv_name}' is absent from "
+            f"target UV layers {available_uv_names!r}"
+        )
+
+    try:
+        reports = bind_materials_implicit_uv_sampling(
+            prepared_materials.materials,
+            source_uv_name,
+            used_material_indices=prepared_materials.used_material_indices,
+            excluded_nodes=prepared_materials.image_nodes,
+        )
+    except MaterialUvBindingError as exc:
+        raise BakeExecutionError(
+            f"Unable to bind implicit material sampling to source UV '{source_uv_name}'"
+        ) from exc
+
+    consumer_count = sum(report.consumer_count for report in reports)
+    logger.info(
+        "Bound %d implicit UV consumer(s) across %d temporary material(s) to source UV '%s'",
+        consumer_count,
+        len(reports),
+        source_uv_name,
+    )
 
 
 def _bake_pass_to_buffer(
@@ -295,16 +363,10 @@ def run_semantic_bake(
                     render_target=runtime.renderer.shader_target,
                     generated_material=generated_material,
                 ) as prepared_materials:
-                    source_uv_name = runtime.target_snapshot.render_uv_layer
-                    if source_uv_name is None:
-                        raise BakeExecutionError(
-                            "Semantic bake target has no source render UV layer"
-                        )
-                    bind_materials_implicit_uv_sampling(
-                        prepared_materials.materials,
-                        source_uv_name,
-                        used_material_indices=prepared_materials.used_material_indices,
-                        excluded_nodes=prepared_materials.image_nodes,
+                    _bind_temporary_source_uv_sampling(
+                        runtime,
+                        prepared_materials,
+                        generated_material=generated_material,
                     )
                     with activate_object_for_operator(
                         temporary.object,
@@ -368,6 +430,7 @@ def run_semantic_bake(
 
 __all__ = [
     "BakeExecutionError",
+    "_bind_temporary_source_uv_sampling",
     "_call_bake_operator",
     "run_semantic_bake",
 ]
