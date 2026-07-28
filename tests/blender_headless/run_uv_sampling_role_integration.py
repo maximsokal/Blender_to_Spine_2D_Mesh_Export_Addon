@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import traceback
+import warnings
 
 import bpy
 
@@ -43,6 +44,48 @@ def _assert(condition: bool, message: str) -> None:
         raise ValueError("message must be a non-empty string")
     if not condition:
         raise AssertionError(message)
+
+
+def _enable_material_nodes(material: bpy.types.Material) -> None:
+    if material is None:
+        raise TypeError("material cannot be None")
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=".*Material.use_nodes.*",
+            category=DeprecationWarning,
+        )
+        material.use_nodes = True
+
+
+def _active_render_uv_names(mesh: bpy.types.Mesh) -> tuple[str, ...]:
+    if mesh is None:
+        raise TypeError("mesh cannot be None")
+    return tuple(
+        str(layer.name)
+        for layer in mesh.uv_layers
+        if bool(getattr(layer, "active_render", False))
+    )
+
+
+def _set_render_uv_layer(mesh: bpy.types.Mesh, layer_name: str) -> None:
+    if mesh is None:
+        raise TypeError("mesh cannot be None")
+    if not isinstance(layer_name, str) or not layer_name.strip():
+        raise ValueError("layer_name must be a non-empty string")
+    resolved_name = layer_name.strip()
+    target = mesh.uv_layers.get(resolved_name)
+    if target is None:
+        raise AssertionError(f"UV layer does not exist: {resolved_name}")
+
+    for layer in mesh.uv_layers:
+        layer.active_render = str(layer.name) == resolved_name
+
+    actual = _active_render_uv_names(mesh)
+    if actual != (resolved_name,):
+        raise AssertionError(
+            f"Unable to set unique active_render UV '{resolved_name}': {actual}"
+        )
 
 
 def _clear_scene() -> None:
@@ -111,8 +154,7 @@ def _create_quad(name: str) -> bpy.types.Object:
             loop_index = int(polygon.loop_start) + corner_index
             layer.uv[loop_index].vector = coordinate
         mesh.uv_layers.active = layer
-        for candidate in mesh.uv_layers:
-            candidate.active_render = candidate is layer
+        _set_render_uv_layer(mesh, "UVMap")
 
         bpy.ops.object.select_all(action="DESELECT")
         obj.select_set(True)
@@ -211,7 +253,7 @@ def _source_uv_image_material(name: str):
     resolved_name = name.strip()
 
     material = bpy.data.materials.new(name=resolved_name)
-    material.use_nodes = True
+    _enable_material_nodes(material)
     node_tree = material.node_tree
     if node_tree is None:
         raise RuntimeError("Created material has no node tree")
@@ -251,8 +293,9 @@ def _source_uv_image_material(name: str):
         pass
     image_node.image = image
 
-    # The representative sword uses this exact semantic path. Texture Coordinate UV
-    # must read SourceUV through active_render while Blender writes into SpineBakeUV.
+    # The representative sword uses this exact semantic path. The temporary copy
+    # must replace this implicit UV source with UV Map(SourceUV), while Blender writes
+    # the baked result through the explicit SpineBakeUV operator argument.
     node_tree.links.new(
         texture_coordinate.outputs["UV"],
         mapping.inputs["Vector"],
@@ -279,8 +322,7 @@ def _assign_constant_source_uv(obj: bpy.types.Object) -> None:
     for item in source.uv:
         item.vector = (0.25, 0.5)
     layers.active = source
-    for layer in layers:
-        layer.active_render = layer is source
+    _set_render_uv_layer(mesh, SOURCE_RENDER_UV)
 
 
 def test_source_render_uv_is_not_replaced_by_spine_bake_uv() -> None:
@@ -290,6 +332,16 @@ def test_source_render_uv_is_not_replaced_by_spine_bake_uv() -> None:
     with tempfile.TemporaryDirectory(prefix="spine2d-uv-sampling-role-") as directory:
         source = _create_quad("UvSamplingRole")
         _assign_constant_source_uv(source)
+        source_active = source.data.uv_layers.active
+        _assert(
+            source_active is not None and source_active.name == SOURCE_RENDER_UV,
+            f"source active UV is wrong: {getattr(source_active, 'name', None)}",
+        )
+        _assert(
+            _active_render_uv_names(source.data) == (SOURCE_RENDER_UV,),
+            f"source active_render UV is wrong: {_active_render_uv_names(source.data)}",
+        )
+
         material, source_image = _source_uv_image_material("UvSamplingRoleMaterial")
         source.data.materials.append(material)
         settings = _settings(Path(directory), "UvSamplingRole")
@@ -309,6 +361,18 @@ def test_source_render_uv_is_not_replaced_by_spine_bake_uv() -> None:
                 set(target.uv_layer_names)
             ),
             f"UV layers were not preserved: {target.uv_layer_names}",
+        )
+        source_coordinates = tuple(
+            loop.uv(SOURCE_RENDER_UV) for loop in target.loops
+        )
+        _assert(
+            all(
+                coordinate is not None
+                and abs(coordinate[0] - 0.25) <= 1.0e-6
+                and abs(coordinate[1] - 0.5) <= 1.0e-6
+                for coordinate in source_coordinates
+            ),
+            f"SourceUV coordinates changed before bake: {source_coordinates}",
         )
 
         result = export_a1_single_object(source, settings)
@@ -336,6 +400,11 @@ def test_source_render_uv_is_not_replaced_by_spine_bake_uv() -> None:
         _assert(len(covered) > 20, "UV-role bake produced too few covered pixels")
         mean_red = sum(value[0] for value in covered) / len(covered)
         mean_blue = sum(value[2] for value in covered) / len(covered)
+        print(
+            "[UV_ROLE] "
+            f"covered={len(covered)} mean_red={mean_red:.6f} "
+            f"mean_blue={mean_blue:.6f}"
+        )
         _assert(
             mean_red > 0.75,
             f"source render UV did not sample the red texel: red={mean_red}",
