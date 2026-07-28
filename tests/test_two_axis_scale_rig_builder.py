@@ -53,6 +53,9 @@ def test_two_axis_scale_rig_matches_reference_semantic_hierarchy():
         "Box_rotation_Y",
         "Box_scale",
     )
+    bone_by_name = {bone.name: bone for bone in result.bones}
+    assert bone_by_name["Box_rotation_X"].rotation == -134.67
+    assert bone_by_name["Box_rotation_Y"].rotation == -17.43
     result.validate()
 
 
@@ -68,9 +71,9 @@ def test_two_axis_constraint_schedule_and_scale_targets_are_exact():
         "Box_rotate_X",
     )
     assert rotate_x.target == "Box_rotation_X"
-    assert rotate_y.bones == ("Box_1", "Box_2")
+    assert rotate_y.bones == ("Box_2", "Box_1")
     assert rotate_y.target == "Box_rotation_Y"
-    assert scale.bones == ("Box_rotate_X", "Box_1", "Box_2")
+    assert scale.bones == ("Box_rotate_X", "Box_2", "Box_1")
     assert scale.target == "Box_scale"
     assert scale.extras["relative"] is True
     assert depth.bones == ("Box_1_scale", "Box_2_scale")
@@ -84,13 +87,14 @@ def test_two_axis_builder_supports_arbitrary_depth_group_counts():
         for index in range(5)
     )
     result = build_two_axis_scale_rig(_request(groups))
+    reversed_rotation_bones = tuple(reversed(result.info.sub_bone_names))
 
     assert len(result.info.z_groups) == 5
     assert len(result.info.sub_bone_names) == 5
-    assert result.transform[1].bones == result.info.sub_bone_names
+    assert result.transform[1].bones == reversed_rotation_bones
     assert result.transform[2].bones == (
         result.info.main_rotation_bone_name,
-        *result.info.sub_bone_names,
+        *reversed_rotation_bones,
     )
     assert result.transform[3].bones == result.info.sub_bone_scale_names
     result.validate()
