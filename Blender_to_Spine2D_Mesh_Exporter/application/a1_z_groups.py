@@ -1,7 +1,13 @@
 """Create stable A1 Z-group assignments from the original mesh snapshot.
 
-Z values are inspected exactly once on the source snapshot. Every later segment or
-triangulated copy resolves its parent group through ``SourceVertexId`` rather than
+Legacy production grouped source depth after rounding Blender Z coordinates to four
+decimal places. That canonicalization is part of the rig contract: evaluated meshes
+and applied transforms can introduce tiny floating-point differences between vertices
+that belong to the same authored depth layer. Treating every raw float as a separate
+Z group explodes the rig and shifts otherwise connected regions independently.
+
+Z values are canonicalized exactly once on the source snapshot. Every later segment
+or triangulated copy resolves its parent group through ``SourceVertexId`` rather than
 comparing transformed floating-point coordinates.
 """
 
@@ -18,6 +24,10 @@ from .a1_numeric_contracts import (
     require_identity,
     require_integer,
 )
+
+
+LEGACY_Z_GROUP_DECIMALS = 4
+_MAXIMUM_Z_GROUP_DECIMALS = 12
 
 
 class A1ZGroupAssignmentError(ValueError):
@@ -138,13 +148,32 @@ class A1ZGroupAssignmentPlan:
         )
 
 
+def _canonical_z(value: float, *, decimals: int, field_name: str) -> float:
+    """Return one finite legacy-compatible Z identity.
+
+    Python's rounded negative zero compares equal to positive zero but retains a
+    different textual representation. Normalize it explicitly so diagnostics,
+    serialization, and dictionary keys remain stable across platforms.
+    """
+
+    resolved = require_finite_number(value, field_name)
+    canonical = float(round(resolved, decimals))
+    return 0.0 if canonical == 0.0 else canonical
+
+
 def build_a1_z_group_assignment(
     source_snapshot: MeshSnapshot,
     *,
     height_overrides: Tuple[A1ZGroupHeightOverride, ...] = (),
+    z_group_decimals: int = LEGACY_Z_GROUP_DECIMALS,
     z_index_base: int = 1,
 ) -> A1ZGroupAssignmentPlan:
-    """Build sorted legacy Z groups and source-vertex bindings exactly once."""
+    """Build canonical legacy Z groups and exact source-vertex bindings.
+
+    ``z_group_decimals`` defaults to the historical four-decimal Blender-unit
+    contract. It is explicit for deterministic tests and future compatibility work,
+    but production callers should normally keep the default.
+    """
 
     if not isinstance(source_snapshot, MeshSnapshot):
         raise TypeError("source_snapshot must be MeshSnapshot")
@@ -153,34 +182,51 @@ def build_a1_z_group_assignment(
         raise TypeError("height_overrides must be tuple")
     if not all(isinstance(item, A1ZGroupHeightOverride) for item in height_overrides):
         raise TypeError("height_overrides must contain A1ZGroupHeightOverride values")
+    require_integer(
+        z_group_decimals,
+        "z_group_decimals",
+        minimum=0,
+        maximum=_MAXIMUM_Z_GROUP_DECIMALS,
+    )
     require_integer(z_index_base, "z_index_base", minimum=0)
 
-    override_values = tuple(float(item.z_value) for item in height_overrides)
-    if len(override_values) != len(set(override_values)):
-        raise ValueError("height_overrides contain duplicate z_value entries")
-    override_by_z = {
-        float(item.z_value): float(item.height_real_pixels)
-        for item in height_overrides
-    }
+    override_by_z: dict[float, float] = {}
+    for override_index, item in enumerate(height_overrides):
+        canonical_z = _canonical_z(
+            item.z_value,
+            decimals=z_group_decimals,
+            field_name=f"height_overrides[{override_index}].z_value",
+        )
+        if canonical_z in override_by_z:
+            raise ValueError(
+                "height_overrides contain duplicate z_value entries after "
+                f"{z_group_decimals}-decimal canonicalization: {canonical_z}"
+            )
+        override_by_z[canonical_z] = float(item.height_real_pixels)
 
     z_values_by_source: dict[SourceVertexId, float] = {}
     for vertex in source_snapshot.vertices:
-        z_value = float(vertex.position[2])
+        canonical_z = _canonical_z(
+            vertex.position[2],
+            decimals=z_group_decimals,
+            field_name=f"vertex[{vertex.id.index}].position[2]",
+        )
         existing = z_values_by_source.get(vertex.source_id)
-        if existing is not None and existing != z_value:
+        if existing is not None and existing != canonical_z:
             raise A1ZGroupAssignmentError(
-                f"Source vertex {vertex.source_id} appears with conflicting Z values "
-                f"{existing} and {z_value}"
+                f"Source vertex {vertex.source_id} appears with conflicting canonical "
+                f"Z values {existing} and {canonical_z}"
             )
-        z_values_by_source[vertex.source_id] = z_value
+        z_values_by_source[vertex.source_id] = canonical_z
 
     ordered_z_values = tuple(sorted(set(z_values_by_source.values())))
     unknown_overrides = tuple(sorted(set(override_by_z) - set(ordered_z_values)))
     if unknown_overrides:
         raise A1ZGroupAssignmentError(
-            f"height_overrides reference Z values absent from source snapshot: "
+            "height_overrides reference canonical Z values absent from source snapshot: "
             f"{unknown_overrides}"
         )
+
     groups = tuple(
         LegacyZGroup(
             z_value=z_value,
@@ -208,3 +254,13 @@ def build_a1_z_group_assignment(
         groups=groups,
         source_bindings=bindings,
     )
+
+
+__all__ = [
+    "A1SourceVertexZBinding",
+    "A1ZGroupAssignmentError",
+    "A1ZGroupAssignmentPlan",
+    "A1ZGroupHeightOverride",
+    "LEGACY_Z_GROUP_DECIMALS",
+    "build_a1_z_group_assignment",
+]
