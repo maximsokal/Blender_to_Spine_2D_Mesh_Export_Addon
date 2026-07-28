@@ -53,7 +53,7 @@ from .legacy_rig_contracts import (
 from .legacy_rig_error import LegacyRigBuildError
 from .legacy_rig_scale import calculate_uniform_scale
 from .legacy_visuals import (
-    apply_legacy_visual_options,
+    apply_legacy_visual_options as _apply_legacy_visual_options,
     build_legacy_control_slots_and_attachments,
     build_legacy_preview_animation,
 )
@@ -76,6 +76,11 @@ from .parity import (
 )
 from .rig_builder import build_rig
 from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
+from .rig_visuals import (
+    apply_rig_visual_options,
+    build_two_axis_scale_control_slots_and_attachments,
+    build_two_axis_scale_preview_animation,
+)
 from .serializer import SpineSerializer
 from .two_axis_scale_profile import TwoAxisScaleRigProfile
 from .two_axis_scale_rig import (
@@ -91,6 +96,50 @@ from .weighted_vertices import (
     decode_weighted_vertices,
     encode_weighted_vertices,
 )
+
+
+def apply_legacy_visual_options(
+    document: SpineDocument,
+    *,
+    prefix: str,
+    include_control_icons: bool,
+    include_preview_animation: bool,
+) -> SpineDocument:
+    """Compatibility facade that recognizes the generated control namespace.
+
+    Existing application modules historically import this name from the package root.
+    The facade keeps those callers working while camera-projection documents can use the
+    new two-axis profile before every call site is renamed to ``apply_rig_visual_options``.
+    """
+
+    if not isinstance(document, SpineDocument):
+        raise TypeError("document must be SpineDocument")
+    normalized = prefix.strip() if isinstance(prefix, str) else ""
+    if not normalized:
+        raise ValueError("prefix must be a non-empty string")
+    bone_names = {bone.name for bone in document.bones}
+    rotation_z = f"{normalized}_rotation_Z"
+    scale_control = f"{normalized}_scale"
+    if rotation_z in bone_names:
+        return _apply_legacy_visual_options(
+            document,
+            prefix=normalized,
+            include_control_icons=include_control_icons,
+            include_preview_animation=include_preview_animation,
+        )
+    if scale_control in bone_names:
+        return apply_rig_visual_options(
+            document,
+            prefix=normalized,
+            rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+            include_control_icons=include_control_icons,
+            include_preview_animation=include_preview_animation,
+        )
+    raise ValueError(
+        "Unable to identify rig profile from generated controls for "
+        f"prefix {normalized!r}"
+    )
+
 
 __all__ = [
     "A1ParityError",
@@ -150,6 +199,7 @@ __all__ = [
     "WeightedVertexInfluence",
     "apply_attachment_sequence_animations",
     "apply_legacy_visual_options",
+    "apply_rig_visual_options",
     "build_attachment_sequence_timeline",
     "build_connected_group_document",
     "build_legacy_control_slots_and_attachments",
@@ -159,7 +209,9 @@ __all__ = [
     "build_legacy_preview_animation",
     "build_legacy_rig",
     "build_rig",
+    "build_two_axis_scale_control_slots_and_attachments",
     "build_two_axis_scale_layout",
+    "build_two_axis_scale_preview_animation",
     "build_two_axis_scale_rig",
     "calculate_uniform_scale",
     "compare_a1_exports",
