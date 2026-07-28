@@ -19,54 +19,154 @@ _PIXEL_CHANNEL_COUNT = 4
 _SPINE_FILE_SPACE_FLIP_MARKER = "spine2d_spine_file_space_rows_flipped_v1"
 
 
-def _activate_uv_layer(mesh: Any, layer_name: str) -> None:
-    """Activate one exact Blender 5.2 UV layer for editing and rendering."""
+def _activate_uv_layer(
+    mesh: Any,
+    layer_name: str,
+    *,
+    render_layer_name: str | None = None,
+) -> None:
+    """Configure independent bake-destination and shader-sampling UV roles.
+
+    Blender's bake operator writes into the active UV layer unless an explicit
+    ``uv_layer`` argument is supplied. Material nodes such as Texture Coordinate
+    ``UV`` and Image Texture nodes with an unlinked Vector input sample the mesh's
+    ``active_render`` UV layer. Those are separate responsibilities:
+
+    - ``layer_name`` is the generated destination layout, normally ``SpineBakeUV``;
+    - ``render_layer_name`` is the source material-sampling layout, normally the
+      original Blender render UV such as ``UVMap``.
+
+    Assigning the bake layer to ``active_render`` would make the source material
+    read through the destination layout and scramble the baked texture. This
+    function therefore keeps the two roles independent and validates Blender's
+    resulting RNA state before baking starts.
+    """
 
     if mesh is None:
         raise BakeExecutionError("mesh cannot be None")
     if not isinstance(layer_name, str) or not layer_name.strip():
         raise ValueError("layer_name must be a non-empty string")
-    resolved_name = layer_name.strip()
+    if render_layer_name is not None and (
+        not isinstance(render_layer_name, str) or not render_layer_name.strip()
+    ):
+        raise ValueError("render_layer_name must be a non-empty string or None")
+
+    bake_name = layer_name.strip()
+    requested_render_name = (
+        None if render_layer_name is None else render_layer_name.strip()
+    )
     layers = getattr(mesh, "uv_layers", None)
     if layers is None:
         raise BakeExecutionError("Temporary target mesh has no UV layer collection")
     getter = getattr(layers, "get", None)
     if not callable(getter):
         raise BakeExecutionError("Blender 5.2 UVLoopLayers.get() is unavailable")
+
     try:
-        layer = getter(resolved_name)
+        bake_layer = getter(bake_name)
     except Exception as exc:
         raise BakeExecutionError(
-            f"Unable to resolve bake UV layer '{resolved_name}'"
+            f"Unable to resolve bake UV layer '{bake_name}'"
         ) from exc
-    if layer is None:
+    if bake_layer is None:
         raise BakeExecutionError(
-            f"Temporary target mesh is missing UV layer '{resolved_name}'"
+            f"Temporary target mesh is missing UV layer '{bake_name}'"
         )
 
     try:
-        layers.active = layer
+        materialized_layers = tuple(layers)
     except Exception as exc:
-        raise BakeExecutionError(
-            f"Unable to activate bake UV layer '{resolved_name}'"
-        ) from exc
+        raise BakeExecutionError("Unable to inspect temporary target UV layers") from exc
+    if not materialized_layers:
+        raise BakeExecutionError("Temporary target mesh contains no UV layers")
+
+    if requested_render_name is None:
+        current_render_layers = tuple(
+            candidate
+            for candidate in materialized_layers
+            if bool(getattr(candidate, "active_render", False))
+        )
+        if len(current_render_layers) != 1:
+            names = tuple(
+                str(getattr(candidate, "name", "<unnamed>"))
+                for candidate in current_render_layers
+            )
+            raise BakeExecutionError(
+                "A unique source render UV layer is required before semantic bake; "
+                f"active_render layers={names}"
+            )
+        render_layer = current_render_layers[0]
+        resolved_render_name = str(getattr(render_layer, "name", "") or "")
+        if not resolved_render_name:
+            raise BakeExecutionError("Source render UV layer has an empty name")
+    else:
+        resolved_render_name = requested_render_name
+        try:
+            render_layer = getter(resolved_render_name)
+        except Exception as exc:
+            raise BakeExecutionError(
+                f"Unable to resolve source render UV layer '{resolved_render_name}'"
+            ) from exc
+        if render_layer is None:
+            raise BakeExecutionError(
+                "Temporary target mesh is missing source render UV layer "
+                f"'{resolved_render_name}'"
+            )
+
     try:
-        for candidate in layers:
-            candidate.active_render = candidate is layer or candidate.name == resolved_name
+        layers.active = bake_layer
     except Exception as exc:
         raise BakeExecutionError(
-            f"Unable to assign render UV layer '{resolved_name}'"
+            f"Unable to activate bake destination UV layer '{bake_name}'"
+        ) from exc
+
+    try:
+        for candidate in materialized_layers:
+            candidate.active_render = (
+                candidate is render_layer
+                or str(getattr(candidate, "name", "") or "")
+                == resolved_render_name
+            )
+    except Exception as exc:
+        raise BakeExecutionError(
+            f"Unable to assign source render UV layer '{resolved_render_name}'"
         ) from exc
 
     active = getattr(layers, "active", None)
-    if active is not layer and getattr(active, "name", None) != resolved_name:
+    if active is not bake_layer and getattr(active, "name", None) != bake_name:
         raise BakeExecutionError(
-            f"Blender did not keep UV layer '{resolved_name}' active"
+            f"Blender did not keep bake destination UV layer '{bake_name}' active"
         )
-    if not bool(getattr(layer, "active_render", False)):
+
+    active_render_layers = tuple(
+        candidate
+        for candidate in materialized_layers
+        if bool(getattr(candidate, "active_render", False))
+    )
+    if len(active_render_layers) != 1:
+        names = tuple(
+            str(getattr(candidate, "name", "<unnamed>"))
+            for candidate in active_render_layers
+        )
         raise BakeExecutionError(
-            f"Blender did not keep UV layer '{resolved_name}' active for rendering"
+            "Blender did not keep exactly one source render UV layer active; "
+            f"active_render layers={names}"
         )
+    actual_render = active_render_layers[0]
+    if actual_render is not render_layer and getattr(
+        actual_render, "name", None
+    ) != resolved_render_name:
+        raise BakeExecutionError(
+            "Blender changed the source render UV role; "
+            f"expected='{resolved_render_name}', "
+            f"actual='{getattr(actual_render, 'name', None)}'"
+        )
+
+    logger.debug(
+        "Configured semantic bake UV roles: destination='%s', source_render='%s'",
+        bake_name,
+        resolved_render_name,
+    )
 
 
 def _configure_image_alpha_mode(image: Any, *, color_mode: str) -> None:
