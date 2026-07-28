@@ -42,6 +42,23 @@ def source_with_two_z_groups():
     return replace(snapshot, vertices=vertices)
 
 
+def source_with_legacy_z_noise():
+    snapshot = build_square_snapshot()
+    noisy_z_values = (-0.25000001, -0.24999999, 0.24999999, 0.25000001)
+    vertices = tuple(
+        replace(
+            vertex,
+            position=(
+                vertex.position[0],
+                vertex.position[1],
+                noisy_z_values[vertex.id.index],
+            ),
+        )
+        for vertex in snapshot.vertices
+    )
+    return replace(snapshot, vertices=vertices)
+
+
 def test_source_snapshot_builds_sorted_one_based_z_groups():
     plan = build_a1_z_group_assignment(source_with_two_z_groups())
 
@@ -57,15 +74,28 @@ def test_source_snapshot_builds_sorted_one_based_z_groups():
     assert plan.group_index_for_source(SourceVertexId("Cube", 3)) == 2
 
 
-def test_height_overrides_are_applied_by_exact_source_z_value():
+def test_source_z_values_are_canonicalized_before_grouping():
+    plan = build_a1_z_group_assignment(source_with_legacy_z_noise())
+
+    assert tuple(group.z_value for group in plan.groups) == (-0.25, 0.25)
+    assert tuple(binding.z_group_index for binding in plan.source_bindings) == (
+        1,
+        1,
+        2,
+        2,
+    )
+
+
+def test_height_overrides_follow_the_same_canonical_z_identity():
     plan = build_a1_z_group_assignment(
         source_with_two_z_groups(),
         height_overrides=(
-            A1ZGroupHeightOverride(-1.0, -128.0),
-            A1ZGroupHeightOverride(1.0, 128.0),
+            A1ZGroupHeightOverride(-1.00000001, -128.0),
+            A1ZGroupHeightOverride(1.00000001, 128.0),
         ),
     )
 
+    assert tuple(group.z_value for group in plan.groups) == (-1.0, 1.0)
     assert tuple(group.height_real_pixels for group in plan.groups) == (
         -128.0,
         128.0,
@@ -151,12 +181,22 @@ def test_derived_snapshot_from_another_source_is_rejected():
         plan.projection_bindings(other)
 
 
-def test_duplicate_height_override_is_rejected():
+def test_duplicate_height_override_is_rejected_after_canonicalization():
     with pytest.raises(ValueError, match="duplicate z_value"):
         build_a1_z_group_assignment(
             build_square_snapshot(),
             height_overrides=(
-                A1ZGroupHeightOverride(0.0, 0.0),
-                A1ZGroupHeightOverride(0.0, 10.0),
+                A1ZGroupHeightOverride(0.00000001, 0.0),
+                A1ZGroupHeightOverride(0.00000002, 10.0),
             ),
+        )
+
+
+@pytest.mark.parametrize("invalid", [True, -1, 13])
+def test_z_group_decimal_contract_rejects_invalid_values(invalid):
+    expected = TypeError if invalid is True else ValueError
+    with pytest.raises(expected):
+        build_a1_z_group_assignment(
+            build_square_snapshot(),
+            z_group_decimals=invalid,
         )
