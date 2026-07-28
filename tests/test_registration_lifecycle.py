@@ -87,6 +87,10 @@ def test_registration_owners_use_only_needed_transaction_helpers():
             "register_classes_transactionally",
             "unregister_all_best_effort",
         },
+        "rig_ui.py": {
+            "register_classes_transactionally",
+            "unregister_all_best_effort",
+        },
         "ui.py": {
             "register_classes_transactionally",
             "register_rna_properties_transactionally",
@@ -131,6 +135,7 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
     assert "scene_settings_migration" in source
     assert "a1_readiness_invalidation" in source
     assert "auto_readiness" in source
+    assert "rig_ui" in source
 
     steps_assignment = next(
         node for node in ast.walk(tree)
@@ -144,6 +149,7 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
         "Scene RNA properties",
         "Scene settings migration",
         "UI",
+        "Rig UI",
         "readiness invalidation",
         "automatic readiness",
         "Re-Polish UI",
@@ -153,7 +159,8 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
     assert labels.index("Scene RNA properties") < labels.index(
         "Scene settings migration"
     ) < labels.index("UI")
-    assert labels.index("UI") < labels.index("readiness invalidation")
+    assert labels.index("UI") < labels.index("Rig UI")
+    assert labels.index("Rig UI") < labels.index("readiness invalidation")
     assert labels.index("readiness invalidation") < labels.index(
         "automatic readiness"
     )
