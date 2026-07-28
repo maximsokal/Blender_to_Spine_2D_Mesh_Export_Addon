@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Set
 
 import bpy
 
@@ -16,6 +17,26 @@ from .infrastructure.blender_registration import (
 
 
 logger = logging.getLogger(__name__)
+
+
+class SPINE2D_OT_ResetRigProfile(bpy.types.Operator):
+    """Restore the compatibility three-axis profile without changing other settings."""
+
+    bl_idname = "spine2d.reset_rig_profile"
+    bl_label = "Reset Rig Profile"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context: bpy.types.Context) -> Set[str]:
+        try:
+            context.scene.spine2d_rig_profile = (
+                A1RigProfile.THREE_AXIS_ROTATION.value
+            )
+            self.report({"INFO"}, "Rig profile reset to 3-Axis Rotation")
+            return {"FINISHED"}
+        except Exception as exc:
+            logger.exception("Unable to reset Spine2D rig profile")
+            self.report({"ERROR"}, f"Rig reset error: {exc}")
+            return {"CANCELLED"}
 
 
 class OBJECT_PT_Spine2DRigPanel(bpy.types.Panel):
@@ -33,7 +54,13 @@ class OBJECT_PT_Spine2DRigPanel(bpy.types.Panel):
         layout = self.layout
         scene = context.scene
         try:
-            layout.prop(scene, "spine2d_rig_profile", text="Rig profile")
+            header = layout.row(align=True)
+            header.prop(scene, "spine2d_rig_profile", text="Rig profile")
+            header.operator(
+                "spine2d.reset_rig_profile",
+                text="",
+                icon="LOOP_BACK",
+            )
             profile = resolve_a1_rig_profile(
                 getattr(
                     scene,
@@ -43,12 +70,22 @@ class OBJECT_PT_Spine2DRigPanel(bpy.types.Panel):
             )
             description = layout.box()
             if profile is A1RigProfile.THREE_AXIS_ROTATION:
-                description.label(text="Controls: Rotation X / Y / Z", icon="ORIENTATION_GIMBAL")
-                description.label(text="Current compatibility rig; scale is constrained")
+                description.label(
+                    text="Controls: Rotation X / Y / Z",
+                    icon="ORIENTATION_GIMBAL",
+                )
+                description.label(
+                    text="Current compatibility rig; scale is constrained"
+                )
             else:
-                description.label(text="Controls: Rotation X / Y + Scale", icon="FULLSCREEN_ENTER")
+                description.label(
+                    text="Controls: Rotation X / Y + Scale",
+                    icon="FULLSCREEN_ENTER",
+                )
                 description.label(text="No Rotation Z control is generated")
-                description.label(text="Scale affects X owner and all depth planes")
+                description.label(
+                    text="Scale affects X owner and all depth planes"
+                )
 
             layout.separator()
             row = layout.row(align=True)
@@ -62,7 +99,10 @@ class OBJECT_PT_Spine2DRigPanel(bpy.types.Panel):
             layout.label(text="Rig UI error (see console)", icon="ERROR")
 
 
-CLASSES = (OBJECT_PT_Spine2DRigPanel,)
+CLASSES = (
+    SPINE2D_OT_ResetRigProfile,
+    OBJECT_PT_Spine2DRigPanel,
+)
 
 
 def register() -> None:
@@ -92,6 +132,7 @@ def unregister() -> None:
 __all__ = [
     "CLASSES",
     "OBJECT_PT_Spine2DRigPanel",
+    "SPINE2D_OT_ResetRigProfile",
     "register",
     "unregister",
 ]
