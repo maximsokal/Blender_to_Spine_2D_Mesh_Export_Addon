@@ -28,6 +28,7 @@ from ..domain.geometry import MeshSnapshot, ModifierLineagePolicy
 from ..domain.spine import LegacyAttachmentSequence
 from ..domain.spine.legacy_rig_contracts import UniformScaleMode
 from ..domain.spine.legacy_rig_scale import calculate_uniform_scale
+from ..domain.spine.rig_profiles import resolve_a1_rig_profile
 from ..domain.uv import UvUnwrapSettings
 from .a1_geometry_preparation import A1GeometryPreparationSettings
 from .a1_numeric_contracts import (
@@ -135,8 +136,7 @@ class A1SingleObjectExportSettings:
             raise TypeError("export must be ExportSettings")
         if self.export.spine_version != "4.2.43":
             raise ValueError("A1 currently supports Spine 4.2.43 only")
-        if self.export.rig_profile != "LEGACY_ROTATABLE_MESH":
-            raise ValueError("A1 requires rig_profile LEGACY_ROTATABLE_MESH")
+        resolve_a1_rig_profile(self.export.rig_profile)
         for field_name in ("prefix", "output_stem", "json_output_stem"):
             value = getattr(self, field_name)
             if value is not None:
