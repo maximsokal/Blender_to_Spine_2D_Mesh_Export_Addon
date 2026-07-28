@@ -46,11 +46,12 @@ if ($LASTEXITCODE -ne 0) {
 
 Do not use fail-fast for final evidence. A release run must expose every failure.
 
-## Focused 0.41.1 correspondence regression
+## Focused 0.41.2 geometry and material regression
 
 ```powershell
 & .\.venv-tests\Scripts\python.exe `
     -m pytest `
+    tests/test_a1_z_groups.py `
     tests/test_normal_uv_pyramid_regression.py `
     tests/test_a1_material_correspondence.py `
     tests/test_a1_bake_material_bindings.py `
@@ -64,12 +65,15 @@ Do not use fail-fast for final evidence. A release run must expose every failure
     --durations=20
 
 if ($LASTEXITCODE -ne 0) {
-    throw "0.41.1 correspondence regressions failed"
+    throw "0.41.2 focused regressions failed"
 }
 ```
 
 These tests verify:
 
+- source Z values use the Legacy four-decimal identity before Z-group creation;
+- near-identical evaluated depths share one parent group through `SourceVertexId`;
+- noisy source depth cannot inflate the final rig by hundreds of bones;
 - attachment hull and triangle area remain defined in the stable local projected pixel plane;
 - Z-group setup translations do not redefine attachment topology;
 - serialized UV, triangle, hull, edge, and weighted-bone streams preserve projection order;
@@ -182,7 +186,7 @@ This fixture intentionally uses different geometry-corner and source-material-UV
 
 This verifies that source material sampling UV and generated `SpineBakeUV` remain separate roles.
 
-## Build version 0.41.1
+## Build version 0.41.2
 
 ```powershell
 Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
@@ -196,7 +200,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Get-Item `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.41.1.zip" |
+    ".\dist\blender_to_spine2d_mesh_exporter-0.41.2.zip" |
     Select-Object FullName, Length, LastWriteTime
 ```
 
@@ -205,7 +209,7 @@ Get-Item `
 ```powershell
 & $Blender `
     --command extension validate `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.41.1.zip"
+    ".\dist\blender_to_spine2d_mesh_exporter-0.41.2.zip"
 
 if ($LASTEXITCODE -ne 0) {
     throw "Built extension validation failed"
