@@ -53,14 +53,7 @@ def build_legacy_z_group_metadata(
     profile: LegacyRigProfile,
     uniform_scale: float,
 ) -> Tuple[LegacyZGroupBuildInfo, ...]:
-    """Sort source Z values and resolve dense legacy names and pixel offsets.
-
-    Historical production calculated automatically derived Z offsets relative to the
-    center of the complete source depth range. Explicit ``height_real_pixels`` values
-    remain authoritative. Centering is important because Z-group translations are part
-    of the exported setup pose and must not push every layer to one side of the main
-    bone merely because no explicit override was supplied.
-    """
+    """Sort source Z values and resolve dense legacy names and pixel offsets."""
 
     if not isinstance(request, LegacyRigBuildRequest):
         raise TypeError("request must be LegacyRigBuildRequest")
@@ -73,18 +66,7 @@ def build_legacy_z_group_metadata(
     ordered_groups = tuple(
         sorted(request.z_groups, key=lambda group: float(group.z_value))
     )
-    minimum_z = require_finite_derived(
-        float(ordered_groups[0].z_value),
-        "minimum_z",
-    )
-    maximum_z = require_finite_derived(
-        float(ordered_groups[-1].z_value),
-        "maximum_z",
-    )
-    center_z = require_finite_derived(
-        (minimum_z + maximum_z) / 2.0,
-        "center_z",
-    )
+    minimum_z = float(ordered_groups[0].z_value)
     result: list[LegacyZGroupBuildInfo] = []
 
     for offset, group in enumerate(ordered_groups):
@@ -96,14 +78,14 @@ def build_legacy_z_group_metadata(
             calculation_method = "height_real_pixels"
         else:
             delta = require_finite_derived(
-                float(group.z_value) - center_z,
+                float(group.z_value) - minimum_z,
                 f"z_groups[{offset}].delta",
             )
             y_offset = require_finite_derived(
                 delta * resolved_scale,
                 f"z_groups[{offset}].y_offset_pixels",
             )
-            calculation_method = "direct_3d_scaling_centered"
+            calculation_method = "direct_3d_scaling"
 
         rounded_y = require_finite_derived(
             round(y_offset, 2),
