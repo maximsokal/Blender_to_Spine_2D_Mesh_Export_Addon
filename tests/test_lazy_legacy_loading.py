@@ -42,12 +42,13 @@ def test_root_startup_imports_only_rewrite_registration_boundaries():
         "auto_readiness",
         "repolish_ui",
         "generated_material_ui",
+        "ui_layout",
         "single_object_operator",
     ]
 
 
 def test_runtime_operators_do_not_import_legacy_loaders():
-    for filename in ("single_object_operator.py", "ui.py"):
+    for filename in ("single_object_operator.py", "ui.py", "ui_layout.py"):
         names = _imported_leaf_names(filename)
         assert "main" not in names
         assert "json_export" not in names
