@@ -4,7 +4,21 @@ This changelog records public product releases. Internal development milestones 
 
 ## Unreleased candidate status
 
-Version 0.41.2 is not a validated release candidate. A representative textured sword asset still imports into Spine with an incorrect setup-pose mesh layout even though material baking succeeds. The candidate must not be merged or released until the source Blender mesh, generated JSON, generated texture, and a known-good Legacy output are compared through an asset-specific regression.
+Version 0.41.3 is a development candidate and is not validated for release. It fixes the source-render-UV overwrite reproduced from the representative textured sword archive. The candidate must not be merged or released until all automated layers and a fresh manual sword export/import pass on the same commit.
+
+## [0.41.3] - 2026-07-28
+
+### Fixed
+
+- Semantic baking no longer replaces the source material render UV with generated `SpineBakeUV`.
+- Texture Coordinate UV and Image Texture nodes now continue to sample the original render UV while Blender writes to the generated destination layout.
+- `bpy.ops.object.bake` receives the destination UV layer explicitly instead of inferring it from the shader render role.
+- The representative sword material graph is covered by a Blender 5.2 headless regression: Texture Coordinate UV to Mapping to Image Texture to Principled BSDF.
+
+### Changed
+
+- Bake UV activation validates two independent roles: active destination UV and unique source render UV.
+- The previous 0.41.2 representative-asset failure is retained as historical evidence rather than treated as a release result.
 
 ## [0.41.2] - 2026-07-28
 
@@ -19,7 +33,7 @@ Version 0.41.2 is not a validated release candidate. A representative textured s
 
 ### Known issue
 
-- This change does not resolve the incorrect setup-pose layout observed for the representative textured sword asset. Version 0.41.2 remains a failed development candidate rather than a release.
+- This change did not resolve the incorrect material placement observed for the representative textured sword asset. Version 0.41.2 remains a failed development candidate rather than a release.
 
 ## [0.41.1] - 2026-07-27
 
@@ -45,7 +59,7 @@ Version 0.41.2 is not a validated release candidate. A representative textured s
 
 ### Fixed
 
-- Blender could materialize temporary polygons in a different order while the bake material stage still assigned source material slots positionally, placing correct source materials on the wrong baked faces.
+- Blender could materialize temporary polygons in a different order from immutable snapshot faces while the bake material stage still assigned source material slots positionally.
 - A shifted weighted bone index or serialized UV/triangle reorder could reach output without an explicit correspondence failure.
 - The previous directional texture test used matching geometry and UV orientation and could not independently prove source-material corner identity.
 
