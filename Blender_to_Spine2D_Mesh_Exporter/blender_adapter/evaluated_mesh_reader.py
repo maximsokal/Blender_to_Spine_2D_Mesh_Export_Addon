@@ -267,6 +267,101 @@ def _evaluated_loop_uvs(
         ) from exc
 
 
+def _uv_roles_from_mesh(
+    mesh: Any,
+    allowed_layer_names: tuple[str, ...],
+) -> tuple[str | None, str | None]:
+    """Read active and render UV roles constrained to exported layer names.
+
+    ``Object.to_mesh()`` is authoritative for evaluated UV coordinates, but its
+    UV role metadata is not guaranteed to match the source datablock. This helper
+    intentionally reads only role names and never reads or mutates UV coordinates.
+    """
+
+    if mesh is None:
+        raise EvaluatedMeshReadError("mesh cannot be None while resolving UV roles")
+    if not isinstance(allowed_layer_names, tuple) or any(
+        not isinstance(name, str) or not name for name in allowed_layer_names
+    ):
+        raise TypeError("allowed_layer_names must be a tuple of non-empty strings")
+
+    layers = getattr(mesh, "uv_layers", None)
+    if layers is None:
+        return None, None
+    try:
+        available = tuple(layers)
+    except Exception as exc:
+        raise EvaluatedMeshReadError("Unable to inspect Mesh UV roles") from exc
+
+    allowed = frozenset(allowed_layer_names)
+    role_layers = tuple(
+        layer
+        for layer in available
+        if str(getattr(layer, "name", "") or "") in allowed
+    )
+    active_layer = getattr(layers, "active", None)
+    active_name = str(getattr(active_layer, "name", "") or "")
+    if active_name not in allowed:
+        active_name = ""
+
+    render_name = _active_render_uv_name(
+        role_layers,
+        active_layer if active_name else None,
+    )
+    return active_name or None, render_name
+
+
+def _resolve_evaluated_uv_roles(
+    *,
+    evaluated_mesh: Any,
+    source_mesh: Any,
+    resolved_uv_layers: tuple[Any, ...],
+) -> tuple[str | None, str | None]:
+    """Keep evaluated UV data while restoring source active/render role names.
+
+    The source role is accepted only when a layer with the same name exists in
+    the evaluated layer set. Modifier-generated UV layers therefore remain valid,
+    while source material sampling through ``Texture Coordinate: UV`` keeps the
+    original ``active_render`` layer after ``Object.to_mesh()``.
+    """
+
+    if not isinstance(resolved_uv_layers, tuple):
+        raise TypeError("resolved_uv_layers must be tuple")
+    resolved_uv_names = tuple(
+        str(getattr(layer, "name", "") or "") for layer in resolved_uv_layers
+    )
+    if any(not name for name in resolved_uv_names):
+        raise EvaluatedMeshReadError("Evaluated mesh contains an unnamed UV layer")
+    if len(resolved_uv_names) != len(set(resolved_uv_names)):
+        raise EvaluatedMeshReadError("Evaluated mesh contains duplicate UV layer names")
+
+    evaluated_active, evaluated_render = _uv_roles_from_mesh(
+        evaluated_mesh,
+        resolved_uv_names,
+    )
+    source_active, source_render = _uv_roles_from_mesh(
+        source_mesh,
+        resolved_uv_names,
+    )
+
+    active_name = source_active or evaluated_active
+    render_name = source_render or evaluated_render or active_name
+
+    if (source_active, source_render) != (evaluated_active, evaluated_render):
+        logger.debug(
+            "Resolved evaluated UV role drift: source(active=%s, render=%s), "
+            "evaluated(active=%s, render=%s), final(active=%s, render=%s)",
+            source_active,
+            source_render,
+            evaluated_active,
+            evaluated_render,
+            active_name,
+            render_name,
+        )
+
+    return active_name, render_name
+
+
 def _remove_temporary_object_and_mesh(
     bpy_module: Any,
     obj: Any | None,
@@ -357,15 +452,14 @@ def _build_snapshot_from_evaluated_mesh(
     )
     require_valid_evaluated_lineage(lineage_report)
 
-    resolved_uv_layers = _resolve_uv_layers(evaluated_mesh, uv_layer_names)
+    requested_uv_names = None if uv_layer_names is None else tuple(uv_layer_names)
+    resolved_uv_layers = _resolve_uv_layers(evaluated_mesh, requested_uv_names)
     resolved_uv_names = tuple(str(layer.name) for layer in resolved_uv_layers)
-    active_layer = getattr(evaluated_mesh.uv_layers, "active", None)
-    active_uv_name = (
-        str(active_layer.name)
-        if active_layer is not None and active_layer.name in resolved_uv_names
-        else None
+    active_uv_name, render_uv_name = _resolve_evaluated_uv_roles(
+        evaluated_mesh=evaluated_mesh,
+        source_mesh=source_mesh,
+        resolved_uv_layers=resolved_uv_layers,
     )
-    render_uv_name = _active_render_uv_name(resolved_uv_layers, active_layer)
     seam_values, sharp_values = _read_edge_flags(evaluated_mesh)
     evaluated_loop_count = len(evaluated_mesh.loops)
 
@@ -536,6 +630,7 @@ def read_evaluated_mesh_snapshot(
     if resolved_scene is None:
         raise EvaluatedMeshReadError("A Blender Scene is required for evaluation")
 
+    requested_uv_names = None if uv_layer_names is None else tuple(uv_layer_names)
     names = _new_attribute_names()
     temporary_collection = None
     temporary_object = None
@@ -583,7 +678,7 @@ def read_evaluated_mesh_snapshot(
             snapshot_id=resolved_snapshot_id,
             names=names,
             modifier_stack=modifier_stack,
-            uv_layer_names=uv_layer_names,
+            uv_layer_names=requested_uv_names,
             lineage_policy=lineage_policy,
         )
         logger.info(
