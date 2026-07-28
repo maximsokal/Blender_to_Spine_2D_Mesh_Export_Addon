@@ -90,32 +90,27 @@ def _active_render_uv_name(
     resolved_uv_layers: tuple[Any, ...],
     active_layer: Any | None,
 ) -> str | None:
-    """Resolve Blender 5.2's implicit shader-sampling UV layer.
+    """Resolve the source UV role independently from the editable active UV role.
 
-    Real Blender 5.2 RNA can retain a stale ``active_render`` flag on the first
-    UV layer after another layer becomes ``uv_layers.active``. Material nodes
-    using ``Texture Coordinate: UV`` follow the active source UV in that state.
-    The active layer is therefore authoritative when it belongs to the resolved
-    layer set; ``active_render`` remains a compatibility fallback for snapshots
-    or test doubles that do not expose an active collection item.
+    Blender exposes two distinct responsibilities: ``uv_layers.active`` is the
+    editable/operator-facing layer, while ``active_render`` identifies implicit
+    material sampling. A unique render layer is therefore authoritative. The active
+    layer is used only as a compatibility fallback when no render flag is available.
     """
-
-    if active_layer is not None and active_layer in resolved_uv_layers:
-        active_name = str(getattr(active_layer, "name", "") or "")
-        if active_name:
-            return active_name
 
     render_layers = tuple(
         layer for layer in resolved_uv_layers if bool(getattr(layer, "active_render", False))
     )
     if len(render_layers) > 1:
         raise MeshReadError(
-            "Blender mesh reports more than one active_render UV layer without "
-            "a resolvable active UV layer: "
+            "Blender mesh reports more than one active_render UV layer: "
             + str(tuple(layer.name for layer in render_layers))
         )
     if render_layers:
         return str(render_layers[0].name)
+    if active_layer is not None and active_layer in resolved_uv_layers:
+        active_name = str(getattr(active_layer, "name", "") or "")
+        return active_name or None
     return None
 
 
