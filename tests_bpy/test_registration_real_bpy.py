@@ -5,6 +5,7 @@ from __future__ import annotations
 import bpy
 
 import Blender_to_Spine2D_Mesh_Exporter as extension
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
 
 
 RNA_REGISTRATIONS = (
@@ -75,12 +76,18 @@ def _assert_registered() -> None:
         assert hasattr(registration.owner, registration.name), registration.name
     assert bpy.context.scene.spine2d_texture_size == 1024
     assert bpy.context.scene.spine2d_seam_maker_mode == "AUTO"
+    assert (
+        bpy.context.scene.spine2d_rig_profile
+        == A1RigProfile.THREE_AXIS_ROTATION.value
+    )
     assert bpy.context.scene.spine2d_material_source_policy == "REQUIRE_SOURCE"
     assert hasattr(bpy.types.Object, "spine2d_bake_settings")
     assert hasattr(bpy.types.Object, "spine2d_connect_settings")
     assert _panel_class("OBJECT_PT_spine2d_mesh") is not None
+    assert _panel_class("OBJECT_PT_spine2d_rig") is not None
     assert _panel_class("OBJECT_PT_spine2d_repolish") is not None
     assert _panel_class("OBJECT_PT_spine2d_generated_materials") is not None
+    assert _operator_class("spine2d.reset_rig_profile") is not None
     assert _operator_class("object.spine2d_single_export") is not None
     assert _operator_class("object.spine2d_multi_export") is not None
     assert _operator_class("object.save_uv_as_json") is not None
@@ -90,8 +97,10 @@ def _assert_unregistered() -> None:
     for registration in RNA_REGISTRATIONS:
         assert not hasattr(registration.owner, registration.name), registration.name
     assert _panel_class("OBJECT_PT_spine2d_mesh") is None
+    assert _panel_class("OBJECT_PT_spine2d_rig") is None
     assert _panel_class("OBJECT_PT_spine2d_repolish") is None
     assert _panel_class("OBJECT_PT_spine2d_generated_materials") is None
+    assert _operator_class("spine2d.reset_rig_profile") is None
     assert _operator_class("object.spine2d_single_export") is None
     assert _operator_class("object.spine2d_multi_export") is None
     assert _operator_class("object.save_uv_as_json") is None
