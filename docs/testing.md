@@ -46,38 +46,37 @@ if ($LASTEXITCODE -ne 0) {
 
 Do not use fail-fast for final evidence. A release run must expose every failure.
 
-## Focused 0.41.2 geometry and material regression
+## Focused 0.41.3 UV sampling and material regression
 
 ```powershell
 & .\.venv-tests\Scripts\python.exe `
     -m pytest `
-    tests/test_a1_z_groups.py `
-    tests/test_normal_uv_pyramid_regression.py `
+    tests/test_semantic_bake_image_io.py `
+    tests/test_semantic_bake_execution_uv_roles.py `
+    tests/test_uv_sampling_roles.py `
     tests/test_a1_material_correspondence.py `
     tests/test_a1_bake_material_bindings.py `
-    tests/test_a1_attachment_projection.py `
-    tests/test_a1_attachment_hull_normalization.py `
-    tests/test_physical_hull_promotion.py `
-    tests/test_legacy_attachment_builder.py `
+    tests/test_a1_z_groups.py `
+    tests/test_normal_uv_pyramid_regression.py `
     tests/test_manifest_version.py `
     tests/test_documentation_contract.py `
     -vv `
     --durations=20
 
 if ($LASTEXITCODE -ne 0) {
-    throw "0.41.2 focused regressions failed"
+    throw "0.41.3 focused regressions failed"
 }
 ```
 
 These tests verify:
 
-- source Z values use the Legacy four-decimal identity before Z-group creation;
-- near-identical evaluated depths share one parent group through `SourceVertexId`;
-- noisy source depth cannot inflate the final rig by hundreds of bones;
-- attachment hull and triangle area remain defined in the stable local projected pixel plane;
-- Z-group setup translations do not redefine attachment topology;
+- the generated `SpineBakeUV` layer is the bake destination;
+- the original source render UV remains the shader-sampling layer;
+- `bpy.ops.object.bake` receives the destination UV layer explicitly;
+- a Texture Coordinate UV to Mapping to Image Texture graph does not sample through `SpineBakeUV`;
 - serialized UV, triangle, hull, edge, and weighted-bone streams preserve projection order;
 - temporary bake material indices follow exact snapshot face identity rather than Blender polygon collection order;
+- source Z values retain the Legacy four-decimal identity;
 - the four-face pyramid remains exportable.
 
 ## Real bpy suite
@@ -182,11 +181,30 @@ This fixture intentionally uses different geometry-corner and source-material-UV
     --factory-startup `
     --python-exit-code 1 `
     --python "tests\blender_headless\run_uv_sampling_role_integration.py"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Source render UV role integration failed"
+}
 ```
 
-This verifies that source material sampling UV and generated `SpineBakeUV` remain separate roles.
+Expected marker:
 
-## Build version 0.41.2
+```text
+[PASS] test_source_render_uv_is_not_replaced_by_spine_bake_uv
+```
+
+This fixture reproduces the representative sword material graph:
+
+```text
+Texture Coordinate UV
+-> Mapping
+-> Image Texture
+-> Principled BSDF
+```
+
+It verifies that the original source render UV samples the material while the independently active `SpineBakeUV` receives the bake output.
+
+## Build version 0.41.3
 
 ```powershell
 Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
@@ -200,7 +218,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Get-Item `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.41.2.zip" |
+    ".\dist\blender_to_spine2d_mesh_exporter-0.41.3.zip" |
     Select-Object FullName, Length, LastWriteTime
 ```
 
@@ -209,7 +227,7 @@ Get-Item `
 ```powershell
 & $Blender `
     --command extension validate `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.41.2.zip"
+    ".\dist\blender_to_spine2d_mesh_exporter-0.41.3.zip"
 
 if ($LASTEXITCODE -ne 0) {
     throw "Built extension validation failed"
@@ -227,7 +245,8 @@ A release claim must record:
 - real-bpy summary;
 - required Blender headless markers;
 - package build and archive validation results;
-- final ZIP path, size, timestamp, and SHA-256.
+- final ZIP path, size, timestamp, and SHA-256;
+- manual re-export and Spine import of the representative sword asset.
 
 Do not state that tests passed without the corresponding logs. Do not reuse results from an older commit.
 
