@@ -52,6 +52,7 @@ if bpy is not None:
         rig_ui,
         single_object_operator,
         ui,
+        ui_layout,
     )
     from .blender_adapter import (
         a1_readiness_invalidation,
@@ -88,6 +89,7 @@ if bpy is not None:
         auto_readiness,
         repolish_ui,
         generated_material_ui,
+        ui_layout,
         single_object_operator,
     )
 
@@ -160,6 +162,11 @@ if bpy is not None:
             "generated material UI",
             generated_material_ui.register,
             generated_material_ui.unregister,
+        ),
+        (
+            "ordered UI layout",
+            ui_layout.register,
+            ui_layout.unregister,
         ),
         (
             "single-object operator",
