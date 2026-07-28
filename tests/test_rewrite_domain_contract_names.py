@@ -37,6 +37,7 @@ ACTIVE_ROOT_FILES = (
     PACKAGE / "rig_ui.py",
     PACKAGE / "single_object_operator.py",
     PACKAGE / "ui.py",
+    PACKAGE / "ui_layout.py",
 )
 RETIRED_IDENTIFIERS = (
     "LEGACY_SEED_CONE",
