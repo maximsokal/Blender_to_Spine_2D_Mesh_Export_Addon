@@ -75,7 +75,11 @@ from .parity import (
     compare_a1_exports,
 )
 from .rig_builder import build_rig
-from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
+from .rig_profiles import (
+    A1RigProfile,
+    A1RigSetupPoseMode,
+    resolve_a1_rig_profile,
+)
 from .rig_visuals import (
     apply_rig_visual_options,
     build_two_axis_scale_control_slots_and_attachments,
@@ -148,6 +152,7 @@ __all__ = [
     "A1ParitySettings",
     "A1ParitySeverity",
     "A1RigProfile",
+    "A1RigSetupPoseMode",
     "AnimationNameAssignment",
     "AttachmentSequenceAnimationError",
     "Bone",
