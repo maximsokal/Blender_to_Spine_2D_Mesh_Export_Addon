@@ -28,7 +28,10 @@ from ..domain.geometry import MeshSnapshot, ModifierLineagePolicy
 from ..domain.spine import LegacyAttachmentSequence
 from ..domain.spine.legacy_rig_contracts import UniformScaleMode
 from ..domain.spine.legacy_rig_scale import calculate_uniform_scale
-from ..domain.spine.rig_profiles import resolve_a1_rig_profile
+from ..domain.spine.rig_profiles import (
+    A1RigSetupPoseMode,
+    resolve_a1_rig_profile,
+)
 from ..domain.uv import UvUnwrapSettings
 from .a1_geometry_preparation import A1GeometryPreparationSettings
 from .a1_numeric_contracts import (
@@ -130,6 +133,10 @@ class A1SingleObjectExportSettings:
         0.5,
         1.0,
     )
+    # Appended so existing positional construction remains byte-compatible.
+    rig_setup_pose_mode: A1RigSetupPoseMode = (
+        A1RigSetupPoseMode.PRESERVE_COMPOSITION
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.export, ExportSettings):
@@ -186,6 +193,8 @@ class A1SingleObjectExportSettings:
             raise TypeError("bake_execution must be BakeExecutionSettings")
         if not isinstance(self.rig_scale_mode, UniformScaleMode):
             raise TypeError("rig_scale_mode must be UniformScaleMode")
+        if not isinstance(self.rig_setup_pose_mode, A1RigSetupPoseMode):
+            raise TypeError("rig_setup_pose_mode must be A1RigSetupPoseMode")
         for field_name in (
             "use_world_location_for_main_bone",
             "include_control_icons",
