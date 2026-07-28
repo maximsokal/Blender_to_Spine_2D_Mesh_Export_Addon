@@ -24,6 +24,7 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
 
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (  # noqa: E402
     A1RigProfile,
+    A1RigSetupPoseMode,
     LegacyAttachmentVertex,
     LegacyMeshAttachmentRequest,
     LegacyRigBuildRequest,
@@ -52,6 +53,8 @@ def _build_document():
                 LegacyZGroup(-1.0, height_real_pixels=-200.0),
                 LegacyZGroup(1.0, height_real_pixels=300.0),
             ),
+            main_position_pixels=(125.0, -50.0),
+            setup_pose_mode=A1RigSetupPoseMode.NORMALIZED_SINGLE,
         )
     )
     request = LegacyMeshAttachmentRequest(
@@ -125,13 +128,39 @@ def test_two_axis_scale_rig_serializes_in_blender_runtime() -> None:
         "two-axis profile did not generate the independent scale control",
     )
     bone_by_name = {bone.name: bone for bone in document.bones}
+    main = bone_by_name["TwoAxisFixture_main"]
+    internal_base = bone_by_name["TwoAxisFixture"]
+    rotation_x = bone_by_name["TwoAxisFixture_rotation_X"]
+    rotation_y = bone_by_name["TwoAxisFixture_rotation_Y"]
+    scale = bone_by_name["TwoAxisFixture_scale"]
+    _assert((main.x, main.y) == (0.0, 0.0), "single main must be neutral")
     _assert(
-        bone_by_name["TwoAxisFixture_rotation_X"].rotation == -134.67,
-        "X control setup rotation differs from the reference rig",
+        (internal_base.x, internal_base.y) == (125.0, -50.0),
+        "single placement was not transferred to the internal base",
+    )
+    _assert(rotation_x.rotation == 0.0, "X control setup rotation must be zero")
+    _assert(rotation_y.rotation == 0.0, "Y control setup rotation must be zero")
+    _assert(
+        rotation_x.x == rotation_y.x == scale.x,
+        "X, Y, and Scale controls must share one X column",
     )
     _assert(
-        bone_by_name["TwoAxisFixture_rotation_Y"].rotation == -17.43,
-        "Y control setup rotation differs from the reference rig",
+        rotation_x.y - rotation_y.y == 200.0,
+        "X and Y controls are not spaced by one control length",
+    )
+    _assert(
+        rotation_y.y - scale.y == 200.0,
+        "Y and Scale controls are not spaced by one control length",
+    )
+
+    rotate_x, rotate_y, _scale_constraint, _depth = rig.transform
+    _assert(
+        rotate_x.extras.get("rotation") == -134.67,
+        "X reference angle was not transferred to the constraint offset",
+    )
+    _assert(
+        rotate_y.extras.get("rotation") == -17.43,
+        "Y reference angle was not transferred to the constraint offset",
     )
 
     combined_orders = tuple(item.order for item in (*rig.ik, *rig.transform))
