@@ -1,4 +1,4 @@
-"""Blender 4.4 regression for independent source-sampling and bake-target UV roles."""
+"""Blender 5.2 regression for independent source-sampling and bake-target UV roles."""
 
 from __future__ import annotations
 
@@ -29,6 +29,8 @@ from run_camera_projection_integration import _read_pixels, _settings  # noqa: E
 
 
 def _source_uv_image_material(name: str):
+    """Build the exact UV graph used by the representative sword asset."""
+
     material = bpy.data.materials.new(name=name)
     material.use_nodes = True
     nodes = material.node_tree.nodes
@@ -37,6 +39,8 @@ def _source_uv_image_material(name: str):
     output = nodes.new(type="ShaderNodeOutputMaterial")
     principled = nodes.new(type="ShaderNodeBsdfPrincipled")
     principled.inputs["Roughness"].default_value = 1.0
+    texture_coordinate = nodes.new(type="ShaderNodeTexCoord")
+    mapping = nodes.new(type="ShaderNodeMapping")
     image_node = nodes.new(type="ShaderNodeTexImage")
     image_node.interpolation = "Closest"
 
@@ -65,8 +69,16 @@ def _source_uv_image_material(name: str):
         pass
     image_node.image = image
 
-    # Vector intentionally remains unlinked. Blender must use the mesh's active_render UV,
-    # while the bake operator writes into the independently active SpineBakeUV layer.
+    # The representative sword uses this exact semantic path. Texture Coordinate UV
+    # must read SourceUV through active_render while Blender writes into SpineBakeUV.
+    material.node_tree.links.new(
+        texture_coordinate.outputs["UV"],
+        mapping.inputs["Vector"],
+    )
+    material.node_tree.links.new(
+        mapping.outputs["Vector"],
+        image_node.inputs["Vector"],
+    )
     material.node_tree.links.new(
         image_node.outputs["Color"],
         principled.inputs["Base Color"],
