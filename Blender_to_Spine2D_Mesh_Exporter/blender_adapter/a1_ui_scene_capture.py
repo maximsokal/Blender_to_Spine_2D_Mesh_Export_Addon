@@ -15,6 +15,7 @@ from ..domain.baking.generated_materials import (
     ColorRGBA,
 )
 from ..domain.geometry import A1AngularMode
+from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
 
 
 _DEFAULT_PROJECTION_ALPHA_THRESHOLD = 1.0 / 255.0
@@ -34,6 +35,7 @@ class _SceneExportProfile:
     bake_execution: BakeExecutionSettings
     include_control_icons: bool
     include_preview_animation: bool
+    rig_profile: A1RigProfile
     material_source_policy: A1MaterialSourcePolicy = (
         A1MaterialSourcePolicy.REQUIRE_SOURCE
     )
@@ -80,6 +82,8 @@ class _SceneExportProfile:
             raise TypeError("include_control_icons must be bool")
         if not isinstance(self.include_preview_animation, bool):
             raise TypeError("include_preview_animation must be bool")
+        if not isinstance(self.rig_profile, A1RigProfile):
+            raise TypeError("rig_profile must be A1RigProfile")
         if not isinstance(
             self.material_source_policy,
             A1MaterialSourcePolicy,
@@ -313,6 +317,15 @@ def _resolve_texture_export_mode(scene: Any) -> A1TextureExportMode:
         ) from exc
 
 
+def _resolve_rig_profile(scene: Any) -> A1RigProfile:
+    raw = getattr(
+        scene,
+        "spine2d_rig_profile",
+        A1RigProfile.THREE_AXIS_ROTATION.value,
+    )
+    return resolve_a1_rig_profile(raw)
+
+
 def _capture_scene_profile(
     scene: Any,
     *,
@@ -360,6 +373,7 @@ def _capture_scene_profile(
         include_preview_animation=bool(
             getattr(scene, "spine2d_export_preview_animation", True)
         ),
+        rig_profile=_resolve_rig_profile(scene),
         material_source_policy=_resolve_material_source_policy(scene),
         generated_material_pattern=_resolve_generated_material_pattern(scene),
         generated_gray_color=_resolve_generated_gray_color(scene),
@@ -377,6 +391,7 @@ __all__ = [
     "_resolve_images_relative_path",
     "_resolve_material_source_policy",
     "_resolve_output_directory",
+    "_resolve_rig_profile",
     "_resolve_texture_export_mode",
     "_texture_size",
 ]
