@@ -9,6 +9,7 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
     ExportSettings,
 )
 from Blender_to_Spine2D_Mesh_Exporter.application.contracts import IssueSeverity
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
 
 
 def test_export_request_is_immutable_and_validated(tmp_path: Path):
@@ -19,9 +20,27 @@ def test_export_request_is_immutable_and_validated(tmp_path: Path):
     )
     request = ExportRequest(("Cube",), "Cube", settings)
 
-    assert request.settings.rig_profile == "LEGACY_ROTATABLE_MESH"
+    assert request.settings.rig_profile == A1RigProfile.THREE_AXIS_ROTATION.value
     with pytest.raises(ValueError, match="active_object_id"):
         ExportRequest(("Cube",), "Other", settings)
+
+
+def test_export_settings_accept_only_supported_rig_profiles(tmp_path: Path):
+    selected = ExportSettings(
+        texture_width=512,
+        texture_height=512,
+        output_directory=tmp_path,
+        rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
+    )
+    assert selected.rig_profile == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+
+    with pytest.raises(ValueError, match="Unsupported rig profile"):
+        ExportSettings(
+            texture_width=512,
+            texture_height=512,
+            output_directory=tmp_path,
+            rig_profile="UNKNOWN_RIG",
+        )
 
 
 def test_failed_result_requires_error_issue():
