@@ -96,6 +96,10 @@ def test_registration_owners_use_only_needed_transaction_helpers():
             "register_rna_properties_transactionally",
             "unregister_all_best_effort",
         },
+        "ui_layout.py": {
+            "register_rna_properties_transactionally",
+            "unregister_all_best_effort",
+        },
         "blender_adapter/generated_material_ui.py": {
             "register_classes_transactionally",
             "register_rna_properties_transactionally",
@@ -136,6 +140,7 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
     assert "a1_readiness_invalidation" in source
     assert "auto_readiness" in source
     assert "rig_ui" in source
+    assert "ui_layout" in source
 
     steps_assignment = next(
         node for node in ast.walk(tree)
@@ -154,6 +159,7 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
         "automatic readiness",
         "Re-Polish UI",
         "generated material UI",
+        "ordered UI layout",
         "single-object operator",
     ]
     assert labels.index("Scene RNA properties") < labels.index(
@@ -164,6 +170,9 @@ def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
     assert labels.index("readiness invalidation") < labels.index(
         "automatic readiness"
     )
+    assert labels.index("generated material UI") < labels.index(
+        "ordered UI layout"
+    ) < labels.index("single-object operator")
     assert "unregister_all_best_effort" in _called_names(_function(tree, "register"))
     assert "unregister_all_best_effort" in _called_names(_function(tree, "unregister"))
 
