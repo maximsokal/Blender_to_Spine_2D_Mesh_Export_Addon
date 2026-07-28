@@ -43,6 +43,27 @@ def _source_signature(obj) -> tuple[object, ...]:
     )
 
 
+def _uv_role_signature(obj) -> tuple[object, ...]:
+    mesh = obj.data
+    active = mesh.uv_layers.active
+    return (
+        tuple(layer.name for layer in mesh.uv_layers),
+        None if active is None else active.name,
+        tuple(
+            layer.name
+            for layer in mesh.uv_layers
+            if bool(getattr(layer, "active_render", False))
+        ),
+        tuple(
+            (
+                layer.name,
+                read_uv_coordinates(layer, expected_length=len(mesh.loops)),
+            )
+            for layer in mesh.uv_layers
+        ),
+    )
+
+
 def _datablock_signature() -> tuple[frozenset[str], ...]:
     return (
         frozenset(item.name_full for item in bpy.data.objects),
@@ -129,3 +150,43 @@ def test_evaluated_mesh_reader_restores_source_and_removes_temporary_data(quad_o
     assert len(result.snapshot.faces) == 1
     assert result.snapshot.active_uv_layer == "UVMap"
     assert result.snapshot.render_uv_layer == "UVMap"
+
+
+def test_evaluated_mesh_reader_preserves_independent_source_uv_roles(quad_object):
+    mesh = quad_object.data
+    original = mesh.uv_layers.get("UVMap")
+    assert original is not None
+    source_render = mesh.uv_layers.new(name="SourceUV")
+    for index, coordinate in enumerate(
+        ((0.25, 0.5), (0.25, 0.5), (0.25, 0.5), (0.25, 0.5))
+    ):
+        write_uv_coordinate(
+            source_render,
+            index,
+            coordinate,
+            expected_length=len(mesh.loops),
+        )
+
+    mesh.uv_layers.active = source_render
+    for layer in mesh.uv_layers:
+        layer.active_render = layer is source_render
+
+    source_before = _uv_role_signature(quad_object)
+    datablocks_before = _datablock_signature()
+
+    result = read_evaluated_mesh_snapshot(
+        quad_object,
+        depsgraph=bpy.context.evaluated_depsgraph_get(),
+        scene=bpy.context.scene,
+        uv_layer_names=("UVMap", "SourceUV"),
+    )
+
+    assert _uv_role_signature(quad_object) == source_before
+    assert _datablock_signature() == datablocks_before
+    assert result.snapshot.uv_layer_names == ("UVMap", "SourceUV")
+    assert result.snapshot.active_uv_layer == "SourceUV"
+    assert result.snapshot.render_uv_layer == "SourceUV"
+    assert all(
+        loop.uv("SourceUV") == pytest.approx((0.25, 0.5))
+        for loop in result.snapshot.loops
+    )
