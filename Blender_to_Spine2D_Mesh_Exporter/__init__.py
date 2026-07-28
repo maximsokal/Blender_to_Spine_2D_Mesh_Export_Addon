@@ -49,6 +49,7 @@ if bpy is not None:
         auto_readiness,
         config,
         repolish_ui,
+        rig_ui,
         single_object_operator,
         ui,
     )
@@ -82,6 +83,7 @@ if bpy is not None:
         addon_preferences,
         scene_settings_migration,
         ui,
+        rig_ui,
         a1_readiness_invalidation,
         auto_readiness,
         repolish_ui,
@@ -133,6 +135,11 @@ if bpy is not None:
             "UI",
             ui.register,
             ui.unregister,
+        ),
+        (
+            "Rig UI",
+            rig_ui.register,
+            rig_ui.unregister,
         ),
         (
             "readiness invalidation",
