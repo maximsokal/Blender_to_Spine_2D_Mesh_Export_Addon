@@ -2,7 +2,10 @@ from types import SimpleNamespace
 
 import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_bridge as bridge
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import A1TextureExportMode
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
+    A1RigProfile,
+    A1RigSetupPoseMode,
+)
 
 
 class _RnaObject:
@@ -18,7 +21,7 @@ class _RnaObject:
 
 
 def _scene(
-    rig_profile: A1RigProfile = A1RigProfile.THREE_AXIS_ROTATION,
+    rig_profile: A1RigProfile = A1RigProfile.TWO_AXIS_ROTATION_SCALE,
 ):
     return SimpleNamespace(
         spine2d_texture_export_mode=(
@@ -29,6 +32,8 @@ def _scene(
         spine2d_angle_limit=30.0,
         spine2d_control_icons=True,
         spine2d_export_preview_animation=True,
+        spine2d_bake_frame_start=0,
+        spine2d_frames_for_render=0,
         render=SimpleNamespace(engine="CYCLES"),
     )
 
@@ -54,6 +59,19 @@ def test_bridge_routes_multi_and_mixed_to_post_render_output_services():
     assert bridge.export_a1_single_object.__module__.endswith(
         ".a1_single_object_export"
     )
+
+
+def test_single_settings_request_a_neutral_authoring_setup_pose(tmp_path):
+    settings = bridge._build_single_object_settings(
+        _object("Hero"),
+        _scene(),
+        output_directory=tmp_path,
+        texture_size=128,
+        images_relative_path="images",
+    )
+
+    assert settings.export.rig_profile == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+    assert settings.rig_setup_pose_mode is A1RigSetupPoseMode.NORMALIZED_SINGLE
 
 
 def test_multi_sources_share_one_immutable_scene_snapshot(tmp_path):
@@ -85,6 +103,11 @@ def test_multi_sources_share_one_immutable_scene_snapshot(tmp_path):
     assert (
         sources[1].settings.export.rig_profile
         == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+    )
+    assert all(
+        source.settings.rig_setup_pose_mode
+        is A1RigSetupPoseMode.PRESERVE_COMPOSITION
+        for source in sources
     )
     assert sources[1].settings.export.sequence_start_frame == 4
     assert sources[1].settings.export.sequence_frame_count == 3
