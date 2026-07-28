@@ -303,9 +303,9 @@ def test_registration_structure_has_current_runtime_owners_only():
         "rig_ui",
         "a1_readiness_invalidation",
         "auto_readiness",
-        "repolish_ui",
         "generated_material_ui",
         "ui_layout",
+        "repolish_ui",
         "single_object_operator",
     )
     assert "WM_OT_UninstallAddon" not in class_names
@@ -318,8 +318,8 @@ def test_registration_structure_has_current_runtime_owners_only():
         "Rig UI",
         "readiness invalidation",
         "automatic readiness",
-        "Re-Polish UI",
         "generated material UI",
         "ordered UI layout",
+        "Re-Polish UI",
         "single-object operator",
     )
