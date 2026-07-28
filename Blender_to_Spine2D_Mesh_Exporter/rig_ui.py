@@ -1,5 +1,5 @@
 # pylint: disable=import-error
-"""Dedicated Blender UI category for selectable Spine rig profiles."""
+"""Rig-profile controls shared by the ordered Rewrite UI."""
 
 from __future__ import annotations
 
@@ -19,8 +19,53 @@ from .infrastructure.blender_registration import (
 logger = logging.getLogger(__name__)
 
 
+def draw_rig_settings(
+    layout: bpy.types.UILayout,
+    context: bpy.types.Context,
+) -> None:
+    """Draw rig settings inside the main panel's standard foldout container."""
+
+    scene = context.scene
+    row = layout.row(align=True)
+    row.prop(scene, "spine2d_rig_profile", text="Rig profile")
+    row.operator(
+        "spine2d.reset_rig_profile",
+        text="",
+        icon="LOOP_BACK",
+    )
+    profile = resolve_a1_rig_profile(
+        getattr(
+            scene,
+            "spine2d_rig_profile",
+            A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
+        )
+    )
+    description = layout.box()
+    if profile is A1RigProfile.THREE_AXIS_ROTATION:
+        description.label(
+            text="Controls: Rotation X / Y / Z",
+            icon="ORIENTATION_GIMBAL",
+        )
+        description.label(text="Compatibility rig; scale is constrained")
+    else:
+        description.label(
+            text="Controls: Rotation X / Y + Scale",
+            icon="FULLSCREEN_ENTER",
+        )
+        description.label(text="Single export uses a neutral setup pose")
+        description.label(text="Multi export preserves scene placement")
+
+    layout.separator()
+    row = layout.row(align=True)
+    row.label(text="Control icons")
+    row.prop(scene, "spine2d_control_icons", text="")
+    row = layout.row(align=True)
+    row.label(text="Preview animation")
+    row.prop(scene, "spine2d_export_preview_animation", text="")
+
+
 class SPINE2D_OT_ResetRigProfile(bpy.types.Operator):
-    """Restore the compatibility three-axis profile without changing other settings."""
+    """Restore the production two-axis profile without changing other settings."""
 
     bl_idname = "spine2d.reset_rig_profile"
     bl_label = "Reset Rig Profile"
@@ -29,9 +74,9 @@ class SPINE2D_OT_ResetRigProfile(bpy.types.Operator):
     def execute(self, context: bpy.types.Context) -> Set[str]:
         try:
             context.scene.spine2d_rig_profile = (
-                A1RigProfile.THREE_AXIS_ROTATION.value
+                A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
             )
-            self.report({"INFO"}, "Rig profile reset to 3-Axis Rotation")
+            self.report({"INFO"}, "Rig profile reset to 2-Axis Rotation + Scale")
             return {"FINISHED"}
         except Exception as exc:
             logger.exception("Unable to reset Spine2D rig profile")
@@ -39,74 +84,11 @@ class SPINE2D_OT_ResetRigProfile(bpy.types.Operator):
             return {"CANCELLED"}
 
 
-class OBJECT_PT_Spine2DRigPanel(bpy.types.Panel):
-    """Child panel that keeps rig generation independent from texture settings."""
-
-    bl_label = "Rig"
-    bl_idname = "OBJECT_PT_spine2d_rig"
-    bl_parent_id = "OBJECT_PT_spine2d_mesh"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Blender to Spine2D Mesh Exporter"
-    bl_options = {"DEFAULT_CLOSED"}
-
-    def draw(self, context: bpy.types.Context) -> None:
-        layout = self.layout
-        scene = context.scene
-        try:
-            header = layout.row(align=True)
-            header.prop(scene, "spine2d_rig_profile", text="Rig profile")
-            header.operator(
-                "spine2d.reset_rig_profile",
-                text="",
-                icon="LOOP_BACK",
-            )
-            profile = resolve_a1_rig_profile(
-                getattr(
-                    scene,
-                    "spine2d_rig_profile",
-                    A1RigProfile.THREE_AXIS_ROTATION.value,
-                )
-            )
-            description = layout.box()
-            if profile is A1RigProfile.THREE_AXIS_ROTATION:
-                description.label(
-                    text="Controls: Rotation X / Y / Z",
-                    icon="ORIENTATION_GIMBAL",
-                )
-                description.label(
-                    text="Current compatibility rig; scale is constrained"
-                )
-            else:
-                description.label(
-                    text="Controls: Rotation X / Y + Scale",
-                    icon="FULLSCREEN_ENTER",
-                )
-                description.label(text="No Rotation Z control is generated")
-                description.label(
-                    text="Scale affects X owner and all depth planes"
-                )
-
-            layout.separator()
-            row = layout.row(align=True)
-            row.label(text="Control icons")
-            row.prop(scene, "spine2d_control_icons", text="")
-            row = layout.row(align=True)
-            row.label(text="Preview animation")
-            row.prop(scene, "spine2d_export_preview_animation", text="")
-        except Exception:
-            logger.exception("Unable to draw Spine2D Rig panel")
-            layout.label(text="Rig UI error (see console)", icon="ERROR")
-
-
-CLASSES = (
-    SPINE2D_OT_ResetRigProfile,
-    OBJECT_PT_Spine2DRigPanel,
-)
+CLASSES = (SPINE2D_OT_ResetRigProfile,)
 
 
 def register() -> None:
-    """Register the dedicated rig panel transactionally."""
+    """Register the rig reset operator transactionally."""
 
     register_classes_transactionally(
         CLASSES,
@@ -117,7 +99,7 @@ def register() -> None:
 
 
 def unregister() -> None:
-    """Unregister the dedicated rig panel best-effort."""
+    """Unregister the rig reset operator best-effort."""
 
     unregister_all_best_effort(
         class_cleanup_actions(
@@ -131,8 +113,8 @@ def unregister() -> None:
 
 __all__ = [
     "CLASSES",
-    "OBJECT_PT_Spine2DRigPanel",
     "SPINE2D_OT_ResetRigProfile",
+    "draw_rig_settings",
     "register",
     "unregister",
 ]
