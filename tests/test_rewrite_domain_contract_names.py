@@ -34,6 +34,7 @@ ACTIVE_ROOT_FILES = (
     PACKAGE / "__init__.py",
     PACKAGE / "addon_preferences.py",
     PACKAGE / "config.py",
+    PACKAGE / "rig_ui.py",
     PACKAGE / "single_object_operator.py",
     PACKAGE / "ui.py",
 )
