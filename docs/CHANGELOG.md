@@ -2,6 +2,19 @@
 
 This changelog records public product releases. Internal development milestones are intentionally omitted.
 
+## [0.41.2] - 2026-07-28
+
+### Fixed
+
+- Restored the Legacy four-decimal source-Z identity before creating rig depth groups.
+- Near-identical evaluated Z values now share one deterministic Z-group parent through exact `SourceVertexId` bindings.
+- Floating-point noise can no longer create almost one Z group per source vertex, inflate the rig by hundreds of bones, or vertically separate regions that belong to the same authored depth layer.
+- Explicit Z height overrides use the same canonical depth identity as source vertices.
+
+### Added
+
+- Pure regressions for noisy source depth, canonical parent bindings, duplicate canonical overrides, and bounded final rig bone count.
+
 ## [0.41.1] - 2026-07-27
 
 ### Fixed
