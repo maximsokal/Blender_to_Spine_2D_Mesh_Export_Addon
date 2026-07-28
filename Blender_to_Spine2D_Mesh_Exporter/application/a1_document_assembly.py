@@ -12,9 +12,9 @@ from ..domain.spine import (
     LegacyMeshDocumentBuildResult,
     LegacyRigBuildResult,
     apply_attachment_sequence_animations,
-    apply_legacy_visual_options,
     build_legacy_mesh_document,
 )
+from ..domain.spine.rig_visuals import apply_rig_visual_options
 from ..domain.uv import UvRangePolicy, enforce_uv_range
 from .a1_attachment_projection_service import (
     A1AttachmentProjectionResult,
@@ -177,9 +177,10 @@ def assemble_a1_document(
             resolved_projections,
             document_build,
         )
-        document = apply_legacy_visual_options(
+        document = apply_rig_visual_options(
             document_build.document,
             prefix=settings.prefix,
+            rig_profile=rig.profile.profile_id,
             include_control_icons=settings.include_control_icons,
             include_preview_animation=settings.include_preview_animation,
         )
