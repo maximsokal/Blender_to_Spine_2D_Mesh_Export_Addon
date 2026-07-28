@@ -228,11 +228,22 @@ class LegacyRigBuildResult:
             raise TypeError("info must be LegacyRigInfo")
 
     def validate(self) -> None:
-        """Validate exact legacy semantics and generic Spine cross-references."""
+        """Validate exact profile semantics and generic Spine cross-references."""
 
-        from .legacy_rig_validation import validate_legacy_rig_result
+        from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
 
-        validate_legacy_rig_result(self)
+        profile = resolve_a1_rig_profile(self.profile.profile_id)
+        if profile is A1RigProfile.THREE_AXIS_ROTATION:
+            from .legacy_rig_validation import validate_legacy_rig_result
+
+            validate_legacy_rig_result(self)
+            return
+        if profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
+            from .two_axis_scale_rig import validate_two_axis_scale_rig_result
+
+            validate_two_axis_scale_rig_result(self)
+            return
+        raise AssertionError(f"Unhandled rig profile: {profile}")
 
 
 __all__ = [
