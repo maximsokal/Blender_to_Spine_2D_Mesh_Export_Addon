@@ -37,6 +37,7 @@ def test_root_startup_imports_only_rewrite_registration_boundaries():
         "addon_preferences",
         "scene_settings_migration",
         "ui",
+        "rig_ui",
         "a1_readiness_invalidation",
         "auto_readiness",
         "repolish_ui",
