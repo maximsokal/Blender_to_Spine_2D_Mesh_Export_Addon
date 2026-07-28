@@ -64,6 +64,26 @@ def _uv_role_signature(obj) -> tuple[object, ...]:
     )
 
 
+def _set_unique_render_uv(mesh, layer_name: str) -> None:
+    if mesh is None:
+        raise TypeError("mesh cannot be None")
+    if not isinstance(layer_name, str) or not layer_name.strip():
+        raise ValueError("layer_name must be a non-empty string")
+    resolved_name = layer_name.strip()
+    if mesh.uv_layers.get(resolved_name) is None:
+        raise AssertionError(f"UV layer does not exist: {resolved_name}")
+
+    for layer in mesh.uv_layers:
+        layer.active_render = str(layer.name) == resolved_name
+
+    active_render_names = tuple(
+        str(layer.name)
+        for layer in mesh.uv_layers
+        if bool(getattr(layer, "active_render", False))
+    )
+    assert active_render_names == (resolved_name,)
+
+
 def _datablock_signature() -> tuple[frozenset[str], ...]:
     return (
         frozenset(item.name_full for item in bpy.data.objects),
@@ -168,10 +188,11 @@ def test_evaluated_mesh_reader_preserves_independent_source_uv_roles(quad_object
         )
 
     mesh.uv_layers.active = source_render
-    for layer in mesh.uv_layers:
-        layer.active_render = layer is source_render
+    _set_unique_render_uv(mesh, "SourceUV")
 
     source_before = _uv_role_signature(quad_object)
+    assert source_before[1] == "SourceUV"
+    assert source_before[2] == ("SourceUV",)
     datablocks_before = _datablock_signature()
 
     result = read_evaluated_mesh_snapshot(
