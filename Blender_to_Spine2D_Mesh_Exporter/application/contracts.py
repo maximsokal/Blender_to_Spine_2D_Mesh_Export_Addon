@@ -12,6 +12,7 @@ from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping, Tuple
 
+from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from .a1_numeric_contracts import (
     require_finite_number,
     require_integer,
@@ -51,7 +52,7 @@ class ExportSettings:
     output_directory: Path
     images_relative_path: str = "images"
     spine_version: str = "4.2.43"
-    rig_profile: str = "LEGACY_ROTATABLE_MESH"
+    rig_profile: str = A1RigProfile.THREE_AXIS_ROTATION.value
     seam_mode: str = "AUTO"
     angle_limit_degrees: float = 30.0
     bake_margin: int = 4
@@ -70,6 +71,7 @@ class ExportSettings:
         )
         require_non_empty_string(self.spine_version, "spine_version")
         require_non_empty_string(self.rig_profile, "rig_profile")
+        resolve_a1_rig_profile(self.rig_profile)
         if not isinstance(self.seam_mode, str):
             raise TypeError("seam_mode must be str")
         if self.seam_mode not in {"AUTO", "CUSTOM"}:
