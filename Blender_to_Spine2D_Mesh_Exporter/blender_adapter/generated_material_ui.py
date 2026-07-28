@@ -27,6 +27,83 @@ GENERATED_MATERIAL_PATTERN_PROPERTY = "spine2d_generated_material_pattern"
 GENERATED_GRAY_COLOR_PROPERTY = "spine2d_generated_gray_color"
 
 
+def draw_generated_material_settings(
+    layout: bpy.types.UILayout,
+    context: bpy.types.Context,
+) -> None:
+    """Draw generated-material controls inside the main standard foldout."""
+
+    scene = context.scene
+    header = layout.row(align=True)
+    header.label(text="Rewrite material policy")
+    header.operator(
+        "spine2d.reset_generated_materials",
+        text="Reset",
+    )
+    layout.prop(
+        scene,
+        MATERIAL_SOURCE_POLICY_PROPERTY,
+        text="Material source",
+    )
+    policy = str(
+        getattr(
+            scene,
+            MATERIAL_SOURCE_POLICY_PROPERTY,
+            A1MaterialSourcePolicy.REQUIRE_SOURCE.value,
+        )
+    ).upper()
+    generated_column = layout.column(align=True)
+    generated_column.enabled = (
+        policy != A1MaterialSourcePolicy.REQUIRE_SOURCE.value
+    )
+    generated_column.prop(
+        scene,
+        GENERATED_MATERIAL_PATTERN_PROPERTY,
+        text="Generated pattern",
+    )
+    pattern = str(
+        getattr(
+            scene,
+            GENERATED_MATERIAL_PATTERN_PROPERTY,
+            A1GeneratedMaterialPattern.SOLID_GRAY.value,
+        )
+    ).upper()
+    if pattern == A1GeneratedMaterialPattern.SOLID_GRAY.value:
+        generated_column.prop(
+            scene,
+            GENERATED_GRAY_COLOR_PROPERTY,
+            text="Gray color",
+        )
+
+    active = getattr(context, "active_object", None)
+    material_count = len(
+        tuple(
+            material
+            for material in getattr(getattr(active, "data", None), "materials", ())
+            if material is not None
+        )
+    )
+    if policy == A1MaterialSourcePolicy.REQUIRE_SOURCE.value:
+        layout.label(
+            text="Missing materials stop Rewrite export",
+            icon="ERROR" if material_count == 0 else "INFO",
+        )
+    elif policy == A1MaterialSourcePolicy.GENERATE_IF_MISSING.value:
+        layout.label(
+            text=(
+                "Generated fallback will be used"
+                if material_count == 0
+                else "Fallback activates when used material data is missing"
+            ),
+            icon="CHECKMARK",
+        )
+    else:
+        layout.label(
+            text="Source materials are ignored for Rewrite export",
+            icon="INFO",
+        )
+
+
 class SPINE2D_OT_ResetGeneratedMaterials(bpy.types.Operator):
     """Reset Rewrite generated-material controls without touching source materials."""
 
@@ -51,100 +128,7 @@ class SPINE2D_OT_ResetGeneratedMaterials(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class OBJECT_PT_Spine2DGeneratedMaterials(bpy.types.Panel):
-    """Configure source-material fallback for the Rewrite exporter only."""
-
-    bl_label = "Rewrite Generated Materials"
-    bl_idname = "OBJECT_PT_spine2d_generated_materials"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Blender to Spine2D Mesh Exporter"
-    bl_parent_id = "OBJECT_PT_spine2d_mesh"
-    bl_options = {"DEFAULT_CLOSED"}
-
-    @classmethod
-    def poll(cls, context: bpy.types.Context) -> bool:
-        active = context.active_object
-        return bool(active is not None and active.type == "MESH")
-
-    def draw(self, context: bpy.types.Context) -> None:
-        scene = context.scene
-        column = self.layout.column(align=True)
-        header = column.row(align=True)
-        header.label(text="Rewrite material policy")
-        header.operator(
-            "spine2d.reset_generated_materials",
-            text="Reset",
-        )
-        column.prop(
-            scene,
-            MATERIAL_SOURCE_POLICY_PROPERTY,
-            text="Material source",
-        )
-        policy = str(
-            getattr(
-                scene,
-                MATERIAL_SOURCE_POLICY_PROPERTY,
-                A1MaterialSourcePolicy.REQUIRE_SOURCE.value,
-            )
-        ).upper()
-        generated_column = column.column(align=True)
-        generated_column.enabled = (
-            policy != A1MaterialSourcePolicy.REQUIRE_SOURCE.value
-        )
-        generated_column.prop(
-            scene,
-            GENERATED_MATERIAL_PATTERN_PROPERTY,
-            text="Generated pattern",
-        )
-        pattern = str(
-            getattr(
-                scene,
-                GENERATED_MATERIAL_PATTERN_PROPERTY,
-                A1GeneratedMaterialPattern.SOLID_GRAY.value,
-            )
-        ).upper()
-        if pattern == A1GeneratedMaterialPattern.SOLID_GRAY.value:
-            generated_column.prop(
-                scene,
-                GENERATED_GRAY_COLOR_PROPERTY,
-                text="Gray color",
-            )
-
-        active = context.active_object
-        material_count = len(
-            tuple(
-                material
-                for material in getattr(getattr(active, "data", None), "materials", ())
-                if material is not None
-            )
-        )
-        if policy == A1MaterialSourcePolicy.REQUIRE_SOURCE.value:
-            column.label(
-                text="Missing materials stop Rewrite export",
-                icon="ERROR" if material_count == 0 else "INFO",
-            )
-        elif policy == A1MaterialSourcePolicy.GENERATE_IF_MISSING.value:
-            column.label(
-                text=(
-                    "Generated fallback will be used"
-                    if material_count == 0
-                    else "Fallback activates when used material data is missing"
-                ),
-                icon="CHECKMARK",
-            )
-        else:
-            column.label(
-                text="Source materials are ignored for Rewrite export",
-                icon="INFO",
-            )
-        column.label(text="These controls are ignored by Legacy export", icon="INFO")
-
-
-CLASSES = (
-    SPINE2D_OT_ResetGeneratedMaterials,
-    OBJECT_PT_Spine2DGeneratedMaterials,
-)
+CLASSES = (SPINE2D_OT_ResetGeneratedMaterials,)
 
 RNA_PROPERTIES = (
     RnaPropertyRegistration(
@@ -219,7 +203,7 @@ RNA_PROPERTIES = (
 
 
 def register() -> None:
-    """Register generated-material Scene properties and the child panel."""
+    """Register generated-material Scene properties and reset operator."""
 
     registered_classes = register_classes_transactionally(
         CLASSES,
@@ -242,7 +226,7 @@ def register() -> None:
 
 
 def unregister() -> None:
-    """Remove every generated-material property and panel."""
+    """Remove every generated-material property and reset operator."""
 
     unregister_all_best_effort(
         (
@@ -261,9 +245,9 @@ __all__ = [
     "GENERATED_GRAY_COLOR_PROPERTY",
     "GENERATED_MATERIAL_PATTERN_PROPERTY",
     "MATERIAL_SOURCE_POLICY_PROPERTY",
-    "OBJECT_PT_Spine2DGeneratedMaterials",
     "RNA_PROPERTIES",
     "SPINE2D_OT_ResetGeneratedMaterials",
+    "draw_generated_material_settings",
     "register",
     "unregister",
 ]
