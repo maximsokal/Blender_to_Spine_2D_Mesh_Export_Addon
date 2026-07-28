@@ -17,12 +17,14 @@ from ..application import (
 )
 from ..domain.baking import CameraProjectionPlan
 from ..domain.spine import (
+    A1RigProfile,
     ConnectedPlacementSpace,
     ConstraintOrderPolicy,
     SpineCompositionSettings,
     SpineDocumentComponent,
     SpineDocumentCompositionResult,
     compose_spine_documents,
+    resolve_a1_rig_profile,
 )
 from ..domain.spine.connected_group_assembly import build_connected_group_document
 from ..domain.spine.connected_group_contracts import (
@@ -117,6 +119,23 @@ def _validate_composition_inputs(
             pair_index=pair_index,
         )
 
+    profiles = tuple(
+        resolve_a1_rig_profile(item.rig.profile.profile_id) for item in prepared
+    )
+    if len(set(profiles)) != 1:
+        raise ValueError(
+            "All objects in one multi-object document must use the same rig profile"
+        )
+    if (
+        settings.mode is A1MultiObjectMode.CONNECTED
+        and profiles[0] is A1RigProfile.TWO_AXIS_ROTATION_SCALE
+    ):
+        raise ValueError(
+            "CONNECTED mode does not yet support TWO_AXIS_ROTATION_SCALE because its "
+            "five-phase constraint schedule differs from the six-phase three-axis "
+            "connected rig. Disable Connect for these objects or select 3-Axis Rotation."
+        )
+
 
 def _connected_placement_space(
     prepared: PreparedA1Object,
@@ -197,6 +216,7 @@ def compose_a1_multi_object_document(
             namespace_animations=settings.namespace_animations,
             animation_separator=settings.animation_separator,
         ),
+        profile=prepared[0].rig.profile,
     )
 
 
