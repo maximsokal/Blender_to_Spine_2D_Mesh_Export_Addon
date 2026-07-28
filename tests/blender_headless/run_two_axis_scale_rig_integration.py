@@ -124,6 +124,15 @@ def test_two_axis_scale_rig_serializes_in_blender_runtime() -> None:
         "TwoAxisFixture_scale" in bone_names,
         "two-axis profile did not generate the independent scale control",
     )
+    bone_by_name = {bone.name: bone for bone in document.bones}
+    _assert(
+        bone_by_name["TwoAxisFixture_rotation_X"].rotation == -134.67,
+        "X control setup rotation differs from the reference rig",
+    )
+    _assert(
+        bone_by_name["TwoAxisFixture_rotation_Y"].rotation == -17.43,
+        "Y control setup rotation differs from the reference rig",
+    )
 
     combined_orders = tuple(item.order for item in (*rig.ik, *rig.transform))
     _assert(
@@ -137,8 +146,8 @@ def test_two_axis_scale_rig_serializes_in_blender_runtime() -> None:
         scale_constraint.bones
         == (
             "TwoAxisFixture_rotate_X",
-            "TwoAxisFixture_1",
             "TwoAxisFixture_2",
+            "TwoAxisFixture_1",
         ),
         f"unexpected scale targets: {scale_constraint.bones}",
     )
