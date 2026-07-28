@@ -1,6 +1,6 @@
 # Settings Reference
 
-This document describes the user-facing settings registered by the Blender 5.2 extension. Defaults are the values used by a new or reset Scene.
+This document describes the user-facing settings registered by the Blender 5.2 extension. Defaults are the values used by a new or migrated Scene.
 
 ## Main panel: Export
 
@@ -47,22 +47,6 @@ Backslashes are normalized to forward slashes. Leading `./` and surrounding slas
 
 The final texture directory is below the JSON output directory.
 
-### Control icons
-
-| Type | Default |
-| --- | --- |
-| Boolean | Enabled |
-
-Includes the compatibility control-icon structures in the final Spine document.
-
-### Preview animation
-
-| Type | Default |
-| --- | --- |
-| Boolean | Enabled |
-
-Includes the compatibility preview animation in the final Spine document.
-
 ### Connect
 
 Per-object setting shown when multiple Mesh objects are selected.
@@ -73,6 +57,75 @@ Per-object setting shown when multiple Mesh objects are selected.
 
 At least two selected objects must have Connect enabled to create a connected subgroup. One connected object falls back to standalone composition with a warning.
 
+`TWO_AXIS_ROTATION_SCALE` currently supports single-object and standalone multi-object composition. Connected composition remains blocked with an explicit readiness/export diagnostic until its five-phase constraint schedule receives a dedicated connected-group implementation. The exporter never substitutes a fake sixth constraint.
+
+## Child panel: Rig
+
+### Rig profile
+
+| Value | Persisted ID | Default | Behavior |
+| --- | --- | --- | --- |
+| 3-Axis Rotation | `LEGACY_ROTATABLE_MESH` | Yes | Existing X/Y/Z compatibility rig. Existing output remains the default for old Scenes. |
+| 2-Axis Rotation + Scale | `TWO_AXIS_ROTATION_SCALE` | No | Generates X/Y pseudo-rotation controls and one independent uniform Scale control. No Rotation Z control is generated. |
+
+Changing Rig profile invalidates cached readiness and schedules a new analysis because bone names, constraint order, weighted bone indices, control attachments, and preview animation change.
+
+The two-axis profile follows the complete Spine 4.2.43 reference stored in [Rig Profiles](rig-profiles.md). Model-specific `BOX`, `TOP`, and `BOTTOM` names are not copied. They are generalized through the object prefix, ordered Z groups, and existing per-vertex bones.
+
+### 2-Axis controls
+
+The generated control set is:
+
+```text
+<prefix>_rotation_X
+<prefix>_rotation_Y
+<prefix>_scale
+<prefix>_main
+```
+
+The Scale transform affects `<prefix>_rotate_X` and every Z-group rotation bone. Constraint evaluation uses the reference order:
+
+```text
+0  Rotation X Transform
+1  IK
+2  Uniform Scale Transform
+3  X Depth Scale Transform
+4  Rotation Y Transform
+```
+
+### Reset Rig Profile
+
+The reset button beside the profile selector restores:
+
+```text
+3-Axis Rotation (LEGACY_ROTATABLE_MESH)
+```
+
+It does not modify texture, cutting, baking, material, or path settings.
+
+### Control icons
+
+| Type | Default |
+| --- | --- |
+| Boolean | Enabled |
+
+The generated control attachments match the selected profile:
+
+- 3-Axis: X, Y, Z, Main;
+- 2-Axis + Scale: X, Y, Scale, Main.
+
+The current transition UI also mirrors this toggle in the Export foldout; both controls edit the same Scene property.
+
+### Preview animation
+
+| Type | Default |
+| --- | --- |
+| Boolean | Enabled |
+
+The preview matches the selected profile. The two-axis preview references only X, Y, and Scale controls and contains no Z timeline.
+
+The current transition UI also mirrors this toggle in the Export foldout; both controls edit the same Scene property.
+
 ## Main panel: Cut
 
 ### Seam Maker
@@ -82,7 +135,7 @@ At least two selected objects must have Connect enabled to create a connected su
 | Auto | Yes | Uses angular segmentation controls. |
 | Custom | No | Uses user-marked seams and disables angular splitting controls. |
 
-Older development scenes are migrated once to the current Scene settings schema with Auto selected. A deliberate Custom choice made after migration is preserved.
+Older development scenes are migrated once to the current Scene settings schema with Auto and 3-Axis Rotation selected. Deliberate choices made after migration are preserved.
 
 ### Seed angle limit
 
@@ -171,6 +224,7 @@ Runs the production preparation pipeline without committing final export files. 
 - overall READY, WARNING, BLOCKED, NOT_ANALYSED, or STALE state;
 - object-level issues;
 - geometry, topology, UV, material, texture, rig, and attachment statistics;
+- selected rig profile;
 - blocker and warning counts.
 
 Export requires a current report that allows export.
@@ -226,9 +280,9 @@ DEBUG
 
 Rescans Python modules and preserves existing per-file levels where possible.
 
-## Reset behavior
+## Main Reset behavior
 
-The main Reset operator restores:
+The main Reset operator restores export, cut, and bake settings:
 
 ```text
 Export mode                  Normal - UV Segments
@@ -244,6 +298,8 @@ Frames for render            0
 Start frame                  0
 ```
 
+Use the dedicated Rig reset control to restore the default rig profile.
+
 The Generated Materials Reset operator restores:
 
 ```text
@@ -254,6 +310,7 @@ Generated Gray               0.5, 0.5, 0.5
 
 ## Related documents
 
+- [Rig Profiles](rig-profiles.md)
 - [Usage](usage.md)
 - [Output Format](output-format.md)
 - [Troubleshooting](troubleshooting.md)
