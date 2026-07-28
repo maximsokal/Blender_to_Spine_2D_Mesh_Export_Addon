@@ -9,6 +9,7 @@ import bpy
 
 from .. import config
 from ..domain.baking import A1TextureExportMode
+from ..domain.spine.rig_profiles import A1RigProfile
 from .scene_settings_migration import (
     CURRENT_SETTINGS_SCHEMA_VERSION,
     migration_file_loading,
@@ -48,8 +49,12 @@ def _update_ui_for_paths(_self: Any, context: bpy.types.Context) -> None:
                 area.tag_redraw()
 
 
-def _update_texture_export_mode(_self: Any, context: bpy.types.Context) -> None:
-    """Invalidate diagnostics and schedule one debounced analysis for the new mode."""
+def _invalidate_readiness_for_setting(
+    context: bpy.types.Context,
+    *,
+    reason: str,
+) -> None:
+    """Invalidate cached analysis and request one debounced replacement."""
 
     scene = getattr(context, "scene", None)
     try:
@@ -58,23 +63,39 @@ def _update_texture_export_mode(_self: Any, context: bpy.types.Context) -> None:
 
             clear_a1_export_readiness(scene)
     except Exception:
-        logger.exception("Unable to invalidate readiness after export-mode change")
+        logger.exception("Unable to invalidate readiness after %s", reason)
 
     try:
         from .. import auto_readiness
 
-        auto_readiness.request_auto_analysis(
-            context,
-            reason="texture export mode changed",
-        )
+        auto_readiness.request_auto_analysis(context, reason=reason)
     except Exception:
         # Registration, file loading, and test doubles may not expose the automatic
         # readiness owner yet. The cache has already been invalidated above.
         logger.debug(
-            "Automatic readiness is unavailable during export-mode update",
+            "Automatic readiness is unavailable after %s",
+            reason,
             exc_info=True,
         )
 
+
+def _update_texture_export_mode(_self: Any, context: bpy.types.Context) -> None:
+    """Invalidate diagnostics and schedule one analysis for the new texture mode."""
+
+    _invalidate_readiness_for_setting(
+        context,
+        reason="texture export mode changed",
+    )
+    _update_ui_for_paths(_self, context)
+
+
+def _update_rig_profile(_self: Any, context: bpy.types.Context) -> None:
+    """Invalidate diagnostics because rig bones, constraints, and weights changed."""
+
+    _invalidate_readiness_for_setting(
+        context,
+        reason="rig profile changed",
+    )
     _update_ui_for_paths(_self, context)
 
 
@@ -149,6 +170,19 @@ PROPERTIES = (
             ),
             default=A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
             update=_update_texture_export_mode,
+        ),
+    ),
+    (
+        "spine2d_rig_profile",
+        bpy.props.EnumProperty(
+            name="Rig Profile",
+            description="Choose the generated Spine control hierarchy",
+            items=tuple(
+                (profile.value, profile.label, profile.description)
+                for profile in A1RigProfile
+            ),
+            default=A1RigProfile.THREE_AXIS_ROTATION.value,
+            update=_update_rig_profile,
         ),
     ),
     (
