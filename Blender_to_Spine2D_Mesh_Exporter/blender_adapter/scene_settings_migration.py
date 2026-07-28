@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 from typing import Any
 
@@ -22,6 +23,25 @@ _REGISTERED = False
 _FILE_LOADING = False
 _SCHEMA_PROPERTY = "spine2d_settings_schema_version"
 _RIG_PROPERTY = "spine2d_rig_profile"
+_SEAM_PROPERTY = "spine2d_seam_maker_mode"
+_MISSING = object()
+
+
+@dataclass(frozen=True, slots=True)
+class _PreRegistrationSceneState:
+    """Raw persisted values captured before Blender binds Rewrite RNA defaults."""
+
+    schema_version: int
+    persisted_keys: frozenset[str]
+    seam_mode: str
+    rig_profile_raw: object
+    rig_profile_persisted: bool
+
+
+_PRE_REGISTRATION_SCENE_STATES: dict[
+    tuple[str, int],
+    _PreRegistrationSceneState,
+] = {}
 
 
 def migration_file_loading() -> bool:
@@ -30,8 +50,21 @@ def migration_file_loading() -> bool:
     return _FILE_LOADING
 
 
-def _stored_schema_version(scene: Any) -> int:
-    raw = getattr(scene, _SCHEMA_PROPERTY, 0)
+def _scene_identity(scene: Any) -> tuple[str, int]:
+    """Return one process-local identity stable across RNA registration."""
+
+    as_pointer = getattr(scene, "as_pointer", None)
+    if callable(as_pointer):
+        try:
+            pointer = int(as_pointer())
+        except (TypeError, ValueError, OverflowError, RuntimeError):
+            pointer = 0
+        if pointer > 0:
+            return ("BLENDER_POINTER", pointer)
+    return ("PYTHON_OBJECT", id(scene))
+
+
+def _coerce_schema_version(raw: object) -> int:
     try:
         value = int(raw)
     except (TypeError, ValueError, OverflowError):
@@ -39,12 +72,19 @@ def _stored_schema_version(scene: Any) -> int:
     return max(0, value)
 
 
+def _normalize_seam_mode(raw: object) -> str:
+    value = str(raw or "AUTO").strip().upper()
+    return value or "AUTO"
+
+
+def _stored_schema_version(scene: Any) -> int:
+    return _coerce_schema_version(getattr(scene, _SCHEMA_PROPERTY, 0))
+
+
 def _stored_seam_mode(scene: Any) -> str:
     """Return one normalized persisted seam mode for diagnostics."""
 
-    raw = getattr(scene, "spine2d_seam_maker_mode", "AUTO")
-    value = str(raw or "AUTO").strip().upper()
-    return value or "AUTO"
+    return _normalize_seam_mode(getattr(scene, _SEAM_PROPERTY, "AUTO"))
 
 
 def _persisted_scene_keys(scene: Any) -> frozenset[str]:
@@ -60,25 +100,152 @@ def _persisted_scene_keys(scene: Any) -> frozenset[str]:
         return frozenset()
 
 
-def _is_fresh_scene(scene: Any, current_schema: int) -> bool:
+def _persisted_id_value(
+    scene: Any,
+    property_name: str,
+    persisted_keys: frozenset[str],
+    default: object,
+) -> object:
+    """Read one raw ID-property value before an RNA descriptor can shadow it."""
+
+    if property_name not in persisted_keys:
+        return default
+
+    getter = getattr(scene, "get", None)
+    if callable(getter):
+        try:
+            return getter(property_name, default)
+        except Exception:
+            logger.debug(
+                "Unable to read persisted Scene property %s through get()",
+                property_name,
+                exc_info=True,
+            )
+
+    try:
+        return scene[property_name]
+    except Exception:
+        logger.debug(
+            "Unable to read persisted Scene property %s through item access",
+            property_name,
+            exc_info=True,
+        )
+        return default
+
+
+def _capture_scene_state(scene: Any) -> _PreRegistrationSceneState:
+    """Capture only raw persisted values needed by the schema migration."""
+
+    if scene is None:
+        raise ValueError("scene cannot be None")
+
+    persisted_keys = _persisted_scene_keys(scene)
+    raw_schema = _persisted_id_value(
+        scene,
+        _SCHEMA_PROPERTY,
+        persisted_keys,
+        0,
+    )
+    raw_seam = _persisted_id_value(
+        scene,
+        _SEAM_PROPERTY,
+        persisted_keys,
+        "AUTO",
+    )
+    raw_rig = _persisted_id_value(
+        scene,
+        _RIG_PROPERTY,
+        persisted_keys,
+        _MISSING,
+    )
+    return _PreRegistrationSceneState(
+        schema_version=_coerce_schema_version(raw_schema),
+        persisted_keys=persisted_keys,
+        seam_mode=_normalize_seam_mode(raw_seam),
+        rig_profile_raw=raw_rig,
+        rig_profile_persisted=raw_rig is not _MISSING,
+    )
+
+
+def _capture_pre_registration_scene_state_for_scenes(
+    scenes: tuple[Any, ...],
+) -> int:
+    """Replace the pending snapshot set with the supplied deterministic Scene tuple."""
+
+    if not isinstance(scenes, tuple):
+        raise TypeError("scenes must be a tuple")
+    if any(scene is None for scene in scenes):
+        raise ValueError("scenes cannot contain None")
+
+    _PRE_REGISTRATION_SCENE_STATES.clear()
+    for scene in scenes:
+        identity = _scene_identity(scene)
+        if identity in _PRE_REGISTRATION_SCENE_STATES:
+            raise ValueError("scenes cannot contain duplicate Scene identities")
+        _PRE_REGISTRATION_SCENE_STATES[identity] = _capture_scene_state(scene)
+    return len(_PRE_REGISTRATION_SCENE_STATES)
+
+
+def capture_pre_registration_scene_state() -> int:
+    """Capture current Scene ID-properties immediately before RNA registration.
+
+    Registering an EnumProperty over an older saved ID-property can make Blender expose
+    the new RNA default before the migration owner runs. This snapshot preserves the
+    actual pre-registration schema, seam mode, and rig choice for that one lifecycle.
+    """
+
+    scenes = tuple(getattr(bpy.data, "scenes", ()))
+    captured = _capture_pre_registration_scene_state_for_scenes(scenes)
+    logger.debug("Captured pre-registration settings for %d Scene(s)", captured)
+    return captured
+
+
+def clear_pre_registration_scene_state() -> None:
+    """Discard pending pre-registration snapshots after rollback or unregistration."""
+
+    _PRE_REGISTRATION_SCENE_STATES.clear()
+
+
+def _is_fresh_scene(
+    scene: Any,
+    current_schema: int,
+    snapshot: _PreRegistrationSceneState | None,
+) -> bool:
     """Return True only when no previous Rewrite setting was stored in the Scene."""
 
     if current_schema != 0:
         return False
-    persisted = _persisted_scene_keys(scene)
+    persisted = (
+        snapshot.persisted_keys
+        if snapshot is not None
+        else _persisted_scene_keys(scene)
+    )
     return not any(
         key.startswith("spine2d_") and key != _SCHEMA_PROPERTY
         for key in persisted
     )
 
 
-def _stored_rig_profile(scene: Any) -> A1RigProfile:
-    raw = getattr(scene, _RIG_PROPERTY, A1RigProfile.TWO_AXIS_ROTATION_SCALE.value)
+def _resolve_stored_rig_profile(raw: object) -> A1RigProfile:
     try:
         return resolve_a1_rig_profile(raw)
     except (TypeError, ValueError):
         logger.warning("Invalid persisted rig profile %r; using two-axis default", raw)
         return A1RigProfile.TWO_AXIS_ROTATION_SCALE
+
+
+def _stored_rig_profile(
+    scene: Any,
+    snapshot: _PreRegistrationSceneState | None,
+) -> A1RigProfile:
+    if snapshot is not None and snapshot.rig_profile_persisted:
+        return _resolve_stored_rig_profile(snapshot.rig_profile_raw)
+    raw = getattr(
+        scene,
+        _RIG_PROPERTY,
+        A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
+    )
+    return _resolve_stored_rig_profile(raw)
 
 
 def migrate_scene_settings(scene: Any) -> bool:
@@ -92,26 +259,47 @@ def migrate_scene_settings(scene: Any) -> bool:
     if scene is None:
         raise ValueError("scene cannot be None")
 
-    current = _stored_schema_version(scene)
+    identity = _scene_identity(scene)
+    snapshot = _PRE_REGISTRATION_SCENE_STATES.get(identity)
+    current = (
+        snapshot.schema_version
+        if snapshot is not None
+        else _stored_schema_version(scene)
+    )
     if current >= CURRENT_SETTINGS_SCHEMA_VERSION:
+        _PRE_REGISTRATION_SCENE_STATES.pop(identity, None)
         return False
 
-    fresh_scene = _is_fresh_scene(scene, current)
-    previous_mode = _stored_seam_mode(scene)
+    fresh_scene = _is_fresh_scene(scene, current, snapshot)
+    previous_mode = (
+        snapshot.seam_mode
+        if snapshot is not None
+        else _stored_seam_mode(scene)
+    )
     seam_changed = current < 3 and not fresh_scene
-    if seam_changed:
-        scene.spine2d_seam_maker_mode = "AUTO"
 
     if current >= 4:
-        rig_profile = _stored_rig_profile(scene)
+        rig_profile = _stored_rig_profile(scene, snapshot)
     elif fresh_scene:
         rig_profile = A1RigProfile.TWO_AXIS_ROTATION_SCALE
     else:
         # Never silently change established pre-profile projects.
         rig_profile = A1RigProfile.THREE_AXIS_ROTATION
 
-    scene.spine2d_rig_profile = rig_profile.value
-    scene.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION
+    try:
+        if seam_changed:
+            scene.spine2d_seam_maker_mode = "AUTO"
+        scene.spine2d_rig_profile = rig_profile.value
+        scene.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION
+    except Exception:
+        logger.exception(
+            "Unable to apply migrated settings to Scene '%s'",
+            str(getattr(scene, "name", "<unnamed>")),
+        )
+        raise
+    else:
+        _PRE_REGISTRATION_SCENE_STATES.pop(identity, None)
+
     logger.info(
         "Migrated Spine2D Rewrite Scene '%s' settings schema %d -> %d; "
         "fresh=%s; Seam Maker %s -> %s; Rig -> %s",
@@ -146,6 +334,7 @@ def spine2d_scene_settings_load_pre(_dummy: Any) -> None:
     """Prevent RNA update callbacks from marking old values during file loading."""
 
     global _FILE_LOADING
+    clear_pre_registration_scene_state()
     _FILE_LOADING = True
 
 
@@ -193,12 +382,15 @@ def unregister() -> None:
         load_pre_handlers.remove(spine2d_scene_settings_load_pre)
     while spine2d_scene_settings_load_post in load_post_handlers:
         load_post_handlers.remove(spine2d_scene_settings_load_post)
+    clear_pre_registration_scene_state()
     _FILE_LOADING = False
     _REGISTERED = False
 
 
 __all__ = [
     "CURRENT_SETTINGS_SCHEMA_VERSION",
+    "capture_pre_registration_scene_state",
+    "clear_pre_registration_scene_state",
     "migrate_all_scenes",
     "migrate_scene_settings",
     "migration_file_loading",
