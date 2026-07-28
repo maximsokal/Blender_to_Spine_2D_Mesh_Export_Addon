@@ -152,9 +152,8 @@ def test_read_source_mesh_snapshot_preserves_face_corner_identity():
     assert snapshot.faces[0].material_index == 2
 
 
-def test_active_uv_layer_overrides_stale_active_render_flag():
+def test_render_uv_layer_remains_independent_from_active_uv_layer():
     obj = make_fake_quad()
-    uv_map = obj.data.uv_layers[0]
     source_uv = _uv_layer(
         "SourceUV",
         ((0.25, 0.5), (0.25, 0.5), (0.25, 0.5), (0.25, 0.5)),
@@ -162,11 +161,27 @@ def test_active_uv_layer_overrides_stale_active_render_flag():
     )
     obj.data.uv_layers.append(source_uv)
     obj.data.uv_layers.active = source_uv
-    uv_map.active_render = True
 
     snapshot = read_source_mesh_snapshot(obj)
 
     assert snapshot.uv_layer_names == ("UVMap", "SourceUV")
+    assert snapshot.active_uv_layer == "SourceUV"
+    assert snapshot.render_uv_layer == "UVMap"
+
+
+def test_active_uv_is_render_fallback_when_no_render_flag_exists():
+    obj = make_fake_quad()
+    obj.data.uv_layers[0].active_render = False
+    source_uv = _uv_layer(
+        "SourceUV",
+        ((0.25, 0.5), (0.25, 0.5), (0.25, 0.5), (0.25, 0.5)),
+        active_render=False,
+    )
+    obj.data.uv_layers.append(source_uv)
+    obj.data.uv_layers.active = source_uv
+
+    snapshot = read_source_mesh_snapshot(obj)
+
     assert snapshot.active_uv_layer == "SourceUV"
     assert snapshot.render_uv_layer == "SourceUV"
 
