@@ -1,4 +1,4 @@
-"""Naming profile for the X/Y rotation plus uniform scale rig."""
+"""Naming and setup constants for the X/Y rotation plus uniform scale rig."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ class TwoAxisScaleRigProfile(LegacyRigProfile):
     """Namespaced Spine 4.2.43 names generalized from the reference box rig."""
 
     profile_id: str = A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+    rotation_x_setup_degrees: float = -134.67
+    rotation_y_setup_degrees: float = -17.43
 
     def scale_control_bone(self, prefix: str) -> str:
         return f"{self._require_prefix(prefix)}_scale"
