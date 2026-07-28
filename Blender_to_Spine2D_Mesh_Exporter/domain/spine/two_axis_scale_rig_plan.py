@@ -11,10 +11,9 @@ from .two_axis_scale_rig_contracts import TwoAxisScaleRigLayout
 # editor-control placement and length. Deformation uses actual Z-group offsets.
 _CONTROL_LENGTH_RATIO = 0.4
 _CONTROL_X_RATIO = 1.635
-_CONTROL_Y_SPACING_RATIO = 0.2
+# Keep every visible control at least one control length apart vertically.
+_CONTROL_Y_SPACING_RATIO = 0.4
 _HELPER_SPAN_RATIO = 1.2
-_SCALE_CONTROL_X_RATIO = 2.248
-_SCALE_CONTROL_Y_RATIO = 0.12
 
 
 def _rounded(value: float, field_name: str) -> float:
@@ -31,22 +30,19 @@ def build_two_axis_scale_layout(plan: LegacyRigBuildPlan) -> TwoAxisScaleRigLayo
 
     scale = require_finite_derived(plan.uniform_scale, "uniform_scale")
     depth_values = tuple(float(group.y_offset_pixels) for group in plan.z_groups)
+    control_x = _rounded(scale * _CONTROL_X_RATIO, "control_x")
+    control_spacing = _rounded(
+        scale * _CONTROL_Y_SPACING_RATIO,
+        "control_y_spacing",
+    )
     return TwoAxisScaleRigLayout(
         control_length=_rounded(scale * _CONTROL_LENGTH_RATIO, "control_length"),
-        control_x=_rounded(scale * _CONTROL_X_RATIO, "control_x"),
-        control_y_spacing=_rounded(
-            scale * _CONTROL_Y_SPACING_RATIO,
-            "control_y_spacing",
-        ),
+        control_x=control_x,
+        control_y_spacing=control_spacing,
         helper_span=_rounded(scale * _HELPER_SPAN_RATIO, "helper_span"),
-        scale_control_x=_rounded(
-            scale * _SCALE_CONTROL_X_RATIO,
-            "scale_control_x",
-        ),
-        scale_control_y=_rounded(
-            scale * _SCALE_CONTROL_Y_RATIO,
-            "scale_control_y",
-        ),
+        # X, Y, and Scale controls form one editor column.
+        scale_control_x=control_x,
+        scale_control_y=_rounded(-control_spacing, "scale_control_y"),
         minimum_depth_y=_rounded(min(depth_values), "minimum_depth_y"),
         maximum_depth_y=_rounded(max(depth_values), "maximum_depth_y"),
     )
