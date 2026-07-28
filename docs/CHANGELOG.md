@@ -2,18 +2,24 @@
 
 This changelog records public product releases. Internal development milestones are intentionally omitted.
 
+## Unreleased candidate status
+
+Version 0.41.2 is not a validated release candidate. A representative textured sword asset still imports into Spine with an incorrect setup-pose mesh layout even though material baking succeeds. The candidate must not be merged or released until the source Blender mesh, generated JSON, generated texture, and a known-good Legacy output are compared through an asset-specific regression.
+
 ## [0.41.2] - 2026-07-28
 
-### Fixed
+### Changed
 
-- Restored the Legacy four-decimal source-Z identity before creating rig depth groups.
-- Near-identical evaluated Z values now share one deterministic Z-group parent through exact `SourceVertexId` bindings.
-- Floating-point noise can no longer create almost one Z group per source vertex, inflate the rig by hundreds of bones, or vertically separate regions that belong to the same authored depth layer.
-- Explicit Z height overrides use the same canonical depth identity as source vertices.
+- Source Z values are canonicalized to the historical four-decimal Legacy identity before Z-group creation and exact `SourceVertexId` binding.
+- Explicit Z-group height overrides use the same canonical identity.
 
 ### Added
 
-- Pure regressions for noisy source depth, canonical parent bindings, duplicate canonical overrides, and bounded final rig bone count.
+- Regressions preventing small evaluated-geometry floating-point differences from creating extra depth groups or inflating the base rig bone count.
+
+### Known issue
+
+- This change does not resolve the incorrect setup-pose layout observed for the representative textured sword asset. Version 0.41.2 remains a failed development candidate rather than a release.
 
 ## [0.41.1] - 2026-07-27
 
