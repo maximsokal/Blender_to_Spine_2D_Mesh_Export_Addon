@@ -4,7 +4,20 @@ This changelog records public product releases. Internal development milestones 
 
 ## Unreleased candidate status
 
-Version 0.47.0 is a development candidate and is not validated for release. It includes normalized two-axis controls, Blender Object Origin pivot preservation, Scene settings migration hardening, and shared segment vertex-bone optimization. The candidate must not be merged or released until all automated layers and fresh manual Blender-to-Spine exports pass on the same commit.
+Version 0.47.1 is a development candidate and is not validated for release. It includes the 0.47.0 rig, pivot, migration, and shared vertex-bone changes plus deterministic filtering of edge-on faces that have no area in Spine X/Y projection space. The candidate must not be merged or released until all automated layers and fresh manual Blender-to-Spine exports pass on the same commit.
+
+## [0.47.1] - 2026-07-29
+
+### Added
+
+- Blender-independent projected-region filtering that preserves immutable source geometry, UVs, and Source lineage while materializing only visible X/Y disk components.
+- A Blender 5.2 two-axis standalone multi-object regression containing a valid 3D side wall whose two vertices collapse to the same Spine X/Y point.
+
+### Fixed
+
+- Normal UV multi-object export no longer fails when a legitimate three-dimensional side face is edge-on and has zero area only after projection into Spine pixel space.
+- Completely edge-on regions are omitted instead of creating invalid mesh triangles; an object is blocked only when every prepared region is invisible in X/Y.
+- Remaining visible regions are renumbered densely before slots, attachments, vertex bones, and weighted indices are built.
 
 ## [0.47.0] - 2026-07-29
 
