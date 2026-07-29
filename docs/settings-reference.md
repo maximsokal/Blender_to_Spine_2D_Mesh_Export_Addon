@@ -72,7 +72,9 @@ Per-object setting shown when multiple Mesh objects are selected.
 
 At least two selected objects must have Connect enabled to create a connected subgroup. One connected object falls back to standalone composition with a warning.
 
-`TWO_AXIS_ROTATION_SCALE` supports connected composition through a dedicated five-phase connected constraint schedule. The connected group and every object retain independent X, Y, and Scale controls; no Rotation Z control or synthetic sixth constraint is generated. Global and per-object phases are ordered as Rotation X, IK, Uniform Scale, X Depth Scale, and Rotation Y, with unique contiguous Spine constraint orders across the complete document.
+`TWO_AXIS_ROTATION_SCALE` supports connected composition through a dedicated five-phase connected constraint schedule. The connected group and every object retain independent X, Y, and Scale controls; no Rotation Z control or synthetic sixth constraint is generated. Global and per-object phases are Rotation X, IK, Uniform Scale, X Depth Scale, and Rotation Y.
+
+Connected order values are assigned by ordered Z layer, matching the historical 3-Axis merger. Objects in the same Z layer intentionally share the same phase order; objects in different layers receive consecutive order values. The set of used phase values is dense, but the complete document may contain duplicate order values by design.
 
 ## Rig
 
@@ -80,7 +82,7 @@ At least two selected objects must have Connect enabled to create a connected su
 
 | Value | Persisted ID | Fresh Scene default | Behavior |
 | --- | --- | --- | --- |
-| 3-Axis Rotation | `LEGACY_ROTATABLE_MESH` | No | Existing X/Y/Z compatibility rig. |
+| 3-Axis Rotation | `LEGACY_ROTATABLE_MESH` | No | Existing X/Y/Z compatibility rig. Connected export reproduces the dedicated wrapper and constraint payload from the historical `main` exporter. |
 | 2-Axis Rotation + Scale | `TWO_AXIS_ROTATION_SCALE` | Yes | Generates X/Y pseudo-rotation controls and one independent uniform Scale control. No Rotation Z control is generated. |
 
 Changing Rig profile invalidates cached readiness and schedules a new analysis because bone names, constraint order, weighted bone indices, control attachments, and preview animation change.
@@ -104,9 +106,11 @@ The reference X/Y setup angles are retained as transform-constraint rotation off
 
 ### Multi-object setup pose
 
-Each standalone or connected object source uses `PRESERVE_COMPOSITION`: its existing `<prefix>_main` placement and reference X/Y setup rotations remain part of the object-local rig so composition cannot flatten or overlap the scene.
+Each standalone or connected object source uses `PRESERVE_COMPOSITION`: its existing `<prefix>_main` placement and profile-specific controls remain part of the object-local rig so composition cannot flatten or overlap the scene.
 
-Connected composition then adds a separate neutral global wrapper. The wrapper controls have zero setup rotation. For the two-axis profile, every `<prefix>_scale` control is converted from root space to `<prefix>_main` local space before composition. This keeps the object, its control icons, and its constraint targets in one transform space while global layers move the complete object rig.
+For connected 3-Axis export, the group is not an ordinary object rig and is not post-normalized. It uses the dedicated Legacy hierarchy from `main`: root-space X/Y/Z controls, neutral generated Z layers, exact global helper transforms, exact constrained-bone lists, full object-main X/Y offsets, Z-layer order sharing, and unchanged object scale-compensator order `6`.
+
+For connected 2-Axis export, every `<prefix>_scale` control is converted from root space to `<prefix>_main` local space before composition. The group then uses explicit global X, IK, Scale, depth-scale, and Y targets with the same Z-layer scheduling principle.
 
 The selected object policy is explicit immutable data passed through UI settings into the rig build request. It is never inferred from object names or coordinate values.
 
@@ -131,7 +135,7 @@ Rotation Y
 Scale
 ```
 
-The Scale transform affects `<prefix>_rotate_X` and every Z-group rotation bone. Constraint evaluation uses the reference order:
+The Scale transform affects `<prefix>_rotate_X` and every Z-group rotation bone. Single-object constraint evaluation uses the reference order:
 
 ```text
 0  Rotation X Transform
@@ -140,6 +144,8 @@ The Scale transform affects `<prefix>_rotate_X` and every Z-group rotation bone.
 3  X Depth Scale Transform
 4  Rotation Y Transform
 ```
+
+Connected evaluation keeps the same semantic phase order while allocating one object order per connected Z layer.
 
 ### Reset Rig Profile
 
