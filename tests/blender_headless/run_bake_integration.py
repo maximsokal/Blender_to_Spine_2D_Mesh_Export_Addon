@@ -493,7 +493,7 @@ def test_complete_a1_service_rolls_back_png_and_json_together() -> None:
         _assert(final_png.read_bytes() == old_png, "existing PNG was corrupted")
         leftovers = tuple(
             sorted(
-                str(path.relative_to(output_directory))
+                path.relative_to(output_directory).as_posix()
                 for path in output_directory.rglob("*")
                 if path.is_file()
             )
