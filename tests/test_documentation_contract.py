@@ -80,7 +80,6 @@ def test_readme_preserves_visual_assets_badges_counters_and_video():
         "img.youtube.com/vi/f_1Zc2qCz44/maxresdefault.jpg",
         "assets/ui_addon.png",
     )
-
     missing = tuple(fragment for fragment in required_fragments if fragment not in source)
     assert not missing, f"README visual contract is missing: {missing}"
     assert (ROOT / "assets" / "cover.png").is_file()
@@ -119,7 +118,7 @@ def test_documentation_matches_manifest_and_current_defaults():
     )
     assert match is not None
     version = match.group(1)
-    assert version == "0.41.3"
+    assert version == "0.47.0"
 
     for relative_path in (
         "docs/README.md",
