@@ -9,7 +9,7 @@ The repository uses four validation layers:
 3. Blender headless integration scripts in `tests/blender_headless/`.
 4. Blender extension validation and ZIP packaging.
 
-A focused test run is not a release gate. Every required layer must pass on the same candidate commit.
+A focused test run is not a release gate. Every required layer must pass on the same candidate commit, and connected-rig changes require a fresh manual import into Spine 4.2.43.
 
 ## Compile check
 
@@ -26,6 +26,47 @@ if ($LASTEXITCODE -ne 0) {
     throw "Compilation failed with exit code $LASTEXITCODE"
 }
 ```
+
+## Focused 0.47.4 connected setup regression
+
+```powershell
+$FocusedTests = @(
+    "tests/test_connected_runtime_setup_invariants.py",
+    "tests/test_connected_setup_correction_architecture.py",
+    "tests/test_connected_setup_pose_regression.py",
+    "tests/test_two_axis_connected_policy.py",
+    "tests/test_two_axis_connected_single_layer.py",
+    "tests/test_connected_group_document.py",
+    "tests/test_connected_group_split_architecture.py",
+    "tests/test_connected_placement_space_contract.py",
+    "tests/test_spine_composition.py",
+    "tests/test_manifest_version.py",
+    "tests/test_documentation_contract.py"
+)
+
+& .\.venv-tests\Scripts\python.exe `
+    -m pytest `
+    $FocusedTests `
+    -vv `
+    --strict-markers `
+    --durations=20
+
+if ($LASTEXITCODE -ne 0) {
+    throw "0.47.4 connected setup regressions failed"
+}
+```
+
+These tests verify:
+
+- the global X/Y wrapper constraints contribute zero setup rotation, translation, scale, and shear delta;
+- global three-axis Rotation Z is relative-local and preserves the generated layer setup rotation;
+- global three-axis scale owns both scale channels but no rotation, translation, or shear channel;
+- each parent layer's setup Y contribution is subtracted from its object-main local Y;
+- the resulting layer Y plus object-main Y equals the intended Blender visible Y;
+- object Scale controls remain in their own `<prefix>_main` local space;
+- connected constraint schedules remain unique and contiguous;
+- weighted attachment indices and influence data remain unchanged after composition;
+- the correction owner has no Blender API, mesh, UV, attachment, weighted-stream, or serialization responsibility.
 
 ## Complete Blender-independent suite
 
@@ -46,77 +87,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Do not use fail-fast for final evidence. A release run must expose every failure.
 
-## Focused 0.47.3 geometry, rig, pivot, and material regression
-
-```powershell
-$FocusedTests = @(
-    "tests/test_a1_projected_region_filter.py",
-    "tests/test_a1_projected_region_filter_architecture.py",
-    "tests/test_vertex_bone_optimizer.py",
-    "tests/test_a1_document_assembly.py",
-    "tests/test_a1_attachment_hull_normalization.py",
-    "tests/test_a1_material_correspondence.py",
-    "tests/test_two_axis_scale_rig_builder.py",
-    "tests/test_two_axis_multi_placement.py",
-    "tests/test_two_axis_connected_policy.py",
-    "tests/test_two_axis_connected_single_layer.py",
-    "tests/test_connected_setup_pose_regression.py",
-    "tests/test_connected_group_document.py",
-    "tests/test_connected_group_split_architecture.py",
-    "tests/test_a1_object_origin_offset.py",
-    "tests/test_scene_settings_migration_contract.py",
-    "tests/test_semantic_bake_image_io.py",
-    "tests/test_semantic_bake_execution_uv_roles.py",
-    "tests/test_uv_sampling_roles.py",
-    "tests/test_a1_bake_material_bindings.py",
-    "tests/test_a1_z_groups.py",
-    "tests/test_normal_uv_pyramid_regression.py",
-    "tests/test_manifest_version.py",
-    "tests/test_documentation_contract.py"
-)
-
-& .\.venv-tests\Scripts\python.exe `
-    -m pytest `
-    $FocusedTests `
-    -vv `
-    --strict-markers `
-    --durations=20
-
-if ($LASTEXITCODE -ne 0) {
-    throw "0.47.3 focused regressions failed"
-}
-```
-
-These tests verify:
-
-- valid three-dimensional faces that are edge-on in Spine X/Y are omitted from the 2D triangle stream;
-- visible faces remain immutable and retain exact source vertex, loop, face, UV, and material lineage;
-- disconnected visible components are materialized as deterministic manifold disks;
-- remaining segments receive dense slot and attachment indices;
-- an object is rejected only when every prepared face is invisible in X/Y;
-- coincident segment-boundary points share one canonical vertex bone when parent and setup position match;
-- weighted bone indices are compacted while local influence coordinates and weights remain unchanged;
-- UV, triangle, hull, edge, attachment path, and mesh vertex order survive vertex-bone optimization;
-- same-XY vertices in different Z parents remain independent;
-- single-object two-axis controls serialize with neutral setup rotation;
-- connected two-axis documents retain global and per-object X/Y/Scale controls;
-- the connected global two-axis wrapper has a neutral setup pose;
-- per-object two-axis Scale controls use their own main-local coordinate space;
-- the connected three-axis global X constraint cannot mix or collapse Y scale;
-- the connected three-axis global Z constraint targets wrapper layers instead of object base chains;
-- connected constraints use unique contiguous profile-specific schedules;
-- connected weighted attachment indices remain valid after global rig insertion;
-- Blender Object Origin remains the exported rotation pivot;
-- old saved Scenes retain the compatibility rig while genuinely fresh Scenes use the two-axis default;
-- the generated `SpineBakeUV` layer is the bake destination;
-- the original source render UV remains the shader-sampling layer;
-- `bpy.ops.object.bake` receives the destination UV layer explicitly;
-- temporary bake material indices follow exact snapshot face identity;
-- source Z values retain the Legacy four-decimal identity.
-
 ## Real bpy suite
-
-Run the configured real-bpy suite through the repository runner:
 
 ```powershell
 & .\.venv-bpy\Scripts\python.exe scripts\run_bpy_tests.py
@@ -124,18 +95,6 @@ Run the configured real-bpy suite through the repository runner:
 if ($LASTEXITCODE -ne 0) {
     throw "Real bpy suite failed with exit code $LASTEXITCODE"
 }
-```
-
-For the material-bake boundary:
-
-```powershell
-& .\.venv-bpy\Scripts\python.exe `
-    -m pytest `
-    tests_bpy/test_semantic_bake_real_bpy.py `
-    -vv `
-    -s `
-    --strict-markers `
-    --durations=20
 ```
 
 ## Blender executable
@@ -152,7 +111,7 @@ Every headless command must include `--python-exit-code 1`.
 
 ## Connected setup-pose gates
 
-The two connected regressions below validate the serialized fields that Spine evaluates in setup mode, not only bone names and constraint order.
+The following gates inspect the final serialized JSON using the same setup-delta assumptions as Spine 4.2. They do not pass merely because bones and constraints exist.
 
 ### Two-axis connected setup
 
@@ -194,73 +153,7 @@ Expected marker:
 [CONNECTED_SETUP_POSE] PASS test_connected_three_axis_setup_pose_is_not_collapsed
 ```
 
-## Edge-on two-axis multi-object integration
-
-```powershell
-& $Blender `
-    --background `
-    --factory-startup `
-    --python-exit-code 1 `
-    --python "tests\blender_headless\run_edge_on_multi_object_integration.py"
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Edge-on multi-object integration failed"
-}
-```
-
-Expected marker:
-
-```text
-[EDGE_ON_MULTI] PASS two-axis standalone edge-on regression
-```
-
-## Normal UV pyramid integration
-
-```powershell
-& $Blender `
-    --background `
-    --factory-startup `
-    --python-exit-code 1 `
-    --python "tests\blender_headless\run_normal_uv_pyramid_mode_integration.py"
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Normal UV pyramid integration failed"
-}
-```
-
-Expected markers:
-
-```text
-[NORMAL_UV_PYRAMID_AUTO_ROUNDTRIP] PASS
-[NORMAL_UV_PYRAMID_CUSTOM] PASS
-[MISSING_IMAGE_PREFLIGHT] PASS
-[EDIT_MODE_CONTRACT] PASS
-[NORMAL_UV_PYRAMID] PASS
-```
-
-## Shared vertex-bone optimization integration
-
-```powershell
-& $Blender `
-    --background `
-    --factory-startup `
-    --python-exit-code 1 `
-    --python "tests\blender_headless\run_vertex_bone_optimization_integration.py"
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Vertex-bone optimization integration failed"
-}
-```
-
-Expected marker:
-
-```text
-[VERTEX_BONE_OPTIMIZATION] PASS pyramid shared-bone regression
-```
-
-The Blender pyramid still contains twelve weighted attachment vertices across four segment meshes, but those vertices reference four canonical generated bones instead of twelve duplicated bones.
-
-## Existing multi-object integration
+### Existing multi-object and rollback regression
 
 ```powershell
 & $Blender `
@@ -280,59 +173,35 @@ Expected marker:
 [MULTI] PASS 3 integration tests
 ```
 
-## Directional Spine UV integration
+The forced second-bake traceback in the rollback test is intentional only when the final test and Blender process both report success.
+
+## Geometry and material gates
+
+Run these after connected setup changes because document assembly remains shared:
 
 ```powershell
-& $Blender `
-    --background `
-    --factory-startup `
-    --python-exit-code 1 `
-    --python "tests\blender_headless\run_spine_uv_file_space_integration.py"
-```
+$HeadlessScripts = @(
+    "tests\blender_headless\run_edge_on_multi_object_integration.py",
+    "tests\blender_headless\run_vertex_bone_optimization_integration.py",
+    "tests\blender_headless\run_normal_uv_pyramid_mode_integration.py",
+    "tests\blender_headless\run_spine_material_correspondence_integration.py",
+    "tests\blender_headless\run_uv_sampling_role_integration.py"
+)
 
-Expected marker:
+foreach ($Script in $HeadlessScripts) {
+    & $Blender `
+        --background `
+        --factory-startup `
+        --python-exit-code 1 `
+        --python $Script
 
-```text
-[SPINE_UV_FILE_SPACE_DIRECTIONAL] PASS
-```
-
-## Asymmetric material correspondence integration
-
-```powershell
-& $Blender `
-    --background `
-    --factory-startup `
-    --python-exit-code 1 `
-    --python "tests\blender_headless\run_spine_material_correspondence_integration.py"
-```
-
-Expected marker:
-
-```text
-[SPINE_MATERIAL_CORRESPONDENCE] PASS
-```
-
-## Source render UV role integration
-
-```powershell
-& $Blender `
-    --background `
-    --factory-startup `
-    --python-exit-code 1 `
-    --python "tests\blender_headless\run_uv_sampling_role_integration.py"
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Source render UV role integration failed"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Headless integration failed: $Script"
+    }
 }
 ```
 
-Expected marker:
-
-```text
-[PASS] test_source_render_uv_is_not_replaced_by_spine_bake_uv
-```
-
-## Build version 0.47.3
+## Build version 0.47.4
 
 ```powershell
 Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
@@ -345,22 +214,30 @@ if ($LASTEXITCODE -ne 0) {
     throw "Extension package build failed"
 }
 
-Get-Item `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.47.3.zip" |
-    Select-Object FullName, Length, LastWriteTime
-```
+$Zip = ".\dist\blender_to_spine2d_mesh_exporter-0.47.4.zip"
 
-## Validate the archive
+if (-not (Test-Path -LiteralPath $Zip -PathType Leaf)) {
+    throw "Expected ZIP was not created: $Zip"
+}
 
-```powershell
-& $Blender `
-    --command extension validate `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.47.3.zip"
+& $Blender --command extension validate $Zip
 
 if ($LASTEXITCODE -ne 0) {
     throw "Built extension validation failed"
 }
 ```
+
+## Manual Spine gate
+
+Install the new ZIP, restart Blender, and produce fresh connected JSON for both profiles. In Spine 4.2.43 verify:
+
+- setup pose matches Blender XY composition before touching a control;
+- object size and area are non-zero;
+- each object's local controls move only that object;
+- global controls move the entire group;
+- global X/Y/Z or X/Y/Scale controls do not deform the group merely by importing the JSON;
+- control icons follow their owning object and do not collapse at the origin;
+- meshes, textures, UVs, pivots, and draw order remain correct.
 
 ## Release evidence
 
@@ -374,7 +251,7 @@ A release claim must record:
 - required Blender headless markers;
 - package build and archive validation results;
 - final ZIP path, size, timestamp, and SHA-256;
-- manual re-export and Spine import of representative assets.
+- fresh manual Blender-to-Spine import results for representative assets.
 
 Do not state that tests passed without the corresponding logs. Do not reuse results from an older commit.
 
