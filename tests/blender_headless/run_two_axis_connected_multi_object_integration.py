@@ -57,15 +57,23 @@ def _two_axis_sources(sources):
 def _constraint(document: dict, name: str) -> dict:
     matches = tuple(
         item
-        for item in document.get("transform", ())
+        for item in (*document.get("ik", ()), *document.get("transform", ()))
         if item.get("name") == name
     )
-    _assert(len(matches) == 1, f"expected one transform constraint {name!r}")
+    _assert(len(matches) == 1, f"expected one constraint {name!r}, found {len(matches)}")
     return matches[0]
 
 
+def _assert_fields(actual: dict, expected: dict, label: str) -> None:
+    for key, value in expected.items():
+        _assert(
+            actual.get(key) == value,
+            f"{label}.{key}: {actual.get(key)!r} != {value!r}; actual={actual}",
+        )
+
+
 def _assert_zero_relative_local_delta(document: dict, constraint_name: str) -> None:
-    """Assert that one global wrapper constraint is identity in setup pose."""
+    """Assert that one global wrapper rotation is identity in setup pose."""
 
     constraint = _constraint(document, constraint_name)
     _assert(constraint.get("local") is True, f"{constraint_name} is not local")
@@ -82,7 +90,7 @@ def _assert_zero_relative_local_delta(document: dict, constraint_name: str) -> N
         )
 
 
-def _assert_neutral_connected_setup(document: dict) -> None:
+def _assert_connected_control_space(document: dict) -> None:
     """Validate the setup-pose fields that Spine evaluates before animation."""
 
     bones = {bone["name"]: bone for bone in document["bones"]}
@@ -202,41 +210,121 @@ def test_connected_two_axis_export_builds_global_and_object_controls() -> None:
             layer_y + object_y == 32.0,
             "two-axis ObjectB setup world Y no longer matches Blender placement",
         )
-        _assert_neutral_connected_setup(document)
+        _assert_connected_control_space(document)
 
+        _assert_fields(
+            _constraint(document, "all_objects_rotation_X_constraint"),
+            {
+                "order": 0,
+                "bones": [
+                    "all_objects_rotate_X_constraint_rotate_IK",
+                    "all_objects_rotate_X",
+                ],
+                "target": "all_objects_rotation_X",
+                "local": True,
+                "relative": True,
+                "mixX": 0,
+                "mixY": 0,
+                "mixScaleX": 0,
+                "mixScaleY": 0,
+                "mixShearY": 0,
+            },
+            "all_objects_rotation_X_constraint",
+        )
+        _assert_fields(
+            _constraint(document, "all_objects_IK"),
+            {
+                "order": 3,
+                "bones": ["all_objects_rotate_X_constraint"],
+                "target": "all_objects_rotate_X_constraint_IK",
+                "compress": True,
+                "stretch": True,
+            },
+            "all_objects_IK",
+        )
+        _assert_fields(
+            _constraint(document, "all_objects_scale"),
+            {
+                "order": 6,
+                "bones": [
+                    "all_objects_rotate_X",
+                    "all_objects_layer_0",
+                    "all_objects_layer_1",
+                ],
+                "target": "all_objects_scale",
+                "relative": True,
+                "mixRotate": 0,
+                "mixX": 0,
+                "mixY": 0,
+                "mixShearY": 0,
+            },
+            "all_objects_scale",
+        )
+        _assert_fields(
+            _constraint(document, "all_objects_scale_rotate_X_constraint"),
+            {
+                "order": 9,
+                "bones": ["all_objects_0_scale", "all_objects_1_scale"],
+                "target": "all_objects_rotate_X_constraint",
+            },
+            "all_objects_scale_rotate_X_constraint",
+        )
+        _assert_fields(
+            _constraint(document, "all_objects_rotation_Y"),
+            {
+                "order": 12,
+                "bones": ["all_objects_layer_0", "all_objects_layer_1"],
+                "target": "all_objects_rotation_Y",
+                "local": True,
+                "relative": True,
+                "mixX": 0,
+                "mixY": 0,
+                "mixScaleX": 0,
+                "mixScaleY": 0,
+                "mixShearY": 0,
+            },
+            "all_objects_rotation_Y",
+        )
+
+        expected_orders = {
+            "all_objects_rotation_X_constraint": 0,
+            "ObjectB_rotation_X_constraint": 1,
+            "ObjectA_rotation_X_constraint": 2,
+            "all_objects_IK": 3,
+            "ObjectB_IK": 4,
+            "ObjectA_IK": 5,
+            "all_objects_scale": 6,
+            "ObjectB_scale": 7,
+            "ObjectA_scale": 8,
+            "all_objects_scale_rotate_X_constraint": 9,
+            "ObjectB_scale_rotate_X_constraint": 10,
+            "ObjectA_scale_rotate_X_constraint": 11,
+            "all_objects_rotation_Y": 12,
+            "ObjectB_rotation_Y": 13,
+            "ObjectA_rotation_Y": 14,
+        }
         constraints = tuple(document.get("ik", ())) + tuple(
             document.get("transform", ())
         )
-        orders = tuple(int(item["order"]) for item in constraints)
         names = {item["name"] for item in constraints}
-        required_constraints = {
-            "all_objects_rotation_X_constraint",
-            "all_objects_IK",
-            "all_objects_scale",
-            "all_objects_scale_rotate_X_constraint",
-            "all_objects_rotation_Y",
-            "ObjectA_rotation_X_constraint",
-            "ObjectA_IK",
-            "ObjectA_scale",
-            "ObjectA_scale_rotate_X_constraint",
-            "ObjectA_rotation_Y",
-            "ObjectB_rotation_X_constraint",
-            "ObjectB_IK",
-            "ObjectB_scale",
-            "ObjectB_scale_rotate_X_constraint",
-            "ObjectB_rotation_Y",
-        }
         _assert(
-            names == required_constraints,
+            names == set(expected_orders),
             f"unexpected connected two-axis constraints: {sorted(names)}",
         )
+        for name, expected_order in expected_orders.items():
+            constraint = _constraint(document, name)
+            _assert(
+                int(constraint["order"]) == expected_order,
+                f"{name} order {constraint['order']} != {expected_order}",
+            )
+        orders = tuple(int(item["order"]) for item in constraints)
         _assert(
             len(orders) == len(set(orders)) == 15,
             f"connected two-axis constraint orders collide: {orders}",
         )
         _assert(
             set(orders) == set(range(15)),
-            f"connected two-axis schedule is not contiguous: {orders}",
+            f"connected two-axis schedule is not dense: {orders}",
         )
         _assert(
             result.statistics["connected_layer_count"] == 2,
