@@ -4,7 +4,27 @@ This changelog records public product releases. Internal development milestones 
 
 ## Unreleased candidate status
 
-Version 0.41.3 is a development candidate and is not validated for release. It fixes the source-render-UV overwrite reproduced from the representative textured sword archive. The candidate must not be merged or released until all automated layers and a fresh manual sword export/import pass on the same commit.
+Version 0.47.0 is a development candidate and is not validated for release. It includes normalized two-axis controls, Blender Object Origin pivot preservation, Scene settings migration hardening, and shared segment vertex-bone optimization. The candidate must not be merged or released until all automated layers and fresh manual Blender-to-Spine exports pass on the same commit.
+
+## [0.47.0] - 2026-07-29
+
+### Added
+
+- Shared vertex-bone optimization for coincident segment-boundary vertices belonging to the same object and Z parent.
+- Typed weighted-stream remapping that preserves local influence coordinates and weights while compacting final bone indices.
+- Regression coverage for the four-face pyramid: twelve segment vertex bones compact to four canonical bones without changing UVs, triangles, hulls, edges, or attachment order.
+
+### Changed
+
+- Single-object two-axis control bones serialize with neutral setup rotations while reference angles remain in transform-constraint offsets.
+- Single-object attachments preserve Blender Object Origin as the exported rotation pivot instead of moving the pivot to the geometry bounds center.
+- Extension version advanced from the 0.41 development series to 0.47.0.
+
+### Fixed
+
+- Segmented objects no longer export one independent Spine bone for every repeated copy of the same physical boundary vertex.
+- Weighted mesh bone indices are rebuilt after vertex-bone compaction instead of relying on pre-compaction contiguous ranges.
+- Older saved Scenes retain the compatibility rig profile when Blender RNA defaults are rebound during extension registration.
 
 ## [0.41.3] - 2026-07-28
 
@@ -96,7 +116,7 @@ Version 0.41.3 is a development candidate and is not validated for release. It f
 ### Removed
 
 - Temporary Rewrite milestone documents from the public documentation directory.
-- Development-only fixture manifest examples from public user documentation.
+- Development-only fixture manifest examples from the public user documentation.
 - Blender 4.x compatibility claims from the current extension package.
 - Legacy modules from the built Blender 5.2 extension archive.
 
