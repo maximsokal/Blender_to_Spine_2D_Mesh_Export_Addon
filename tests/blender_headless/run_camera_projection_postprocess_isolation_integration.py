@@ -1,4 +1,4 @@
-"""Blender 4.4 regression for B4 compositor and sequencer isolation."""
+"""Blender 5.2 regression for camera-projection compositor and sequencer isolation."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     export_a1_single_object,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import bake_executor as bake_module  # noqa: E402
+import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_execution as render_module  # noqa: E402
 from run_bake_integration import _assert  # noqa: E402
 from run_camera_projection_integration import (  # noqa: E402
     _create_layer_weight_material,
@@ -43,7 +43,7 @@ def test_b4_disables_postprocess_only_during_render() -> None:
             _create_layer_weight_material("PostprocessIsolationMaterial")
         )
         observed = []
-        original_render = bake_module._call_render_operator
+        original_render = render_module._call_render_operator
 
         def guarded_render(bpy_module):
             observed.append(
@@ -59,7 +59,7 @@ def test_b4_disables_postprocess_only_during_render() -> None:
             return original_render(bpy_module)
 
         with mock.patch.object(
-            bake_module,
+            render_module,
             "_call_render_operator",
             side_effect=guarded_render,
         ):
