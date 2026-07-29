@@ -119,7 +119,8 @@ def test_connected_three_axis_global_constraints_match_main_payload():
 
 
 def test_connected_three_axis_orders_are_grouped_by_z_layer_like_main():
-    result = build_connected_group_document(connected_objects(), settings())
+    objects = connected_objects()
+    result = build_connected_group_document(objects, settings())
     schedule = result.constraint_schedule
 
     assert schedule.object_rotation_x == (
@@ -152,7 +153,9 @@ def test_connected_three_axis_orders_are_grouped_by_z_layer_like_main():
     assert schedule.unique_orders == tuple(range(15))
     assert len(schedule.all_orders) > len(schedule.unique_orders)
 
-    names = {
-        item.name for item in (*result.document.ik, *result.document.transform)
-    }
-    assert not any(name.endswith("_scale_compensator") for name in names)
+    for item in objects:
+        compensator = _constraint(
+            result.document,
+            f"{item.prefix}_scale_compensator",
+        )
+        assert compensator.order == 6
