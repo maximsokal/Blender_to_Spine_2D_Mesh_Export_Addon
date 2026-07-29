@@ -27,13 +27,17 @@ if ($LASTEXITCODE -ne 0) {
 }
 ```
 
-## Focused 0.47.4 connected setup regression
+## Focused 0.47.5 connected Legacy-parity regression
 
 ```powershell
 $FocusedTests = @(
+    "tests/test_connected_legacy_main_parity.py",
+    "tests/test_connected_two_axis_global_payload.py",
+    "tests/test_connected_serialization_validator.py",
     "tests/test_connected_runtime_setup_invariants.py",
     "tests/test_connected_setup_correction_architecture.py",
     "tests/test_connected_setup_pose_regression.py",
+    "tests/test_connected_global_rig_parity.py",
     "tests/test_two_axis_connected_policy.py",
     "tests/test_two_axis_connected_single_layer.py",
     "tests/test_connected_group_document.py",
@@ -52,21 +56,22 @@ $FocusedTests = @(
     --durations=20
 
 if ($LASTEXITCODE -ne 0) {
-    throw "0.47.4 connected setup regressions failed"
+    throw "0.47.5 connected Legacy-parity regressions failed"
 }
 ```
 
 These tests verify:
 
-- the global X/Y wrapper constraints contribute zero setup rotation, translation, scale, and shear delta;
-- global three-axis Rotation Z is relative-local and preserves the generated layer setup rotation;
-- global three-axis scale owns both scale channels but no rotation, translation, or shear channel;
-- each parent layer's setup Y contribution is subtracted from its object-main local Y;
-- the resulting layer Y plus object-main Y equals the intended Blender visible Y;
-- object Scale controls remain in their own `<prefix>_main` local space;
-- connected constraint schedules remain unique and contiguous;
-- weighted attachment indices and influence data remain unchanged after composition;
-- the correction owner has no Blender API, mesh, UV, attachment, weighted-stream, or serialization responsibility.
+- the connected 3-Axis global wrapper is the dedicated historical `main` wrapper, not an ordinary object rig;
+- global controls, helper bones, neutral generated Z layers, parents, lengths, rotations, and inheritance fields match `main`;
+- global Rotation X/Y/Z, IK, and Scale use the exact historical bone lists, targets, offsets, and channel mixes;
+- object constraint orders are assigned by Z layer and source object order is preserved;
+- objects in the same Z layer intentionally share an order;
+- Legacy scale compensators remain at standalone order `6`;
+- the serializer relaxes only `DUPLICATE_CONSTRAINT_ORDER` for a validated connected result;
+- two-axis connected X, IK, Scale, depth-scale, and Y use explicit global targets and the same layer-order principle;
+- weighted attachment indices and influence data remain unchanged after global bones are inserted;
+- the generic composer and normal serializer remain strict for non-connected documents.
 
 ## Complete Blender-independent suite
 
@@ -102,38 +107,16 @@ if ($LASTEXITCODE -ne 0) {
 ```powershell
 $Blender = "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 
-if (-not (Test-Path -LiteralPath $Blender -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath $Blender)) {
     throw "Blender executable not found: $Blender"
 }
 ```
 
 Every headless command must include `--python-exit-code 1`.
 
-## Connected setup-pose gates
+## Connected rig gates
 
-The following gates inspect the final serialized JSON using the same setup-delta assumptions as Spine 4.2. They do not pass merely because bones and constraints exist.
-
-### Two-axis connected setup
-
-```powershell
-& $Blender `
-    --background `
-    --factory-startup `
-    --python-exit-code 1 `
-    --python "tests\blender_headless\run_two_axis_connected_multi_object_integration.py"
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Connected two-axis setup integration failed"
-}
-```
-
-Expected marker:
-
-```text
-[TWO_AXIS_CONNECTED_MULTI] PASS test_connected_two_axis_export_builds_global_and_object_controls
-```
-
-### Three-axis connected setup
+### Three-axis exact `main` parity
 
 ```powershell
 & $Blender `
@@ -143,17 +126,37 @@ Expected marker:
     --python "tests\blender_headless\run_connected_setup_pose_integration.py"
 
 if ($LASTEXITCODE -ne 0) {
-    throw "Connected three-axis setup integration failed"
+    throw "Connected three-axis Legacy parity failed"
 }
 ```
 
 Expected marker:
 
 ```text
-[CONNECTED_SETUP_POSE] PASS test_connected_three_axis_setup_pose_is_not_collapsed
+[CONNECTED_MAIN_PARITY] PASS test_connected_three_axis_matches_legacy_main_wrapper
 ```
 
-### Existing multi-object and rollback regression
+### Two-axis connected payload and controls
+
+```powershell
+& $Blender `
+    --background `
+    --factory-startup `
+    --python-exit-code 1 `
+    --python "tests\blender_headless\run_two_axis_connected_multi_object_integration.py"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Connected two-axis integration failed"
+}
+```
+
+Expected marker:
+
+```text
+[TWO_AXIS_CONNECTED_MULTI] PASS test_connected_two_axis_export_builds_global_and_object_controls
+```
+
+### Existing standalone, connected, and rollback service
 
 ```powershell
 & $Blender `
@@ -177,7 +180,7 @@ The forced second-bake traceback in the rollback test is intentional only when t
 
 ## Geometry and material gates
 
-Run these after connected setup changes because document assembly remains shared:
+Run these after connected changes because document assembly remains shared:
 
 ```powershell
 $HeadlessScripts = @(
@@ -201,7 +204,7 @@ foreach ($Script in $HeadlessScripts) {
 }
 ```
 
-## Build version 0.47.4
+## Build version 0.47.5
 
 ```powershell
 Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
@@ -214,7 +217,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Extension package build failed"
 }
 
-$Zip = ".\dist\blender_to_spine2d_mesh_exporter-0.47.4.zip"
+$Zip = ".\dist\blender_to_spine2d_mesh_exporter-0.47.5.zip"
 
 if (-not (Test-Path -LiteralPath $Zip -PathType Leaf)) {
     throw "Expected ZIP was not created: $Zip"
@@ -231,13 +234,13 @@ if ($LASTEXITCODE -ne 0) {
 
 Install the new ZIP, restart Blender, and produce fresh connected JSON for both profiles. In Spine 4.2.43 verify:
 
-- setup pose matches Blender XY composition before touching a control;
-- object size and area are non-zero;
-- each object's local controls move only that object;
-- global controls move the entire group;
-- global X/Y/Z or X/Y/Scale controls do not deform the group merely by importing the JSON;
-- control icons follow their owning object and do not collapse at the origin;
-- meshes, textures, UVs, pivots, and draw order remain correct.
+- the 3-Axis connected setup matches the working historical exporter before any control is moved;
+- the 3-Axis global controls affect the same object and helper bones as the `main` JSON;
+- objects in a shared Z layer do not collapse or reorder visually;
+- the 2-Axis connected setup preserves all object sizes, pivots, positions, and control icons;
+- each local control affects only its owning object;
+- global controls affect the complete connected group;
+- meshes, textures, UVs, weighted vertices, pivots, and draw order remain correct.
 
 ## Release evidence
 
