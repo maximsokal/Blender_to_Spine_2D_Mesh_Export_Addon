@@ -15,6 +15,7 @@ from ..domain.spine import (
     build_legacy_mesh_document,
 )
 from ..domain.spine.rig_visuals import apply_rig_visual_options
+from ..domain.spine.vertex_bone_optimizer import optimize_shared_vertex_bones
 from ..domain.uv import UvRangePolicy, enforce_uv_range
 from .a1_attachment_projection_service import (
     A1AttachmentProjectionResult,
@@ -173,6 +174,10 @@ def assemble_a1_document(
             tuple(projection.request for projection in resolved_projections),
             skeleton_metadata=skeleton_metadata,
         )
+        # Segmentation duplicates shared source points at attachment boundaries.  Share
+        # the corresponding generated bones before downstream correspondence checks,
+        # while preserving every attachment vertex, UV, triangle, and local weight.
+        document_build = optimize_shared_vertex_bones(document_build)
         validate_document_material_correspondence(
             resolved_projections,
             document_build,
