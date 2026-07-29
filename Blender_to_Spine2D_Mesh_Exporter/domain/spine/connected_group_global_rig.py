@@ -40,6 +40,23 @@ def _connected_z_groups(
     )
 
 
+def _ordered_connected_bone_names(
+    names: Tuple[str, ...],
+    layers: Tuple[ConnectedZLayer, ...],
+) -> Tuple[str, ...]:
+    """Keep layer references in public top-down connected layer order."""
+
+    rank = {
+        name: (layer.layer_index, kind)
+        for layer in layers
+        for kind, name in enumerate(
+            (layer.scale_bone_name, layer.layer_bone_name)
+        )
+    }
+    ordered_layer_names = iter(sorted((name for name in names if name in rank), key=rank.get))
+    return tuple(next(ordered_layer_names) if name in rank else name for name in names)
+
+
 def _remap_connected_layers(
     bones: Tuple[Bone, ...],
     ik: Tuple[IKConstraint, ...],
@@ -75,6 +92,12 @@ def _remap_connected_layers(
             return None
         return name_map.get(name, name)
 
+    def remap_constraint_bones(names: Tuple[str, ...]) -> Tuple[str, ...]:
+        remapped = tuple(remap_name(name) for name in names)
+        if not all(isinstance(name, str) for name in remapped):
+            raise TypeError("constraint bone remap produced a non-string name")
+        return _ordered_connected_bone_names(remapped, layers)
+
     return (
         tuple(
             replace(
@@ -87,7 +110,7 @@ def _remap_connected_layers(
         tuple(
             replace(
                 constraint,
-                bones=tuple(remap_name(name) for name in constraint.bones),
+                bones=remap_constraint_bones(constraint.bones),
                 target=remap_name(constraint.target),
             )
             for constraint in ik
@@ -95,7 +118,7 @@ def _remap_connected_layers(
         tuple(
             replace(
                 constraint,
-                bones=tuple(remap_name(name) for name in constraint.bones),
+                bones=remap_constraint_bones(constraint.bones),
                 target=remap_name(constraint.target),
             )
             for constraint in transform
