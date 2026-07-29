@@ -1,9 +1,7 @@
 """Real Blender 5.2 integration tests for the rewritten multi-object service.
 
-The fixtures are generated at runtime and exercise both typed composition modes plus
-one shared filesystem transaction. The failure case deliberately lets the first Cycles
-bake finish and fails the second bake, proving that the final JSON and every texture are
-rolled back together.
+The connected case protects exact historical ``main`` behavior: a dedicated neutral
+wrapper, layer-based constraint orders, and unchanged per-object compensators.
 """
 
 from __future__ import annotations
@@ -149,56 +147,6 @@ def _prepare_state(output_directory: Path):
     )
 
 
-def _number(mapping: dict[str, object], key: str) -> float:
-    value = mapping.get(key, 0.0)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise AssertionError(f"{key} must be numeric, got {value!r}")
-    return float(value)
-
-
-def _connected_setup_translation(
-    bones: dict[str, dict[str, object]],
-    main_bone_name: str,
-) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
-    """Return main-local, generated-layer, and visible setup translations.
-
-    Connected object mains are parented to ``all_objects_layer_*``. That layer is
-    itself parented to ``all_objects_*_scale``, whose setup Y stores the connected
-    depth offset. The object's visible Blender XY is therefore the sum of these
-    three local translations, not the value stored on ``<object>_main`` alone.
-    """
-
-    try:
-        main = bones[main_bone_name]
-        layer_name = main["parent"]
-        if not isinstance(layer_name, str):
-            raise AssertionError(
-                f"{main_bone_name} parent must be a string, got {layer_name!r}"
-            )
-        layer = bones[layer_name]
-        scale_name = layer["parent"]
-        if not isinstance(scale_name, str):
-            raise AssertionError(
-                f"{layer_name} parent must be a string, got {scale_name!r}"
-            )
-        scale = bones[scale_name]
-    except KeyError as exc:
-        raise AssertionError(
-            f"connected setup chain is incomplete for {main_bone_name}: {exc.args[0]}"
-        ) from exc
-
-    main_local = (_number(main, "x"), _number(main, "y"))
-    layer_setup = (
-        _number(layer, "x") + _number(scale, "x"),
-        _number(layer, "y") + _number(scale, "y"),
-    )
-    visible_setup = (
-        main_local[0] + layer_setup[0],
-        main_local[1] + layer_setup[1],
-    )
-    return main_local, layer_setup, visible_setup
-
-
 def _assert_state_restored(
     *,
     context_before,
@@ -220,6 +168,24 @@ def _assert_state_restored(
         not _temporary_datablock_names(),
         "multi export leaked temporary Blender datablocks",
     )
+
+
+def _constraint(document: dict, name: str) -> dict:
+    matches = tuple(
+        item
+        for item in (*document.get("ik", ()), *document.get("transform", ()))
+        if item.get("name") == name
+    )
+    _assert(len(matches) == 1, f"expected one constraint {name!r}, found {len(matches)}")
+    return matches[0]
+
+
+def _assert_fields(actual: dict, expected: dict, label: str) -> None:
+    for key, value in expected.items():
+        _assert(
+            actual.get(key) == value,
+            f"{label}.{key}: {actual.get(key)!r} != {value!r}; actual={actual}",
+        )
 
 
 def test_standalone_multi_export_commits_one_json_and_two_textures() -> None:
@@ -274,7 +240,7 @@ def test_standalone_multi_export_commits_one_json_and_two_textures() -> None:
         )
 
 
-def test_connected_multi_export_builds_global_rig_and_offsets() -> None:
+def test_connected_multi_export_matches_legacy_main_wrapper() -> None:
     _clear_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-multi-connected-") as directory:
         output_directory = Path(directory)
@@ -304,10 +270,7 @@ def test_connected_multi_export_builds_global_rig_and_offsets() -> None:
 
         document = json.loads(expected_json.read_text(encoding="utf-8"))
         bones = {bone["name"]: bone for bone in document["bones"]}
-        _assert("all_objects_main" in bones, "global main bone missing")
-        _assert("all_objects_rotation_X" in bones, "global X controller missing")
-        _assert("all_objects_rotation_Y" in bones, "global Y controller missing")
-        _assert("all_objects_rotation_Z" in bones, "global Z controller missing")
+
         _assert(
             bones["ObjectA_main"]["parent"] == "all_objects_layer_1",
             f"anchor object layer is wrong: {bones['ObjectA_main']}",
@@ -316,58 +279,115 @@ def test_connected_multi_export_builds_global_rig_and_offsets() -> None:
             bones["ObjectB_main"]["parent"] == "all_objects_layer_0",
             f"elevated object layer is wrong: {bones['ObjectB_main']}",
         )
-
-        anchor_location = sources[0].source_object.matrix_world.translation
-        elevated_location = sources[1].source_object.matrix_world.translation
-        export_settings = sources[0].settings.export
-        uniform_scale = (
-            float(export_settings.texture_width)
-            + float(export_settings.texture_height)
-        ) / 2.0
-        expected_visible = (
-            round((elevated_location.x - anchor_location.x) * uniform_scale, 2),
-            round((elevated_location.y - anchor_location.y) * uniform_scale, 2),
+        _assert(
+            (float(bones["ObjectA_main"].get("x", 0.0)), float(bones["ObjectA_main"].get("y", 0.0)))
+            == (0.0, 0.0),
+            f"anchor moved: {bones['ObjectA_main']}",
         )
-        expected_layer = (
-            0.0,
-            round((elevated_location.z - anchor_location.z) * uniform_scale, 2),
-        )
-        expected_main_local = (
-            expected_visible[0] - expected_layer[0],
-            expected_visible[1] - expected_layer[1],
+        _assert(
+            (float(bones["ObjectB_main"].get("x", 0.0)), float(bones["ObjectB_main"].get("y", 0.0)))
+            == (64.0, 32.0),
+            f"ObjectB full Legacy XY offset is wrong: {bones['ObjectB_main']}",
         )
 
-        anchor_main, anchor_layer, anchor_visible = _connected_setup_translation(
-            bones,
-            "ObjectA_main",
+        for control in (
+            "all_objects_rotation_X",
+            "all_objects_rotation_Y",
+            "all_objects_rotation_Z",
+        ):
+            _assert(
+                bones[control].get("parent") == "root",
+                f"global control is not root-space: {bones[control]}",
+            )
+
+        for name in (
+            "all_objects_0_scale",
+            "all_objects_layer_0",
+            "all_objects_1_scale",
+            "all_objects_layer_1",
+        ):
+            _assert(float(bones[name].get("y", 0.0)) == 0.0, f"{name} has setup Y")
+            _assert(float(bones[name].get("rotation", 0.0)) == 0.0, f"{name} rotated")
+            _assert("inherit" not in bones[name], f"{name} has object-rig inherit mode")
+
+        _assert_fields(
+            _constraint(document, "all_objects_rotation_X"),
+            {
+                "order": 0,
+                "bones": ["all_objects_0_scale", "all_objects_1_scale", "all_objects"],
+                "target": "all_objects_rotation_X",
+                "rotation": 90,
+                "local": True,
+                "relative": True,
+                "x": -64.0,
+                "y": -16.0,
+                "scaleX": -1,
+                "scaleY": -1,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+            "all_objects_rotation_X",
         )
-        object_b_main, object_b_layer, object_b_visible = (
-            _connected_setup_translation(bones, "ObjectB_main")
+        _assert_fields(
+            _constraint(document, "all_objects_rotation_Z"),
+            {
+                "order": 2,
+                "bones": ["ObjectA", "ObjectB"],
+                "target": "all_objects_rotation_Z",
+                "local": True,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+            "all_objects_rotation_Z",
         )
-        _assert(anchor_main == (0.0, 0.0), f"anchor main moved: {anchor_main}")
-        _assert(anchor_layer == (0.0, 0.0), f"anchor layer moved: {anchor_layer}")
-        _assert(
-            anchor_visible == (0.0, 0.0),
-            f"anchor visible setup moved: {anchor_visible}",
-        )
-        _assert(
-            object_b_layer == expected_layer,
-            f"ObjectB depth layer offset wrong: {object_b_layer} != {expected_layer}",
-        )
-        _assert(
-            object_b_main == expected_main_local,
-            f"ObjectB compensated local offset wrong: "
-            f"{object_b_main} != {expected_main_local}",
-        )
-        _assert(
-            object_b_visible == expected_visible,
-            f"ObjectB visible setup offset wrong: "
-            f"{object_b_visible} != {expected_visible}",
+        _assert_fields(
+            _constraint(document, "all_objects_scale_constraint"),
+            {
+                "order": 10,
+                "bones": ["all_objects_0_scale", "all_objects_1_scale"],
+                "target": "all_objects_rotate_X_constraint",
+                "scaleX": -1,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+            "all_objects_scale_constraint",
         )
 
-        constraints = tuple(document.get("ik", ())) + tuple(document.get("transform", ()))
-        orders = tuple(int(item["order"]) for item in constraints)
-        _assert(len(orders) == len(set(orders)), "connected constraint orders collide")
+        expected_orders = {
+            "all_objects_rotation_X": 0,
+            "all_objects_rotation_Y": 1,
+            "all_objects_rotation_Z": 2,
+            "ObjectB_rotation_X": 3,
+            "ObjectA_rotation_X": 4,
+            "ObjectB_rotation_Y": 5,
+            "ObjectA_rotation_Y": 6,
+            "all_objects_scale_constraint_IK": 7,
+            "ObjectB_scale_constraint_IK": 8,
+            "ObjectA_scale_constraint_IK": 9,
+            "all_objects_scale_constraint": 10,
+            "ObjectB_scale_constraint": 11,
+            "ObjectA_scale_constraint": 12,
+            "ObjectB_rotation_Z": 13,
+            "ObjectA_rotation_Z": 14,
+            "ObjectA_scale_compensator": 6,
+            "ObjectB_scale_compensator": 6,
+        }
+        for name, expected_order in expected_orders.items():
+            actual = _constraint(document, name)
+            _assert(
+                int(actual["order"]) == expected_order,
+                f"{name} order {actual['order']} != {expected_order}",
+            )
+
+        orders = tuple(
+            int(item["order"])
+            for item in (*document.get("ik", ()), *document.get("transform", ()))
+        )
+        _assert(set(orders) == set(range(15)), f"Legacy order phases changed: {orders}")
+        _assert(len(orders) == 17 and len(set(orders)) == 15, f"Legacy ties changed: {orders}")
         _assert(
             result.statistics["connected_layer_count"] == 2,
             "connected Z layer count is wrong",
@@ -475,7 +495,7 @@ def test_second_bake_failure_rolls_back_json_and_both_textures() -> None:
 def main() -> None:
     tests = (
         test_standalone_multi_export_commits_one_json_and_two_textures,
-        test_connected_multi_export_builds_global_rig_and_offsets,
+        test_connected_multi_export_matches_legacy_main_wrapper,
         test_second_bake_failure_rolls_back_json_and_both_textures,
     )
     print(f"Blender version: {bpy.app.version_string}")
