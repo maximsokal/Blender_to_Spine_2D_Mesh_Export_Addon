@@ -120,6 +120,18 @@ The physical `hull` prefix describes the convex hull of final attachment XY posi
 
 The exported UVs retain the generated bake layout values. Before saving the semantic bake image, Blender pixel rows are converted to the top-down file-space orientation expected by those Spine UVs.
 
+### Shared segment vertex bones
+
+Segmentation can repeat one physical source point in several independent attachments. Version 0.47.0 keeps every attachment vertex and its own UV entry, but equivalent generated vertex bones are shared when all of the following match:
+
+- the segments belong to the same exported object;
+- the generated bones have the same Z-parent;
+- their final serialized setup X and Y values are identical;
+- their remaining setup properties are identical;
+- removing the duplicate name cannot break a slot, constraint, child, skin, or animation reference.
+
+Only weighted `boneIndex` values are compacted. The exporter does not alter attachment UVs, triangles, hull, edges, texture paths, local influence X/Y, or influence weights. Coincident XY points under different Z parents remain separate because they participate in different depth deformation.
+
 ## Camera Projection attachment
 
 Camera Projection produces one screen-space mesh attachment for the selected render group.
