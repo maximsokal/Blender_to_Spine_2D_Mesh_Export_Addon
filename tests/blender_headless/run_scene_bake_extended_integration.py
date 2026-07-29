@@ -1,4 +1,4 @@
-"""Extended real Blender 4.4 fixtures for B3 scene dependencies."""
+"""Extended real Blender 5.2 fixtures for B3 scene dependencies."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     execute_bake_plan,
     read_source_mesh_snapshot,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import bake_executor as bake_module  # noqa: E402
+import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.semantic_bake_execution as bake_module  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
     BakeCompositeMode,
     BakeExecutionSettings,
