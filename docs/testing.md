@@ -46,37 +46,49 @@ if ($LASTEXITCODE -ne 0) {
 
 Do not use fail-fast for final evidence. A release run must expose every failure.
 
-## Focused 0.47.0 rig, pivot, and material regression
+## Focused 0.47.1 geometry, rig, pivot, and material regression
 
 ```powershell
+$FocusedTests = @(
+    "tests/test_a1_projected_region_filter.py",
+    "tests/test_a1_projected_region_filter_architecture.py",
+    "tests/test_vertex_bone_optimizer.py",
+    "tests/test_a1_document_assembly.py",
+    "tests/test_a1_attachment_hull_normalization.py",
+    "tests/test_a1_material_correspondence.py",
+    "tests/test_two_axis_scale_rig_builder.py",
+    "tests/test_two_axis_multi_placement.py",
+    "tests/test_a1_object_origin_offset.py",
+    "tests/test_scene_settings_migration_contract.py",
+    "tests/test_semantic_bake_image_io.py",
+    "tests/test_semantic_bake_execution_uv_roles.py",
+    "tests/test_uv_sampling_roles.py",
+    "tests/test_a1_bake_material_bindings.py",
+    "tests/test_a1_z_groups.py",
+    "tests/test_normal_uv_pyramid_regression.py",
+    "tests/test_manifest_version.py",
+    "tests/test_documentation_contract.py"
+)
+
 & .\.venv-tests\Scripts\python.exe `
     -m pytest `
-    tests/test_vertex_bone_optimizer.py `
-    tests/test_a1_document_assembly.py `
-    tests/test_a1_material_correspondence.py `
-    tests/test_two_axis_scale_rig_builder.py `
-    tests/test_two_axis_multi_placement.py `
-    tests/test_a1_object_origin_offset.py `
-    tests/test_scene_settings_migration_contract.py `
-    tests/test_semantic_bake_image_io.py `
-    tests/test_semantic_bake_execution_uv_roles.py `
-    tests/test_uv_sampling_roles.py `
-    tests/test_a1_bake_material_bindings.py `
-    tests/test_a1_z_groups.py `
-    tests/test_normal_uv_pyramid_regression.py `
-    tests/test_manifest_version.py `
-    tests/test_documentation_contract.py `
+    $FocusedTests `
     -vv `
     --strict-markers `
     --durations=20
 
 if ($LASTEXITCODE -ne 0) {
-    throw "0.47.0 focused regressions failed"
+    throw "0.47.1 focused regressions failed"
 }
 ```
 
 These tests verify:
 
+- valid three-dimensional faces that are edge-on in Spine X/Y are omitted from the 2D triangle stream;
+- visible faces remain immutable and retain exact source vertex, loop, face, UV, and material lineage;
+- disconnected visible components are materialized as deterministic manifold disks;
+- remaining segments receive dense slot and attachment indices;
+- an object is rejected only when every prepared face is invisible in X/Y;
 - coincident segment-boundary points share one canonical vertex bone when parent and setup position match;
 - weighted bone indices are compacted while local influence coordinates and weights remain unchanged;
 - UV, triangle, hull, edge, attachment path, and mesh vertex order survive vertex-bone optimization;
@@ -126,6 +138,28 @@ if (-not (Test-Path -LiteralPath $Blender -PathType Leaf)) {
 
 Every headless command must include `--python-exit-code 1`.
 
+## Edge-on two-axis multi-object integration
+
+This is the direct regression for a multi-object asset containing a valid three-dimensional side wall that collapses only after projection into Spine X/Y.
+
+```powershell
+& $Blender `
+    --background `
+    --factory-startup `
+    --python-exit-code 1 `
+    --python "tests\blender_headless\run_edge_on_multi_object_integration.py"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Edge-on multi-object integration failed"
+}
+```
+
+Expected marker:
+
+```text
+[EDGE_ON_MULTI] PASS two-axis standalone edge-on regression
+```
+
 ## Normal UV pyramid integration
 
 ```powershell
@@ -171,6 +205,26 @@ Expected marker:
 ```
 
 The Blender pyramid still contains twelve weighted attachment vertices across four segment meshes, but those vertices reference four canonical generated bones instead of twelve duplicated bones.
+
+## Existing multi-object integration
+
+```powershell
+& $Blender `
+    --background `
+    --factory-startup `
+    --python-exit-code 1 `
+    --python "tests\blender_headless\run_multi_object_export_integration.py"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Multi-object integration failed"
+}
+```
+
+Expected marker:
+
+```text
+[MULTI] PASS 3 integration tests
+```
 
 ## Directional Spine UV integration
 
@@ -237,7 +291,7 @@ Texture Coordinate UV
 
 It verifies that the original source render UV samples the material while the independently active `SpineBakeUV` receives the bake output.
 
-## Build version 0.47.0
+## Build version 0.47.1
 
 ```powershell
 Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
@@ -251,7 +305,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Get-Item `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.47.0.zip" |
+    ".\dist\blender_to_spine2d_mesh_exporter-0.47.1.zip" |
     Select-Object FullName, Length, LastWriteTime
 ```
 
@@ -260,7 +314,7 @@ Get-Item `
 ```powershell
 & $Blender `
     --command extension validate `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.47.0.zip"
+    ".\dist\blender_to_spine2d_mesh_exporter-0.47.1.zip"
 
 if ($LASTEXITCODE -ne 0) {
     throw "Built extension validation failed"
