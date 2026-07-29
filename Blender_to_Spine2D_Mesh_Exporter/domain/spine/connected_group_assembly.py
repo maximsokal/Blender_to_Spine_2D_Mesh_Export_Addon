@@ -1,4 +1,4 @@
-"""Assemble connected A1 object documents under one global rotatable-mesh rig."""
+"""Assemble connected A1 object documents under one global profile-aware rig."""
 
 from __future__ import annotations
 
@@ -128,7 +128,7 @@ def build_connected_group_document(
         resolved_profile,
         layers,
     )
-    schedule = build_constraint_schedule(placements)
+    schedule = build_constraint_schedule(placements, resolved_profile)
     uniform_scale = calculate_uniform_scale(
         settings.texture_width,
         settings.texture_height,
