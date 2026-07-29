@@ -104,9 +104,11 @@ The reference X/Y setup angles are retained as transform-constraint rotation off
 
 ### Multi-object setup pose
 
-Standalone and connected multi-object preparation use `PRESERVE_COMPOSITION` policy. Each object's existing nonzero `<prefix>_main` placement and reference X/Y setup rotations remain unchanged so document composition cannot flatten or overlap the scene.
+Each standalone or connected object source uses `PRESERVE_COMPOSITION`: its existing `<prefix>_main` placement and reference X/Y setup rotations remain part of the object-local rig so composition cannot flatten or overlap the scene.
 
-The selected policy is explicit immutable data passed through UI settings into the rig build request. It is never inferred from object names or coordinate values.
+Connected composition then adds a separate neutral global wrapper. The wrapper controls have zero setup rotation. For the two-axis profile, every `<prefix>_scale` control is converted from root space to `<prefix>_main` local space before composition. This keeps the object, its control icons, and its constraint targets in one transform space while global layers move the complete object rig.
+
+The selected object policy is explicit immutable data passed through UI settings into the rig build request. It is never inferred from object names or coordinate values.
 
 ### 2-Axis controls
 
@@ -238,130 +240,3 @@ Visible only for **Seed cone + local dihedral**.
 | Float degrees | 0 through 180 | 30.0 |
 
 The value limits local face-to-face angle changes across shared edges while the seed-cone condition remains active.
-
-## Bake
-
-### Frames for render
-
-| Type | Range | Default |
-| --- | --- | --- |
-| Integer | 0 or greater | 0 |
-
-`0` exports the current frame only. A positive value creates one texture task per frame starting at Start frame.
-
-### Start frame
-
-| Type | Range | Default |
-| --- | --- | --- |
-| Integer | 0 or greater | 0 |
-
-For one selected object, frame settings are stored on the Scene. For multi-object export, each selected object has its own frame settings.
-
-### Last frame
-
-Read-only UI value:
-
-```text
-Frames = 0: Start
-Frames > 0: Start + Frames - 1
-```
-
-## Export Readiness
-
-### Analyze
-
-Runs the production preparation pipeline without committing final export files. The report stores:
-
-- overall READY, WARNING, BLOCKED, NOT_ANALYSED, or STALE state;
-- object-level issues;
-- geometry, topology, UV, material, texture, rig, and attachment statistics;
-- selected rig profile and setup-pose policy;
-- blocker and warning counts.
-
-The single-object or multi-object export button is inside this foldout and remains disabled until the current report allows export.
-
-## Add-on Preferences: diagnostics
-
-### Preserve failed work files
-
-| Type | Default |
-| --- | --- |
-| Boolean | Disabled |
-
-When enabled, failed `.spine2d-stage-*` files may be retained for manual inspection. Backup restoration still follows safety rules.
-
-### Recover stale work files
-
-| Type | Default |
-| --- | --- |
-| Boolean | Enabled |
-
-Before reserving new outputs, the exporter may restore missing finals from stale backups and remove abandoned stage or backup files that are not owned by a live process.
-
-## Add-on Preferences: logging
-
-### Enable file logging
-
-| Type | Default |
-| --- | --- |
-| Boolean | Disabled |
-
-Enables the configured file handler in addition to normal Blender console logging.
-
-### Log file path
-
-File destination used when file logging is enabled.
-
-### Filter modules
-
-Filters the displayed per-file logger list in Add-on Preferences. It does not change active logger levels by itself.
-
-### Per-file log level
-
-Every discovered Python module has an independent level selector:
-
-```text
-ERROR
-WARNING
-INFO
-DEBUG
-```
-
-### Refresh Module List
-
-Rescans Python modules and preserves existing per-file levels where possible.
-
-## Main Reset behavior
-
-The main Reset operator restores export, cut, and bake settings:
-
-```text
-Export mode                  Normal - UV Segments
-Texture size                 1024
-Images Subfolder             images/
-Control icons                enabled
-Preview animation            enabled
-Seed angle limit             30
-Angular mode                 Seed cone
-Local edge angle limit       30
-Seam Maker                   Auto
-Frames for render            0
-Start frame                  0
-```
-
-Use the dedicated Rig reset control to restore the default two-axis rig profile.
-
-The Generated Materials Reset operator restores:
-
-```text
-Material Source              Require Source
-Generated Pattern            Solid Gray
-Generated Gray               0.5, 0.5, 0.5
-```
-
-## Related documents
-
-- [Rig Profiles](rig-profiles.md)
-- [Usage](usage.md)
-- [Output Format](output-format.md)
-- [Troubleshooting](troubleshooting.md)
