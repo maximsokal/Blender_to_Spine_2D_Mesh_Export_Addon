@@ -1,10 +1,15 @@
-"""Build global bones and constraints for connected A1 rig profiles."""
+"""Build profile-aware global bones and constraints for connected A1 rigs.
+
+The three-axis path intentionally reproduces the dedicated connected wrapper from the
+historical ``main`` branch. It must not be replaced by a normal per-object rig: the
+connected wrapper has different parents, helper transforms, Z-layer setup values, and
+constraint targets.
+"""
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import replace
-from typing import Mapping, Tuple
+from typing import Iterable, Mapping, Tuple
 
 from .connected_group_contracts import (
     ConnectedConstraintSchedule,
@@ -13,7 +18,6 @@ from .connected_group_contracts import (
     ConnectedZLayer,
 )
 from .legacy_profile import LegacyRigProfile
-from .legacy_rig_assembly import build_legacy_rig
 from .legacy_rig_contracts import LegacyRigBuildRequest, LegacyZGroup
 from .model import Bone, IKConstraint, SpineDocument, TransformConstraint
 from .rig_profiles import A1RigProfile, A1RigSetupPoseMode, resolve_a1_rig_profile
@@ -22,12 +26,149 @@ from .two_axis_scale_rig_assembly import build_two_axis_scale_rig
 from .validator import SpineValidator
 
 
+def _require_inputs(
+    layers: Tuple[ConnectedZLayer, ...],
+    settings: ConnectedGroupSettings,
+    profile: LegacyRigProfile,
+    uniform_scale: float,
+) -> None:
+    if not isinstance(layers, tuple) or not layers:
+        raise ValueError("layers must be a non-empty tuple")
+    if not all(isinstance(item, ConnectedZLayer) for item in layers):
+        raise TypeError("layers must contain ConnectedZLayer values")
+    if not isinstance(settings, ConnectedGroupSettings):
+        raise TypeError("settings must be ConnectedGroupSettings")
+    if not isinstance(profile, LegacyRigProfile):
+        raise TypeError("profile must be LegacyRigProfile")
+    if isinstance(uniform_scale, bool) or not isinstance(uniform_scale, (int, float)):
+        raise TypeError("uniform_scale must be numeric")
+    if float(uniform_scale) <= 0.0:
+        raise ValueError("uniform_scale must be positive")
+
+
+def _legacy_connected_bones(
+    layers: Tuple[ConnectedZLayer, ...],
+    settings: ConnectedGroupSettings,
+    profile: LegacyRigProfile,
+    uniform_scale: float,
+) -> Tuple[Bone, ...]:
+    """Reproduce ``main._build_global_rig`` as immutable Spine model values."""
+
+    prefix = settings.group_prefix
+    scale = float(uniform_scale)
+    half = scale / 2.0
+    base = profile.base_bone(prefix)
+    rotate_x = profile.rotate_x_bone(prefix)
+    constraint_bone = profile.rotate_x_constraint_bone(prefix)
+    constraint_scale_ik = profile.rotate_x_constraint_scale_ik_bone(prefix)
+    constraint_rotate_ik = profile.rotate_x_constraint_rotate_ik_bone(prefix)
+    constraint_ik = profile.rotate_x_constraint_ik_bone(prefix)
+
+    layer_bones = tuple(
+        bone
+        for layer in layers
+        for bone in (
+            Bone(
+                name=layer.scale_bone_name,
+                parent=rotate_x,
+                length=half * 0.1,
+            ),
+            Bone(
+                name=layer.layer_bone_name,
+                parent=layer.scale_bone_name,
+                length=half * 0.1,
+            ),
+        )
+    )
+
+    return (
+        Bone(name=profile.root_bone()),
+        Bone(
+            name=profile.main_bone(prefix),
+            parent=profile.root_bone(),
+            length=half,
+            x=0.0,
+            y=0.0,
+        ),
+        Bone(name=base, parent=profile.main_bone(prefix), x=0.0, y=0.0),
+        Bone(
+            name=profile.scale_rotate_x_bone(prefix),
+            parent=base,
+            length=half,
+            x=0.0,
+            y=0.0,
+        ),
+        # Legacy connected controls are root-space controls, unlike object controls.
+        Bone(
+            name=profile.control_x_bone(prefix),
+            parent=profile.root_bone(),
+            length=scale,
+            x=scale,
+            y=half,
+            color="ff0000ff",
+        ),
+        Bone(
+            name=profile.control_y_bone(prefix),
+            parent=profile.root_bone(),
+            length=scale,
+            x=scale,
+            y=0.0,
+            color="00ff18ff",
+        ),
+        Bone(
+            name=profile.control_z_bone(prefix),
+            parent=profile.root_bone(),
+            length=scale,
+            x=scale,
+            y=-half,
+            color="002cffff",
+        ),
+        Bone(
+            name=rotate_x,
+            parent=profile.scale_rotate_x_bone(prefix),
+            length=half * 0.1,
+            x=0.0,
+            y=0.0,
+        ),
+        Bone(
+            name=constraint_bone,
+            parent=base,
+            length=half,
+            x=0.0,
+            y=0.0,
+            rotation=-90.0,
+            color="abe323ff",
+        ),
+        Bone(
+            name=constraint_scale_ik,
+            parent=base,
+            x=0.0,
+            y=0.0,
+            rotation=-90.0,
+        ),
+        Bone(
+            name=constraint_rotate_ik,
+            parent=constraint_scale_ik,
+            x=0.0,
+            y=0.0,
+        ),
+        Bone(
+            name=constraint_ik,
+            parent=constraint_rotate_ik,
+            x=0.0,
+            y=0.0,
+            rotation=90.0,
+            color="ff3f00ff",
+            icon="ik",
+        ),
+        *layer_bones,
+    )
+
+
 def _connected_z_groups(
     layers: Tuple[ConnectedZLayer, ...],
     uniform_scale: float,
 ) -> Tuple[LegacyZGroup, ...]:
-    if not isinstance(layers, tuple) or not layers:
-        raise ValueError("layers must be a non-empty tuple")
     return tuple(
         LegacyZGroup(
             z_value=float(layer.representative_relative_z),
@@ -40,32 +181,11 @@ def _connected_z_groups(
     )
 
 
-def _ordered_connected_bone_names(
-    names: Tuple[str, ...],
-    layers: Tuple[ConnectedZLayer, ...],
-) -> Tuple[str, ...]:
-    """Keep layer references in public top-down connected layer order."""
-
-    rank = {
-        name: (layer.layer_index, kind)
-        for layer in layers
-        for kind, name in enumerate(
-            (layer.scale_bone_name, layer.layer_bone_name)
-        )
-    }
-    ordered_layer_names = iter(sorted((name for name in names if name in rank), key=rank.get))
-    return tuple(next(ordered_layer_names) if name in rank else name for name in names)
-
-
-def _remap_connected_layers(
+def _remap_two_axis_layers(
     bones: Tuple[Bone, ...],
-    ik: Tuple[IKConstraint, ...],
-    transform: Tuple[TransformConstraint, ...],
     rig_z_groups,
     layers: Tuple[ConnectedZLayer, ...],
-) -> tuple[Tuple[Bone, ...], Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
-    """Rename builder-owned Z groups to stable connected layer identities."""
-
+) -> Tuple[Bone, ...]:
     layer_by_z = {
         float(layer.representative_relative_z): layer for layer in layers
     }
@@ -78,99 +198,49 @@ def _remap_connected_layers(
             layer = layer_by_z[float(group.z_value)]
         except KeyError as exc:
             raise ValueError(
-                "connected rig produced an unknown Z group: "
-                f"{group.z_value}"
+                f"two-axis connected rig produced unknown Z value {group.z_value}"
             ) from exc
         name_map[group.scale_bone_name] = layer.scale_bone_name
         name_map[group.bone_name] = layer.layer_bone_name
 
     if len(name_map) != len(layers) * 2:
-        raise ValueError("connected Z-layer remap is incomplete")
+        raise ValueError("two-axis connected layer remap is incomplete")
 
-    def remap_name(name: str | None) -> str | None:
-        if name is None:
-            return None
-        return name_map.get(name, name)
-
-    def remap_constraint_bones(names: Tuple[str, ...]) -> Tuple[str, ...]:
-        remapped = tuple(remap_name(name) for name in names)
-        if not all(isinstance(name, str) for name in remapped):
-            raise TypeError("constraint bone remap produced a non-string name")
-        return _ordered_connected_bone_names(remapped, layers)
-
-    return (
-        tuple(
-            replace(
-                bone,
-                name=remap_name(bone.name),
-                parent=remap_name(bone.parent),
-            )
-            for bone in bones
-        ),
-        tuple(
-            replace(
-                constraint,
-                bones=remap_constraint_bones(constraint.bones),
-                target=remap_name(constraint.target),
-            )
-            for constraint in ik
-        ),
-        tuple(
-            replace(
-                constraint,
-                bones=remap_constraint_bones(constraint.bones),
-                target=remap_name(constraint.target),
-            )
-            for constraint in transform
-        ),
+    return tuple(
+        replace(
+            bone,
+            name=name_map.get(bone.name, bone.name),
+            parent=(
+                None
+                if bone.parent is None
+                else name_map.get(bone.parent, bone.parent)
+            ),
+        )
+        for bone in bones
     )
 
 
-def _build_connected_profile_parts(
+def _build_two_axis_source_rig(
     layers: Tuple[ConnectedZLayer, ...],
     settings: ConnectedGroupSettings,
-    profile: LegacyRigProfile,
+    profile: TwoAxisScaleRigProfile,
     uniform_scale: float,
-) -> tuple[Tuple[Bone, ...], Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
-    """Build one complete global wrapper through the selected validated rig owner."""
-
-    if not isinstance(settings, ConnectedGroupSettings):
-        raise TypeError("settings must be ConnectedGroupSettings")
-    if not isinstance(profile, LegacyRigProfile):
-        raise TypeError("profile must be LegacyRigProfile")
-
-    request = LegacyRigBuildRequest(
-        prefix=settings.group_prefix,
-        texture_width=settings.texture_width,
-        texture_height=settings.texture_height,
-        z_groups=_connected_z_groups(layers, uniform_scale),
-        main_position_pixels=(0.0, 0.0),
-        scale_mode=settings.scale_mode,
-        setup_pose_mode=A1RigSetupPoseMode.NORMALIZED_SINGLE,
+):
+    rig = build_two_axis_scale_rig(
+        LegacyRigBuildRequest(
+            prefix=settings.group_prefix,
+            texture_width=settings.texture_width,
+            texture_height=settings.texture_height,
+            z_groups=_connected_z_groups(layers, uniform_scale),
+            main_position_pixels=(0.0, 0.0),
+            scale_mode=settings.scale_mode,
+            setup_pose_mode=A1RigSetupPoseMode.NORMALIZED_SINGLE,
+        ),
+        profile=profile,
     )
-    profile_id = resolve_a1_rig_profile(profile.profile_id)
-    if profile_id is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
-        if not isinstance(profile, TwoAxisScaleRigProfile):
-            raise TypeError(
-                "TWO_AXIS_ROTATION_SCALE global rig requires TwoAxisScaleRigProfile"
-            )
-        rig = build_two_axis_scale_rig(request, profile=profile)
-    elif profile_id is A1RigProfile.THREE_AXIS_ROTATION:
-        rig = build_legacy_rig(request, profile=profile)
-    else:
-        raise AssertionError(f"Unhandled connected rig profile: {profile_id}")
-
     if abs(float(rig.info.uniform_scale) - float(uniform_scale)) > 1e-9:
-        raise ValueError(
-            "connected rig scale differs from the resolved connected scale"
-        )
-    return _remap_connected_layers(
-        rig.bones,
-        rig.ik,
-        rig.transform,
-        rig.info.z_groups,
-        layers,
-    )
+        raise ValueError("connected two-axis rig scale differs from group scale")
+    return rig
 
 
 def build_global_bones_document(
@@ -180,16 +250,24 @@ def build_global_bones_document(
     profile: LegacyRigProfile,
     uniform_scale: float,
 ) -> SpineDocument:
-    """Build and validate the bones-only global connected control component."""
+    """Build the bones-only global connected control component."""
 
-    bones, _ik, _transform = _build_connected_profile_parts(
-        layers,
-        settings,
-        profile,
-        uniform_scale,
-    )
+    _require_inputs(layers, settings, profile, uniform_scale)
+    profile_id = resolve_a1_rig_profile(profile.profile_id)
+    if profile_id is A1RigProfile.THREE_AXIS_ROTATION:
+        bones = _legacy_connected_bones(layers, settings, profile, uniform_scale)
+    elif profile_id is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
+        if not isinstance(profile, TwoAxisScaleRigProfile):
+            raise TypeError(
+                "TWO_AXIS_ROTATION_SCALE global rig requires TwoAxisScaleRigProfile"
+            )
+        rig = _build_two_axis_source_rig(layers, settings, profile, uniform_scale)
+        bones = _remap_two_axis_layers(rig.bones, rig.info.z_groups, layers)
+    else:
+        raise AssertionError(f"Unhandled connected rig profile: {profile_id}")
+
     document = SpineDocument(
-        skeleton=deepcopy(dict(source_skeleton)),
+        skeleton=dict(source_skeleton),
         bones=bones,
         slots=(),
         skins=(),
@@ -198,42 +276,216 @@ def build_global_bones_document(
     return document
 
 
-def _global_order_by_name(
+def _replace_extras(
+    constraint: TransformConstraint,
+    *,
+    remove: Iterable[str] = (),
+    update: Mapping[str, object] | None = None,
+) -> TransformConstraint:
+    extras = dict(constraint.extras)
+    for key in remove:
+        extras.pop(key, None)
+    if update is not None:
+        extras.update(update)
+    return replace(constraint, extras=extras)
+
+
+def _legacy_global_constraints(
+    objects: Tuple[ConnectedObjectDocument, ...],
+    layers: Tuple[ConnectedZLayer, ...],
     schedule: ConnectedConstraintSchedule,
     settings: ConnectedGroupSettings,
     profile: LegacyRigProfile,
-) -> dict[str, int]:
+    uniform_scale: float,
+) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
+    """Reproduce ``main._build_global_constraints`` without semantic changes."""
+
+    if schedule.global_rotation_z is None:
+        raise ValueError("legacy connected schedule has no global Rotation Z order")
+
     prefix = settings.group_prefix
-    profile_id = resolve_a1_rig_profile(profile.profile_id)
+    scale = float(uniform_scale)
+    half = scale / 2.0
+    scale_bones = tuple(layer.scale_bone_name for layer in layers)
+    object_base_bones = tuple(profile.base_bone(item.prefix) for item in objects)
 
-    if profile_id is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
-        if not isinstance(profile, TwoAxisScaleRigProfile):
-            raise TypeError(
-                "TWO_AXIS_ROTATION_SCALE global constraints require "
-                "TwoAxisScaleRigProfile"
-            )
-        if schedule.global_scale_depth is None:
-            raise ValueError("two-axis connected schedule has no global scale-depth order")
-        return {
-            profile.rotation_x_constraint(prefix): schedule.global_rotation_x,
-            profile.scale_ik_constraint(prefix): schedule.global_scale_ik,
-            profile.scale_constraint(prefix): schedule.global_scale,
-            profile.scale_depth_constraint(prefix): schedule.global_scale_depth,
-            profile.rotation_y_constraint(prefix): schedule.global_rotation_y,
-        }
+    ik = (
+        IKConstraint(
+            name=profile.scale_ik_constraint(prefix),
+            order=schedule.global_scale_ik,
+            bones=(profile.rotate_x_constraint_bone(prefix),),
+            target=profile.rotate_x_constraint_ik_bone(prefix),
+            extras={"compress": True, "stretch": True},
+        ),
+    )
+    transform = (
+        TransformConstraint(
+            name=profile.rotation_x_constraint(prefix),
+            order=schedule.global_rotation_x,
+            bones=(*scale_bones, profile.base_bone(prefix)),
+            target=profile.control_x_bone(prefix),
+            extras={
+                "rotation": 90,
+                "local": True,
+                "relative": True,
+                "x": -(scale * 2.0),
+                "y": -half,
+                "scaleX": -1,
+                "scaleY": -1,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+        ),
+        TransformConstraint(
+            name=profile.rotation_y_constraint(prefix),
+            order=schedule.global_rotation_y,
+            bones=(
+                profile.rotate_x_bone(prefix),
+                profile.rotate_x_constraint_rotate_ik_bone(prefix),
+            ),
+            target=profile.control_y_bone(prefix),
+            extras={
+                "local": True,
+                "relative": True,
+                "x": scale,
+                "scaleX": -1,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+        ),
+        TransformConstraint(
+            name=profile.rotation_z_constraint(prefix),
+            order=schedule.global_rotation_z,
+            bones=object_base_bones,
+            target=profile.control_z_bone(prefix),
+            extras={
+                "local": True,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+        ),
+        TransformConstraint(
+            name=profile.scale_constraint(prefix),
+            order=schedule.global_scale,
+            bones=scale_bones,
+            target=profile.rotate_x_constraint_bone(prefix),
+            extras={
+                "scaleX": -1,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+        ),
+    )
+    return ik, transform
 
-    if profile_id is A1RigProfile.THREE_AXIS_ROTATION:
-        if schedule.global_rotation_z is None:
-            raise ValueError("three-axis connected schedule has no global Rotation Z order")
-        return {
-            profile.rotation_x_constraint(prefix): schedule.global_rotation_x,
-            profile.rotation_y_constraint(prefix): schedule.global_rotation_y,
-            profile.rotation_z_constraint(prefix): schedule.global_rotation_z,
-            profile.scale_ik_constraint(prefix): schedule.global_scale_ik,
-            profile.scale_constraint(prefix): schedule.global_scale,
-        }
 
-    raise AssertionError(f"Unhandled connected rig profile: {profile_id}")
+def _constraint_by_name(constraints, name: str):
+    matches = tuple(item for item in constraints if item.name == name)
+    if len(matches) != 1:
+        raise ValueError(f"Expected one generated constraint {name!r}, found {len(matches)}")
+    return matches[0]
+
+
+def _two_axis_global_constraints(
+    layers: Tuple[ConnectedZLayer, ...],
+    schedule: ConnectedConstraintSchedule,
+    settings: ConnectedGroupSettings,
+    profile: TwoAxisScaleRigProfile,
+    uniform_scale: float,
+) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
+    if schedule.global_scale_depth is None:
+        raise ValueError("two-axis connected schedule has no global depth order")
+
+    prefix = settings.group_prefix
+    rig = _build_two_axis_source_rig(layers, settings, profile, uniform_scale)
+    generated = (*rig.ik, *rig.transform)
+    layer_bones = tuple(layer.layer_bone_name for layer in layers)
+    scale_bones = tuple(layer.scale_bone_name for layer in layers)
+
+    source_ik = _constraint_by_name(generated, profile.scale_ik_constraint(prefix))
+    source_x = _constraint_by_name(generated, profile.rotation_x_constraint(prefix))
+    source_scale = _constraint_by_name(generated, profile.scale_constraint(prefix))
+    source_depth = _constraint_by_name(
+        generated,
+        profile.scale_depth_constraint(prefix),
+    )
+    source_y = _constraint_by_name(generated, profile.rotation_y_constraint(prefix))
+
+    ik = (
+        replace(
+            source_ik,
+            order=schedule.global_scale_ik,
+            bones=(profile.rotate_x_constraint_bone(prefix),),
+            target=profile.rotate_x_constraint_ik_bone(prefix),
+        ),
+    )
+    transform = (
+        _replace_extras(
+            replace(
+                source_x,
+                order=schedule.global_rotation_x,
+                bones=(
+                    profile.rotate_x_constraint_rotate_ik_bone(prefix),
+                    profile.rotate_x_bone(prefix),
+                ),
+                target=profile.control_x_bone(prefix),
+            ),
+            remove=("rotation", "x", "y", "scaleX", "scaleY", "shearY"),
+            update={
+                "local": True,
+                "relative": True,
+                "mixX": 0,
+                "mixY": 0,
+                "mixScaleX": 0,
+                "mixScaleY": 0,
+                "mixShearY": 0,
+            },
+        ),
+        _replace_extras(
+            replace(
+                source_scale,
+                order=schedule.global_scale,
+                bones=(profile.rotate_x_bone(prefix), *layer_bones),
+                target=profile.scale_control_bone(prefix),
+            ),
+            update={
+                "relative": True,
+                "mixRotate": 0,
+                "mixX": 0,
+                "mixY": 0,
+                "mixShearY": 0,
+            },
+        ),
+        replace(
+            source_depth,
+            order=schedule.global_scale_depth,
+            bones=scale_bones,
+            target=profile.rotate_x_constraint_bone(prefix),
+        ),
+        _replace_extras(
+            replace(
+                source_y,
+                order=schedule.global_rotation_y,
+                bones=layer_bones,
+                target=profile.control_y_bone(prefix),
+            ),
+            remove=("rotation", "x", "y", "scaleX", "scaleY", "shearY"),
+            update={
+                "local": True,
+                "relative": True,
+                "mixX": 0,
+                "mixY": 0,
+                "mixScaleX": 0,
+                "mixScaleY": 0,
+                "mixShearY": 0,
+            },
+        ),
+    )
+    return ik, transform
 
 
 def build_global_constraints(
@@ -244,45 +496,42 @@ def build_global_constraints(
     profile: LegacyRigProfile,
     uniform_scale: float,
 ) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
-    """Build global constraints and assign the profile-specific connected schedule."""
+    """Build explicit connected constraints for one selected profile."""
 
+    _require_inputs(layers, settings, profile, uniform_scale)
     if not isinstance(objects, tuple) or not objects:
         raise ValueError("objects must be a non-empty tuple")
-    if not isinstance(profile, LegacyRigProfile):
-        raise TypeError("profile must be LegacyRigProfile")
+    if not isinstance(schedule, ConnectedConstraintSchedule):
+        raise TypeError("schedule must be ConnectedConstraintSchedule")
     if resolve_a1_rig_profile(schedule.profile_id) is not resolve_a1_rig_profile(
         profile.profile_id
     ):
-        raise ValueError("connected constraint schedule profile does not match rig profile")
+        raise ValueError("connected schedule profile does not match rig profile")
 
-    _bones, ik, transform = _build_connected_profile_parts(
-        layers,
-        settings,
-        profile,
-        uniform_scale,
-    )
-    order_by_name = _global_order_by_name(schedule, settings, profile)
-    generated = {constraint.name for constraint in (*ik, *transform)}
-    missing = set(order_by_name) - generated
-    if missing:
-        raise ValueError(
-            "generated connected global constraints are incomplete: "
-            f"{tuple(sorted(missing))}"
+    profile_id = resolve_a1_rig_profile(profile.profile_id)
+    if profile_id is A1RigProfile.THREE_AXIS_ROTATION:
+        return _legacy_global_constraints(
+            objects,
+            layers,
+            schedule,
+            settings,
+            profile,
+            uniform_scale,
         )
-
-    selected_ik = tuple(
-        replace(constraint, order=order_by_name[constraint.name])
-        for constraint in ik
-        if constraint.name in order_by_name
-    )
-    selected_transform = tuple(
-        replace(constraint, order=order_by_name[constraint.name])
-        for constraint in transform
-        if constraint.name in order_by_name
-    )
-    if {item.name for item in (*selected_ik, *selected_transform)} != set(order_by_name):
-        raise ValueError("connected global constraint selection is incomplete")
-    return selected_ik, selected_transform
+    if profile_id is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
+        if not isinstance(profile, TwoAxisScaleRigProfile):
+            raise TypeError(
+                "TWO_AXIS_ROTATION_SCALE global constraints require "
+                "TwoAxisScaleRigProfile"
+            )
+        return _two_axis_global_constraints(
+            layers,
+            schedule,
+            settings,
+            profile,
+            uniform_scale,
+        )
+    raise AssertionError(f"Unhandled connected rig profile: {profile_id}")
 
 
 __all__ = ["build_global_bones_document", "build_global_constraints"]
