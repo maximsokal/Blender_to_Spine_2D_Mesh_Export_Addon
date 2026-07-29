@@ -34,6 +34,14 @@ def _composition(document):
 
 
 def _schedule():
+    """Return one valid single-layer Legacy connected schedule.
+
+    Scale compensators are not part of the connected phase map. Historical ``main``
+    leaves each compensator at its standalone order during final document scheduling.
+    This fixture exists only to construct a valid ``ConnectedGroupBuildResult`` for the
+    immutable replacement-owner test below.
+    """
+
     component = "object"
     return ConnectedConstraintSchedule(
         global_rotation_x=0,
@@ -46,7 +54,7 @@ def _schedule():
         global_scale=7,
         object_scale=((component, 8),),
         object_rotation_z=((component, 9),),
-        object_scale_compensator=((component, 10),),
+        object_scale_compensator=(),
     )
 
 
