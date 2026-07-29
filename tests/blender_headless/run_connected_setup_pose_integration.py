@@ -1,4 +1,4 @@
-"""Real Blender 5.2 setup-pose regression for both connected rig profiles."""
+"""Real Blender 5.2 setup-pose regression for connected three-axis composition."""
 
 from __future__ import annotations
 
@@ -38,6 +38,22 @@ def _constraint(document: dict, name: str) -> dict:
     return matches[0]
 
 
+def _assert_zero_relative_local_delta(document: dict, name: str) -> None:
+    constraint = _constraint(document, name)
+    _assert(constraint.get("local") is True, f"{name} is not local")
+    _assert(constraint.get("relative") is True, f"{name} is not relative")
+    for field_name in ("rotation", "x", "y", "scaleX", "scaleY", "shearY"):
+        _assert(
+            float(constraint.get(field_name, 0.0)) == 0.0,
+            f"{name} has non-neutral {field_name}: {constraint}",
+        )
+    for field_name in ("mixX", "mixY", "mixScaleX", "mixScaleY", "mixShearY"):
+        _assert(
+            float(constraint.get(field_name, 1.0)) == 0.0,
+            f"{name} still mixes {field_name}: {constraint}",
+        )
+
+
 def test_connected_three_axis_setup_pose_is_not_collapsed() -> None:
     _clear_scene()
     with tempfile.TemporaryDirectory(
@@ -62,21 +78,37 @@ def test_connected_three_axis_setup_pose_is_not_collapsed() -> None:
 
         output_json = (output_directory / "ConnectedThreeAxisSetup.json").resolve()
         document = json.loads(output_json.read_text(encoding="utf-8"))
-        rotation_x = _constraint(document, "all_objects_rotation_X")
-        rotation_z = _constraint(document, "all_objects_rotation_Z")
+        bones = {bone["name"]: bone for bone in document["bones"]}
 
-        _assert(
-            "scaleY" not in rotation_x,
-            f"global X constraint still writes a destructive Y-scale offset: {rotation_x}",
-        )
-        _assert(
-            float(rotation_x.get("mixScaleY", 1.0)) == 0.0,
-            f"global X constraint still mixes Y scale in setup pose: {rotation_x}",
-        )
+        for name in (
+            "all_objects_rotation_X",
+            "all_objects_rotation_Y",
+            "all_objects_rotation_Z",
+        ):
+            _assert_zero_relative_local_delta(document, name)
+
+        rotation_z = _constraint(document, "all_objects_rotation_Z")
         _assert(
             tuple(rotation_z.get("bones", ()))
             == ("all_objects_layer_0", "all_objects_layer_1"),
             f"global Z constraint must operate on wrapper layers: {rotation_z}",
+        )
+
+        scale = _constraint(document, "all_objects_scale_constraint")
+        _assert(float(scale.get("mixRotate", 1.0)) == 0.0, f"scale rotates: {scale}")
+        _assert(float(scale.get("mixX", 1.0)) == 0.0, f"scale translates X: {scale}")
+        _assert(float(scale.get("mixY", 1.0)) == 0.0, f"scale translates Y: {scale}")
+        _assert(float(scale.get("mixScaleX", 0.0)) == 1.0, f"scale X disabled: {scale}")
+        _assert(float(scale.get("mixScaleY", 0.0)) == 1.0, f"scale Y disabled: {scale}")
+        _assert(float(scale.get("mixShearY", 1.0)) == 0.0, f"scale shears: {scale}")
+
+        layer_y = float(bones["all_objects_0_scale"].get("y", 0.0))
+        object_y = float(bones["ObjectB_main"].get("y", 0.0))
+        _assert(layer_y == 16.0, f"ObjectB layer depth is wrong: {layer_y}")
+        _assert(object_y == 16.0, f"ObjectB local Y is wrong: {object_y}")
+        _assert(
+            layer_y + object_y == 32.0,
+            "ObjectB setup world Y no longer matches Blender placement",
         )
 
         _assert_state_restored(
