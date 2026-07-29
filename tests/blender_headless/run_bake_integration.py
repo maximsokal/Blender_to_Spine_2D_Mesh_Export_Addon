@@ -1,8 +1,8 @@
-"""Real Cycles and complete A1 export checks executed by Blender 4.4.
+"""Real Cycles and complete A1 export checks executed by Blender 5.2.
 
-All fixtures are created at runtime. The suite verifies the standalone bake executor,
-then the complete single-object service including one atomic commit shared by the
-baked PNG and the final Spine JSON.
+All fixtures are created at runtime. The suite verifies the standalone bake execution
+path, then the complete single-object service including one atomic commit shared by
+the baked PNG and the final Spine JSON.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     read_source_mesh_snapshot,
     unwrap_snapshot_uv,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import bake_executor as bake_module  # noqa: E402
+import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.semantic_bake_execution as bake_module  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
     BakeExecutionSettings,
     BakeMode,
@@ -487,7 +487,7 @@ def test_complete_a1_service_rolls_back_png_and_json_together() -> None:
         _assert(_capture_scene_bake_state() == scene_before, "failed service changed scene")
         _assert(
             _material_fingerprint(material) == material_before,
-            "failed service mutated source material",
+            "failed service mutated material",
         )
         _assert(not _temporary_datablock_names(), "failed service leaked temporary data")
 
