@@ -21,7 +21,7 @@ This directory contains the maintained public documentation for Blender to Spine
 
 ## Supported product baseline
 
-- Extension version: 0.47.2.
+- Extension version: 0.47.3.
 - Minimum Blender version: 5.2.0.
 - Primary Spine target: 4.2.43.
 - Currently tested desktop platform: Windows.
@@ -29,6 +29,6 @@ This directory contains the maintained public documentation for Blender to Spine
 - Default Seam Maker mode: Auto.
 - Default rig profile for genuinely fresh scenes: 2-Axis Rotation + Scale (`TWO_AXIS_ROTATION_SCALE`).
 - Saved pre-profile scenes migrate to the compatibility 3-Axis Rotation profile.
-- Connected multi-object export supports both rig profiles with profile-specific constraint schedules.
+- Connected multi-object export supports both rig profiles with profile-specific constraint schedules and neutral global setup poses.
 
 Development journals and temporary Rewrite milestone documents are intentionally not part of the public documentation set. Permanent behavior belongs in the documents listed above and in executable tests.
