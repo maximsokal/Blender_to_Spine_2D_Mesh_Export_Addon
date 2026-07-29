@@ -11,6 +11,7 @@ import bpy
 import pytest
 
 import Blender_to_Spine2D_Mesh_Exporter as addon
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine import decode_weighted_vertices
 from tools.create_public_blend_fixtures import create_all
 
 
@@ -126,6 +127,116 @@ def _image_metrics(path: Path) -> dict[str, object]:
         bpy.data.images.remove(image)
 
 
+def _freeze_json_value(value: object) -> object:
+    """Return a deterministic hashable representation of parsed JSON data."""
+
+    if isinstance(value, dict):
+        return tuple(
+            (str(key), _freeze_json_value(item))
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        )
+    if isinstance(value, list):
+        return tuple(_freeze_json_value(item) for item in value)
+    return value
+
+
+def _validate_exported_spine_json(parsed: dict[str, object]) -> None:
+    """Validate weighted indices and canonical generated vertex-bone compaction.
+
+    Exact byte hashes remain the reviewed golden boundary. These semantic assertions
+    make sure a changed hash cannot be accepted while leaving malformed weight streams
+    or duplicate generated vertex bones in the exported Spine document.
+    """
+
+    bones = parsed.get("bones")
+    assert isinstance(bones, list) and bones, "exported JSON must contain bones"
+    assert all(isinstance(bone, dict) for bone in bones)
+
+    bone_names = tuple(str(bone.get("name", "")) for bone in bones)
+    assert all(bone_names), "every exported bone must have a non-empty name"
+    assert len(bone_names) == len(set(bone_names)), "exported bone names must be unique"
+
+    skins = parsed.get("skins")
+    assert isinstance(skins, list) and skins, "exported JSON must contain skins"
+
+    mesh_attachment_count = 0
+    referenced_generated_indices: set[int] = set()
+
+    for skin_index, skin in enumerate(skins):
+        assert isinstance(skin, dict), f"skins[{skin_index}] must be an object"
+        attachments = skin.get("attachments", {})
+        assert isinstance(attachments, dict), (
+            f"skins[{skin_index}].attachments must be an object"
+        )
+
+        for slot_name, slot_attachments in attachments.items():
+            assert isinstance(slot_attachments, dict), (
+                f"skin {skin_index} slot {slot_name!r} attachments must be an object"
+            )
+            for attachment_name, attachment in slot_attachments.items():
+                if not isinstance(attachment, dict):
+                    continue
+                if attachment.get("type") != "mesh":
+                    continue
+
+                mesh_attachment_count += 1
+                uvs = attachment.get("uvs")
+                triangles = attachment.get("triangles")
+                vertices = attachment.get("vertices")
+                assert isinstance(uvs, list) and len(uvs) % 2 == 0, (
+                    f"mesh {slot_name!r}/{attachment_name!r} has invalid UV data"
+                )
+                assert isinstance(triangles, list) and len(triangles) % 3 == 0, (
+                    f"mesh {slot_name!r}/{attachment_name!r} has invalid triangles"
+                )
+                assert isinstance(vertices, list), (
+                    f"mesh {slot_name!r}/{attachment_name!r} has no weighted stream"
+                )
+
+                vertex_count = len(uvs) // 2
+                assert vertex_count > 0
+                decoded = decode_weighted_vertices(
+                    vertices,
+                    expected_vertex_count=vertex_count,
+                )
+                for weighted_vertex in decoded:
+                    assert weighted_vertex.influences
+                    for influence in weighted_vertex.influences:
+                        assert influence.bone_index < len(bones), (
+                            f"mesh {slot_name!r}/{attachment_name!r} references "
+                            f"bone index {influence.bone_index}, but only "
+                            f"{len(bones)} bones exist"
+                        )
+                        if "_vertex_" in bone_names[influence.bone_index]:
+                            referenced_generated_indices.add(influence.bone_index)
+
+    assert mesh_attachment_count > 0, "passed public fixture produced no mesh attachments"
+
+    masters_by_semantics: dict[object, int] = {}
+    duplicate_names: list[tuple[str, str]] = []
+    for bone_index in sorted(referenced_generated_indices):
+        bone = bones[bone_index]
+        semantic_key = _freeze_json_value(
+            {
+                key: value
+                for key, value in bone.items()
+                if key != "name"
+            }
+        )
+        master_index = masters_by_semantics.get(semantic_key)
+        if master_index is None:
+            masters_by_semantics[semantic_key] = bone_index
+            continue
+        duplicate_names.append(
+            (bone_names[master_index], bone_names[bone_index])
+        )
+
+    assert duplicate_names == [], (
+        "exported mesh still contains duplicate generated vertex bones: "
+        f"{duplicate_names}"
+    )
+
+
 def _configure(output_root: Path):
     output_root.mkdir(parents=True, exist_ok=True)
     scene = bpy.context.scene
@@ -153,6 +264,7 @@ def _collect_passed_case(output_root: Path) -> dict[str, object]:
     payload = json_path.read_bytes()
     parsed = json.loads(payload.decode("utf-8"))
     assert isinstance(parsed, dict), f"{json_path.name} root must be a JSON object"
+    _validate_exported_spine_json(parsed)
 
     images = tuple(
         path
