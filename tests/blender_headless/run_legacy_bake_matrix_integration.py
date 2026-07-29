@@ -1,4 +1,4 @@
-"""Legacy-derived Blender 4.4 bake compatibility matrix.
+"""Legacy-derived Blender 5.2 bake compatibility matrix.
 
 A PNG signature is not enough: Blender may report FINISHED and write an opaque black
 image. These tests decode every output and exercise the production A1 material modes,
@@ -38,9 +38,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     export_a1_multi_object,
     export_a1_single_object,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
-    bake_executor as bake_module,
-)
+import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.semantic_bake_execution as bake_module  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
     BakeExecutionSettings,
 )
@@ -551,12 +549,21 @@ def test_sequence_failure_rolls_back_json_static_and_all_frames() -> None:
         original_call = bake_module._call_bake_operator
         calls = 0
 
-        def fail_frame_two(bpy_module, bake_type):
+        def fail_frame_two(
+            bpy_module,
+            bake_type,
+            *,
+            uv_layer_name,
+        ):
             nonlocal calls
             calls += 1
             if calls == 3:  # StaticA, AnimatedB frame 1, AnimatedB frame 2.
                 raise BakeExecutionError("forced AnimatedB frame-2 failure")
-            return original_call(bpy_module, bake_type)
+            return original_call(
+                bpy_module,
+                bake_type,
+                uv_layer_name=uv_layer_name,
+            )
 
         with mock.patch.object(
             bake_module,
