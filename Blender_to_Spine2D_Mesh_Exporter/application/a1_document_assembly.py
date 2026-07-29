@@ -23,6 +23,7 @@ from .a1_attachment_projection_service import (
     project_triangulated_disk_attachment,
 )
 from .a1_material_correspondence import validate_document_material_correspondence
+from .a1_projected_region_filter import split_xy_visible_region_snapshots
 from .a1_z_groups import A1ZGroupAssignmentPlan
 
 
@@ -106,6 +107,34 @@ class A1DocumentAssemblyResult:
         return self.document_build.document
 
 
+def _xy_visible_region_snapshots(
+    rig: LegacyRigBuildResult,
+    region_snapshots: Tuple[MeshSnapshot, ...],
+    settings: A1DocumentAssemblySettings,
+) -> Tuple[MeshSnapshot, ...]:
+    """Cull edge-on faces and return dense visible disk regions for Spine export."""
+
+    visible: list[MeshSnapshot] = []
+    for snapshot in region_snapshots:
+        visible.extend(
+            split_xy_visible_region_snapshots(
+                snapshot,
+                uniform_scale=rig.info.uniform_scale,
+                center_x=float(settings.center_x),
+                center_y=float(settings.center_y),
+            )
+        )
+
+    resolved = tuple(visible)
+    if not resolved:
+        raise A1DocumentAssemblyError(
+            f"All prepared regions for '{settings.prefix}' collapse in Spine XY "
+            "projection space. Rotate or flatten the source object so at least one "
+            "face has visible two-dimensional area."
+        )
+    return resolved
+
+
 def assemble_a1_document(
     rig: LegacyRigBuildResult,
     z_groups: A1ZGroupAssignmentPlan,
@@ -136,8 +165,14 @@ def assemble_a1_document(
             "Rig Z groups do not match the source-lineage Z assignment plan"
         )
 
+    visible_region_snapshots = _xy_visible_region_snapshots(
+        rig,
+        region_snapshots,
+        settings,
+    )
+
     projections: list[A1AttachmentProjectionResult] = []
-    for region_offset, snapshot in enumerate(region_snapshots):
+    for region_offset, snapshot in enumerate(visible_region_snapshots):
         MeshSnapshotValidator().validate_or_raise(snapshot)
         enforce_uv_range(
             snapshot,
@@ -174,7 +209,7 @@ def assemble_a1_document(
             tuple(projection.request for projection in resolved_projections),
             skeleton_metadata=skeleton_metadata,
         )
-        # Segmentation duplicates shared source points at attachment boundaries.  Share
+        # Segmentation duplicates shared source points at attachment boundaries. Share
         # the corresponding generated bones before downstream correspondence checks,
         # while preserving every attachment vertex, UV, triangle, and local weight.
         document_build = optimize_shared_vertex_bones(document_build)
