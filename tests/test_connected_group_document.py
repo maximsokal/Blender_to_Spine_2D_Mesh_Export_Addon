@@ -174,7 +174,8 @@ def test_global_rig_contains_required_legacy_names_and_targets():
 
 
 def test_constraint_schedule_uses_shared_orders_for_same_layer_objects():
-    result = build_connected_group_document(connected_objects(), settings())
+    objects = connected_objects()
+    result = build_connected_group_document(objects, settings())
     schedule = result.constraint_schedule
 
     assert schedule.unique_orders == tuple(range(15))
@@ -190,10 +191,11 @@ def test_constraint_schedule_uses_shared_orders_for_same_layer_objects():
     assert constraint_by_name(result.document, "First_rotation_X").order == (
         constraint_by_name(result.document, "Third_rotation_X").order
     )
-    assert not any(
-        constraint.name.endswith("_scale_compensator")
-        for constraint in all_constraints
-    )
+    for item in objects:
+        assert constraint_by_name(
+            result.document,
+            f"{item.prefix}_scale_compensator",
+        ).order == 6
 
 
 def test_weighted_attachments_remain_valid_after_global_bones_are_inserted():
