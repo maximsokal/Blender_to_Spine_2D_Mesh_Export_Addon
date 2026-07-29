@@ -21,12 +21,13 @@ This directory contains the maintained public documentation for Blender to Spine
 
 ## Supported product baseline
 
-- Extension version: 0.41.3.
+- Extension version: 0.47.0.
 - Minimum Blender version: 5.2.0.
 - Primary Spine target: 4.2.43.
 - Currently tested desktop platform: Windows.
 - Default texture mode: Normal - UV Segments.
 - Default Seam Maker mode: Auto.
-- Default rig profile: 3-Axis Rotation (`LEGACY_ROTATABLE_MESH`).
+- Default rig profile for genuinely fresh scenes: 2-Axis Rotation + Scale (`TWO_AXIS_ROTATION_SCALE`).
+- Saved pre-profile scenes migrate to the compatibility 3-Axis Rotation profile.
 
 Development journals and temporary Rewrite milestone documents are intentionally not part of the public documentation set. Permanent behavior belongs in the documents listed above and in executable tests.
