@@ -17,6 +17,9 @@ from ..application import (
     validate_a1_realized_output_namespace,
 )
 from ..domain.spine import ConnectedGroupBuildResult, SpineSerializer
+from ..domain.spine.connected_group_serialization_validator import (
+    ConnectedGroupSerializationValidator,
+)
 from ..infrastructure import (
     AtomicFileCommitError,
     atomic_file_transaction,
@@ -91,6 +94,14 @@ def _preparation_failure(exc: A1MultiObjectPreparationError) -> ExportResult:
         object_id=exc.object_id,
         object_stage=exc.object_stage,
     )
+
+
+def _serializer_for_composition(composition) -> SpineSerializer:
+    """Keep strict default serialization outside validated connected composition."""
+
+    if isinstance(composition, ConnectedGroupBuildResult):
+        return SpineSerializer(validator=ConnectedGroupSerializationValidator())
+    return SpineSerializer()
 
 
 def export_a1_multi_object(
@@ -225,7 +236,7 @@ def export_a1_multi_object(
 
             stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
             _progress(progress_callback, 93, stage, "Serializing Spine JSON")
-            json_text = SpineSerializer().to_json(
+            json_text = _serializer_for_composition(composition).to_json(
                 document,
                 indent=settings.json_indent,
             )
