@@ -15,10 +15,40 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.model import (
     Bone,
     SpineDocument,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.two_axis_scale_profile import (
+    TwoAxisScaleRigProfile,
+)
 
 
 def _bone_by_name(document):
     return {bone.name: bone for bone in document.bones}
+
+
+def _depth_layers():
+    return (
+        ConnectedZLayer(
+            layer_index=0,
+            representative_relative_z=2.0,
+            component_ids=("front",),
+            scale_bone_name="all_objects_0_scale",
+            layer_bone_name="all_objects_layer_0",
+        ),
+        ConnectedZLayer(
+            layer_index=1,
+            representative_relative_z=-1.5,
+            component_ids=("back",),
+            scale_bone_name="all_objects_1_scale",
+            layer_bone_name="all_objects_layer_1",
+        ),
+    )
+
+
+def _group_settings():
+    return ConnectedGroupSettings(
+        texture_width=100,
+        texture_height=100,
+        group_prefix="all_objects",
+    )
 
 
 def test_connected_object_main_xy_adds_relative_world_to_document_local_offset():
@@ -102,34 +132,45 @@ def test_camera_projection_main_xy_is_preserved_while_reparenting():
     assert camera_main.y == 0.0
 
 
-def test_connected_global_layers_encode_relative_z_with_single_rig_bone_pattern():
-    layers = (
-        ConnectedZLayer(
-            layer_index=0,
-            representative_relative_z=2.0,
-            component_ids=("front",),
-            scale_bone_name="all_objects_0_scale",
-            layer_bone_name="all_objects_layer_0",
-        ),
-        ConnectedZLayer(
-            layer_index=1,
-            representative_relative_z=-1.5,
-            component_ids=("back",),
-            scale_bone_name="all_objects_1_scale",
-            layer_bone_name="all_objects_layer_1",
-        ),
-    )
-    settings = ConnectedGroupSettings(
-        texture_width=100,
-        texture_height=100,
-        group_prefix="all_objects",
-    )
-
+def test_connected_legacy_global_layers_remain_neutral_like_main():
     document = build_global_bones_document(
         {"spine": "4.2.43"},
-        layers,
-        settings,
+        _depth_layers(),
+        _group_settings(),
         LegacyRigProfile(),
+        uniform_scale=100.0,
+    )
+    bones = _bone_by_name(document)
+
+    front_scale = bones["all_objects_0_scale"]
+    front_layer = bones["all_objects_layer_0"]
+    back_scale = bones["all_objects_1_scale"]
+    back_layer = bones["all_objects_layer_1"]
+
+    for scale_bone in (front_scale, back_scale):
+        assert scale_bone.parent == "all_objects_rotate_X"
+        assert scale_bone.length == 5.0
+        assert scale_bone.x == 0.0
+        assert scale_bone.y == 0.0
+        assert scale_bone.rotation is None
+        assert scale_bone.extras == {}
+
+    assert front_layer.parent == "all_objects_0_scale"
+    assert back_layer.parent == "all_objects_1_scale"
+    for layer_bone in (front_layer, back_layer):
+        assert layer_bone.length == 5.0
+        assert layer_bone.x == 0.0
+        assert layer_bone.y == 0.0
+        assert layer_bone.rotation is None
+        assert layer_bone.extras == {}
+
+
+def test_connected_two_axis_global_layers_encode_relative_z():
+    document = build_global_bones_document(
+        {"spine": "4.2.43"},
+        _depth_layers(),
+        _group_settings(),
+        TwoAxisScaleRigProfile(),
         uniform_scale=100.0,
     )
     bones = _bone_by_name(document)
@@ -143,6 +184,6 @@ def test_connected_global_layers_encode_relative_z_with_single_rig_bone_pattern(
     assert back_scale.y == -150.0
     for scale_bone in (front_scale, back_scale):
         assert scale_bone.rotation == 90.0
-        assert scale_bone.extras["inherit"] == "onlyTranslation"
+        assert scale_bone.extras == {"inherit": "onlyTranslation"}
     assert front_layer.rotation == -90.0
     assert back_layer.rotation == -90.0
