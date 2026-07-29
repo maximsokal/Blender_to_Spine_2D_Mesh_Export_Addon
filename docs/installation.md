@@ -15,7 +15,7 @@ Blender 4.x and Blender 5.0/5.1 are not supported. The minimum version is declar
 2. Open Blender 5.2 or newer.
 3. Open **Edit > Preferences > Extensions**.
 4. Open the Extensions menu and choose **Install from Disk**.
-5. Select `blender_to_spine2d_mesh_exporter-<version>.zip`.
+5. Select `blender_to_spine2d_mesh_exporter-0.47.0.zip`.
 6. Enable **Blender to Spine2D Mesh Exporter**.
 7. Open a 3D View, press `N`, and select the **Blender to Spine2D Mesh Exporter** tab.
 
@@ -26,23 +26,32 @@ Do not unpack the release ZIP. Its root must contain `blender_manifest.toml` and
 1. Remove or disable the old extension in **Preferences > Extensions**.
 2. Close Blender completely.
 3. Start Blender again.
-4. Install the new ZIP through **Install from Disk**.
+4. Install `blender_to_spine2d_mesh_exporter-0.47.0.zip` through **Install from Disk**.
 5. Reopen the project file.
 
 Closing Blender prevents loaded Python modules and cached extension metadata from keeping the previous implementation active.
 
 ## Scene settings migration
 
-The extension owns a hidden Scene settings schema. Older scenes are migrated after the saved RNA values have been restored.
+Version 0.47.0 owns Scene settings schema 5. Raw persisted Scene ID-properties are captured before Rewrite RNA properties are registered, so Blender's newly bound defaults cannot hide the values stored in an older `.blend` file.
 
-For version 0.41.3, every scene below schema 3 is migrated once to:
+Migration policy:
 
 ```text
-Seam Maker = Auto
-Settings schema = 3
-```
+Genuinely fresh Scene:
+    Seam Maker = Auto
+    Rig = 2-Axis Rotation + Scale
+    Settings schema = 5
 
-After that migration, a deliberate user choice of Custom is preserved.
+Saved Scene created before rig profiles:
+    Seam Maker = Auto when required by its older schema
+    Rig = 3-Axis Rotation compatibility profile
+    Settings schema = 5
+
+Saved schema-4 or newer Scene with an explicit rig choice:
+    Preserve the selected rig profile
+    Settings schema = 5
+```
 
 The current values can be inspected in Blender's Python Console:
 
@@ -50,13 +59,8 @@ The current values can be inspected in Blender's Python Console:
 print(
     bpy.context.scene.spine2d_settings_schema_version,
     bpy.context.scene.spine2d_seam_maker_mode,
+    bpy.context.scene.spine2d_rig_profile,
 )
-```
-
-Expected result after migrating an older scene:
-
-```text
-3 AUTO
 ```
 
 ## Build locally
@@ -81,6 +85,12 @@ Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
 if ($LASTEXITCODE -ne 0) {
     throw "Extension package build failed with exit code $LASTEXITCODE"
 }
+```
+
+The expected archive is:
+
+```text
+ dist/blender_to_spine2d_mesh_exporter-0.47.0.zip
 ```
 
 The script:
@@ -108,10 +118,10 @@ Validate the extension source directory:
 blender --command extension validate Blender_to_Spine2D_Mesh_Exporter
 ```
 
-Validate a built ZIP:
+Validate the built ZIP:
 
 ```text
-blender --command extension validate <archive.zip>
+blender --command extension validate dist/blender_to_spine2d_mesh_exporter-0.47.0.zip
 ```
 
 ## Remove the extension
