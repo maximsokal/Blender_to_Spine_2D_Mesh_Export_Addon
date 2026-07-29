@@ -45,6 +45,7 @@ Blender 4.x and Blender 5.0/5.1 are not supported by the current extension packa
 - Generated material fallback for missing or intentionally ignored source materials.
 - Single-object, standalone multi-object, connected, and mixed exports.
 - Connected multi-object rigs for both 3-Axis Rotation and 2-Axis Rotation + Scale profiles.
+- Neutral connected setup poses with object-local controls and independent global controls.
 - Static texture and frame-sequence output.
 - Readiness analysis with structured blockers, warnings, and statistics.
 - Atomic JSON and texture output with rollback and stale work-file recovery.
@@ -134,7 +135,7 @@ python tools/prepare_package.py --blender <path-to-Blender-5.2-executable>
 
 The resulting ZIP is written to `dist` unless an explicit output path is supplied. Its root contains `blender_manifest.toml` and `__init__.py`.
 
-See [Installation](docs/installation.md) and [Testing](docs/testing.md) for validation commands for the current 0.47.2 candidate.
+See [Installation](docs/installation.md) and [Testing](docs/testing.md) for validation commands for the current 0.47.3 candidate.
 
 ## Project structure
 
