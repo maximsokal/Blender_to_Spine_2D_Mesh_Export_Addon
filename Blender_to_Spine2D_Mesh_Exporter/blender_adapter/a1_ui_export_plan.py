@@ -14,6 +14,7 @@ from ..application import (
     IssueSeverity,
 )
 from ..domain.baking import sanitize_filename_stem
+from ..domain.spine.rig_profiles import A1RigSetupPoseMode
 from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_ui_scene_capture import _SceneExportProfile, _capture_scene_profile
 from .a1_ui_selection import (
@@ -169,6 +170,8 @@ def _partition_sources(
 
 
 def build_active_ui_export_plan(context: Any) -> A1UiSingleExportPlan:
+    """Build one active-object plan with a neutral single-object rig setup pose."""
+
     if context is None:
         raise ValueError("context cannot be None")
     scene = getattr(context, "scene", None)
@@ -193,6 +196,7 @@ def build_active_ui_export_plan(context: Any) -> A1UiSingleExportPlan:
         json_output_stem=(
             f"{sanitize_filename_stem(object_profile.object_name)}_merged"
         ),
+        rig_setup_pose_mode=A1RigSetupPoseMode.NORMALIZED_SINGLE,
     )
     return A1UiSingleExportPlan(source_object=source_object, settings=settings)
 
