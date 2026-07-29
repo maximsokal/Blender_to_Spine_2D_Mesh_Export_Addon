@@ -1,4 +1,4 @@
-"""Real Blender 5.2 setup-pose regression for connected three-axis composition."""
+"""Real Blender 5.2 parity gate for the Legacy connected three-axis rig."""
 
 from __future__ import annotations
 
@@ -38,26 +38,15 @@ def _constraint(document: dict, name: str) -> dict:
     return matches[0]
 
 
-def _assert_zero_relative_local_delta(document: dict, name: str) -> None:
-    constraint = _constraint(document, name)
-    _assert(constraint.get("local") is True, f"{name} is not local")
-    _assert(constraint.get("relative") is True, f"{name} is not relative")
-    for field_name in ("rotation", "x", "y", "scaleX", "scaleY", "shearY"):
-        _assert(
-            float(constraint.get(field_name, 0.0)) == 0.0,
-            f"{name} has non-neutral {field_name}: {constraint}",
-        )
-    for field_name in ("mixX", "mixY", "mixScaleX", "mixScaleY", "mixShearY"):
-        _assert(
-            float(constraint.get(field_name, 1.0)) == 0.0,
-            f"{name} still mixes {field_name}: {constraint}",
-        )
+def _assert_exact_fields(actual: dict, expected: dict, label: str) -> None:
+    for key, value in expected.items():
+        _assert(actual.get(key) == value, f"{label}.{key}: {actual.get(key)!r} != {value!r}")
 
 
-def test_connected_three_axis_setup_pose_is_not_collapsed() -> None:
+def test_connected_three_axis_matches_legacy_main_wrapper() -> None:
     _clear_scene()
     with tempfile.TemporaryDirectory(
-        prefix="spine2d-connected-three-axis-setup-"
+        prefix="spine2d-connected-three-axis-main-parity-"
     ) as directory:
         output_directory = Path(directory)
         (
@@ -70,46 +59,124 @@ def test_connected_three_axis_setup_pose_is_not_collapsed() -> None:
         settings = _multi_settings(
             output_directory,
             mode=A1MultiObjectMode.CONNECTED,
-            output_stem="ConnectedThreeAxisSetup",
+            output_stem="ConnectedThreeAxisMainParity",
         )
 
         result = export_a1_multi_object(sources, settings)
         _assert(result.success, f"connected three-axis export failed: {result.issues}")
 
-        output_json = (output_directory / "ConnectedThreeAxisSetup.json").resolve()
+        output_json = (output_directory / "ConnectedThreeAxisMainParity.json").resolve()
         document = json.loads(output_json.read_text(encoding="utf-8"))
         bones = {bone["name"]: bone for bone in document["bones"]}
 
-        for name in (
+        for control in (
             "all_objects_rotation_X",
             "all_objects_rotation_Y",
             "all_objects_rotation_Z",
         ):
-            _assert_zero_relative_local_delta(document, name)
+            _assert(
+                bones[control].get("parent") == "root",
+                f"Legacy global control is not root-space: {bones[control]}",
+            )
+
+        for name in (
+            "all_objects_0_scale",
+            "all_objects_layer_0",
+            "all_objects_1_scale",
+            "all_objects_layer_1",
+        ):
+            _assert(float(bones[name].get("y", 0.0)) == 0.0, f"{name} has setup Y")
+            _assert(
+                float(bones[name].get("rotation", 0.0)) == 0.0,
+                f"{name} has setup rotation",
+            )
+            _assert("inherit" not in bones[name], f"{name} has object-rig inherit mode")
+
+        rotation_x = _constraint(document, "all_objects_rotation_X")
+        _assert_exact_fields(
+            rotation_x,
+            {
+                "order": 0,
+                "bones": [
+                    "all_objects_0_scale",
+                    "all_objects_1_scale",
+                    "all_objects",
+                ],
+                "target": "all_objects_rotation_X",
+                "rotation": 90,
+                "local": True,
+                "relative": True,
+                "x": -64.0,
+                "y": -16.0,
+                "scaleX": -1,
+                "scaleY": -1,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+            "all_objects_rotation_X",
+        )
+
+        rotation_y = _constraint(document, "all_objects_rotation_Y")
+        _assert_exact_fields(
+            rotation_y,
+            {
+                "order": 1,
+                "bones": [
+                    "all_objects_rotate_X",
+                    "all_objects_rotate_X_constraint_rotate_IK",
+                ],
+                "target": "all_objects_rotation_Y",
+                "local": True,
+                "relative": True,
+                "x": 32.0,
+                "scaleX": -1,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+            "all_objects_rotation_Y",
+        )
 
         rotation_z = _constraint(document, "all_objects_rotation_Z")
-        _assert(
-            tuple(rotation_z.get("bones", ()))
-            == ("all_objects_layer_0", "all_objects_layer_1"),
-            f"global Z constraint must operate on wrapper layers: {rotation_z}",
+        _assert_exact_fields(
+            rotation_z,
+            {
+                "order": 2,
+                "bones": ["ObjectA", "ObjectB"],
+                "target": "all_objects_rotation_Z",
+                "local": True,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+            "all_objects_rotation_Z",
         )
 
         scale = _constraint(document, "all_objects_scale_constraint")
-        _assert(float(scale.get("mixRotate", 1.0)) == 0.0, f"scale rotates: {scale}")
-        _assert(float(scale.get("mixX", 1.0)) == 0.0, f"scale translates X: {scale}")
-        _assert(float(scale.get("mixY", 1.0)) == 0.0, f"scale translates Y: {scale}")
-        _assert(float(scale.get("mixScaleX", 0.0)) == 1.0, f"scale X disabled: {scale}")
-        _assert(float(scale.get("mixScaleY", 0.0)) == 1.0, f"scale Y disabled: {scale}")
-        _assert(float(scale.get("mixShearY", 1.0)) == 0.0, f"scale shears: {scale}")
-
-        layer_y = float(bones["all_objects_0_scale"].get("y", 0.0))
-        object_y = float(bones["ObjectB_main"].get("y", 0.0))
-        _assert(layer_y == 16.0, f"ObjectB layer depth is wrong: {layer_y}")
-        _assert(object_y == 16.0, f"ObjectB local Y is wrong: {object_y}")
-        _assert(
-            layer_y + object_y == 32.0,
-            "ObjectB setup world Y no longer matches Blender placement",
+        _assert_exact_fields(
+            scale,
+            {
+                "order": 10,
+                "bones": ["all_objects_0_scale", "all_objects_1_scale"],
+                "target": "all_objects_rotate_X_constraint",
+                "scaleX": -1,
+                "mixX": 0,
+                "mixScaleX": 0,
+                "mixShearY": 0,
+            },
+            "all_objects_scale_constraint",
         )
+
+        _assert(float(bones["ObjectB_main"].get("x", 0.0)) == 64.0, "ObjectB X wrong")
+        _assert(float(bones["ObjectB_main"].get("y", 0.0)) == 32.0, "ObjectB Y wrong")
+        _assert(
+            float(bones["all_objects_0_scale"].get("y", 0.0)) == 0.0,
+            "Legacy wrapper added Z to visible Y",
+        )
+
+        _assert(_constraint(document, "ObjectA_scale_compensator")["order"] == 6, "A compensator order")
+        _assert(_constraint(document, "ObjectB_scale_compensator")["order"] == 6, "B compensator order")
 
         _assert_state_restored(
             context_before=context_before,
@@ -121,15 +188,9 @@ def test_connected_three_axis_setup_pose_is_not_collapsed() -> None:
 
 def main() -> None:
     print(f"Blender version: {bpy.app.version_string}")
-    print(
-        "[CONNECTED_SETUP_POSE] RUN "
-        "test_connected_three_axis_setup_pose_is_not_collapsed"
-    )
-    test_connected_three_axis_setup_pose_is_not_collapsed()
-    print(
-        "[CONNECTED_SETUP_POSE] PASS "
-        "test_connected_three_axis_setup_pose_is_not_collapsed"
-    )
+    print("[CONNECTED_MAIN_PARITY] RUN test_connected_three_axis_matches_legacy_main_wrapper")
+    test_connected_three_axis_matches_legacy_main_wrapper()
+    print("[CONNECTED_MAIN_PARITY] PASS test_connected_three_axis_matches_legacy_main_wrapper")
 
 
 if __name__ == "__main__":
