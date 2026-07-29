@@ -157,11 +157,13 @@ def test_connected_two_axis_builds_global_and_per_object_controls():
         bones["First_main"].x,
         bones["First_main"].y,
     ) == ("all_objects_layer_1", 10.0, 20.0)
+    # The parent layer contributes +200 setup Y for relative Z=2, leaving +90
+    # local Y so Second_main still resolves to its intended +290 setup world Y.
     assert (
         bones["Second_main"].parent,
         bones["Second_main"].x,
         bones["Second_main"].y,
-    ) == ("all_objects_layer_0", 230.0, 290.0)
+    ) == ("all_objects_layer_0", 230.0, 90.0)
 
 
 def test_connected_two_axis_schedule_is_contiguous_and_semantically_ordered():
