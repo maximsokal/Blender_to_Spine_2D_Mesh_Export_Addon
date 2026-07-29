@@ -1,4 +1,4 @@
-"""Real Blender 4.4 integration tests for the rewritten multi-object service.
+"""Real Blender 5.2 integration tests for the rewritten multi-object service.
 
 The fixtures are generated at runtime and exercise both typed composition modes plus
 one shared filesystem transaction. The failure case deliberately lets the first Cycles
@@ -37,9 +37,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     BakeExecutionError,
     export_a1_multi_object,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
-    bake_executor as bake_module,
-)
+import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.semantic_bake_execution as bake_module  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
     BakeExecutionSettings,
     BakeMode,
@@ -317,12 +315,21 @@ def test_second_bake_failure_rolls_back_json_and_both_textures() -> None:
         original_call = bake_module._call_bake_operator
         call_count = 0
 
-        def fail_second_bake(bpy_module, bake_type):
+        def fail_second_bake(
+            bpy_module,
+            bake_type,
+            *,
+            uv_layer_name,
+        ):
             nonlocal call_count
             call_count += 1
             if call_count == 2:
                 raise BakeExecutionError("forced second multi-object bake failure")
-            return original_call(bpy_module, bake_type)
+            return original_call(
+                bpy_module,
+                bake_type,
+                uv_layer_name=uv_layer_name,
+            )
 
         with mock.patch.object(
             bake_module,
