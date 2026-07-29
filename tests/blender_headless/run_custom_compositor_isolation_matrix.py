@@ -1,4 +1,4 @@
-"""Real Blender 4.4 custom Compositor isolation and restoration fixture for B4."""
+"""Real Blender 5.2 custom Compositor isolation and restoration fixture for B4."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
         sys.path.insert(0, str(path))
 
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
-    bake_executor as bake_module,
     export_a1_single_object,
 )
+import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_execution as render_module  # noqa: E402
 from run_bake_integration import (  # noqa: E402
     _assert,
     _capture_context,
@@ -107,7 +107,7 @@ def test_custom_compositor_is_bypassed_during_b4_and_restored_unchanged() -> Non
         context_before = _capture_context()
         render_before = _scene_render_fingerprint()
         observations = []
-        original_render = bake_module._call_render_operator
+        original_render = render_module._call_render_operator
 
         def guarded_render(bpy_module):
             observations.append(
@@ -137,7 +137,7 @@ def test_custom_compositor_is_bypassed_during_b4_and_restored_unchanged() -> Non
             return original_render(bpy_module)
 
         with mock.patch.object(
-            bake_module,
+            render_module,
             "_call_render_operator",
             side_effect=guarded_render,
         ):
