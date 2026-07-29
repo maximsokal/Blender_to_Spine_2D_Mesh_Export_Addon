@@ -97,6 +97,20 @@ def _clear_scene() -> None:
             bpy.data.images.remove(image)
 
 
+def _configure_cycles_scene() -> None:
+    """Configure the factory-startup Scene for the explicit Cycles test contract."""
+
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = 1
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "RGBA"
+    scene.view_settings.view_transform = "Standard"
+    scene.view_settings.look = "Medium High Contrast"
+    scene.view_settings.exposure = 0.0
+    scene.view_settings.gamma = 1.0
+
+
 def _create_mesh_object(
     name: str,
     vertices: tuple[tuple[float, float, float], ...],
@@ -249,6 +263,7 @@ def _build_fixture(output_directory: Path):
     )
     analysis = analyse_object_materials(
         source,
+        render_target="CYCLES",
         source_object_id=source_snapshot.source_object_id,
     )
     plan = build_bake_plan(
@@ -289,6 +304,7 @@ def _build_service_settings(output_directory: Path) -> A1SingleObjectExportSetti
 
 def test_real_cycles_emit_bake_commits_png_and_restores_state() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-bake-success-") as directory:
         output_directory = Path(directory)
         source, material, sentinel, target_snapshot, plan = _build_fixture(
@@ -326,6 +342,7 @@ def test_real_cycles_emit_bake_commits_png_and_restores_state() -> None:
 
 def test_forced_bake_failure_rolls_back_file_and_restores_state() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-bake-failure-") as directory:
         output_directory = Path(directory)
         source, material, sentinel, target_snapshot, plan = _build_fixture(
@@ -381,6 +398,7 @@ def test_forced_bake_failure_rolls_back_file_and_restores_state() -> None:
 
 def test_complete_a1_service_commits_valid_png_and_spine_json() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-service-success-") as directory:
         output_directory = Path(directory)
         source = _create_quad("ServiceSource")
@@ -432,6 +450,7 @@ def test_complete_a1_service_commits_valid_png_and_spine_json() -> None:
 
 def test_complete_a1_service_rolls_back_png_and_json_together() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-service-failure-") as directory:
         output_directory = Path(directory)
         source = _create_quad("ServiceSource")
