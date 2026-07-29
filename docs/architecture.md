@@ -46,7 +46,7 @@ Contains Blender-independent immutable models and algorithms:
 - geometry IDs, lineage, topology, segmentation, decomposition, and triangulation;
 - UV ranges and layout contracts;
 - bake plans, material capabilities, projection coverage, contour, layout, and output policy;
-- Spine bones, slots, attachments, constraints, animations, composition, validation, and serialization.
+- Spine bones, slots, attachments, constraints, animations, composition, validation, weighted-stream remapping, and serialization.
 
 Domain modules do not import `bpy` or `bmesh`.
 
@@ -81,7 +81,7 @@ single-object operator boundary
 
 If a step fails, completed steps are rolled back in reverse order. Unregistration also runs in reverse order and reports cleanup failures rather than silently suppressing them.
 
-The Scene settings migration runs after Scene RNA exists and before the main UI becomes active. Registration-time RNA callbacks are distinguished from deliberate user edits so persisted values cannot prematurely advance the settings schema.
+The Scene settings migration captures raw persisted ID-properties before Scene RNA registration. Migration runs after the new RNA descriptors exist and before the main UI becomes active, so fresh defaults cannot hide older saved values.
 
 ## Export request flow
 
@@ -141,12 +141,17 @@ Normal mode never silently switches to Camera Projection. Unsupported mode/mater
 ```text
 prepared regions
   -> shared generated SpineBakeUV layout
+  -> per-region typed mesh attachments
+  -> shared vertex-bone compaction
+  -> exact UV, topology, and weighted-index correspondence validation
   -> temporary material and image setup
   -> semantic Cycles bake
   -> row conversion to Spine PNG file space
   -> staged texture validation
   -> per-region attachment output
 ```
+
+Segmentation can repeat a source point in several region attachments. The typed vertex-bone optimizer groups only component-owned generated bones with identical parent and final setup data. It keeps the first deterministic canonical bone, builds a complete old-index to new-index map, decodes every weighted vertex stream, remaps only bone indices, and re-encodes the stream. UVs, triangles, hulls, edges, attachment paths, local influence coordinates, and weights remain unchanged. Different Z parents are never merged.
 
 The source Scene may use Blender 5.2 EEVEE. The bake transaction temporarily configures the validated Cycles state and restores the original Scene state afterward.
 
@@ -188,6 +193,8 @@ The UI partitions selected Mesh objects into connected and standalone groups.
 - Mixed mode combines one connected subgroup with standalone sources.
 
 Exactly one connected source falls back to standalone mode with a structured warning.
+
+Each object compacts its own generated segment vertex bones before outer composition. Bones are never shared across object boundaries.
 
 The outer multi-object transaction owns the final JSON and every individual or grouped texture. Inner stages do not commit independently.
 
