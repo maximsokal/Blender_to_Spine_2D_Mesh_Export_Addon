@@ -356,7 +356,7 @@ def test_second_bake_failure_rolls_back_json_and_both_textures() -> None:
 
         leftovers = tuple(
             sorted(
-                str(path.relative_to(output_directory))
+                path.relative_to(output_directory).as_posix()
                 for path in output_directory.rglob("*")
                 if path.is_file()
             )
