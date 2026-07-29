@@ -64,6 +64,9 @@ def _assert_neutral_connected_setup(document: dict) -> None:
             f"global connected control has non-neutral setup rotation: {bones[control_name]}",
         )
 
+    global_scale = bones["all_objects_scale"]
+    expected_local_x = float(global_scale.get("x", 0.0))
+    expected_local_y = float(global_scale.get("y", 0.0))
     for prefix in ("ObjectA", "ObjectB"):
         main = bones[f"{prefix}_main"]
         scale = bones[f"{prefix}_scale"]
@@ -71,14 +74,15 @@ def _assert_neutral_connected_setup(document: dict) -> None:
             scale.get("parent") == f"{prefix}_main",
             f"{prefix} scale control is outside object control space: {scale}",
         )
-        # The source fixture uses the same 64 px control offset for both objects.
-        # Parent-local coordinates must not contain the object's world placement.
+        # Every object uses the profile layout in its own main-local space. The
+        # local offset must match the neutral global control and must not include
+        # the object's connected world placement.
         _assert(
-            float(scale.get("x", 0.0)) == 64.0,
+            float(scale.get("x", 0.0)) == expected_local_x,
             f"{prefix} scale control local X is wrong: main={main}, scale={scale}",
         )
         _assert(
-            float(scale.get("y", 0.0)) == -16.0,
+            float(scale.get("y", 0.0)) == expected_local_y,
             f"{prefix} scale control local Y is wrong: main={main}, scale={scale}",
         )
 
