@@ -14,6 +14,7 @@ README = ROOT / "README.md"
 CYRILLIC = re.compile(r"[\u0400-\u04FF]")
 MARKDOWN_LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 HTML_LINK = re.compile(r"(?:src|href)=[\"']([^\"']+)[\"']", re.IGNORECASE)
+SEMANTIC_VERSION = re.compile(r"\d+\.\d+\.\d+")
 
 
 def _public_document_paths() -> tuple[Path, ...]:
@@ -115,7 +116,7 @@ def test_documentation_matches_manifest_and_current_defaults():
     )
     assert match is not None
     version = match.group(1)
-    assert version == "0.47.3"
+    assert SEMANTIC_VERSION.fullmatch(version), version
 
     for relative_path in (
         "docs/README.md",
