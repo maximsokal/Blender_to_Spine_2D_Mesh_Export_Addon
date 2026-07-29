@@ -15,8 +15,8 @@
           "width": 64
         }
       ],
-      "json_sha256": "4b8d10078f5278d07659590aab69e5a7400d45d8ab90979ca18c8ec8fc55900a",
-      "json_size": 5662,
+      "json_sha256": "6af6eae8f85189c5da9beeef4b731fe2f797f59d2b1840e37a0575e82d96bda0",
+      "json_size": 5512,
       "status": "passed"
     },
     "nested_node_groups": {
@@ -34,8 +34,8 @@
           "width": 64
         }
       ],
-      "json_sha256": "3de2b015407ff6621f9c434e8d2f4e169a48a3930fc19754925a7ea57699d5e4",
-      "json_size": 5663,
+      "json_sha256": "17ac67f62ae5993d02049cf50b8e3b7c5c8fba669b4900b8cf3072744ac471dc",
+      "json_size": 5513,
       "status": "passed"
     },
     "non_manifold": {
@@ -57,8 +57,8 @@
           "width": 64
         }
       ],
-      "json_sha256": "868e9309dc9200ae61c1e44392b1c7f54856dccd7d9d620e96629e8dea31bf78",
-      "json_size": 7519,
+      "json_sha256": "745b94e47e723610b8709e4d07939ac48057374fe3f034dd8f23f7b37342d295",
+      "json_size": 7144,
       "status": "passed"
     },
     "procedural_noise": {
@@ -76,8 +76,8 @@
           "width": 64
         }
       ],
-      "json_sha256": "3de2b015407ff6621f9c434e8d2f4e169a48a3930fc19754925a7ea57699d5e4",
-      "json_size": 5663,
+      "json_sha256": "17ac67f62ae5993d02049cf50b8e3b7c5c8fba669b4900b8cf3072744ac471dc",
+      "json_size": 5513,
       "status": "passed"
     }
   },
