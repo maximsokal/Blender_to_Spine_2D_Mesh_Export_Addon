@@ -1,9 +1,9 @@
 """Build profile-aware global bones and constraints for connected A1 rigs.
 
-The three-axis path intentionally reproduces the dedicated connected wrapper from the
-historical ``main`` branch. It must not be replaced by a normal per-object rig: the
-connected wrapper has different parents, helper transforms, Z-layer setup values, and
-constraint targets.
+The three-axis path reproduces the dedicated connected wrapper from the historical
+``main`` branch. It must not be replaced by a normal per-object rig: the wrapper has a
+different hierarchy, explicit zero-valued helper fields, exact constraint targets, and a
+Z-layer-based order model.
 """
 
 from __future__ import annotations
@@ -46,6 +46,36 @@ def _require_inputs(
         raise ValueError("uniform_scale must be positive")
 
 
+def _legacy_bone(
+    name: str,
+    parent: str | None,
+    *,
+    length: float = 0.0,
+    x: float = 0.0,
+    y: float = 0.0,
+    rotation: float | None = None,
+    color: str | None = None,
+    icon: str | None = None,
+) -> Bone:
+    """Typed equivalent of historical ``main._mk_bone``.
+
+    The old helper always serialized ``length``, ``x``, and ``y`` for generated bones,
+    including zero values. Keeping those fields makes review against Legacy JSON exact
+    instead of relying on Spine defaults.
+    """
+
+    return Bone(
+        name=name,
+        parent=parent,
+        length=float(length),
+        x=round(float(x), 2),
+        y=round(float(y), 2),
+        rotation=rotation,
+        color=color,
+        icon=icon,
+    )
+
+
 def _legacy_connected_bones(
     layers: Tuple[ConnectedZLayer, ...],
     settings: ConnectedGroupSettings,
@@ -58,111 +88,83 @@ def _legacy_connected_bones(
     scale = float(uniform_scale)
     half = scale / 2.0
     base = profile.base_bone(prefix)
+    scale_rotate_x = profile.scale_rotate_x_bone(prefix)
     rotate_x = profile.rotate_x_bone(prefix)
     constraint_bone = profile.rotate_x_constraint_bone(prefix)
     constraint_scale_ik = profile.rotate_x_constraint_scale_ik_bone(prefix)
     constraint_rotate_ik = profile.rotate_x_constraint_rotate_ik_bone(prefix)
     constraint_ik = profile.rotate_x_constraint_ik_bone(prefix)
 
-    layer_bones = tuple(
-        bone
-        for layer in layers
-        for bone in (
-            Bone(
-                name=layer.scale_bone_name,
-                parent=rotate_x,
-                length=half * 0.1,
-            ),
-            Bone(
-                name=layer.layer_bone_name,
-                parent=layer.scale_bone_name,
-                length=half * 0.1,
-            ),
-        )
-    )
-
-    return (
-        Bone(name=profile.root_bone()),
-        Bone(
-            name=profile.main_bone(prefix),
-            parent=profile.root_bone(),
+    generated = [
+        _legacy_bone(
+            profile.main_bone(prefix),
+            profile.root_bone(),
             length=half,
-            x=0.0,
-            y=0.0,
         ),
-        Bone(name=base, parent=profile.main_bone(prefix), x=0.0, y=0.0),
-        Bone(
-            name=profile.scale_rotate_x_bone(prefix),
-            parent=base,
-            length=half,
-            x=0.0,
-            y=0.0,
-        ),
-        # Legacy connected controls are root-space controls, unlike object controls.
-        Bone(
-            name=profile.control_x_bone(prefix),
-            parent=profile.root_bone(),
+        _legacy_bone(base, profile.main_bone(prefix)),
+        _legacy_bone(scale_rotate_x, base, length=half),
+        _legacy_bone(
+            profile.control_x_bone(prefix),
+            profile.root_bone(),
             length=scale,
             x=scale,
             y=half,
             color="ff0000ff",
         ),
-        Bone(
-            name=profile.control_y_bone(prefix),
-            parent=profile.root_bone(),
+        _legacy_bone(
+            profile.control_y_bone(prefix),
+            profile.root_bone(),
             length=scale,
             x=scale,
-            y=0.0,
             color="00ff18ff",
         ),
-        Bone(
-            name=profile.control_z_bone(prefix),
-            parent=profile.root_bone(),
+        _legacy_bone(
+            profile.control_z_bone(prefix),
+            profile.root_bone(),
             length=scale,
             x=scale,
             y=-half,
             color="002cffff",
         ),
-        Bone(
-            name=rotate_x,
-            parent=profile.scale_rotate_x_bone(prefix),
-            length=half * 0.1,
-            x=0.0,
-            y=0.0,
-        ),
-        Bone(
-            name=constraint_bone,
-            parent=base,
+        _legacy_bone(rotate_x, scale_rotate_x, length=half * 0.1),
+        _legacy_bone(
+            constraint_bone,
+            base,
             length=half,
-            x=0.0,
-            y=0.0,
             rotation=-90.0,
             color="abe323ff",
         ),
-        Bone(
-            name=constraint_scale_ik,
-            parent=base,
-            x=0.0,
-            y=0.0,
+        _legacy_bone(
+            constraint_scale_ik,
+            base,
             rotation=-90.0,
         ),
-        Bone(
-            name=constraint_rotate_ik,
-            parent=constraint_scale_ik,
-            x=0.0,
-            y=0.0,
-        ),
-        Bone(
-            name=constraint_ik,
-            parent=constraint_rotate_ik,
-            x=0.0,
-            y=0.0,
+        _legacy_bone(constraint_rotate_ik, constraint_scale_ik),
+        _legacy_bone(
+            constraint_ik,
+            constraint_rotate_ik,
             rotation=90.0,
             color="ff3f00ff",
             icon="ik",
         ),
-        *layer_bones,
-    )
+    ]
+    for layer in layers:
+        generated.extend(
+            (
+                _legacy_bone(
+                    layer.scale_bone_name,
+                    rotate_x,
+                    length=half * 0.1,
+                ),
+                _legacy_bone(
+                    layer.layer_bone_name,
+                    layer.scale_bone_name,
+                    length=half * 0.1,
+                ),
+            )
+        )
+
+    return (Bone(name=profile.root_bone()), *generated)
 
 
 def _connected_z_groups(
@@ -386,7 +388,9 @@ def _legacy_global_constraints(
 def _constraint_by_name(constraints, name: str):
     matches = tuple(item for item in constraints if item.name == name)
     if len(matches) != 1:
-        raise ValueError(f"Expected one generated constraint {name!r}, found {len(matches)}")
+        raise ValueError(
+            f"Expected one generated constraint {name!r}, found {len(matches)}"
+        )
     return matches[0]
 
 
