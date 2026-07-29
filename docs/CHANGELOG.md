@@ -4,22 +4,45 @@ This changelog records public product releases. Internal development milestones 
 
 ## Unreleased candidate status
 
-Version 0.47.4 is a development candidate and is not validated for release. Manual import of the 0.47.3 connected pyramid outputs showed that structural neutrality checks were insufficient: Spine 4.2 still evaluated non-zero wrapper constraint deltas and layer depth was added to visible Y placement twice. The candidate must not be merged or released until all automated layers and fresh manual Blender-to-Spine exports pass on the same commit.
+Version 0.47.5 is a development candidate and is not validated for release. Manual Spine imports of 0.47.4 showed that setup-neutral wrapper corrections were the wrong compatibility model: the working historical connected exporter used a dedicated global hierarchy, exact transform payloads, Z-layer-based order sharing, source-order constraint arrays, and unchanged object scale-compensator orders. The candidate must not be merged or released until all automated layers and fresh manual Blender-to-Spine exports pass on the same commit.
+
+## [0.47.5] - 2026-07-29
+
+### Added
+
+- Exact pure regressions against the connected `_build_global_rig`, `_build_global_constraints`, `_renumber_object_constraints`, and `_apply_offsets` behavior from the historical `main` branch.
+- A connected-only serialization validator that permits the historical duplicate-order diagnostic while keeping every other Spine structural, cross-reference, mesh, UV, weighted-stream, and animation error blocking.
+- Explicit two-axis connected payload tests for global Rotation X, IK, Scale, depth-scale, and Rotation Y targets.
+
+### Changed
+
+- Connected 3-Axis composition no longer creates `all_objects` through the ordinary single-object rig builder. It uses the dedicated Legacy global wrapper with root-space controls, neutral Z layers, and the original helper-bone transforms.
+- Connected constraints are no longer sorted after composition. Object constraint arrays retain source object order and global constraints are appended afterward, matching `main`.
+- Object constraint orders are assigned by connected Z layer rather than by object count. Objects in one layer intentionally share an order value.
+- The 3-Axis global Rotation Z constraint again targets each connected object's base bone instead of generated wrapper layers.
+- Legacy object scale compensators remain present at their original standalone order `6`, exactly as in the historical merger.
+
+### Fixed
+
+- Global 3-Axis Rotation X, Rotation Y, Rotation Z, IK, and Scale now use the exact bone lists, targets, offsets, channel mixes, and order formula from the working Legacy connected exporter.
+- Legacy connected object mains keep their complete anchor-relative Blender X/Y offsets because generated Legacy wrapper layers are setup-neutral.
+- Two-axis connected order phases now use the same Z-layer grouping principle instead of assigning a unique order to every object.
 
 ## [0.47.4] - 2026-07-29
 
 ### Added
 
-- Runtime-formula regressions that evaluate connected relative-local constraint setup deltas rather than checking only bone names and serialized control rotations.
+- Runtime-formula regressions that evaluated connected relative-local constraint setup deltas rather than checking only bone names and serialized control rotations.
 - Blender-headless assertions for final setup world placement, wrapper rotation deltas, and three-axis global scale channel ownership.
-- A dedicated immutable connected setup-correction owner executed after global constraints and object placements are composed.
+- A dedicated immutable connected setup-correction owner executed after global constraints and object placements were composed.
 
-### Fixed
+### Changed
 
-- Global connected Rotation X and Rotation Y no longer reuse per-object calibration offsets in the group wrapper; the wrapper now contributes zero rotation, translation, scale, and shear delta in setup pose.
-- Global three-axis Rotation Z now uses relative-local rotation-only behavior, preserving the `-90` setup rotation of connected layer bones instead of replacing it with zero.
-- Global three-axis scale now disables rotation and translation while enabling both scale channels.
-- Connected object main bones subtract the setup Y already contributed by their generated Z layer, so Blender Z is not added to visible Spine Y a second time.
+- This candidate attempted to make the connected global wrapper setup-neutral and to compensate generated layer depth through object-main local Y.
+
+### Known issue
+
+- Manual Spine import showed that the approach still produced broken connected rigs. It changed the Legacy hierarchy, constrained bone lists, channel payloads, constraint order phases, and compensator behavior instead of reproducing the working `main` implementation. These changes are superseded by 0.47.5.
 
 ## [0.47.3] - 2026-07-29
 
@@ -28,32 +51,26 @@ Version 0.47.4 is a development candidate and is not validated for release. Manu
 - Pure and Blender-headless setup-pose regressions derived from the connected pyramid exports that exposed the deformation.
 - Explicit checks for neutral global two-axis controls, object-local Scale controls, disabled global Y-scale mixing, and wrapper-layer global Z targets.
 
-### Fixed
-
-- The generated global `TWO_AXIS_ROTATION_SCALE` wrapper uses a neutral control-bone setup pose instead of applying the reference X/Y angles directly to global control bones.
-- Per-object two-axis Scale controls are parented to their own `<prefix>_main` bones and converted to main-local coordinates, so controls and targets follow connected placement together.
-- The global three-axis Rotation X constraint no longer applies a setup Y-scale offset that collapses the connected skeleton to zero height in Spine 4.2.
-- Global three-axis Rotation Z operates on generated connected wrapper layers rather than overlapping the individual object base-bone constraint chains.
-
 ### Known issue
 
-- Manual Spine import showed that global constraint offsets and connected layer placement still produced a non-neutral setup pose. These defects are superseded by 0.47.4.
+- Manual Spine import showed that global constraint offsets and connected layer placement still produced a broken setup pose. These defects are superseded by later candidates.
 
 ## [0.47.2] - 2026-07-29
 
 ### Added
 
-- Profile-aware connected constraint schedules that preserve the existing six-constraint three-axis order and add a dedicated five-phase two-axis order.
-- A connected global X/Y/Scale rig built through the validated two-axis rig owner rather than through a synthetic legacy constraint.
+- Profile-aware connected constraint schedules and initial connected two-axis support.
 - Pure weighted-index, placement, namespace, control, and constraint-order regressions for connected two-axis documents.
 - A Blender 5.2 headless connected multi-object regression verifying global and per-object X/Y/Scale controls.
 
 ### Fixed
 
 - Connected export no longer rejects `TWO_AXIS_ROTATION_SCALE` before document composition.
-- Every connected two-axis object retains its own X, Y, and Scale controls while the subgroup receives independent global X, Y, and Scale controls.
-- Global and object constraints receive unique contiguous orders across Rotation X, IK, Uniform Scale, X Depth Scale, and Rotation Y phases.
 - Weighted attachment indices continue to be remapped after the global connected bones are inserted.
+
+### Known issue
+
+- The first connected implementation assigned unique orders per object and built the group wrapper through ordinary object-rig mechanics; manual Spine import later showed this was not compatible with the working Legacy connected behavior.
 
 ## [0.47.1] - 2026-07-29
 
