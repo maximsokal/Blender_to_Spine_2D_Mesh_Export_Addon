@@ -106,21 +106,15 @@ def _persisted_id_value(
     persisted_keys: frozenset[str],
     default: object,
 ) -> object:
-    """Read one raw ID-property value before an RNA descriptor can shadow it."""
+    """Read one raw Blender ID-property before an RNA descriptor can shadow it.
+
+    The key set is captured first through ``Scene.keys()``. Once membership is proven,
+    item access is the single authoritative Blender API for the raw persisted value.
+    This deliberately avoids the retired dynamic ``Scene.get`` compatibility bridge.
+    """
 
     if property_name not in persisted_keys:
         return default
-
-    getter = getattr(scene, "get", None)
-    if callable(getter):
-        try:
-            return getter(property_name, default)
-        except Exception:
-            logger.debug(
-                "Unable to read persisted Scene property %s through get()",
-                property_name,
-                exc_info=True,
-            )
 
     try:
         return scene[property_name]
