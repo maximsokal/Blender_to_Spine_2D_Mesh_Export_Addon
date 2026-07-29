@@ -15,7 +15,7 @@ Blender 4.x and Blender 5.0/5.1 are not supported. The minimum version is declar
 2. Open Blender 5.2 or newer.
 3. Open **Edit > Preferences > Extensions**.
 4. Open the Extensions menu and choose **Install from Disk**.
-5. Select `blender_to_spine2d_mesh_exporter-0.47.2.zip`.
+5. Select `blender_to_spine2d_mesh_exporter-0.47.3.zip`.
 6. Enable **Blender to Spine2D Mesh Exporter**.
 7. Open a 3D View, press `N`, and select the **Blender to Spine2D Mesh Exporter** tab.
 
@@ -26,14 +26,14 @@ Do not unpack the release ZIP. Its root must contain `blender_manifest.toml` and
 1. Remove or disable the old extension in **Preferences > Extensions**.
 2. Close Blender completely.
 3. Start Blender again.
-4. Install `blender_to_spine2d_mesh_exporter-0.47.2.zip` through **Install from Disk**.
+4. Install `blender_to_spine2d_mesh_exporter-0.47.3.zip` through **Install from Disk**.
 5. Reopen the project file.
 
 Closing Blender prevents loaded Python modules and cached extension metadata from keeping the previous implementation active.
 
 ## Scene settings migration
 
-Version 0.47.2 owns Scene settings schema 5. Raw persisted Scene ID-properties are captured before Rewrite RNA properties are registered, so Blender's newly bound defaults cannot hide the values stored in an older `.blend` file.
+Version 0.47.3 owns Scene settings schema 5. Raw persisted Scene ID-properties are captured before Rewrite RNA properties are registered, so Blender's newly bound defaults cannot hide the values stored in an older `.blend` file.
 
 Migration policy:
 
@@ -90,7 +90,7 @@ if ($LASTEXITCODE -ne 0) {
 The expected archive is:
 
 ```text
- dist/blender_to_spine2d_mesh_exporter-0.47.2.zip
+ dist/blender_to_spine2d_mesh_exporter-0.47.3.zip
 ```
 
 The script:
@@ -121,7 +121,7 @@ blender --command extension validate Blender_to_Spine2D_Mesh_Exporter
 Validate the built ZIP:
 
 ```text
-blender --command extension validate dist/blender_to_spine2d_mesh_exporter-0.47.2.zip
+blender --command extension validate dist/blender_to_spine2d_mesh_exporter-0.47.3.zip
 ```
 
 ## Remove the extension
