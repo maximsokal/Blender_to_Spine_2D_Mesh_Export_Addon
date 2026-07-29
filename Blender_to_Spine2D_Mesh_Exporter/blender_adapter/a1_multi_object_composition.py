@@ -17,7 +17,6 @@ from ..application import (
 )
 from ..domain.baking import CameraProjectionPlan
 from ..domain.spine import (
-    A1RigProfile,
     ConnectedPlacementSpace,
     ConstraintOrderPolicy,
     SpineCompositionSettings,
@@ -125,15 +124,6 @@ def _validate_composition_inputs(
     if len(set(profiles)) != 1:
         raise ValueError(
             "All objects in one multi-object document must use the same rig profile"
-        )
-    if (
-        settings.mode is A1MultiObjectMode.CONNECTED
-        and profiles[0] is A1RigProfile.TWO_AXIS_ROTATION_SCALE
-    ):
-        raise ValueError(
-            "CONNECTED mode does not yet support TWO_AXIS_ROTATION_SCALE because its "
-            "five-phase constraint schedule differs from the six-phase three-axis "
-            "connected rig. Disable Connect for these objects or select 3-Axis Rotation."
         )
 
 
