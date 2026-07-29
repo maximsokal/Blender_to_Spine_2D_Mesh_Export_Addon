@@ -157,8 +157,7 @@ def test_connected_two_axis_builds_global_and_per_object_controls():
         bones["First_main"].x,
         bones["First_main"].y,
     ) == ("all_objects_layer_1", 10.0, 20.0)
-    # The parent layer contributes +200 setup Y for relative Z=2, leaving +90
-    # local Y so Second_main still resolves to its intended +290 setup world Y.
+    # The two-axis wrapper owns +200 setup Y for relative Z=2, leaving +90 local Y.
     assert (
         bones["Second_main"].parent,
         bones["Second_main"].x,
@@ -166,7 +165,7 @@ def test_connected_two_axis_builds_global_and_per_object_controls():
     ) == ("all_objects_layer_0", 230.0, 90.0)
 
 
-def test_connected_two_axis_schedule_is_contiguous_and_semantically_ordered():
+def test_connected_two_axis_schedule_is_layer_grouped_and_semantically_ordered():
     result = build_connected_group_document(
         _objects(),
         ConnectedGroupSettings(100, 100, anchor_component_id="first"),
@@ -177,12 +176,13 @@ def test_connected_two_axis_schedule_is_contiguous_and_semantically_ordered():
     orders = tuple(constraint.order for constraint in constraints)
 
     assert schedule.profile_id == "TWO_AXIS_ROTATION_SCALE"
-    assert schedule.all_orders == tuple(range(15))
+    assert schedule.unique_orders == tuple(range(15))
     assert len(orders) == len(set(orders)) == 15
-    assert set(orders) == set(schedule.all_orders)
-    assert schedule.object_rotation_x == (("second", 1), ("first", 2))
-    assert schedule.object_scale_depth == (("second", 10), ("first", 11))
-    assert schedule.object_rotation_y == (("second", 13), ("first", 14))
+    assert set(orders) == set(schedule.unique_orders)
+    # Assignment tuples preserve source object order while order values come from layer.
+    assert schedule.object_rotation_x == (("first", 2), ("second", 1))
+    assert schedule.object_scale_depth == (("first", 11), ("second", 10))
+    assert schedule.object_rotation_y == (("first", 14), ("second", 13))
 
     for prefix in ("First", "Second"):
         assert (
