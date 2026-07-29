@@ -10,6 +10,7 @@ from typing import Tuple
 from .composition import SpineDocumentCompositionResult
 from .legacy_rig_contracts import UniformScaleMode
 from .model import SpineDocument
+from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
 
 
 def _require_canonical_string(value: object, field_name: str) -> str:
@@ -36,12 +37,7 @@ def _require_finite_number(value: object, field_name: str) -> float:
 class ConnectedPlacementSpace(str, Enum):
     """Define where a component's visible XY placement is already encoded."""
 
-    # Connected object-bake preparation retains the document-local bbox-center
-    # compensation on <prefix>_main and deliberately omits absolute world translation.
-    # Composition adds anchor-relative Object translation to that existing local value.
     ANCHOR_RELATIVE_WORLD = "ANCHOR_RELATIVE_WORLD"
-    # Camera-projection attachments already contain screen-space XY in their vertices.
-    # Reparent the main bone but preserve its existing coordinates (normally 0, 0).
     PRESERVE_DOCUMENT = "PRESERVE_DOCUMENT"
 
 
@@ -174,9 +170,11 @@ class ConnectedObjectPlacement:
 
 @dataclass(frozen=True, slots=True)
 class ConnectedConstraintSchedule:
+    """Collision-free global/object constraint order for one rig profile."""
+
     global_rotation_x: int
     global_rotation_y: int
-    global_rotation_z: int
+    global_rotation_z: int | None
     object_rotation_x: Tuple[Tuple[str, int], ...]
     object_rotation_y: Tuple[Tuple[str, int], ...]
     global_scale_ik: int
@@ -185,12 +183,16 @@ class ConnectedConstraintSchedule:
     object_scale: Tuple[Tuple[str, int], ...]
     object_rotation_z: Tuple[Tuple[str, int], ...]
     object_scale_compensator: Tuple[Tuple[str, int], ...]
+    global_scale_depth: int | None = None
+    object_scale_depth: Tuple[Tuple[str, int], ...] = ()
+    profile_id: str = A1RigProfile.THREE_AXIS_ROTATION.value
 
     def __post_init__(self) -> None:
+        profile = resolve_a1_rig_profile(self.profile_id)
+
         for field_name in (
             "global_rotation_x",
             "global_rotation_y",
-            "global_rotation_z",
             "global_scale_ik",
             "global_scale",
         ):
@@ -198,16 +200,52 @@ class ConnectedConstraintSchedule:
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{field_name} must be a non-negative integer")
 
-        assignment_fields = (
+        for field_name in ("global_rotation_z", "global_scale_depth"):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} must be None or a non-negative integer")
+
+        common_assignment_fields = (
             "object_rotation_x",
             "object_rotation_y",
             "object_scale_ik",
             "object_scale",
-            "object_rotation_z",
-            "object_scale_compensator",
         )
+        if profile is A1RigProfile.THREE_AXIS_ROTATION:
+            required_assignment_fields = (
+                *common_assignment_fields,
+                "object_rotation_z",
+                "object_scale_compensator",
+            )
+            forbidden_assignment_fields = ("object_scale_depth",)
+            if self.global_rotation_z is None:
+                raise ValueError("legacy connected schedule requires global_rotation_z")
+            if self.global_scale_depth is not None:
+                raise ValueError("legacy connected schedule cannot define global_scale_depth")
+        else:
+            required_assignment_fields = (
+                *common_assignment_fields,
+                "object_scale_depth",
+            )
+            forbidden_assignment_fields = (
+                "object_rotation_z",
+                "object_scale_compensator",
+            )
+            if self.global_rotation_z is not None:
+                raise ValueError("two-axis connected schedule cannot define global_rotation_z")
+            if self.global_scale_depth is None:
+                raise ValueError("two-axis connected schedule requires global_scale_depth")
+
+        for field_name in forbidden_assignment_fields:
+            if getattr(self, field_name):
+                raise ValueError(
+                    f"{field_name} is not valid for connected profile {profile.value}"
+                )
+
         expected_components: Tuple[str, ...] | None = None
-        for field_name in assignment_fields:
+        for field_name in required_assignment_fields:
             assignments = getattr(self, field_name)
             if not isinstance(assignments, tuple) or not assignments:
                 raise ValueError(f"{field_name} must be a non-empty tuple")
@@ -244,19 +282,30 @@ class ConnectedConstraintSchedule:
 
     @property
     def all_orders(self) -> Tuple[int, ...]:
-        return (
+        scalar_orders = [
             self.global_rotation_x,
             self.global_rotation_y,
-            self.global_rotation_z,
-            *(order for _, order in self.object_rotation_x),
-            *(order for _, order in self.object_rotation_y),
             self.global_scale_ik,
-            *(order for _, order in self.object_scale_ik),
             self.global_scale,
-            *(order for _, order in self.object_scale),
-            *(order for _, order in self.object_rotation_z),
-            *(order for _, order in self.object_scale_compensator),
+        ]
+        if self.global_rotation_z is not None:
+            scalar_orders.append(self.global_rotation_z)
+        if self.global_scale_depth is not None:
+            scalar_orders.append(self.global_scale_depth)
+
+        assignment_fields = (
+            self.object_rotation_x,
+            self.object_rotation_y,
+            self.object_scale_ik,
+            self.object_scale,
+            self.object_rotation_z,
+            self.object_scale_compensator,
+            self.object_scale_depth,
         )
+        orders = scalar_orders + [
+            order for assignments in assignment_fields for _, order in assignments
+        ]
+        return tuple(sorted(orders))
 
     def order_for(self, phase: str, component_id: str) -> int:
         if not isinstance(phase, str) or not phase:
@@ -269,6 +318,7 @@ class ConnectedConstraintSchedule:
             "object_scale",
             "object_rotation_z",
             "object_scale_compensator",
+            "object_scale_depth",
         }:
             raise KeyError(f"Unknown connected constraint phase '{phase}'")
         mapping = dict(getattr(self, phase))
