@@ -25,6 +25,38 @@ def _matching_addon_preference_keys() -> tuple[str, ...]:
     )
 
 
+def _assert_manual_readiness_runtime_registered() -> None:
+    """Require the manual readiness bridge without background analysis hooks."""
+
+    assert extension.auto_readiness._REGISTERED is True
+    assert not bpy.app.timers.is_registered(extension.auto_readiness._automatic_timer)
+    assert extension.auto_readiness.a1_auto_readiness_depsgraph_update_post not in (
+        bpy.app.handlers.depsgraph_update_post
+    )
+    assert extension.auto_readiness.a1_auto_readiness_load_pre not in (
+        bpy.app.handlers.load_pre
+    )
+    assert extension.auto_readiness.a1_auto_readiness_load_post not in (
+        bpy.app.handlers.load_post
+    )
+
+
+def _assert_manual_readiness_runtime_unregistered() -> None:
+    """Require complete teardown of the manual readiness bridge and old hooks."""
+
+    assert extension.auto_readiness._REGISTERED is False
+    assert not bpy.app.timers.is_registered(extension.auto_readiness._automatic_timer)
+    assert extension.auto_readiness.a1_auto_readiness_depsgraph_update_post not in (
+        bpy.app.handlers.depsgraph_update_post
+    )
+    assert extension.auto_readiness.a1_auto_readiness_load_pre not in (
+        bpy.app.handlers.load_pre
+    )
+    assert extension.auto_readiness.a1_auto_readiness_load_post not in (
+        bpy.app.handlers.load_post
+    )
+
+
 def _assert_root_runtime_registered() -> None:
     assert (
         extension.get_registration_state()
@@ -38,7 +70,7 @@ def _assert_root_runtime_registered() -> None:
     assert tuple(bpy.app.handlers.depsgraph_update_post).count(
         extension.a1_readiness_invalidation.a1_readiness_depsgraph_update_post
     ) == 1
-    assert bpy.app.timers.is_registered(extension.auto_readiness._automatic_timer)
+    _assert_manual_readiness_runtime_registered()
 
 
 def _assert_root_runtime_unregistered() -> None:
@@ -53,7 +85,7 @@ def _assert_root_runtime_unregistered() -> None:
     assert extension.a1_readiness_invalidation.a1_readiness_depsgraph_update_post not in (
         bpy.app.handlers.depsgraph_update_post
     )
-    assert not bpy.app.timers.is_registered(extension.auto_readiness._automatic_timer)
+    _assert_manual_readiness_runtime_unregistered()
 
 
 def test_direct_root_registration_without_enabled_addon_entry(clean_blender_data):
