@@ -72,7 +72,7 @@ Per-object setting shown when multiple Mesh objects are selected.
 
 At least two selected objects must have Connect enabled to create a connected subgroup. One connected object falls back to standalone composition with a warning.
 
-`TWO_AXIS_ROTATION_SCALE` currently supports single-object and standalone multi-object composition. Connected composition remains blocked with an explicit readiness/export diagnostic until its five-phase constraint schedule receives a dedicated connected-group implementation. The exporter never substitutes a fake sixth constraint.
+`TWO_AXIS_ROTATION_SCALE` supports connected composition through a dedicated five-phase connected constraint schedule. The connected group and every object retain independent X, Y, and Scale controls; no Rotation Z control or synthetic sixth constraint is generated. Global and per-object phases are ordered as Rotation X, IK, Uniform Scale, X Depth Scale, and Rotation Y, with unique contiguous Spine constraint orders across the complete document.
 
 ## Rig
 
