@@ -30,6 +30,7 @@ from .connected_group_schedule import (
     build_constraint_schedule,
     reorder_object_constraints,
 )
+from .connected_group_setup_correction import correct_connected_setup_pose
 from .connected_group_validation import (
     validate_connected_global_namespace,
     validate_connected_group_inputs,
@@ -54,6 +55,8 @@ def apply_object_placements(
 
     Camera-projection documents already encode screen-space XY in attachment vertices;
     their main-bone coordinates are preserved while only the Z-layer parent changes.
+    The generated layer's own setup translation is compensated later by
+    ``correct_connected_setup_pose`` after the global wrapper constraints are inserted.
     """
 
     placement_by_main = {
@@ -208,6 +211,15 @@ def build_connected_group_document(
                 key=lambda item: (item.order, item.name),
             )
         ),
+    )
+    final_document = correct_connected_setup_pose(
+        final_document,
+        normalized_objects,
+        layers,
+        placements,
+        resolved_profile,
+        settings.group_prefix,
+        uniform_scale,
     )
     try:
         SpineValidator().validate_or_raise(final_document)
