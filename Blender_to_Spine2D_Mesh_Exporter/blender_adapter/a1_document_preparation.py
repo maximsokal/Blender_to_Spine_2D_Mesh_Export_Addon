@@ -15,7 +15,6 @@ from ..application import (
     assemble_a1_document,
     build_a1_attachment_path,
     build_a1_attachment_sequence,
-    calculate_a1_mesh_bounds,
     calculate_a1_object_bake_main_position_pixels,
 )
 from ..domain.baking import CameraProjectionPlan
@@ -76,14 +75,12 @@ def prepare_a1_document(
     statistics = texture.statistics
     try:
         camera_projection = isinstance(texture.bake_plan, CameraProjectionPlan)
-        bounds = calculate_a1_mesh_bounds(source.source_snapshot)
         main_position_pixels = (
             None
             if camera_projection
             else calculate_a1_object_bake_main_position_pixels(
                 source.source_snapshot,
                 source.settings,
-                bounds=bounds,
             )
         )
 
@@ -118,8 +115,10 @@ def prepare_a1_document(
             ),
             attachment_width=source.settings.export.texture_width,
             attachment_height=source.settings.export.texture_height,
-            center_x=0.0 if camera_projection else bounds.center_x,
-            center_y=0.0 if camera_projection else bounds.center_y,
+            # Object-bake mesh coordinates are already relative to Blender Object Origin.
+            # Never recenter them around the geometry bounds or the Spine pivot changes.
+            center_x=0.0,
+            center_y=0.0,
             sequence=build_a1_attachment_sequence(texture.bake_plan),
             include_control_icons=source.settings.include_control_icons,
             include_preview_animation=source.settings.include_preview_animation,
