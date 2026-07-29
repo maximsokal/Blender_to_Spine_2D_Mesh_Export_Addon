@@ -46,38 +46,49 @@ if ($LASTEXITCODE -ne 0) {
 
 Do not use fail-fast for final evidence. A release run must expose every failure.
 
-## Focused 0.41.3 UV sampling and material regression
+## Focused 0.47.0 rig, pivot, and material regression
 
 ```powershell
 & .\.venv-tests\Scripts\python.exe `
     -m pytest `
+    tests/test_vertex_bone_optimizer.py `
+    tests/test_a1_document_assembly.py `
+    tests/test_a1_material_correspondence.py `
+    tests/test_two_axis_scale_rig_builder.py `
+    tests/test_two_axis_multi_placement.py `
+    tests/test_a1_object_origin_offset.py `
+    tests/test_scene_settings_migration_contract.py `
     tests/test_semantic_bake_image_io.py `
     tests/test_semantic_bake_execution_uv_roles.py `
     tests/test_uv_sampling_roles.py `
-    tests/test_a1_material_correspondence.py `
     tests/test_a1_bake_material_bindings.py `
     tests/test_a1_z_groups.py `
     tests/test_normal_uv_pyramid_regression.py `
     tests/test_manifest_version.py `
     tests/test_documentation_contract.py `
     -vv `
+    --strict-markers `
     --durations=20
 
 if ($LASTEXITCODE -ne 0) {
-    throw "0.41.3 focused regressions failed"
+    throw "0.47.0 focused regressions failed"
 }
 ```
 
 These tests verify:
 
+- coincident segment-boundary points share one canonical vertex bone when parent and setup position match;
+- weighted bone indices are compacted while local influence coordinates and weights remain unchanged;
+- UV, triangle, hull, edge, attachment path, and mesh vertex order survive vertex-bone optimization;
+- same-XY vertices in different Z parents remain independent;
+- single-object two-axis controls serialize with neutral setup rotation;
+- Blender Object Origin remains the exported rotation pivot;
+- old saved Scenes retain the compatibility rig while genuinely fresh Scenes use the two-axis default;
 - the generated `SpineBakeUV` layer is the bake destination;
 - the original source render UV remains the shader-sampling layer;
 - `bpy.ops.object.bake` receives the destination UV layer explicitly;
-- a Texture Coordinate UV to Mapping to Image Texture graph does not sample through `SpineBakeUV`;
-- serialized UV, triangle, hull, edge, and weighted-bone streams preserve projection order;
-- temporary bake material indices follow exact snapshot face identity rather than Blender polygon collection order;
-- source Z values retain the Legacy four-decimal identity;
-- the four-face pyramid remains exportable.
+- temporary bake material indices follow exact snapshot face identity;
+- source Z values retain the Legacy four-decimal identity.
 
 ## Real bpy suite
 
@@ -138,6 +149,28 @@ Expected markers:
 [EDIT_MODE_CONTRACT] PASS
 [NORMAL_UV_PYRAMID] PASS
 ```
+
+## Shared vertex-bone optimization integration
+
+```powershell
+& $Blender `
+    --background `
+    --factory-startup `
+    --python-exit-code 1 `
+    --python "tests\blender_headless\run_vertex_bone_optimization_integration.py"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Vertex-bone optimization integration failed"
+}
+```
+
+Expected marker:
+
+```text
+[VERTEX_BONE_OPTIMIZATION] PASS pyramid shared-bone regression
+```
+
+The Blender pyramid still contains twelve weighted attachment vertices across four segment meshes, but those vertices reference four canonical generated bones instead of twelve duplicated bones.
 
 ## Directional Spine UV integration
 
@@ -204,7 +237,7 @@ Texture Coordinate UV
 
 It verifies that the original source render UV samples the material while the independently active `SpineBakeUV` receives the bake output.
 
-## Build version 0.41.3
+## Build version 0.47.0
 
 ```powershell
 Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
@@ -218,7 +251,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Get-Item `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.41.3.zip" |
+    ".\dist\blender_to_spine2d_mesh_exporter-0.47.0.zip" |
     Select-Object FullName, Length, LastWriteTime
 ```
 
@@ -227,7 +260,7 @@ Get-Item `
 ```powershell
 & $Blender `
     --command extension validate `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.41.3.zip"
+    ".\dist\blender_to_spine2d_mesh_exporter-0.47.0.zip"
 
 if ($LASTEXITCODE -ne 0) {
     throw "Built extension validation failed"
@@ -246,7 +279,7 @@ A release claim must record:
 - required Blender headless markers;
 - package build and archive validation results;
 - final ZIP path, size, timestamp, and SHA-256;
-- manual re-export and Spine import of the representative sword asset.
+- manual re-export and Spine import of representative assets.
 
 Do not state that tests passed without the corresponding logs. Do not reuse results from an older commit.
 
