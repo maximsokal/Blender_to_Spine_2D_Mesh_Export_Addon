@@ -159,3 +159,61 @@ def test_connected_three_axis_orders_are_grouped_by_z_layer_like_main():
             f"{item.prefix}_scale_compensator",
         )
         assert compensator.order == 6
+
+
+def test_connected_constraint_arrays_keep_main_source_order_then_global_block():
+    profile = LegacyRigProfile()
+    objects = connected_objects()
+    result = build_connected_group_document(objects, settings(), profile=profile)
+
+    expected_ik = tuple(
+        constraint.name
+        for item in objects
+        for constraint in item.document.ik
+    ) + (profile.scale_ik_constraint("all_objects"),)
+    expected_transform = tuple(
+        constraint.name
+        for item in objects
+        for constraint in item.document.transform
+    ) + (
+        profile.rotation_x_constraint("all_objects"),
+        profile.rotation_y_constraint("all_objects"),
+        profile.rotation_z_constraint("all_objects"),
+        profile.scale_constraint("all_objects"),
+    )
+
+    assert tuple(item.name for item in result.document.ik) == expected_ik
+    assert tuple(item.name for item in result.document.transform) == expected_transform
+
+
+def test_connected_composition_metadata_matches_final_legacy_orders():
+    objects = connected_objects()
+    result = build_connected_group_document(objects, settings())
+    assignment_by_name = {
+        item.constraint_name: item for item in result.composition.constraint_orders
+    }
+    final_constraints = (*result.document.ik, *result.document.transform)
+
+    assert set(assignment_by_name) == {item.name for item in final_constraints}
+    for constraint in final_constraints:
+        assignment = assignment_by_name[constraint.name]
+        assert assignment.global_order == constraint.order
+
+    for item in objects:
+        for constraint in (*item.document.ik, *item.document.transform):
+            assignment = assignment_by_name[constraint.name]
+            assert assignment.component_id == item.component_id
+            assert assignment.original_order == constraint.order
+
+    global_assignments = tuple(
+        item
+        for item in result.composition.constraint_orders
+        if item.component_id == "__all_objects_rig__"
+    )
+    assert {item.constraint_name for item in global_assignments} == {
+        "all_objects_scale_constraint_IK",
+        "all_objects_rotation_X",
+        "all_objects_rotation_Y",
+        "all_objects_rotation_Z",
+        "all_objects_scale_constraint",
+    }
