@@ -63,6 +63,10 @@ from .a1_multi_object import (
     resolve_a1_multi_object_preparation_settings,
 )
 from .a1_object_bake_placement import calculate_a1_object_bake_main_position_pixels
+from .a1_projected_region_filter import (
+    A1ProjectedRegionFilterError,
+    split_xy_visible_region_snapshots,
+)
 from .a1_single_object import (
     A1MeshBounds,
     A1ResolvedOutputPaths,
@@ -135,6 +139,7 @@ __all__ = [
     "A1OutputPathKind",
     "A1OutputPreflightSource",
     "A1PreparedRegion",
+    "A1ProjectedRegionFilterError",
     "A1ReadinessState",
     "A1ResolvedOutputPaths",
     "A1SingleObjectExportSettings",
@@ -186,6 +191,7 @@ __all__ = [
     "resolve_a1_names",
     "resolve_a1_output_paths",
     "scale_a1_export_progress_callback",
+    "split_xy_visible_region_snapshots",
     "validate_a1_output_claims",
     "validate_a1_realized_output_namespace",
     "validate_document_material_correspondence",
