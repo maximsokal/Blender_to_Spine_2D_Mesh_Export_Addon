@@ -35,18 +35,6 @@ def draw_rig_settings(
         layout.prop(scene, "spine2d_projection_alpha_threshold", text="Projection alpha threshold")
     else:
         layout.label(text="Preserves cut regions and generated UV meshes", icon="UV")
-    selected_meshes = tuple(
-        candidate for candidate in getattr(context, "selected_objects", ())
-        if getattr(candidate, "type", None) == "MESH"
-    )
-    if len(selected_meshes) > 1:
-        layout.separator()
-        layout.label(text="Connect objects:")
-        for selected_object in selected_meshes:
-            row = layout.row(align=True)
-            row.label(text=selected_object.name, icon="MESH_DATA")
-            row.prop(selected_object.spine2d_connect_settings, "enabled", text="")
-    layout.separator()
     row = layout.row(align=True)
     row.prop(scene, "spine2d_rig_profile", text="Rig profile")
     row.operator(

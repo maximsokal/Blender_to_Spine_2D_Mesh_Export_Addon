@@ -15,7 +15,7 @@ Bake
 Analysis
 ```
 
-Analysis results are contained inside the final **Analysis** foldout, which is collapsed by default. The export action remains in **Export**; analysis is manual and diagnostic-only, so it never disables export. Export mode and connected-object controls are grouped under **Rig**.
+Analysis results are contained inside the final **Analysis** foldout, which is collapsed by default. The highlighted export action is below all foldouts; analysis is manual and diagnostic-only, so it never disables export. Export mode is grouped under **Rig**. Connected-object controls remain internal development-only functionality and are not shown in the production UI.
 
 ## Export
 
@@ -26,7 +26,8 @@ Analysis results are contained inside the final **Analysis** foldout, which is c
 | Normal - UV Segments | Yes | Segments geometry, creates generated bake UVs, bakes textures, and exports region-based Spine mesh attachments. |
 | Camera Projection | No | Renders through the active camera and exports one screen-space projection attachment. |
 
-Changing Export mode invalidates the cached readiness report and schedules a new analysis.
+Changing Export mode invalidates the cached readiness report; run Analyze manually when
+you want an updated diagnostic.
 
 ### Projection alpha threshold
 
@@ -62,9 +63,10 @@ Backslashes are normalized to forward slashes. Leading `./` and surrounding slas
 
 The final texture directory is below the JSON output directory.
 
-### Connect
+### Connect (development-only)
 
-Per-object setting shown when multiple Mesh objects are selected.
+The per-object setting is retained for development integrations but is hidden from the
+production UI.
 
 | Type | Default |
 | --- | --- |
@@ -161,7 +163,7 @@ It does not modify texture, cutting, baking, material, or path settings.
 
 | Type | Default |
 | --- | --- |
-| Boolean | Enabled |
+| Boolean | Disabled |
 
 The generated control attachments match the selected profile:
 
@@ -172,7 +174,7 @@ The generated control attachments match the selected profile:
 
 | Type | Default |
 | --- | --- |
-| Boolean | Enabled |
+| Boolean | Disabled |
 
 The preview matches the selected profile. The two-axis preview references only X, Y, and Scale controls and contains no Z timeline.
 

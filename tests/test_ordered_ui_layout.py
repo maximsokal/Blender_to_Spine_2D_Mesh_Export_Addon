@@ -56,7 +56,7 @@ def test_export_controls_are_not_duplicated_outside_rig_foldout():
     assert "spine2d_control_icons" in _source(rig_ui)
     assert "spine2d_export_preview_animation" in _source(rig_ui)
     assert "spine2d_texture_export_mode" in _source(rig_ui)
-    assert "spine2d_connect_settings" in _source(rig_ui)
+    assert "spine2d_connect_settings" not in _source(rig_ui)
 
 
 def test_ordered_layout_replaces_and_restores_the_original_panel_transactionally():
@@ -79,3 +79,5 @@ def test_analysis_is_the_final_foldout_and_export_action_is_in_export():
     assert multi_export < analysis_title
     assert 'property_name="spine2d_show_analysis"' in source
     assert 'default=False' in source[source.index('name="Show Analysis"'):]
+    assert 'layout.separator()\n            self._draw_export_action(layout, context)' in source
+    assert 'row.alert = True' in source

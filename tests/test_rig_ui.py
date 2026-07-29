@@ -45,6 +45,7 @@ def test_rig_content_is_drawn_by_the_ordered_main_foldout_not_a_child_panel():
     assert "Multi export preserves scene placement" in source
     assert "spine2d_control_icons" in source
     assert "spine2d_export_preview_animation" in source
+    assert "Connect objects:" not in source
     assert rig_ui.CLASSES == (rig_ui.SPINE2D_OT_ResetRigProfile,)
 
 

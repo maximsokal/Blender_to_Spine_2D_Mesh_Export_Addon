@@ -137,12 +137,12 @@ For multiple selected objects, each object has independent Frames and Start valu
 
 ## Configure multi-object composition
 
-When more than one Mesh is selected, each object receives a Connect checkbox.
+Connected-object controls are currently retained as development-only functionality and are not shown in the production UI.
 
 - No connected objects: standalone multi-object composition.
 - At least two connected objects and no standalone objects: connected composition.
 - Connected and standalone objects together: mixed composition.
-- Exactly one Connect checkbox: the request falls back to standalone export with a warning.
+- The internal connected-composition contract remains available to development integrations.
 
 Connected objects share the connected rig contract. Standalone objects retain independent component rigs inside the final document.
 
@@ -160,14 +160,15 @@ The readiness report can include:
 
 The cached report becomes stale when relevant selection, geometry, UV, material, Scene, renderer, camera, or export settings change. Run analysis again after any such change.
 
-The export button is enabled only when the current report allows export.
+The report is diagnostic-only. Export remains available even when the report is missing,
+stale, or contains blockers.
 
 ## Export one object
 
 1. Make the Mesh active.
 2. Configure settings.
 3. Run Analyze.
-4. Resolve every blocker.
+4. Review any reported blockers and warnings.
 5. Press **Export Current Object**.
 
 The JSON stem is derived from the object name and ends with `_merged.json`. Texture paths are written below the configured Images Subfolder.
@@ -175,10 +176,10 @@ The JSON stem is derived from the object name and ends with `_merged.json`. Text
 ## Export multiple objects
 
 1. Select at least two Mesh objects.
-2. Choose the active object and Connect flags.
+2. Configure the Rig settings if needed.
 3. Configure Scene and per-object Bake settings.
 4. Run Analyze.
-5. Resolve every blocker.
+5. Review any reported blockers and warnings.
 6. Press **Export Selected Objects**.
 
 The output stem uses the first ordered selected object name plus the number of additional selected objects.

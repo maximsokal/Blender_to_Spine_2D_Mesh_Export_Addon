@@ -74,8 +74,8 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene.spine2d_texture_size = 1024
             scene.spine2d_json_path = get_default_output_dir()
             scene.spine2d_images_path = "images/"
-            scene.spine2d_control_icons = True
-            scene.spine2d_export_preview_animation = True
+            scene.spine2d_control_icons = False
+            scene.spine2d_export_preview_animation = False
             scene.spine2d_angle_limit = 30
             scene.spine2d_angular_mode = "SEED_CONE"
             scene.spine2d_local_angle_limit = 30.0
@@ -719,7 +719,7 @@ SCENE_PROPERTIES = (
         bpy.props.BoolProperty(
             name="Control icons",
             description="Export control icons in the final JSON",
-            default=True,
+            default=False,
         ),
     ),
     (
@@ -727,7 +727,7 @@ SCENE_PROPERTIES = (
         bpy.props.BoolProperty(
             name="Preview animation",
             description="Add a preview animation to the final JSON",
-            default=True,
+            default=False,
         ),
     ),
 )

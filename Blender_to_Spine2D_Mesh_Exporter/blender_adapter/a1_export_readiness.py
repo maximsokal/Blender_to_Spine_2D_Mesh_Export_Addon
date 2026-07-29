@@ -256,9 +256,9 @@ def build_a1_readiness_signature(context: Any) -> str:
             ),
             "json_path": str(getattr(scene, "spine2d_json_path", "")),
             "images_path": str(getattr(scene, "spine2d_images_path", "")),
-            "control_icons": bool(getattr(scene, "spine2d_control_icons", True)),
+            "control_icons": bool(getattr(scene, "spine2d_control_icons", False)),
             "preview": bool(
-                getattr(scene, "spine2d_export_preview_animation", True)
+                getattr(scene, "spine2d_export_preview_animation", False)
             ),
             "seam_mode": str(getattr(scene, "spine2d_seam_maker_mode", "AUTO")),
             "angle_limit": _safe_float(

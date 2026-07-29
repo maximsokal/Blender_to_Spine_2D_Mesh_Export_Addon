@@ -368,10 +368,10 @@ def _capture_scene_profile(
         geometry=_resolve_geometry_settings(scene),
         bake_execution=bake_execution,
         include_control_icons=bool(
-            getattr(scene, "spine2d_control_icons", True)
+            getattr(scene, "spine2d_control_icons", False)
         ),
         include_preview_animation=bool(
-            getattr(scene, "spine2d_export_preview_animation", True)
+            getattr(scene, "spine2d_export_preview_animation", False)
         ),
         rig_profile=_resolve_rig_profile(scene),
         material_source_policy=_resolve_material_source_policy(scene),

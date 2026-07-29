@@ -117,8 +117,6 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
         column.prop(scene, "spine2d_images_path", text="Images Subfolder")
         images_full_path = os.path.join(json_full_path, scene.spine2d_images_path)
         column.label(text=os.path.normpath(images_full_path))
-        column.separator()
-        self._draw_export_action(column, context)
 
     def _draw_export_action(
         self,
@@ -128,6 +126,8 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
         """Keep the production export action in the Export foldout."""
 
         row = column.row()
+        row.alert = True
+        row.scale_y = 1.25
         selected_meshes = tuple(
             candidate
             for candidate in getattr(context, "selected_objects", ())
@@ -137,11 +137,13 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
             row.operator(
                 "object.spine2d_single_export",
                 text="Export Current Object",
+                icon="EXPORT",
             )
         else:
             row.operator(
                 "object.spine2d_multi_export",
                 text="Export Selected Objects",
+                icon="EXPORT",
             )
 
     def draw(self, context: bpy.types.Context) -> None:
@@ -223,6 +225,8 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
                     context,
                 ),
             )
+            layout.separator()
+            self._draw_export_action(layout, context)
         except Exception:
             logger.exception("Unable to draw ordered Spine2D Rewrite UI")
             layout.label(text="UI error (see console)", icon="ERROR")
