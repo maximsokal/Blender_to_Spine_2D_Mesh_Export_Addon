@@ -30,6 +30,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
     LegacyRigBuildRequest,
     SpineValidator,
     build_legacy_rig,
+    decode_weighted_vertices,
 )
 
 
@@ -214,4 +215,37 @@ def test_normal_four_face_pyramid_keeps_four_spine_attachments():
         "Pyramid_Segment_2",
         "Pyramid_Segment_3",
     }
+
+    vertex_bone_indices = tuple(
+        index
+        for index, bone in enumerate(result.document.bones)
+        if "_Segment_" in bone.name and "_vertex_" in bone.name
+    )
+    assert len(vertex_bone_indices) == 4
+
+    weighted_indices: list[int] = []
+    weighted_vertex_count = 0
+    for component in result.document_build.components:
+        decoded = decode_weighted_vertices(
+            component.attachment.vertices,
+            expected_vertex_count=len(component.request.vertices),
+        )
+        assert len(decoded) == 3
+        weighted_vertex_count += len(decoded)
+        weighted_indices.extend(
+            vertex.influences[0].bone_index for vertex in decoded
+        )
+        assert all(
+            len(vertex.influences) == 1
+            and (
+                vertex.influences[0].x,
+                vertex.influences[0].y,
+                vertex.influences[0].weight,
+            )
+            == (0.0, 0.0, 1.0)
+            for vertex in decoded
+        )
+
+    assert weighted_vertex_count == 12
+    assert set(weighted_indices) == set(vertex_bone_indices)
     assert SpineValidator().validate(result.document) == ()
