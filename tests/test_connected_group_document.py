@@ -140,11 +140,21 @@ def test_global_rig_contains_required_legacy_names_and_targets():
         "all_objects_layer_1",
     } <= bone_names
 
+    rotation_x = constraint_by_name(
+        result.document,
+        profile.rotation_x_constraint("all_objects"),
+    )
+    assert "scaleY" not in rotation_x.extras
+    assert rotation_x.extras["mixScaleY"] == 0
+
     rotation_z = constraint_by_name(
         result.document,
         profile.rotation_z_constraint("all_objects"),
     )
-    assert rotation_z.bones == ("First", "Second", "Third")
+    assert rotation_z.bones == (
+        "all_objects_layer_0",
+        "all_objects_layer_1",
+    )
     assert rotation_z.target == profile.control_z_bone("all_objects")
 
 
