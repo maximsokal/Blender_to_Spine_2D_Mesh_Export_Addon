@@ -1,4 +1,4 @@
-"""Real Blender 4.4 end-to-end tests for B4 camera-render projection."""
+"""Real Blender 5.2 end-to-end tests for B4 camera-render projection."""
 
 from __future__ import annotations
 
@@ -28,9 +28,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     export_a1_single_object,
     prepare_a1_object,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
-    bake_executor as bake_module,
-)
+import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_execution as render_module  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
     BakeExecutionSettings,
     CameraProjectionPlan,
@@ -424,7 +422,7 @@ def test_forced_render_failure_rolls_back_json_texture_and_visibility() -> None:
         material_before = _material_fingerprint(material)
 
         with mock.patch.object(
-            bake_module,
+            render_module,
             "_call_render_operator",
             side_effect=CameraProjectionExecutionError("forced B4 render failure"),
         ):
