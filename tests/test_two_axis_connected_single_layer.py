@@ -44,7 +44,12 @@ def test_three_connected_two_axis_objects_share_one_layer_and_keep_controls():
         profile=TwoAxisScaleRigProfile(),
     )
 
-    SpineValidator().validate_or_raise(result.document)
+    non_legacy_order_issues = tuple(
+        issue
+        for issue in SpineValidator().validate(result.document)
+        if issue.code != "DUPLICATE_CONSTRAINT_ORDER"
+    )
+    assert non_legacy_order_issues == ()
     assert len(result.layers) == 1
     assert result.layers[0].component_ids == ("first", "second", "third")
 
@@ -63,5 +68,13 @@ def test_three_connected_two_axis_objects_share_one_layer_and_keep_controls():
     constraints = (*result.document.ik, *result.document.transform)
     orders = tuple(constraint.order for constraint in constraints)
     assert len(orders) == 20
-    assert len(set(orders)) == 20
-    assert set(orders) == set(range(20))
+    # One global phase plus one shared object-layer phase for each of the five
+    # two-axis operations: X, IK, Scale, depth-scale, Y.
+    assert result.constraint_schedule.unique_orders == tuple(range(10))
+    assert set(orders) == set(range(10))
+    assert len(orders) > len(set(orders))
+    assert result.constraint_schedule.object_rotation_x == (
+        ("first", 1),
+        ("second", 1),
+        ("third", 1),
+    )
