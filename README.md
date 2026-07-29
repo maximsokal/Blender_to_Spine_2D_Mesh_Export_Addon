@@ -44,6 +44,7 @@ Blender 4.x and Blender 5.0/5.1 are not supported by the current extension packa
 - Cycles semantic object baking with Blender 5.2 EEVEE scene-state restoration.
 - Generated material fallback for missing or intentionally ignored source materials.
 - Single-object, standalone multi-object, connected, and mixed exports.
+- Connected multi-object rigs for both 3-Axis Rotation and 2-Axis Rotation + Scale profiles.
 - Static texture and frame-sequence output.
 - Readiness analysis with structured blockers, warnings, and statistics.
 - Atomic JSON and texture output with rollback and stale work-file recovery.
@@ -76,7 +77,7 @@ Camera Projection is selected explicitly. The exporter does not silently switch 
 2. Save the `.blend` file.
 3. Select one or more Mesh objects in Object Mode.
 4. Open **3D View > Sidebar > Blender to Spine2D Mesh Exporter**.
-5. Choose the export, cut, bake, and generated-material settings.
+5. Choose the export, rig, generated-material, cut, and bake settings.
 6. Run **Analyze** and resolve every blocker.
 7. Run **Export Current Object** or **Export Selected Objects**.
 8. Import the generated JSON and textures into Spine 4.2.
@@ -87,7 +88,7 @@ See the [Usage Guide](docs/usage.md) and [Settings Reference](docs/settings-refe
 
 ![Blender to Spine2D Mesh Exporter interface](assets/ui_addon.png)
 
-The panel exposes Export, Cut, and Bake sections, readiness analysis, single or selected-object export, per-object Connect flags, and a separate Generated Materials panel.
+The panel uses one consistent foldout sequence: Export, Rig, Rewrite Generated Materials, Cut, Bake, and Export Readiness. The final foldout contains readiness analysis and the guarded single-object or selected-object export action. Per-object Connect flags are shown for multi-object export.
 
 ## Output overview
 
@@ -133,7 +134,7 @@ python tools/prepare_package.py --blender <path-to-Blender-5.2-executable>
 
 The resulting ZIP is written to `dist` unless an explicit output path is supplied. Its root contains `blender_manifest.toml` and `__init__.py`.
 
-See [Installation](docs/installation.md) and [Testing](docs/testing.md) for validation commands for the current 0.41.3 candidate.
+See [Installation](docs/installation.md) and [Testing](docs/testing.md) for validation commands for the current 0.47.2 candidate.
 
 ## Project structure
 
