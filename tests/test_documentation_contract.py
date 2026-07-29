@@ -118,7 +118,7 @@ def test_documentation_matches_manifest_and_current_defaults():
     )
     assert match is not None
     version = match.group(1)
-    assert version == "0.47.0"
+    assert version == "0.47.1"
 
     for relative_path in (
         "docs/README.md",
