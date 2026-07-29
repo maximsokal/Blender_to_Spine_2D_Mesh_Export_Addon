@@ -38,7 +38,6 @@ def _resolve_local_target(document: Path, raw_target: str) -> Path | None:
     target = raw_target.strip()
     if not target or target.startswith(("#", "http://", "https://", "mailto:")):
         return None
-
     target = target.split(" ", 1)[0].strip("<>")
     target = unquote(target.split("#", 1)[0].split("?", 1)[0])
     if not target:
@@ -55,7 +54,6 @@ def test_public_documentation_contains_no_cyrillic_characters():
             continue
         line = source.count("\n", 0, match.start()) + 1
         violations.append(f"{path.relative_to(ROOT)}:{line}: {match.group(0)!r}")
-
     assert not violations, "Cyrillic characters found in public documentation:\n" + "\n".join(
         violations
     )
@@ -105,7 +103,6 @@ def test_public_documentation_relative_links_and_images_exist():
                 continue
             if not resolved.exists():
                 missing.append(f"{document.relative_to(ROOT)} -> {raw_target}")
-
     assert not missing, "Broken public documentation links:\n" + "\n".join(missing)
 
 
@@ -118,7 +115,7 @@ def test_documentation_matches_manifest_and_current_defaults():
     )
     assert match is not None
     version = match.group(1)
-    assert version == "0.47.1"
+    assert version == "0.47.2"
 
     for relative_path in (
         "docs/README.md",
@@ -132,6 +129,7 @@ def test_documentation_matches_manifest_and_current_defaults():
     assert "### Seam Maker" in settings
     assert "| Auto | Yes |" in settings
     assert "Normal - UV Segments" in settings
+    assert "dedicated five-phase connected constraint schedule" in settings
 
 
 def test_public_docs_do_not_describe_blender_44_as_supported():
@@ -140,5 +138,4 @@ def test_public_docs_do_not_describe_blender_44_as_supported():
         source = _read(path)
         if "Blender 4.4" in source or "Blender-4.4" in source:
             violations.append(str(path.relative_to(ROOT)))
-
     assert not violations, f"Outdated Blender 4.4 support claims: {violations}"
