@@ -27,7 +27,13 @@ def _build_two_axis_connected_parts(
     profile: TwoAxisScaleRigProfile,
     uniform_scale: float,
 ) -> tuple[Tuple[Bone, ...], Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
-    """Reuse the validated two-axis builder and rename only connected Z-layer bones."""
+    """Build a neutral global two-axis wrapper and rename connected Z-layer bones.
+
+    A connected global rig is a newly generated wrapper around already valid object
+    rigs. It must therefore have a neutral setup pose. Reusing the per-object
+    ``PRESERVE_COMPOSITION`` setup angles would immediately rotate the whole group a
+    second time before the user touches a control.
+    """
 
     if not isinstance(profile, TwoAxisScaleRigProfile):
         raise TypeError("profile must be TwoAxisScaleRigProfile")
@@ -52,7 +58,7 @@ def _build_two_axis_connected_parts(
             z_groups=z_groups,
             main_position_pixels=(0.0, 0.0),
             scale_mode=settings.scale_mode,
-            setup_pose_mode=A1RigSetupPoseMode.PRESERVE_COMPOSITION,
+            setup_pose_mode=A1RigSetupPoseMode.NORMALIZED_SINGLE,
         ),
         profile=profile,
     )
@@ -120,7 +126,7 @@ def _build_legacy_global_bones(
     profile: LegacyRigProfile,
     uniform_scale: float,
 ) -> Tuple[Bone, ...]:
-    """Build the historical three-axis global connected hierarchy unchanged."""
+    """Build the three-axis global connected hierarchy."""
 
     half_scale = uniform_scale / 2.0
     prefix = settings.group_prefix
@@ -257,7 +263,7 @@ def _build_legacy_global_constraints(
     profile: LegacyRigProfile,
     uniform_scale: float,
 ) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
-    """Build the historical three-axis global connected constraints unchanged."""
+    """Build a setup-safe three-axis global connected constraint chain."""
 
     prefix = settings.group_prefix
     half_scale = uniform_scale / 2.0
@@ -266,7 +272,7 @@ def _build_legacy_global_constraints(
     control_x, control_y, control_z = profile.control_bones(prefix)
     constraint, _, constraint_rotate, constraint_ik = profile.ik_chain_bones(prefix)
     scale_bones = tuple(layer.scale_bone_name for layer in layers)
-    object_base_bones = tuple(profile.base_bone(item.prefix) for item in objects)
+    layer_bones = tuple(layer.layer_bone_name for layer in layers)
 
     ik = (
         IKConstraint(
@@ -290,9 +296,13 @@ def _build_legacy_global_constraints(
                 "x": -(uniform_scale * 2.0),
                 "y": -half_scale,
                 "scaleX": -1,
-                "scaleY": -1,
                 "mixX": 0,
                 "mixScaleX": 0,
+                # Spine 4.2 defaults omitted scale mixes to 1. A historical
+                # scaleY=-1 offset therefore collapsed the connected hierarchy to
+                # zero height in setup pose. The global X controller must never own
+                # Y scale, so disable that channel explicitly.
+                "mixScaleY": 0,
                 "mixShearY": 0,
             },
         ),
@@ -314,7 +324,10 @@ def _build_legacy_global_constraints(
         TransformConstraint(
             name=profile.rotation_z_constraint(prefix),
             order=schedule.global_rotation_z,
-            bones=object_base_bones,
+            # Operate on generated wrapper layers, not object base bones. Local
+            # object X/Y/Z constraints remain below the wrapper and cannot overwrite
+            # or be overwritten by the group Z rotation.
+            bones=layer_bones,
             target=control_z,
             extras={
                 "local": True,
