@@ -1,7 +1,6 @@
 from dataclasses import replace
 
 import pytest
-
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
     ConnectedGroupBuildError,
     ConnectedGroupSettings,
@@ -108,10 +107,12 @@ def test_main_bones_are_reparented_and_offset_after_composition():
     second = bone_by_name(result.document, "Second_main")
     third = bone_by_name(result.document, "Third_main")
     assert (first.parent, first.x, first.y) == ("all_objects_layer_1", 0.0, 0.0)
+    # The parent layer already contributes +200 setup Y for relative Z=2. The
+    # object main keeps only the remaining +100 local Y so its setup world Y is +300.
     assert (second.parent, second.x, second.y) == (
         "all_objects_layer_0",
         200.0,
-        300.0,
+        100.0,
     )
     assert (third.parent, third.x, third.y) == (
         "all_objects_layer_1",
