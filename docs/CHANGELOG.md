@@ -4,7 +4,22 @@ This changelog records public product releases. Internal development milestones 
 
 ## Unreleased candidate status
 
-Version 0.47.3 is a development candidate and is not validated for release. It includes the 0.47.2 connected-profile implementation and repairs the setup-pose transform spaces discovered by importing representative connected exports into Spine 4.2. The candidate must not be merged or released until all automated layers and fresh manual Blender-to-Spine exports pass on the same commit.
+Version 0.47.4 is a development candidate and is not validated for release. Manual import of the 0.47.3 connected pyramid outputs showed that structural neutrality checks were insufficient: Spine 4.2 still evaluated non-zero wrapper constraint deltas and layer depth was added to visible Y placement twice. The candidate must not be merged or released until all automated layers and fresh manual Blender-to-Spine exports pass on the same commit.
+
+## [0.47.4] - 2026-07-29
+
+### Added
+
+- Runtime-formula regressions that evaluate connected relative-local constraint setup deltas rather than checking only bone names and serialized control rotations.
+- Blender-headless assertions for final setup world placement, wrapper rotation deltas, and three-axis global scale channel ownership.
+- A dedicated immutable connected setup-correction owner executed after global constraints and object placements are composed.
+
+### Fixed
+
+- Global connected Rotation X and Rotation Y no longer reuse per-object calibration offsets in the group wrapper; the wrapper now contributes zero rotation, translation, scale, and shear delta in setup pose.
+- Global three-axis Rotation Z now uses relative-local rotation-only behavior, preserving the `-90` setup rotation of connected layer bones instead of replacing it with zero.
+- Global three-axis scale now disables rotation and translation while enabling both scale channels.
+- Connected object main bones subtract the setup Y already contributed by their generated Z layer, so Blender Z is not added to visible Spine Y a second time.
 
 ## [0.47.3] - 2026-07-29
 
@@ -15,10 +30,14 @@ Version 0.47.3 is a development candidate and is not validated for release. It i
 
 ### Fixed
 
-- The generated global `TWO_AXIS_ROTATION_SCALE` wrapper now uses a neutral setup pose instead of applying the reference X/Y angles a second time to the connected group.
+- The generated global `TWO_AXIS_ROTATION_SCALE` wrapper uses a neutral control-bone setup pose instead of applying the reference X/Y angles directly to global control bones.
 - Per-object two-axis Scale controls are parented to their own `<prefix>_main` bones and converted to main-local coordinates, so controls and targets follow connected placement together.
 - The global three-axis Rotation X constraint no longer applies a setup Y-scale offset that collapses the connected skeleton to zero height in Spine 4.2.
-- Global three-axis Rotation Z now operates on generated connected wrapper layers rather than overlapping the individual object base-bone constraint chains.
+- Global three-axis Rotation Z operates on generated connected wrapper layers rather than overlapping the individual object base-bone constraint chains.
+
+### Known issue
+
+- Manual Spine import showed that global constraint offsets and connected layer placement still produced a non-neutral setup pose. These defects are superseded by 0.47.4.
 
 ## [0.47.2] - 2026-07-29
 
@@ -74,7 +93,7 @@ Version 0.47.3 is a development candidate and is not validated for release. It i
 ### Fixed
 
 - Semantic baking no longer replaces the source material render UV with generated `SpineBakeUV`.
-- Texture Coordinate UV and Image Texture nodes now continue to sample the original render UV while Blender writes to the generated destination layout.
+- Texture Coordinate UV and Image Texture nodes continue to sample the original render UV while Blender writes to the generated destination layout.
 - `bpy.ops.object.bake` receives the destination UV layer explicitly instead of inferring it from the shader render role.
 - The representative sword material graph is covered by a Blender 5.2 headless regression: Texture Coordinate UV to Mapping to Image Texture to Principled BSDF.
 
