@@ -54,6 +54,35 @@ def _two_axis_sources(sources):
     )
 
 
+def _assert_neutral_connected_setup(document: dict) -> None:
+    """Validate the setup-pose fields that Spine evaluates before animation."""
+
+    bones = {bone["name"]: bone for bone in document["bones"]}
+    for control_name in ("all_objects_rotation_X", "all_objects_rotation_Y"):
+        _assert(
+            float(bones[control_name].get("rotation", 0.0)) == 0.0,
+            f"global connected control has non-neutral setup rotation: {bones[control_name]}",
+        )
+
+    for prefix in ("ObjectA", "ObjectB"):
+        main = bones[f"{prefix}_main"]
+        scale = bones[f"{prefix}_scale"]
+        _assert(
+            scale.get("parent") == f"{prefix}_main",
+            f"{prefix} scale control is outside object control space: {scale}",
+        )
+        # The source fixture uses the same 64 px control offset for both objects.
+        # Parent-local coordinates must not contain the object's world placement.
+        _assert(
+            float(scale.get("x", 0.0)) == 64.0,
+            f"{prefix} scale control local X is wrong: main={main}, scale={scale}",
+        )
+        _assert(
+            float(scale.get("y", 0.0)) == -16.0,
+            f"{prefix} scale control local Y is wrong: main={main}, scale={scale}",
+        )
+
+
 def test_connected_two_axis_export_builds_global_and_object_controls() -> None:
     _clear_scene()
     with tempfile.TemporaryDirectory(
@@ -137,6 +166,7 @@ def test_connected_two_axis_export_builds_global_and_object_controls() -> None:
             float(bones["ObjectB_main"].get("y", 0.0)) == 32.0,
             "two-axis ObjectB Y offset wrong",
         )
+        _assert_neutral_connected_setup(document)
 
         constraints = tuple(document.get("ik", ())) + tuple(
             document.get("transform", ())
