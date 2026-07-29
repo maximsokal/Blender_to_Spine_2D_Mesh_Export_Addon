@@ -100,19 +100,17 @@ def test_layers_are_clustered_top_down_and_offsets_use_first_anchor():
     assert placements["third"].layer_index == 1
 
 
-def test_main_bones_are_reparented_and_offset_after_composition():
+def test_main_bones_are_reparented_and_keep_full_legacy_xy_offsets():
     result = build_connected_group_document(connected_objects(), settings())
 
     first = bone_by_name(result.document, "First_main")
     second = bone_by_name(result.document, "Second_main")
     third = bone_by_name(result.document, "Third_main")
     assert (first.parent, first.x, first.y) == ("all_objects_layer_1", 0.0, 0.0)
-    # The parent layer already contributes +200 setup Y for relative Z=2. The
-    # object main keeps only the remaining +100 local Y so its setup world Y is +300.
     assert (second.parent, second.x, second.y) == (
         "all_objects_layer_0",
         200.0,
-        100.0,
+        300.0,
     )
     assert (third.parent, third.x, third.y) == (
         "all_objects_layer_1",
@@ -120,7 +118,12 @@ def test_main_bones_are_reparented_and_offset_after_composition():
         -200.0,
     )
     assert tuple(bone.name for bone in result.document.bones).count("root") == 1
-    assert SpineValidator().validate(result.document) == ()
+    non_legacy_order_issues = tuple(
+        issue
+        for issue in SpineValidator().validate(result.document)
+        if issue.code != "DUPLICATE_CONSTRAINT_ORDER"
+    )
+    assert non_legacy_order_issues == ()
 
 
 def test_global_rig_contains_required_legacy_names_and_targets():
@@ -145,36 +148,51 @@ def test_global_rig_contains_required_legacy_names_and_targets():
         result.document,
         profile.rotation_x_constraint("all_objects"),
     )
-    assert "scaleY" not in rotation_x.extras
-    assert rotation_x.extras["mixScaleY"] == 0
+    assert rotation_x.bones == (
+        "all_objects_0_scale",
+        "all_objects_1_scale",
+        "all_objects",
+    )
+    assert rotation_x.extras["rotation"] == 90
+    assert rotation_x.extras["x"] == -200.0
+    assert rotation_x.extras["y"] == -50.0
+    assert rotation_x.extras["scaleX"] == -1
+    assert rotation_x.extras["scaleY"] == -1
 
     rotation_z = constraint_by_name(
         result.document,
         profile.rotation_z_constraint("all_objects"),
     )
-    assert rotation_z.bones == (
-        "all_objects_layer_0",
-        "all_objects_layer_1",
-    )
+    assert rotation_z.bones == ("First", "Second", "Third")
     assert rotation_z.target == profile.control_z_bone("all_objects")
+    assert rotation_z.extras == {
+        "local": True,
+        "mixX": 0,
+        "mixScaleX": 0,
+        "mixShearY": 0,
+    }
 
 
-def test_constraint_schedule_is_contiguous_and_unique_for_same_layer_objects():
+def test_constraint_schedule_uses_shared_orders_for_same_layer_objects():
     result = build_connected_group_document(connected_objects(), settings())
     schedule = result.constraint_schedule
 
-    assert schedule.all_orders == tuple(range(len(schedule.all_orders)))
+    assert schedule.unique_orders == tuple(range(15))
     assert schedule.object_rotation_x == (
-        ("second", 3),
         ("first", 4),
-        ("third", 5),
+        ("second", 3),
+        ("third", 4),
     )
     all_constraints = (*result.document.ik, *result.document.transform)
     all_orders = tuple(constraint.order for constraint in all_constraints)
-    assert len(all_orders) == len(set(all_orders))
-    assert set(all_orders) == set(schedule.all_orders)
-    assert constraint_by_name(result.document, "First_scale_compensator").order != (
-        constraint_by_name(result.document, "Third_scale_compensator").order
+    assert set(all_orders) == set(schedule.unique_orders)
+    assert len(all_orders) > len(set(all_orders))
+    assert constraint_by_name(result.document, "First_rotation_X").order == (
+        constraint_by_name(result.document, "Third_rotation_X").order
+    )
+    assert not any(
+        constraint.name.endswith("_scale_compensator")
+        for constraint in all_constraints
     )
 
 
