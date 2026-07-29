@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Tuple
 
 from .composition import (
+    ConstraintOrderAssignment,
     ConstraintOrderPolicy,
     SpineCompositionSettings,
     SpineDocumentComponent,
@@ -123,6 +124,75 @@ def _validate_connected_final(document: SpineDocument) -> None:
         )
 
 
+def _connected_constraint_assignments(
+    document: SpineDocument,
+    objects: Tuple[ConnectedObjectDocument, ...],
+    group_component_id: str,
+) -> Tuple[ConstraintOrderAssignment, ...]:
+    """Describe the actual final connected orders instead of temporary rebase values."""
+
+    if not isinstance(document, SpineDocument):
+        raise TypeError("document must be SpineDocument")
+    if not isinstance(objects, tuple) or not objects:
+        raise ValueError("objects must be a non-empty tuple")
+    if not isinstance(group_component_id, str) or not group_component_id.strip():
+        raise ValueError("group_component_id must be a non-empty string")
+
+    owner_and_original: dict[str, tuple[str, str, int]] = {}
+    for item in objects:
+        for constraint_type, constraints in (
+            ("ik", item.document.ik),
+            ("transform", item.document.transform),
+        ):
+            for constraint in constraints:
+                if constraint.name in owner_and_original:
+                    raise ConnectedGroupBuildError(
+                        f"Constraint metadata name is duplicated: {constraint.name}"
+                    )
+                owner_and_original[constraint.name] = (
+                    item.component_id,
+                    constraint_type,
+                    constraint.order,
+                )
+
+    assignments: list[ConstraintOrderAssignment] = []
+    found_names: set[str] = set()
+    for constraint_type, constraints in (
+        ("ik", document.ik),
+        ("transform", document.transform),
+    ):
+        for constraint in constraints:
+            found_names.add(constraint.name)
+            owner = owner_and_original.get(constraint.name)
+            if owner is None:
+                component_id = group_component_id
+                original_order = constraint.order
+            else:
+                component_id, expected_type, original_order = owner
+                if expected_type != constraint_type:
+                    raise ConnectedGroupBuildError(
+                        f"Constraint '{constraint.name}' changed collection from "
+                        f"{expected_type} to {constraint_type}"
+                    )
+            assignments.append(
+                ConstraintOrderAssignment(
+                    component_id=component_id,
+                    constraint_type=constraint_type,
+                    constraint_name=constraint.name,
+                    original_order=original_order,
+                    global_order=constraint.order,
+                )
+            )
+
+    missing = set(owner_and_original) - found_names
+    if missing:
+        raise ConnectedGroupBuildError(
+            "Connected composition lost constraint metadata for: "
+            f"{tuple(sorted(missing))}"
+        )
+    return tuple(assignments)
+
+
 def build_connected_group_document(
     objects: Tuple[ConnectedObjectDocument, ...],
     settings: ConnectedGroupSettings,
@@ -166,6 +236,7 @@ def build_connected_group_document(
         normalize_connected_object_control_space(item, resolved_profile)
         for item in objects
     )
+    group_component_id = f"__{settings.group_prefix}_rig__"
     object_components = tuple(
         SpineDocumentComponent(
             component_id=item.component_id,
@@ -177,7 +248,7 @@ def build_connected_group_document(
     composition = compose_spine_documents(
         (
             SpineDocumentComponent(
-                component_id=f"__{settings.group_prefix}_rig__",
+                component_id=group_component_id,
                 document=global_document,
                 animation_namespace=settings.group_prefix,
             ),
@@ -243,7 +314,15 @@ def build_connected_group_document(
     )
     _validate_connected_final(final_document)
 
-    composition = replace(composition, document=final_document)
+    composition = replace(
+        composition,
+        document=final_document,
+        constraint_orders=_connected_constraint_assignments(
+            final_document,
+            normalized_objects,
+            group_component_id,
+        ),
+    )
     return ConnectedGroupBuildResult(
         document=final_document,
         composition=composition,
