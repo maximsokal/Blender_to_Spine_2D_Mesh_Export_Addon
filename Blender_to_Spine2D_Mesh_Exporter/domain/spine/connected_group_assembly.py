@@ -1,4 +1,4 @@
-"""Assemble connected A1 object documents under one global profile-aware rig."""
+"""Assemble connected A1 object documents under one profile-aware global rig."""
 
 from __future__ import annotations
 
@@ -27,8 +27,8 @@ from .connected_group_global_rig import (
 from .connected_group_layout import resolve_layers_and_placements
 from .connected_group_object_setup import normalize_connected_object_control_space
 from .connected_group_schedule import (
+    apply_connected_constraint_schedule,
     build_constraint_schedule,
-    reorder_object_constraints,
 )
 from .connected_group_setup_correction import correct_connected_setup_pose
 from .connected_group_validation import (
@@ -38,6 +38,7 @@ from .connected_group_validation import (
 from .legacy_profile import LegacyRigProfile
 from .legacy_rig_scale import calculate_uniform_scale
 from .model import Bone, SpineDocument
+from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from .validator import SpineValidator
 
 
@@ -46,17 +47,13 @@ def apply_object_placements(
     placements: Tuple[ConnectedObjectPlacement, ...],
     uniform_scale: float,
 ) -> SpineDocument:
-    """Reparent object main bones in their declared connected coordinate space.
+    """Reparent object mains and preserve the historical full XY offset.
 
-    Connected object-bake documents intentionally keep only document-local XY on
-    ``<prefix>_main``. That local value compensates for centering attachment vertex bones
-    around the geometry bounding-box midpoint. Connected composition adds the
-    anchor-relative Object translation to this existing offset instead of replacing it.
-
-    Camera-projection documents already encode screen-space XY in attachment vertices;
-    their main-bone coordinates are preserved while only the Z-layer parent changes.
-    The generated layer's own setup translation is compensated later by
-    ``correct_connected_setup_pose`` after the global wrapper constraints are inserted.
+    The Legacy connected wrapper stores no setup translation on its generated Z layers,
+    so ``<prefix>_main`` receives the complete anchor-relative Blender X/Y translation,
+    exactly as ``main._apply_offsets`` did. The two-axis wrapper still has profile-owned
+    layer setup translation; that profile alone is compensated after global constraints
+    are assembled.
     """
 
     placement_by_main = {
@@ -76,11 +73,13 @@ def apply_object_placements(
                     bone,
                     parent=placement.parent_layer_bone_name,
                     x=round(
-                        float(bone.x) + placement.relative_x * uniform_scale,
+                        float(bone.x or 0.0)
+                        + placement.relative_x * float(uniform_scale),
                         2,
                     ),
                     y=round(
-                        float(bone.y) + placement.relative_y * uniform_scale,
+                        float(bone.y or 0.0)
+                        + placement.relative_y * float(uniform_scale),
                         2,
                     ),
                 )
@@ -107,12 +106,39 @@ def apply_object_placements(
     return replace(document, bones=tuple(updated_bones))
 
 
+def _stable_constraint_order(document: SpineDocument) -> SpineDocument:
+    """Sort by order only, preserving input object order for same-layer ties."""
+
+    return replace(
+        document,
+        ik=tuple(sorted(document.ik, key=lambda item: item.order)),
+        transform=tuple(sorted(document.transform, key=lambda item: item.order)),
+    )
+
+
+def _validate_connected_final(document: SpineDocument) -> None:
+    """Validate everything except intentional Legacy same-layer order sharing."""
+
+    issues = tuple(
+        issue
+        for issue in SpineValidator().validate(document)
+        if issue.code != "DUPLICATE_CONSTRAINT_ORDER"
+    )
+    if issues:
+        details = "\n".join(
+            f"- [{issue.code}] {issue.path}: {issue.message}" for issue in issues
+        )
+        raise ConnectedGroupBuildError(
+            "Connected A1 group failed final validation:\n" + details
+        )
+
+
 def build_connected_group_document(
     objects: Tuple[ConnectedObjectDocument, ...],
     settings: ConnectedGroupSettings,
     profile: LegacyRigProfile | None = None,
 ) -> ConnectedGroupBuildResult:
-    """Compose A1 object documents under one collision-free global control rig."""
+    """Compose A1 object documents under one Legacy-compatible connected wrapper."""
 
     if not isinstance(settings, ConnectedGroupSettings):
         raise TypeError("settings must be ConnectedGroupSettings")
@@ -153,11 +179,7 @@ def build_connected_group_document(
     object_components = tuple(
         SpineDocumentComponent(
             component_id=item.component_id,
-            document=reorder_object_constraints(
-                item,
-                schedule,
-                resolved_profile,
-            ),
+            document=item.document,
             animation_namespace=(item.animation_namespace or item.component_id),
         )
         for item in normalized_objects
@@ -173,7 +195,9 @@ def build_connected_group_document(
         ),
         SpineCompositionSettings(
             shared_bone_names=(resolved_profile.root_bone(),),
-            constraint_order_policy=ConstraintOrderPolicy.PRESERVE,
+            # Generic composition remains collision-strict. Final Legacy layer orders are
+            # applied only after every weighted bone index has been safely remapped.
+            constraint_order_policy=ConstraintOrderPolicy.REBASE_CONTIGUOUS,
             namespace_animations=settings.namespace_animations,
             animation_separator=settings.animation_separator,
         ),
@@ -197,36 +221,35 @@ def build_connected_group_document(
         resolved_profile,
         uniform_scale,
     )
-    final_document = replace(
+    with_global_constraints = replace(
         placed_document,
-        ik=tuple(
-            sorted(
-                (*placed_document.ik, *global_ik),
-                key=lambda item: (item.order, item.name),
-            )
-        ),
-        transform=tuple(
-            sorted(
-                (*placed_document.transform, *global_transform),
-                key=lambda item: (item.order, item.name),
-            )
-        ),
+        ik=(*placed_document.ik, *global_ik),
+        transform=(*placed_document.transform, *global_transform),
     )
-    final_document = correct_connected_setup_pose(
-        final_document,
+
+    profile_id = resolve_a1_rig_profile(resolved_profile.profile_id)
+    if profile_id is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
+        # Two-axis generated layers intentionally store depth in setup Y. Compensate that
+        # profile only; the Legacy connected layers are neutral and need no correction.
+        with_global_constraints = correct_connected_setup_pose(
+            with_global_constraints,
+            normalized_objects,
+            layers,
+            placements,
+            resolved_profile,
+            settings.group_prefix,
+            uniform_scale,
+        )
+
+    scheduled_document = apply_connected_constraint_schedule(
+        with_global_constraints,
         normalized_objects,
-        layers,
-        placements,
+        schedule,
         resolved_profile,
         settings.group_prefix,
-        uniform_scale,
     )
-    try:
-        SpineValidator().validate_or_raise(final_document)
-    except Exception as exc:
-        raise ConnectedGroupBuildError(
-            f"Connected A1 group failed final validation: {exc}"
-        ) from exc
+    final_document = _stable_constraint_order(scheduled_document)
+    _validate_connected_final(final_document)
 
     composition = replace(composition, document=final_document)
     return ConnectedGroupBuildResult(
