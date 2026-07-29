@@ -149,6 +149,56 @@ def _prepare_state(output_directory: Path):
     )
 
 
+def _number(mapping: dict[str, object], key: str) -> float:
+    value = mapping.get(key, 0.0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise AssertionError(f"{key} must be numeric, got {value!r}")
+    return float(value)
+
+
+def _connected_setup_translation(
+    bones: dict[str, dict[str, object]],
+    main_bone_name: str,
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    """Return main-local, generated-layer, and visible setup translations.
+
+    Connected object mains are parented to ``all_objects_layer_*``. That layer is
+    itself parented to ``all_objects_*_scale``, whose setup Y stores the connected
+    depth offset. The object's visible Blender XY is therefore the sum of these
+    three local translations, not the value stored on ``<object>_main`` alone.
+    """
+
+    try:
+        main = bones[main_bone_name]
+        layer_name = main["parent"]
+        if not isinstance(layer_name, str):
+            raise AssertionError(
+                f"{main_bone_name} parent must be a string, got {layer_name!r}"
+            )
+        layer = bones[layer_name]
+        scale_name = layer["parent"]
+        if not isinstance(scale_name, str):
+            raise AssertionError(
+                f"{layer_name} parent must be a string, got {scale_name!r}"
+            )
+        scale = bones[scale_name]
+    except KeyError as exc:
+        raise AssertionError(
+            f"connected setup chain is incomplete for {main_bone_name}: {exc.args[0]}"
+        ) from exc
+
+    main_local = (_number(main, "x"), _number(main, "y"))
+    layer_setup = (
+        _number(layer, "x") + _number(scale, "x"),
+        _number(layer, "y") + _number(scale, "y"),
+    )
+    visible_setup = (
+        main_local[0] + layer_setup[0],
+        main_local[1] + layer_setup[1],
+    )
+    return main_local, layer_setup, visible_setup
+
+
 def _assert_state_restored(
     *,
     context_before,
@@ -266,10 +316,54 @@ def test_connected_multi_export_builds_global_rig_and_offsets() -> None:
             bones["ObjectB_main"]["parent"] == "all_objects_layer_0",
             f"elevated object layer is wrong: {bones['ObjectB_main']}",
         )
-        _assert(float(bones["ObjectA_main"].get("x", 0.0)) == 0.0, "anchor X moved")
-        _assert(float(bones["ObjectA_main"].get("y", 0.0)) == 0.0, "anchor Y moved")
-        _assert(float(bones["ObjectB_main"].get("x", 0.0)) == 64.0, "ObjectB X offset wrong")
-        _assert(float(bones["ObjectB_main"].get("y", 0.0)) == 32.0, "ObjectB Y offset wrong")
+
+        anchor_location = sources[0].source_object.matrix_world.translation
+        elevated_location = sources[1].source_object.matrix_world.translation
+        export_settings = sources[0].settings.export
+        uniform_scale = (
+            float(export_settings.texture_width)
+            + float(export_settings.texture_height)
+        ) / 2.0
+        expected_visible = (
+            round((elevated_location.x - anchor_location.x) * uniform_scale, 2),
+            round((elevated_location.y - anchor_location.y) * uniform_scale, 2),
+        )
+        expected_layer = (
+            0.0,
+            round((elevated_location.z - anchor_location.z) * uniform_scale, 2),
+        )
+        expected_main_local = (
+            expected_visible[0] - expected_layer[0],
+            expected_visible[1] - expected_layer[1],
+        )
+
+        anchor_main, anchor_layer, anchor_visible = _connected_setup_translation(
+            bones,
+            "ObjectA_main",
+        )
+        object_b_main, object_b_layer, object_b_visible = (
+            _connected_setup_translation(bones, "ObjectB_main")
+        )
+        _assert(anchor_main == (0.0, 0.0), f"anchor main moved: {anchor_main}")
+        _assert(anchor_layer == (0.0, 0.0), f"anchor layer moved: {anchor_layer}")
+        _assert(
+            anchor_visible == (0.0, 0.0),
+            f"anchor visible setup moved: {anchor_visible}",
+        )
+        _assert(
+            object_b_layer == expected_layer,
+            f"ObjectB depth layer offset wrong: {object_b_layer} != {expected_layer}",
+        )
+        _assert(
+            object_b_main == expected_main_local,
+            f"ObjectB compensated local offset wrong: "
+            f"{object_b_main} != {expected_main_local}",
+        )
+        _assert(
+            object_b_visible == expected_visible,
+            f"ObjectB visible setup offset wrong: "
+            f"{object_b_visible} != {expected_visible}",
+        )
 
         constraints = tuple(document.get("ik", ())) + tuple(document.get("transform", ()))
         orders = tuple(int(item["order"]) for item in constraints)
