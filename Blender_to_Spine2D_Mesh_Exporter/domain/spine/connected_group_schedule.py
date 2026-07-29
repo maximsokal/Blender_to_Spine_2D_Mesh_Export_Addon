@@ -16,6 +16,12 @@ from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from .two_axis_scale_profile import TwoAxisScaleRigProfile
 
 
+# The old single-object builder always serialized the compensator at order 6. The
+# historical connected merger did not renumber or remove it, so exact main-branch
+# parity requires preserving this value for every connected three-axis object.
+_LEGACY_SCALE_COMPENSATOR_ORDER = 6
+
+
 def _layer_count(placements: Tuple[ConnectedObjectPlacement, ...]) -> int:
     if not isinstance(placements, tuple) or not placements:
         raise ValueError("placements must be a non-empty tuple")
@@ -28,12 +34,7 @@ def _assign_layer_phase(
     placements: Tuple[ConnectedObjectPlacement, ...],
     first_order: int,
 ) -> tuple[Tuple[Tuple[str, int], ...], int]:
-    """Assign one order per Z layer while preserving source component order.
-
-    This is the exact behavior of ``main/multi_object_export.py``: two objects in the
-    same Z group share an evaluation order, but their JSON list order remains the input
-    object order.
-    """
+    """Assign one order per Z layer while preserving source component order."""
 
     count = _layer_count(placements)
     assignments = tuple(
@@ -47,7 +48,7 @@ def _build_legacy_schedule(
     placements: Tuple[ConnectedObjectPlacement, ...],
     profile: LegacyRigProfile,
 ) -> ConnectedConstraintSchedule:
-    """Reproduce the connected order formula from the historical ``main`` branch."""
+    """Reproduce the connected order formula from historical ``main``."""
 
     next_order = 0
     global_rotation_x = next_order
@@ -80,6 +81,8 @@ def _build_legacy_schedule(
         global_scale=global_scale,
         object_scale=object_scale,
         object_rotation_z=object_rotation_z,
+        # Compensators keep their original standalone order and are intentionally not
+        # part of the layer-phase model, exactly like main._renumber_object_constraints.
         object_scale_compensator=(),
         profile_id=profile.profile_id,
     )
@@ -89,7 +92,7 @@ def _build_two_axis_schedule(
     placements: Tuple[ConnectedObjectPlacement, ...],
     profile: TwoAxisScaleRigProfile,
 ) -> ConnectedConstraintSchedule:
-    """Generalize Legacy layer phases to the five two-axis rig operations."""
+    """Generalize Legacy layer phases to the five two-axis operations."""
 
     next_order = 0
     global_rotation_x = next_order
@@ -157,55 +160,52 @@ def _object_order_by_name(
     item: ConnectedObjectDocument,
     schedule: ConnectedConstraintSchedule,
     profile: LegacyRigProfile,
-) -> tuple[dict[str, int], set[str]]:
+) -> dict[str, int]:
     profile_id = resolve_a1_rig_profile(profile.profile_id)
     if profile_id is A1RigProfile.THREE_AXIS_ROTATION:
-        return (
-            {
-                profile.rotation_x_constraint(item.prefix): schedule.order_for(
-                    "object_rotation_x", item.component_id
-                ),
-                profile.rotation_y_constraint(item.prefix): schedule.order_for(
-                    "object_rotation_y", item.component_id
-                ),
-                profile.scale_ik_constraint(item.prefix): schedule.order_for(
-                    "object_scale_ik", item.component_id
-                ),
-                profile.scale_constraint(item.prefix): schedule.order_for(
-                    "object_scale", item.component_id
-                ),
-                profile.rotation_z_constraint(item.prefix): schedule.order_for(
-                    "object_rotation_z", item.component_id
-                ),
-            },
-            {profile.scale_compensator_constraint(item.prefix)},
-        )
+        return {
+            profile.rotation_x_constraint(item.prefix): schedule.order_for(
+                "object_rotation_x", item.component_id
+            ),
+            profile.rotation_y_constraint(item.prefix): schedule.order_for(
+                "object_rotation_y", item.component_id
+            ),
+            profile.scale_ik_constraint(item.prefix): schedule.order_for(
+                "object_scale_ik", item.component_id
+            ),
+            profile.scale_constraint(item.prefix): schedule.order_for(
+                "object_scale", item.component_id
+            ),
+            profile.rotation_z_constraint(item.prefix): schedule.order_for(
+                "object_rotation_z", item.component_id
+            ),
+            profile.scale_compensator_constraint(
+                item.prefix
+            ): _LEGACY_SCALE_COMPENSATOR_ORDER,
+        }
     if profile_id is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
         if not isinstance(profile, TwoAxisScaleRigProfile):
             raise TypeError(
                 "TWO_AXIS_ROTATION_SCALE constraint scheduling requires "
                 "TwoAxisScaleRigProfile"
             )
-        return (
-            {
-                profile.rotation_x_constraint(item.prefix): schedule.order_for(
-                    "object_rotation_x", item.component_id
-                ),
-                profile.scale_ik_constraint(item.prefix): schedule.order_for(
-                    "object_scale_ik", item.component_id
-                ),
-                profile.scale_constraint(item.prefix): schedule.order_for(
-                    "object_scale", item.component_id
-                ),
-                profile.scale_depth_constraint(item.prefix): schedule.order_for(
-                    "object_scale_depth", item.component_id
-                ),
-                profile.rotation_y_constraint(item.prefix): schedule.order_for(
-                    "object_rotation_y", item.component_id
-                ),
-            },
-            set(),
-        )
+        return {
+            profile.rotation_x_constraint(item.prefix): schedule.order_for(
+                "object_rotation_x", item.component_id
+            ),
+            profile.scale_ik_constraint(item.prefix): schedule.order_for(
+                "object_scale_ik", item.component_id
+            ),
+            profile.scale_constraint(item.prefix): schedule.order_for(
+                "object_scale", item.component_id
+            ),
+            profile.scale_depth_constraint(item.prefix): schedule.order_for(
+                "object_scale_depth", item.component_id
+            ),
+            profile.rotation_y_constraint(item.prefix): schedule.order_for(
+                "object_rotation_y", item.component_id
+            ),
+        }
     raise AssertionError(f"Unhandled connected rig profile: {profile_id}")
 
 
@@ -214,7 +214,7 @@ def reorder_object_constraints(
     schedule: ConnectedConstraintSchedule,
     profile: LegacyRigProfile,
 ) -> SpineDocument:
-    """Return one object document with connected orders and Legacy-only drops applied."""
+    """Return one object document with connected Legacy-compatible orders."""
 
     if not isinstance(item, ConnectedObjectDocument):
         raise TypeError("item must be ConnectedObjectDocument")
@@ -223,15 +223,14 @@ def reorder_object_constraints(
     if not isinstance(profile, LegacyRigProfile):
         raise TypeError("profile must be LegacyRigProfile")
 
-    order_by_name, drop_names = _object_order_by_name(item, schedule, profile)
+    order_by_name = _object_order_by_name(item, schedule, profile)
     actual_names = {
         constraint.name for constraint in (*item.document.ik, *item.document.transform)
     }
-    expected_names = set(order_by_name) | drop_names
-    if actual_names != expected_names:
+    if actual_names != set(order_by_name):
         raise ValueError(
             f"Connected object '{item.component_id}' constraint names changed after "
-            f"validation: expected={tuple(sorted(expected_names))}, "
+            f"validation: expected={tuple(sorted(order_by_name))}, "
             f"actual={tuple(sorted(actual_names))}"
         )
 
@@ -240,12 +239,10 @@ def reorder_object_constraints(
         ik=tuple(
             replace(constraint, order=order_by_name[constraint.name])
             for constraint in item.document.ik
-            if constraint.name not in drop_names
         ),
         transform=tuple(
             replace(constraint, order=order_by_name[constraint.name])
             for constraint in item.document.transform
-            if constraint.name not in drop_names
         ),
     )
 
@@ -257,12 +254,7 @@ def apply_connected_constraint_schedule(
     profile: LegacyRigProfile,
     group_prefix: str,
 ) -> SpineDocument:
-    """Apply final global and object orders after safe typed composition.
-
-    Generic document composition remains collision-strict. Connected Legacy parity is
-    applied only after bone-index remapping, allowing same-layer order values without
-    weakening the generic composer.
-    """
+    """Apply final global and object orders after safe typed composition."""
 
     if not isinstance(document, SpineDocument):
         raise TypeError("document must be SpineDocument")
@@ -302,9 +294,8 @@ def apply_connected_constraint_schedule(
     else:
         raise AssertionError(f"Unhandled connected rig profile: {profile_id}")
 
-    drop_names: set[str] = set()
     for item in objects:
-        object_orders, object_drops = _object_order_by_name(item, schedule, profile)
+        object_orders = _object_order_by_name(item, schedule, profile)
         overlap = set(order_by_name).intersection(object_orders)
         if overlap:
             raise ValueError(
@@ -312,17 +303,15 @@ def apply_connected_constraint_schedule(
                 f"{tuple(sorted(overlap))}"
             )
         order_by_name.update(object_orders)
-        drop_names.update(object_drops)
 
     actual_names = {
         constraint.name for constraint in (*document.ik, *document.transform)
     }
-    expected_names = set(order_by_name) | drop_names
-    if actual_names != expected_names:
+    if actual_names != set(order_by_name):
         raise ValueError(
             "Connected final constraint schema differs from the scheduled schema: "
-            f"missing={tuple(sorted(expected_names - actual_names))}, "
-            f"unexpected={tuple(sorted(actual_names - expected_names))}"
+            f"missing={tuple(sorted(set(order_by_name) - actual_names))}, "
+            f"unexpected={tuple(sorted(actual_names - set(order_by_name)))}"
         )
 
     return replace(
@@ -330,12 +319,10 @@ def apply_connected_constraint_schedule(
         ik=tuple(
             replace(constraint, order=order_by_name[constraint.name])
             for constraint in document.ik
-            if constraint.name not in drop_names
         ),
         transform=tuple(
             replace(constraint, order=order_by_name[constraint.name])
             for constraint in document.transform
-            if constraint.name not in drop_names
         ),
     )
 
