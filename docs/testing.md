@@ -46,7 +46,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Do not use fail-fast for final evidence. A release run must expose every failure.
 
-## Focused 0.47.2 geometry, rig, pivot, and material regression
+## Focused 0.47.3 geometry, rig, pivot, and material regression
 
 ```powershell
 $FocusedTests = @(
@@ -59,6 +59,8 @@ $FocusedTests = @(
     "tests/test_two_axis_scale_rig_builder.py",
     "tests/test_two_axis_multi_placement.py",
     "tests/test_two_axis_connected_policy.py",
+    "tests/test_two_axis_connected_single_layer.py",
+    "tests/test_connected_setup_pose_regression.py",
     "tests/test_connected_group_document.py",
     "tests/test_connected_group_split_architecture.py",
     "tests/test_a1_object_origin_offset.py",
@@ -81,7 +83,7 @@ $FocusedTests = @(
     --durations=20
 
 if ($LASTEXITCODE -ne 0) {
-    throw "0.47.2 focused regressions failed"
+    throw "0.47.3 focused regressions failed"
 }
 ```
 
@@ -98,7 +100,11 @@ These tests verify:
 - same-XY vertices in different Z parents remain independent;
 - single-object two-axis controls serialize with neutral setup rotation;
 - connected two-axis documents retain global and per-object X/Y/Scale controls;
-- connected two-axis constraints use one unique contiguous five-phase schedule;
+- the connected global two-axis wrapper has a neutral setup pose;
+- per-object two-axis Scale controls use their own main-local coordinate space;
+- the connected three-axis global X constraint cannot mix or collapse Y scale;
+- the connected three-axis global Z constraint targets wrapper layers instead of object base chains;
+- connected constraints use unique contiguous profile-specific schedules;
 - connected weighted attachment indices remain valid after global rig insertion;
 - Blender Object Origin remains the exported rotation pivot;
 - old saved Scenes retain the compatibility rig while genuinely fresh Scenes use the two-axis default;
@@ -144,9 +150,51 @@ if (-not (Test-Path -LiteralPath $Blender -PathType Leaf)) {
 
 Every headless command must include `--python-exit-code 1`.
 
-## Edge-on two-axis multi-object integration
+## Connected setup-pose gates
 
-This is the direct regression for a multi-object asset containing a valid three-dimensional side wall that collapses only after projection into Spine X/Y.
+The two connected regressions below validate the serialized fields that Spine evaluates in setup mode, not only bone names and constraint order.
+
+### Two-axis connected setup
+
+```powershell
+& $Blender `
+    --background `
+    --factory-startup `
+    --python-exit-code 1 `
+    --python "tests\blender_headless\run_two_axis_connected_multi_object_integration.py"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Connected two-axis setup integration failed"
+}
+```
+
+Expected marker:
+
+```text
+[TWO_AXIS_CONNECTED_MULTI] PASS test_connected_two_axis_export_builds_global_and_object_controls
+```
+
+### Three-axis connected setup
+
+```powershell
+& $Blender `
+    --background `
+    --factory-startup `
+    --python-exit-code 1 `
+    --python "tests\blender_headless\run_connected_setup_pose_integration.py"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Connected three-axis setup integration failed"
+}
+```
+
+Expected marker:
+
+```text
+[CONNECTED_SETUP_POSE] PASS test_connected_three_axis_setup_pose_is_not_collapsed
+```
+
+## Edge-on two-axis multi-object integration
 
 ```powershell
 & $Blender `
@@ -232,28 +280,6 @@ Expected marker:
 [MULTI] PASS 3 integration tests
 ```
 
-## Connected two-axis multi-object integration
-
-This regression executes the production connected path with two live Blender objects using `TWO_AXIS_ROTATION_SCALE`. It verifies global controls, independent per-object controls, connected layer placement, unique constraint orders, texture output, and Blender state restoration.
-
-```powershell
-& $Blender `
-    --background `
-    --factory-startup `
-    --python-exit-code 1 `
-    --python "tests\blender_headless\run_two_axis_connected_multi_object_integration.py"
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Connected two-axis multi-object integration failed"
-}
-```
-
-Expected marker:
-
-```text
-[TWO_AXIS_CONNECTED_MULTI] PASS test_connected_two_axis_export_builds_global_and_object_controls
-```
-
 ## Directional Spine UV integration
 
 ```powershell
@@ -286,8 +312,6 @@ Expected marker:
 [SPINE_MATERIAL_CORRESPONDENCE] PASS
 ```
 
-This fixture intentionally uses different geometry-corner and source-material-UV orders. Its expected colors are derived from the source geometry and source UV contract rather than from another exported stream.
-
 ## Source render UV role integration
 
 ```powershell
@@ -308,18 +332,7 @@ Expected marker:
 [PASS] test_source_render_uv_is_not_replaced_by_spine_bake_uv
 ```
 
-This fixture reproduces the representative sword material graph:
-
-```text
-Texture Coordinate UV
--> Mapping
--> Image Texture
--> Principled BSDF
-```
-
-It verifies that the original source render UV samples the material while the independently active `SpineBakeUV` receives the bake output.
-
-## Build version 0.47.2
+## Build version 0.47.3
 
 ```powershell
 Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
@@ -333,7 +346,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Get-Item `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.47.2.zip" |
+    ".\dist\blender_to_spine2d_mesh_exporter-0.47.3.zip" |
     Select-Object FullName, Length, LastWriteTime
 ```
 
@@ -342,7 +355,7 @@ Get-Item `
 ```powershell
 & $Blender `
     --command extension validate `
-    ".\dist\blender_to_spine2d_mesh_exporter-0.47.2.zip"
+    ".\dist\blender_to_spine2d_mesh_exporter-0.47.3.zip"
 
 if ($LASTEXITCODE -ne 0) {
     throw "Built extension validation failed"
