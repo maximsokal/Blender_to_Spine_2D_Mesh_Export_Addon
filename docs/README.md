@@ -21,7 +21,7 @@ This directory contains the maintained public documentation for Blender to Spine
 
 ## Supported product baseline
 
-- Extension version: 0.47.0.
+- Extension version: 0.47.1.
 - Minimum Blender version: 5.2.0.
 - Primary Spine target: 4.2.43.
 - Currently tested desktop platform: Windows.
