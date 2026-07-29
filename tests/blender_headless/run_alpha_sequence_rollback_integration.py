@@ -24,9 +24,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     read_source_mesh_snapshot,
     unwrap_snapshot_uv,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
-    bake_executor as public_bake_executor,
-)
+import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.semantic_bake_execution as bake_module  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
     BakeExecutionSettings,
     BakeMode,
@@ -248,18 +246,27 @@ def test_failure_on_alpha_pass_rolls_back_existing_png_and_restores_state() -> N
         scene_before = _capture_scene_bake_state()
         material_before = _material_fingerprint(material)
 
-        original_call = public_bake_executor._call_bake_operator
+        original_call = bake_module._call_bake_operator
         call_count = 0
 
-        def fail_on_alpha_pass(bpy_module, bake_type):
+        def fail_on_alpha_pass(
+            bpy_module,
+            bake_type,
+            *,
+            uv_layer_name,
+        ):
             nonlocal call_count
             call_count += 1
             if call_count == 2:
                 raise BakeExecutionError("forced alpha pass failure")
-            return original_call(bpy_module, bake_type)
+            return original_call(
+                bpy_module,
+                bake_type,
+                uv_layer_name=uv_layer_name,
+            )
 
         with mock.patch.object(
-            public_bake_executor,
+            bake_module,
             "_call_bake_operator",
             side_effect=fail_on_alpha_pass,
         ):
