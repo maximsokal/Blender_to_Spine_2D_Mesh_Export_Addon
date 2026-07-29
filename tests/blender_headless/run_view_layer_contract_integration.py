@@ -1,4 +1,4 @@
-"""Blender 4.4 regression for B4 active View Layer source visibility."""
+"""Blender 5.2 regression for B4 active View Layer source visibility."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     export_a1_single_object,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import bake_executor as bake_module  # noqa: E402
+import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_execution as render_module  # noqa: E402
 from run_bake_integration import _assert, _temporary_datablock_names  # noqa: E402
 from run_camera_projection_integration import (  # noqa: E402
     _create_layer_weight_material,
@@ -68,7 +68,7 @@ def test_holdout_only_source_is_rejected_before_render() -> None:
         view_layer.update()
 
         with mock.patch.object(
-            bake_module,
+            render_module,
             "_call_render_operator",
             side_effect=AssertionError("render operator must not run for Holdout source"),
         ):
