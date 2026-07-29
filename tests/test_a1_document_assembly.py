@@ -71,7 +71,7 @@ def test_two_regions_assemble_into_one_valid_spine_document():
     assert SpineValidator().validate(result.document) == ()
 
 
-def test_document_assembly_assigns_cumulative_weighted_bone_ranges():
+def test_document_assembly_shares_weighted_bones_for_region_boundary_vertices():
     _, z_plan, rig, regions, settings = build_inputs()
     result = assemble_a1_document(rig, z_plan, regions, settings)
     first, second = result.document_build.components
@@ -86,15 +86,23 @@ def test_document_assembly_assigns_cumulative_weighted_bone_ranges():
         expected_vertex_count=len(second.request.vertices),
     )
 
+    # Face 0 owns source vertices 0, 1, 2. Face 1 owns 0, 2, 3, so its
+    # first two attachment vertices must reuse the canonical bones from face 0.
     assert tuple(item.influences[0].bone_index for item in first_stream) == (
         base,
         base + 1,
         base + 2,
     )
     assert tuple(item.influences[0].bone_index for item in second_stream) == (
+        base,
+        base + 2,
         base + 3,
-        base + 4,
-        base + 5,
+    )
+    assert len(result.document.bones) == base + 4
+    assert second.vertex_bone_start_index == base
+    assert tuple(bone.name for bone in second.vertex_bones[:2]) == (
+        "Cube_Segment_0_vertex_0",
+        "Cube_Segment_0_vertex_2",
     )
 
 
