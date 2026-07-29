@@ -4,7 +4,23 @@ This changelog records public product releases. Internal development milestones 
 
 ## Unreleased candidate status
 
-Version 0.47.1 is a development candidate and is not validated for release. It includes the 0.47.0 rig, pivot, migration, and shared vertex-bone changes plus deterministic filtering of edge-on faces that have no area in Spine X/Y projection space. The candidate must not be merged or released until all automated layers and fresh manual Blender-to-Spine exports pass on the same commit.
+Version 0.47.2 is a development candidate and is not validated for release. It includes the 0.47.1 projected-region fixes and adds a dedicated connected multi-object implementation for `TWO_AXIS_ROTATION_SCALE`. The candidate must not be merged or released until all automated layers and fresh manual Blender-to-Spine exports pass on the same commit.
+
+## [0.47.2] - 2026-07-29
+
+### Added
+
+- Profile-aware connected constraint schedules that preserve the existing six-constraint three-axis order and add a dedicated five-phase two-axis order.
+- A connected global X/Y/Scale rig built through the validated two-axis rig owner rather than through a synthetic legacy constraint.
+- Pure weighted-index, placement, namespace, control, and constraint-order regressions for connected two-axis documents.
+- A Blender 5.2 headless connected multi-object regression verifying global and per-object X/Y/Scale controls.
+
+### Fixed
+
+- Connected export no longer rejects `TWO_AXIS_ROTATION_SCALE` before document composition.
+- Every connected two-axis object retains its own X, Y, and Scale controls while the subgroup receives independent global X, Y, and Scale controls.
+- Global and object constraints receive unique contiguous orders across Rotation X, IK, Uniform Scale, X Depth Scale, and Rotation Y phases.
+- Weighted attachment indices continue to be remapped after the global connected bones are inserted.
 
 ## [0.47.1] - 2026-07-29
 
@@ -118,32 +134,3 @@ Version 0.47.1 is a development candidate and is not validated for release. It i
 ### Changed
 
 - Replaced Legacy production orchestration with explicit application, domain, Blender adapter, and infrastructure boundaries.
-- Camera Projection is selected explicitly and is never an automatic fallback from Normal mode.
-- Semantic object baking uses a transactional Cycles path and restores Blender 5.2 EEVEE Scene state.
-- Normal bake images are converted to Spine file-space row orientation before save.
-- Staged texture validation samples exported Spine UVs against the saved image contract.
-- Seam Maker defaults to Auto.
-- Older development scenes below settings schema 3 migrate once to Auto; later deliberate Custom choices are preserved.
-- Public documentation now describes only maintained product behavior and uses English-only content checks.
-
-### Removed
-
-- Temporary Rewrite milestone documents from the public documentation directory.
-- Development-only fixture manifest examples from the public user documentation.
-- Blender 4.x compatibility claims from the current extension package.
-- Legacy modules from the built Blender 5.2 extension archive.
-
-### Fixed
-
-- Registration-time Seam Maker callbacks no longer mark restored Custom values as deliberate user edits before migration.
-- Source UV guards no longer intercept unrelated typed stage validation for non-Mesh test doubles.
-- Original request UV bounds are validated before inset pixel sampling.
-- Texture planning and object preparation orchestration remain below architecture size limits.
-- Blender-loaded staged PNG sampling accounts for Spine file-space vertical orientation.
-- Float32 pixel-buffer tests use precision-aware comparisons without hiding row-order errors.
-
-## [0.23.0] - 2025-08-20
-
-### Added
-
-- Initial public Legacy release of the add-on.
