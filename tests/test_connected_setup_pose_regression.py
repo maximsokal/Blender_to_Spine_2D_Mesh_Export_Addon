@@ -1,4 +1,4 @@
-"""Setup-pose regressions derived from real Spine 4.2 connected exports."""
+"""Connected setup regressions derived from real Spine 4.2 exports."""
 
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
     ConnectedGroupSettings,
@@ -56,7 +56,7 @@ def test_connected_two_axis_scale_controls_follow_each_object_main():
         assert composed[scale_name].y == expected_y
 
 
-def test_connected_three_axis_global_x_never_collapses_y_scale():
+def test_connected_three_axis_global_x_keeps_exact_main_payload():
     profile = LegacyRigProfile()
     result = build_connected_group_document(
         connected_objects(),
@@ -68,11 +68,26 @@ def test_connected_three_axis_global_x_never_collapses_y_scale():
         profile.rotation_x_constraint("all_objects"),
     )
 
-    assert "scaleY" not in rotation_x.extras
-    assert rotation_x.extras["mixScaleY"] == 0
+    assert rotation_x.bones == (
+        "all_objects_0_scale",
+        "all_objects_1_scale",
+        "all_objects",
+    )
+    assert rotation_x.extras == {
+        "rotation": 90,
+        "local": True,
+        "relative": True,
+        "x": -200.0,
+        "y": -50.0,
+        "scaleX": -1,
+        "scaleY": -1,
+        "mixX": 0,
+        "mixScaleX": 0,
+        "mixShearY": 0,
+    }
 
 
-def test_connected_three_axis_global_z_uses_wrapper_layers():
+def test_connected_three_axis_global_z_targets_object_base_bones():
     profile = LegacyRigProfile()
     result = build_connected_group_document(
         connected_objects(),
@@ -84,7 +99,11 @@ def test_connected_three_axis_global_z_uses_wrapper_layers():
         profile.rotation_z_constraint("all_objects"),
     )
 
-    assert rotation_z.bones == (
-        "all_objects_layer_0",
-        "all_objects_layer_1",
-    )
+    assert rotation_z.bones == ("First", "Second", "Third")
+    assert rotation_z.target == "all_objects_rotation_Z"
+    assert rotation_z.extras == {
+        "local": True,
+        "mixX": 0,
+        "mixScaleX": 0,
+        "mixShearY": 0,
+    }
