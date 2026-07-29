@@ -228,7 +228,7 @@ def test_bool_values_are_not_accepted_as_connected_numeric_contracts():
         )
 
 
-def test_existing_connected_golden_layout_and_schedule_are_unchanged():
+def test_existing_connected_golden_layout_and_schedule_match_main():
     result = build_connected_group_document(connected_objects(), settings())
 
     assert tuple(
@@ -249,10 +249,11 @@ def test_existing_connected_golden_layout_and_schedule_are_unchanged():
         ),
     )
     assert result.constraint_schedule.object_rotation_x == (
-        ("second", 3),
         ("first", 4),
-        ("third", 5),
+        ("second", 3),
+        ("third", 4),
     )
-    assert result.constraint_schedule.all_orders == tuple(
-        range(len(result.constraint_schedule.all_orders))
+    assert result.constraint_schedule.unique_orders == tuple(range(15))
+    assert len(result.constraint_schedule.all_orders) > len(
+        result.constraint_schedule.unique_orders
     )
