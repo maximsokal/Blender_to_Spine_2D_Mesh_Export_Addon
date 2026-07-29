@@ -2,7 +2,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-
 from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1MeshBounds,
     A1SingleObjectExportSettings,
@@ -69,7 +68,7 @@ def _offset_snapshot(
     )
 
 
-def test_object_bake_main_position_preserves_offset_geometry_around_object_origin():
+def test_object_bake_main_position_uses_world_object_origin_only():
     snapshot = _offset_snapshot(
         offset_x=2.5,
         offset_y=-4.5,
@@ -82,10 +81,10 @@ def test_object_bake_main_position_preserves_offset_geometry_around_object_origi
         _settings(),
     )
 
-    assert result == (1300.0, 2400.0)
+    assert result == (1000.0, 2000.0)
 
 
-def test_centered_attachment_and_main_offset_reconstruct_original_world_xy():
+def test_origin_relative_attachment_and_main_reconstruct_original_world_xy():
     snapshot = _offset_snapshot(
         offset_x=2.5,
         offset_y=-4.5,
@@ -96,19 +95,17 @@ def test_centered_attachment_and_main_offset_reconstruct_original_world_xy():
         snapshot,
         _settings(),
     )
-    center_x = 3.0
-    center_y = -4.0
     vertex_x = 5.0
     vertex_y = -1.0
     scale = 100.0
-    centered_vertex_x = (vertex_x - center_x) * scale
-    centered_vertex_y = -(vertex_y - center_y) * scale
+    origin_relative_vertex_x = vertex_x * scale
+    origin_relative_vertex_y = -vertex_y * scale
 
-    assert main_x + centered_vertex_x == 10.0 * scale + vertex_x * scale
-    assert main_y + centered_vertex_y == 20.0 * scale - vertex_y * scale
+    assert main_x + origin_relative_vertex_x == (10.0 + vertex_x) * scale
+    assert main_y + origin_relative_vertex_y == (20.0 - vertex_y) * scale
 
 
-def test_connected_preparation_keeps_only_document_local_geometry_offset():
+def test_connected_preparation_keeps_neutral_document_local_origin():
     snapshot = _offset_snapshot(
         offset_x=-3.0,
         offset_y=0.75,
@@ -121,10 +118,10 @@ def test_connected_preparation_keeps_only_document_local_geometry_offset():
         _settings(use_world_location_for_main_bone=False),
     )
 
-    assert result == (-250.0, -125.0)
+    assert result == (0.0, 0.0)
 
 
-def test_centered_geometry_does_not_change_existing_world_position():
+def test_centered_geometry_does_not_change_existing_world_origin():
     source = build_square_snapshot()
     snapshot = replace(
         source,
@@ -165,6 +162,30 @@ def test_centered_geometry_does_not_change_existing_world_position():
     )
 
     assert result == (-320.0, 640.0)
+
+
+def test_valid_cached_bounds_never_move_the_object_origin():
+    snapshot = _offset_snapshot(
+        offset_x=2.5,
+        offset_y=-4.5,
+        world_x=10.0,
+        world_y=20.0,
+    )
+
+    result = calculate_a1_object_bake_main_position_pixels(
+        snapshot,
+        _settings(),
+        bounds=A1MeshBounds(
+            minimum_x=100.0,
+            maximum_x=200.0,
+            minimum_y=-50.0,
+            maximum_y=10.0,
+            center_x=150.0,
+            center_y=-20.0,
+        ),
+    )
+
+    assert result == (1000.0, 2000.0)
 
 
 def test_object_bake_main_position_rejects_invalid_contract_types():
@@ -212,7 +233,6 @@ def test_object_bake_main_position_rejects_inconsistent_cached_center():
 
 def test_object_bake_main_position_rejects_cached_midpoint_overflow():
     huge = 1.0e308
-
     with pytest.raises(ValueError, match="bounds.expected_center_x must be finite"):
         calculate_a1_object_bake_main_position_pixels(
             build_square_snapshot(),
@@ -221,15 +241,18 @@ def test_object_bake_main_position_rejects_cached_midpoint_overflow():
         )
 
 
-def test_object_bake_main_position_rejects_derived_coordinate_overflow():
-    # The midpoint remains finite, but applying the 100-pixel rig scale overflows.
-    huge = 2.0e306
+def test_object_bake_main_position_rejects_world_origin_overflow():
+    snapshot = _offset_snapshot(
+        offset_x=0.0,
+        offset_y=0.0,
+        world_x=2.0e306,
+        world_y=0.0,
+    )
 
-    with pytest.raises(ValueError, match="object_bake_main_x must be finite"):
+    with pytest.raises(ValueError, match="object_origin_main_x must be finite"):
         calculate_a1_object_bake_main_position_pixels(
-            build_square_snapshot(),
+            snapshot,
             _settings(),
-            bounds=A1MeshBounds(huge, huge, 0.0, 0.0, huge, 0.0),
         )
 
 
@@ -251,3 +274,5 @@ def test_object_bake_placement_math_has_one_blender_independent_owner():
     assert "import bpy" not in application_source
     assert "def _combine_object_bake_main_position_pixels" not in adapter_source
     assert "calculate_a1_object_bake_main_position_pixels(" in adapter_source
+    assert "center_x=0.0" in adapter_source
+    assert "center_y=0.0" in adapter_source
