@@ -19,7 +19,7 @@ Rig
 Rewrite Generated Materials
 Cut
 Bake
-Export Readiness
+Analysis
 ```
 
 The Rig foldout contains the profile selector, control-icon toggle, preview-animation toggle, and a profile-specific description. Changing the profile invalidates cached readiness and schedules a new analysis. The dedicated Rig reset restores `TWO_AXIS_ROTATION_SCALE`.

@@ -89,7 +89,7 @@ See the [Usage Guide](docs/usage.md) and [Settings Reference](docs/settings-refe
 
 ![Blender to Spine2D Mesh Exporter interface](assets/ui_addon.png)
 
-The panel uses one consistent foldout sequence: Export, Rig, Rewrite Generated Materials, Cut, Bake, and Export Readiness. The final foldout contains readiness analysis and the guarded single-object or selected-object export action. Per-object Connect flags are shown for multi-object export.
+The panel uses one consistent foldout sequence: Export, Rig, Rewrite Generated Materials, Cut, Bake, and Analysis. Export mode and per-object Connect flags are grouped under Rig. Analysis is collapsed by default, runs only when Analyze is pressed, and never disables export.
 
 ## Output overview
 

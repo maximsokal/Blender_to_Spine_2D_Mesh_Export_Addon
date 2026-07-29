@@ -12,7 +12,6 @@ import bpy
 from . import rig_ui, ui
 from .blender_adapter import generated_material_ui
 from .config import get_default_output_dir
-from .domain.baking import A1TextureExportMode
 from .infrastructure.blender_registration import (
     RnaPropertyRegistration,
     register_rna_properties_transactionally,
@@ -100,34 +99,12 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
         column: bpy.types.UILayout,
         context: bpy.types.Context,
     ) -> None:
-        """Draw export settings without duplicating controls owned by Rig."""
+        """Draw output paths and the production export action.
+
+        Export mode and connected-object controls are owned by the Rig foldout.
+        """
 
         scene = context.scene
-        column.prop(scene, "spine2d_texture_export_mode", text="Export mode")
-        texture_mode = str(
-            getattr(
-                scene,
-                "spine2d_texture_export_mode",
-                A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
-            )
-        ).upper()
-        if texture_mode == A1TextureExportMode.CAMERA_PROJECTION.value:
-            column.label(
-                text="Active camera render → one screen-space mesh",
-                icon="CAMERA_DATA",
-            )
-            column.prop(
-                scene,
-                "spine2d_projection_alpha_threshold",
-                text="Projection alpha threshold",
-            )
-        else:
-            column.label(
-                text="Preserves cut regions and generated UV meshes",
-                icon="UV",
-            )
-        column.separator()
-
         column.prop(scene, "spine2d_texture_size", text="Texture size")
         column.separator()
         column.prop(scene, "spine2d_json_path", text="JSON")
@@ -140,34 +117,17 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
         column.prop(scene, "spine2d_images_path", text="Images Subfolder")
         images_full_path = os.path.join(json_full_path, scene.spine2d_images_path)
         column.label(text=os.path.normpath(images_full_path))
+        column.separator()
+        self._draw_export_action(column, context)
 
-        selected_meshes = tuple(
-            candidate
-            for candidate in getattr(context, "selected_objects", ())
-            if getattr(candidate, "type", None) == "MESH"
-        )
-        if len(selected_meshes) > 1:
-            column.separator()
-            column.label(text="Connect objects:")
-            for selected_object in selected_meshes:
-                row = column.row(align=True)
-                row.label(text=selected_object.name, icon="MESH_DATA")
-                row.prop(
-                    selected_object.spine2d_connect_settings,
-                    "enabled",
-                    text="",
-                )
-
-    def _draw_readiness_and_export(
+    def _draw_export_action(
         self,
         column: bpy.types.UILayout,
         context: bpy.types.Context,
     ) -> None:
-        """Keep analysis and the guarded export action in one final foldout."""
+        """Keep the production export action in the Export foldout."""
 
-        export_allowed = self._draw_readiness(column, context)
         row = column.row()
-        row.enabled = export_allowed
         selected_meshes = tuple(
             candidate
             for candidate in getattr(context, "selected_objects", ())
@@ -256,9 +216,9 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
             self._draw_foldout(
                 layout,
                 scene,
-                property_name="spine2d_show_readiness",
-                title="Export Readiness",
-                draw_content=lambda content: self._draw_readiness_and_export(
+                property_name="spine2d_show_analysis",
+                title="Analysis",
+                draw_content=lambda content: self._draw_readiness(
                     content,
                     context,
                 ),
@@ -289,11 +249,11 @@ RNA_PROPERTIES = (
     ),
     RnaPropertyRegistration(
         owner=bpy.types.Scene,
-        name="spine2d_show_readiness",
+        name="spine2d_show_analysis",
         value=bpy.props.BoolProperty(
-            name="Show Export Readiness",
-            default=True,
-            description="Show or hide analysis results and export actions",
+            name="Show Analysis",
+            default=False,
+            description="Show or hide the manually triggered readiness analysis",
         ),
     ),
 )

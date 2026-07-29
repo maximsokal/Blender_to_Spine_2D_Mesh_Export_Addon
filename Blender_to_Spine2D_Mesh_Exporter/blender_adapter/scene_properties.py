@@ -54,7 +54,7 @@ def _invalidate_readiness_for_setting(
     *,
     reason: str,
 ) -> None:
-    """Invalidate cached analysis and request one debounced replacement."""
+    """Invalidate cached analysis; refresh is deliberately manual."""
 
     scene = getattr(context, "scene", None)
     try:
@@ -65,18 +65,8 @@ def _invalidate_readiness_for_setting(
     except Exception:
         logger.exception("Unable to invalidate readiness after %s", reason)
 
-    try:
-        from .. import auto_readiness
-
-        auto_readiness.request_auto_analysis(context, reason=reason)
-    except Exception:
-        # Registration, file loading, and test doubles may not expose the automatic
-        # readiness owner yet. The cache has already been invalidated above.
-        logger.debug(
-            "Automatic readiness is unavailable after %s",
-            reason,
-            exc_info=True,
-        )
+    # Do not schedule background analysis here. A settings edit must never start
+    # production work or make the UI busy; the user explicitly presses Analyze.
 
 
 def _update_texture_export_mode(_self: Any, context: bpy.types.Context) -> None:

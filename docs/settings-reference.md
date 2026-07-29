@@ -12,10 +12,10 @@ Rig
 Rewrite Generated Materials
 Cut
 Bake
-Export Readiness
+Analysis
 ```
 
-Analysis results and the guarded export action are contained inside the final **Export Readiness** foldout. Rig and generated-material settings are no longer separate child panels below the export action.
+Analysis results are contained inside the final **Analysis** foldout, which is collapsed by default. The export action remains in **Export**; analysis is manual and diagnostic-only, so it never disables export. Export mode and connected-object controls are grouped under **Rig**.
 
 ## Export
 

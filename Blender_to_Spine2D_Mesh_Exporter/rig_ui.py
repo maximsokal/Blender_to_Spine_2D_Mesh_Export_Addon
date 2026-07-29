@@ -9,6 +9,7 @@ from typing import Set
 import bpy
 
 from .domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
+from .domain.baking import A1TextureExportMode
 from .infrastructure.blender_registration import (
     class_cleanup_actions,
     register_classes_transactionally,
@@ -26,6 +27,26 @@ def draw_rig_settings(
     """Draw rig settings inside the main panel's standard foldout container."""
 
     scene = context.scene
+    layout.label(text="Texture export", icon="TEXTURE")
+    layout.prop(scene, "spine2d_texture_export_mode", text="Export mode")
+    texture_mode = str(getattr(scene, "spine2d_texture_export_mode", A1TextureExportMode.NORMAL_UV_SEGMENTS.value)).upper()
+    if texture_mode == A1TextureExportMode.CAMERA_PROJECTION.value:
+        layout.label(text="Active camera render -> one screen-space mesh", icon="CAMERA_DATA")
+        layout.prop(scene, "spine2d_projection_alpha_threshold", text="Projection alpha threshold")
+    else:
+        layout.label(text="Preserves cut regions and generated UV meshes", icon="UV")
+    selected_meshes = tuple(
+        candidate for candidate in getattr(context, "selected_objects", ())
+        if getattr(candidate, "type", None) == "MESH"
+    )
+    if len(selected_meshes) > 1:
+        layout.separator()
+        layout.label(text="Connect objects:")
+        for selected_object in selected_meshes:
+            row = layout.row(align=True)
+            row.label(text=selected_object.name, icon="MESH_DATA")
+            row.prop(selected_object.spine2d_connect_settings, "enabled", text="")
+    layout.separator()
     row = layout.row(align=True)
     row.prop(scene, "spine2d_rig_profile", text="Rig profile")
     row.operator(

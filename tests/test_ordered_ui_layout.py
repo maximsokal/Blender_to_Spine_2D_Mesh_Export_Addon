@@ -14,7 +14,7 @@ EXPECTED_TITLES = (
     "Rewrite Generated Materials",
     "Cut",
     "Bake",
-    "Export Readiness",
+    "Analysis",
 )
 
 
@@ -47,13 +47,16 @@ def test_all_secondary_sections_use_the_same_main_foldout_owner():
 def test_export_controls_are_not_duplicated_outside_rig_foldout():
     ordered = _source(ui_layout)
     export_start = ordered.index("def _draw_export_settings(")
-    readiness_start = ordered.index("def _draw_readiness_and_export(")
-    export_source = ordered[export_start:readiness_start]
+    export_source = ordered[export_start:ordered.index("def _draw_export_action(")]
 
     assert "spine2d_control_icons" not in export_source
     assert "spine2d_export_preview_animation" not in export_source
+    assert "spine2d_texture_export_mode" not in export_source
+    assert "spine2d_connect_settings" not in export_source
     assert "spine2d_control_icons" in _source(rig_ui)
     assert "spine2d_export_preview_animation" in _source(rig_ui)
+    assert "spine2d_texture_export_mode" in _source(rig_ui)
+    assert "spine2d_connect_settings" in _source(rig_ui)
 
 
 def test_ordered_layout_replaces_and_restores_the_original_panel_transactionally():
@@ -66,15 +69,13 @@ def test_ordered_layout_replaces_and_restores_the_original_panel_transactionally
     assert "ordered UI RNA registration rollback" in source
 
 
-def test_readiness_is_the_final_foldout_and_owns_the_export_action():
+def test_analysis_is_the_final_foldout_and_export_action_is_in_export():
     source = _source(ui_layout)
-    readiness_title = source.index('title="Export Readiness"')
+    analysis_title = source.index('title="Analysis"')
     single_export = source.index('"object.spine2d_single_export"')
     multi_export = source.index('"object.spine2d_multi_export"')
 
-    assert single_export < readiness_title
-    assert multi_export < readiness_title
-    # The action helper is referenced by the final foldout and nothing is drawn below it.
-    tail = source[readiness_title:source.index("except Exception:", readiness_title)]
-    assert "_draw_readiness_and_export" in tail
-    assert "self._draw_foldout(" not in tail[tail.index("_draw_readiness_and_export") + 1:]
+    assert single_export < analysis_title
+    assert multi_export < analysis_title
+    assert 'property_name="spine2d_show_analysis"' in source
+    assert 'default=False' in source[source.index('name="Show Analysis"'):]

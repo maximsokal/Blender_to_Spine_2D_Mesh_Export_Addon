@@ -547,15 +547,13 @@ def register() -> None:
     _LAST_KEY = None
     try:
         _patch_ui(ui)
-        _install_handlers()
+        # Readiness is a user-triggered diagnostic. Keep the compatibility patch
+        # for non-blocking export, but do not install timers or file/depsgraph
+        # callbacks that would run analysis in the background.
         _REGISTERED = True
-        _register_timer()
-        request_auto_analysis(bpy.context, reason="automatic analysis registered")
     except Exception:
         logger.exception("Unable to register automatic readiness service")
         _REGISTERED = False
-        _unregister_timer()
-        _remove_handlers()
         _restore_ui(ui)
         _UI_MODULE = None
         raise
@@ -567,8 +565,6 @@ def unregister() -> None:
 
     ui_module = _UI_MODULE
     _REGISTERED = False
-    _unregister_timer()
-    _remove_handlers()
     if ui_module is not None:
         _restore_ui(ui_module)
     _cancel_pending()
