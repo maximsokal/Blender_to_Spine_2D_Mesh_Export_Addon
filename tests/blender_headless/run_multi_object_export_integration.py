@@ -52,6 +52,7 @@ from run_bake_integration import (  # noqa: E402
     _capture_context,
     _capture_scene_bake_state,
     _clear_scene,
+    _configure_cycles_scene,
     _create_emission_material,
     _create_quad,
     _create_sentinel,
@@ -133,6 +134,7 @@ def _multi_settings(
 
 
 def _prepare_state(output_directory: Path):
+    _configure_cycles_scene()
     sources, materials = _build_sources(output_directory)
     sentinel = _create_sentinel()
     _activate_only(sentinel)
