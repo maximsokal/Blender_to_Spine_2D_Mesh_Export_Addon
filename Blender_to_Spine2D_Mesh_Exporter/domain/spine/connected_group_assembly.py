@@ -106,16 +106,6 @@ def apply_object_placements(
     return replace(document, bones=tuple(updated_bones))
 
 
-def _stable_constraint_order(document: SpineDocument) -> SpineDocument:
-    """Sort by order only, preserving input object order for same-layer ties."""
-
-    return replace(
-        document,
-        ik=tuple(sorted(document.ik, key=lambda item: item.order)),
-        transform=tuple(sorted(document.transform, key=lambda item: item.order)),
-    )
-
-
 def _validate_connected_final(document: SpineDocument) -> None:
     """Validate everything except intentional Legacy same-layer order sharing."""
 
@@ -221,6 +211,9 @@ def build_connected_group_document(
         resolved_profile,
         uniform_scale,
     )
+    # Keep the exact main-branch array ownership: object constraints already exist in
+    # component order and global constraints are appended afterward. Only their ``order``
+    # values are replaced; the arrays are deliberately not sorted.
     with_global_constraints = replace(
         placed_document,
         ik=(*placed_document.ik, *global_ik),
@@ -241,14 +234,13 @@ def build_connected_group_document(
             uniform_scale,
         )
 
-    scheduled_document = apply_connected_constraint_schedule(
+    final_document = apply_connected_constraint_schedule(
         with_global_constraints,
         normalized_objects,
         schedule,
         resolved_profile,
         settings.group_prefix,
     )
-    final_document = _stable_constraint_order(scheduled_document)
     _validate_connected_final(final_document)
 
     composition = replace(composition, document=final_document)
