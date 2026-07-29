@@ -106,6 +106,17 @@ def _assert_forwarding_hook(
     assert forwarded_uv.id == "uv_layer_name", filename
 
 
+def _direct_function_call_names(function: ast.FunctionDef) -> tuple[str, ...]:
+    result: list[str] = []
+    for statement in function.body:
+        if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
+            continue
+        callee = statement.value.func
+        if isinstance(callee, ast.Name):
+            result.append(callee.id)
+    return tuple(result)
+
+
 def test_every_headless_runner_rejects_retired_bake_executor_imports():
     stale_imports: list[str] = []
 
@@ -152,3 +163,46 @@ def test_bake_rollback_hooks_preserve_current_operator_signature():
             outer_function=outer_function,
             hook_function=hook_function,
         )
+
+
+def test_shared_bake_fixture_uses_explicit_cycles_material_target():
+    fixture = _function(_tree(HEADLESS_ROOT / "run_bake_integration.py"), "_build_fixture")
+    calls = tuple(
+        node
+        for node in ast.walk(fixture)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "analyse_object_materials"
+    )
+    assert len(calls) == 1
+    keywords = {
+        keyword.arg: keyword.value
+        for keyword in calls[0].keywords
+        if keyword.arg is not None
+    }
+    render_target = keywords["render_target"]
+    assert isinstance(render_target, ast.Constant)
+    assert render_target.value == "CYCLES"
+
+
+def test_shared_bake_tests_configure_cycles_after_factory_scene_reset():
+    tree = _tree(HEADLESS_ROOT / "run_bake_integration.py")
+    test_names = (
+        "test_real_cycles_emit_bake_commits_png_and_restores_state",
+        "test_forced_bake_failure_rolls_back_file_and_restores_state",
+        "test_complete_a1_service_commits_valid_png_and_spine_json",
+        "test_complete_a1_service_rolls_back_png_and_json_together",
+    )
+
+    for test_name in test_names:
+        calls = _direct_function_call_names(_function(tree, test_name))
+        assert calls[:2] == ("_clear_scene", "_configure_cycles_scene"), test_name
+
+
+def test_multi_fixture_configures_cycles_before_capture():
+    prepare_state = _function(
+        _tree(HEADLESS_ROOT / "run_multi_object_export_integration.py"),
+        "_prepare_state",
+    )
+    calls = _direct_function_call_names(prepare_state)
+    assert calls[0] == "_configure_cycles_scene"
