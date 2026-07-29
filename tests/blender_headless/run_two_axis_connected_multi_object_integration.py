@@ -54,6 +54,34 @@ def _two_axis_sources(sources):
     )
 
 
+def _constraint(document: dict, name: str) -> dict:
+    matches = tuple(
+        item
+        for item in document.get("transform", ())
+        if item.get("name") == name
+    )
+    _assert(len(matches) == 1, f"expected one transform constraint {name!r}")
+    return matches[0]
+
+
+def _assert_zero_relative_local_delta(document: dict, constraint_name: str) -> None:
+    """Assert that one global wrapper constraint is identity in setup pose."""
+
+    constraint = _constraint(document, constraint_name)
+    _assert(constraint.get("local") is True, f"{constraint_name} is not local")
+    _assert(constraint.get("relative") is True, f"{constraint_name} is not relative")
+    for field_name in ("rotation", "x", "y", "scaleX", "scaleY", "shearY"):
+        _assert(
+            float(constraint.get(field_name, 0.0)) == 0.0,
+            f"{constraint_name} has non-neutral {field_name}: {constraint}",
+        )
+    for field_name in ("mixX", "mixY", "mixScaleX", "mixScaleY", "mixShearY"):
+        _assert(
+            float(constraint.get(field_name, 1.0)) == 0.0,
+            f"{constraint_name} still mixes {field_name}: {constraint}",
+        )
+
+
 def _assert_neutral_connected_setup(document: dict) -> None:
     """Validate the setup-pose fields that Spine evaluates before animation."""
 
@@ -63,6 +91,9 @@ def _assert_neutral_connected_setup(document: dict) -> None:
             float(bones[control_name].get("rotation", 0.0)) == 0.0,
             f"global connected control has non-neutral setup rotation: {bones[control_name]}",
         )
+
+    _assert_zero_relative_local_delta(document, "all_objects_rotation_X_constraint")
+    _assert_zero_relative_local_delta(document, "all_objects_rotation_Y")
 
     global_scale = bones["all_objects_scale"]
     expected_local_x = float(global_scale.get("x", 0.0))
@@ -74,9 +105,6 @@ def _assert_neutral_connected_setup(document: dict) -> None:
             scale.get("parent") == f"{prefix}_main",
             f"{prefix} scale control is outside object control space: {scale}",
         )
-        # Every object uses the profile layout in its own main-local space. The
-        # local offset must match the neutral global control and must not include
-        # the object's connected world placement.
         _assert(
             float(scale.get("x", 0.0)) == expected_local_x,
             f"{prefix} scale control local X is wrong: main={main}, scale={scale}",
@@ -166,9 +194,13 @@ def test_connected_two_axis_export_builds_global_and_object_controls() -> None:
             float(bones["ObjectB_main"].get("x", 0.0)) == 64.0,
             "two-axis ObjectB X offset wrong",
         )
+        layer_y = float(bones["all_objects_0_scale"].get("y", 0.0))
+        object_y = float(bones["ObjectB_main"].get("y", 0.0))
+        _assert(layer_y == 16.0, f"two-axis ObjectB layer depth is wrong: {layer_y}")
+        _assert(object_y == 16.0, f"two-axis ObjectB local Y is wrong: {object_y}")
         _assert(
-            float(bones["ObjectB_main"].get("y", 0.0)) == 32.0,
-            "two-axis ObjectB Y offset wrong",
+            layer_y + object_y == 32.0,
+            "two-axis ObjectB setup world Y no longer matches Blender placement",
         )
         _assert_neutral_connected_setup(document)
 
