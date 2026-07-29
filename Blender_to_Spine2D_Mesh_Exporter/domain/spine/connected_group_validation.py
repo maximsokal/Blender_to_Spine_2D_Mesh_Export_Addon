@@ -11,6 +11,8 @@ from .connected_group_contracts import (
 )
 from .connected_group_error import ConnectedGroupBuildError
 from .legacy_profile import LegacyRigProfile
+from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
+from .two_axis_scale_profile import TwoAxisScaleRigProfile
 from .validator import SpineValidator
 
 
@@ -28,24 +30,44 @@ def validate_object_constraint_schema(
     item: ConnectedObjectDocument,
     profile: LegacyRigProfile,
 ) -> None:
-    """Require the exact one-IK plus five-Transform legacy A1 schema."""
+    """Require the exact IK/Transform schema owned by the selected rig profile."""
 
+    if not isinstance(item, ConnectedObjectDocument):
+        raise TypeError("item must be ConnectedObjectDocument")
+    if not isinstance(profile, LegacyRigProfile):
+        raise TypeError("profile must be LegacyRigProfile")
+
+    profile_id = resolve_a1_rig_profile(profile.profile_id)
     expected_ik = (profile.scale_ik_constraint(item.prefix),)
-    expected_transform = (
-        profile.rotation_x_constraint(item.prefix),
-        profile.rotation_y_constraint(item.prefix),
-        profile.scale_constraint(item.prefix),
-        profile.rotation_z_constraint(item.prefix),
-        profile.scale_compensator_constraint(item.prefix),
-    )
+    if profile_id is A1RigProfile.THREE_AXIS_ROTATION:
+        expected_transform = (
+            profile.rotation_x_constraint(item.prefix),
+            profile.rotation_y_constraint(item.prefix),
+            profile.scale_constraint(item.prefix),
+            profile.rotation_z_constraint(item.prefix),
+            profile.scale_compensator_constraint(item.prefix),
+        )
+    elif profile_id is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
+        if not isinstance(profile, TwoAxisScaleRigProfile):
+            raise TypeError(
+                "TWO_AXIS_ROTATION_SCALE validation requires TwoAxisScaleRigProfile"
+            )
+        expected_transform = (
+            profile.rotation_x_constraint(item.prefix),
+            profile.rotation_y_constraint(item.prefix),
+            profile.scale_constraint(item.prefix),
+            profile.scale_depth_constraint(item.prefix),
+        )
+    else:
+        raise AssertionError(f"Unhandled connected rig profile: {profile_id}")
+
     actual_ik = tuple(constraint.name for constraint in item.document.ik)
     actual_transform = tuple(
         constraint.name for constraint in item.document.transform
     )
-
-    ik_valid = len(actual_ik) == 1 and set(actual_ik) == set(expected_ik)
+    ik_valid = len(actual_ik) == len(expected_ik) and set(actual_ik) == set(expected_ik)
     transform_valid = (
-        len(actual_transform) == 5
+        len(actual_transform) == len(expected_transform)
         and set(actual_transform) == set(expected_transform)
     )
     if ik_valid and transform_valid:
@@ -66,9 +88,15 @@ def validate_object_constraint_schema(
             if name in set(expected_ik)
         )
     )
+    if profile_id is A1RigProfile.THREE_AXIS_ROTATION:
+        schema_description = "exactly the six A1 constraints"
+    else:
+        schema_description = (
+            "exactly the five TWO_AXIS_ROTATION_SCALE A1 constraints"
+        )
     raise ConnectedGroupBuildError(
-        f"Object component '{item.component_id}' must contain exactly the six "
-        "A1 constraints in their required IK/Transform collections; "
+        f"Object component '{item.component_id}' must contain {schema_description} "
+        "in their required IK/Transform collections; "
         f"missing={tuple(sorted(expected_all - actual_all))}, "
         f"unexpected={tuple(sorted(actual_all - expected_all))}, "
         f"wrong_collection={wrong_collection}, "
