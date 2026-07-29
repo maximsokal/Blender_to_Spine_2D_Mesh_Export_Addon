@@ -6,7 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
@@ -20,6 +19,9 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_multi_object_contracts 
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_selection import (
     _ObjectExportProfile,
+)
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import (
+    A1RigSetupPoseMode,
 )
 
 
@@ -42,6 +44,45 @@ def _source(index: int, name: str) -> A1MultiObjectSource:
         animation_namespace=f"object_{index}",
         settings=_settings(name),
     )
+
+
+def test_active_ui_plan_explicitly_requests_normalized_single_setup(monkeypatch):
+    source_object = SimpleNamespace(name="Cone")
+    object_profile = _ObjectExportProfile(source_object, "Cone", 0, 0, False)
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        a1_ui_export_plan,
+        "_active_mesh",
+        lambda _context: source_object,
+    )
+    monkeypatch.setattr(
+        a1_ui_export_plan,
+        "_capture_scene_profile",
+        lambda _scene: object(),
+    )
+    monkeypatch.setattr(
+        a1_ui_export_plan,
+        "_capture_object_profile",
+        lambda *_args, **_kwargs: object_profile,
+    )
+
+    def _capture_settings(_object_profile, _scene_profile, **kwargs):
+        captured.update(kwargs)
+        return _settings("Cone")
+
+    monkeypatch.setattr(
+        a1_ui_export_plan,
+        "_settings_from_profiles",
+        _capture_settings,
+    )
+
+    plan = a1_ui_export_plan.build_active_ui_export_plan(
+        SimpleNamespace(scene=SimpleNamespace())
+    )
+
+    assert plan.source_object is source_object
+    assert captured["rig_setup_pose_mode"] is A1RigSetupPoseMode.NORMALIZED_SINGLE
 
 
 def test_multi_ui_plan_preserves_explicit_mixed_subgroup_order():
