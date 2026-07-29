@@ -25,6 +25,7 @@ from .connected_group_global_rig import (
     build_global_constraints,
 )
 from .connected_group_layout import resolve_layers_and_placements
+from .connected_group_object_setup import normalize_connected_object_control_space
 from .connected_group_schedule import (
     build_constraint_schedule,
     reorder_object_constraints,
@@ -142,6 +143,10 @@ def build_connected_group_document(
         uniform_scale,
     )
 
+    normalized_objects = tuple(
+        normalize_connected_object_control_space(item, resolved_profile)
+        for item in objects
+    )
     object_components = tuple(
         SpineDocumentComponent(
             component_id=item.component_id,
@@ -152,7 +157,7 @@ def build_connected_group_document(
             ),
             animation_namespace=(item.animation_namespace or item.component_id),
         )
-        for item in objects
+        for item in normalized_objects
     )
     composition = compose_spine_documents(
         (
@@ -173,7 +178,7 @@ def build_connected_group_document(
 
     draw_order_document = apply_connected_setup_draw_order(
         composition.document,
-        objects,
+        normalized_objects,
         placements,
     )
     placed_document = apply_object_placements(
@@ -182,7 +187,7 @@ def build_connected_group_document(
         uniform_scale,
     )
     global_ik, global_transform = build_global_constraints(
-        objects,
+        normalized_objects,
         layers,
         schedule,
         settings,
