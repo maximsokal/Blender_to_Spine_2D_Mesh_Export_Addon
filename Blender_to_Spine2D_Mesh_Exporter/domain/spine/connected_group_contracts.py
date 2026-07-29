@@ -170,7 +170,12 @@ class ConnectedObjectPlacement:
 
 @dataclass(frozen=True, slots=True)
 class ConnectedConstraintSchedule:
-    """Collision-free global/object constraint order for one rig profile."""
+    """Legacy-compatible global/object order grouped by connected Z layer.
+
+    The historical ``main`` implementation assigned one order value to a whole Z layer.
+    Multiple independent object constraints may therefore share an order when their
+    objects belong to the same layer. The set of used order values must still be dense.
+    """
 
     global_rotation_x: int
     global_rotation_y: int
@@ -217,9 +222,11 @@ class ConnectedConstraintSchedule:
             required_assignment_fields = (
                 *common_assignment_fields,
                 "object_rotation_z",
-                "object_scale_compensator",
             )
-            forbidden_assignment_fields = ("object_scale_depth",)
+            forbidden_assignment_fields = (
+                "object_scale_compensator",
+                "object_scale_depth",
+            )
             if self.global_rotation_z is None:
                 raise ValueError("legacy connected schedule requires global_rotation_z")
             if self.global_scale_depth is not None:
@@ -275,13 +282,18 @@ class ConnectedConstraintSchedule:
                     "all object constraint phases must use the same component order"
                 )
 
-        if self.all_orders != tuple(range(len(self.all_orders))):
+        if not self.unique_orders:
+            raise ValueError("Connected constraint schedule cannot be empty")
+        expected_dense = tuple(range(self.unique_orders[-1] + 1))
+        if self.unique_orders != expected_dense:
             raise ValueError(
-                "Connected constraint schedule must be contiguous and unique"
+                "Connected constraint schedule order values must form a dense range"
             )
 
     @property
     def all_orders(self) -> Tuple[int, ...]:
+        """Return every assigned order, including valid same-layer duplicates."""
+
         scalar_orders = [
             self.global_rotation_x,
             self.global_rotation_y,
@@ -306,6 +318,12 @@ class ConnectedConstraintSchedule:
             order for assignments in assignment_fields for _, order in assignments
         ]
         return tuple(sorted(orders))
+
+    @property
+    def unique_orders(self) -> Tuple[int, ...]:
+        """Return the dense evaluation phases used by the connected rig."""
+
+        return tuple(sorted(set(self.all_orders)))
 
     def order_for(self, phase: str, component_id: str) -> int:
         if not isinstance(phase, str) or not phase:
