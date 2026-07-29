@@ -196,7 +196,12 @@ def validate_document_material_correspondence(
     projections: Tuple[A1AttachmentProjectionResult, ...],
     document_build: LegacyMeshDocumentBuildResult,
 ) -> None:
-    """Validate that final Spine components preserve every projected index stream."""
+    """Validate that final Spine components preserve every projected index stream.
+
+    Shared segment-boundary vertices may now reference a canonical bone introduced by
+    another component. Therefore the weighted stream is the authoritative final index
+    map; the old contiguous ``start + vertex`` assumption is intentionally rejected.
+    """
 
     if not isinstance(projections, tuple) or not projections:
         raise ValueError("projections must be a non-empty tuple")
@@ -248,6 +253,7 @@ def validate_document_material_correspondence(
             attachment.vertices,
             expected_vertex_count=len(request.vertices),
         )
+        first_bone_index: int | None = None
         for vertex_index, weighted_vertex in enumerate(weighted_vertices):
             if len(weighted_vertex.influences) != 1:
                 raise A1MaterialCorrespondenceError(
@@ -255,30 +261,39 @@ def validate_document_material_correspondence(
                     f"{len(weighted_vertex.influences)} influences instead of one"
                 )
             influence = weighted_vertex.influences[0]
-            expected_bone_index = component.vertex_bone_start_index + vertex_index
-            if influence.bone_index != expected_bone_index:
-                raise A1MaterialCorrespondenceError(
-                    f"Component {component_index} vertex {vertex_index} references "
-                    f"bone {influence.bone_index}, expected {expected_bone_index}"
-                )
+            actual_bone_index = influence.bone_index
+            if first_bone_index is None:
+                first_bone_index = actual_bone_index
             if (influence.x, influence.y, influence.weight) != (0.0, 0.0, 1.0):
                 raise A1MaterialCorrespondenceError(
                     f"Component {component_index} vertex {vertex_index} has unexpected "
                     f"weighted local data {(influence.x, influence.y, influence.weight)}"
                 )
             try:
-                document_bone = document_bones[expected_bone_index]
+                document_bone = document_bones[actual_bone_index]
                 component_bone = component.vertex_bones[vertex_index]
             except IndexError as exc:
                 raise A1MaterialCorrespondenceError(
-                    f"Component {component_index} vertex {vertex_index} bone index is "
-                    "outside the final document"
+                    f"Component {component_index} vertex {vertex_index} bone index "
+                    f"{actual_bone_index} is outside the final document"
                 ) from exc
             if document_bone != component_bone:
                 raise A1MaterialCorrespondenceError(
-                    f"Component {component_index} vertex {vertex_index} final bone "
-                    "does not match the component bone"
+                    f"Component {component_index} vertex {vertex_index} references "
+                    f"bone {actual_bone_index}, which does not match its canonical "
+                    "component bone"
                 )
+
+        if first_bone_index is None:
+            raise A1MaterialCorrespondenceError(
+                f"Component {component_index} contains no weighted vertices"
+            )
+        if component.vertex_bone_start_index != first_bone_index:
+            raise A1MaterialCorrespondenceError(
+                f"Component {component_index} start index "
+                f"{component.vertex_bone_start_index} differs from its first weighted "
+                f"bone index {first_bone_index}"
+            )
 
         validate_projection_material_correspondence(projection, document_build.rig)
 
