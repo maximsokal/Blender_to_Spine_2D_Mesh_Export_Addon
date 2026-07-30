@@ -4,7 +4,7 @@
  * Validate an externally generated Spine 4.1 JSON with the exact vendored 4.1 runtime.
  *
  * Usage:
- *   node tools/spine41_runtime_oracle.mjs <json-file> <runtime-entry>
+ *   node tools/spine41_runtime_oracle.mjs <json-file> <runtime-entry> [--full]
  *
  * runtime-entry must point to the self-contained ESM entry, for example:
  *   ../Spine2D_curve_optimization/vendor/spine-webgl-41/index.js
@@ -12,6 +12,9 @@
  * The runtime path may also be supplied through SPINE41_RUNTIME_ENTRY.
  * The referenced runtime repository is treated as read-only; this script never writes
  * to it and creates only in-memory atlas/texture objects.
+ *
+ * Output is concise by default. Pass --full only when the complete per-constraint and
+ * per-bone diagnostic payload is required.
  */
 
 import assert from 'node:assert/strict';
@@ -54,6 +57,21 @@ function requirePositiveInteger(value, path) {
     fail(`${path} must be a positive integer`, { value });
   }
   return value;
+}
+
+function parseOutputOptions(argumentsList) {
+  if (!Array.isArray(argumentsList)) fail('argumentsList must be an array');
+
+  let includeDetails = false;
+  for (const argument of argumentsList) {
+    if (argument === '--full') {
+      includeDetails = true;
+      continue;
+    }
+    fail(`Unknown oracle option: ${String(argument)}`);
+  }
+
+  return Object.freeze({ includeDetails });
 }
 
 function resolveRuntimeEntry(argument) {
@@ -247,6 +265,19 @@ function validateConstraintOrders(records) {
   );
 }
 
+function summarizeConstraintOrders(records) {
+  if (records.length === 0) {
+    return Object.freeze({ count: 0, minimum: null, maximum: null, contiguous: true });
+  }
+  const orders = records.map((record) => record.order);
+  return Object.freeze({
+    count: records.length,
+    minimum: Math.min(...orders),
+    maximum: Math.max(...orders),
+    contiguous: true,
+  });
+}
+
 function runtimeConstraintObjects(skeleton) {
   return [
     ...skeleton.ikConstraints,
@@ -342,9 +373,13 @@ function setupBounds(runtime, skeleton) {
 async function main() {
   const jsonArgument = process.argv[2];
   if (!jsonArgument) {
-    fail('Usage: node tools/spine41_runtime_oracle.mjs <json-file> <runtime-entry>');
+    fail(
+      'Usage: node tools/spine41_runtime_oracle.mjs ' +
+        '<json-file> <runtime-entry> [--full]',
+    );
   }
 
+  const options = parseOutputOptions(process.argv.slice(4));
   const jsonPath = resolve(process.cwd(), jsonArgument);
   if (!existsSync(jsonPath)) fail(`JSON file does not exist: ${jsonPath}`);
   if (!statSync(jsonPath).isFile()) fail(`JSON path is not a file: ${jsonPath}`);
@@ -397,8 +432,11 @@ async function main() {
     const cacheConstraints = validateUpdateCache(skeleton, constraintRecords);
     skeleton.updateWorldTransform();
 
-    const report = {
+    const boneSnapshots = validateBoneMatrices(skeleton);
+    const bounds = setupBounds(runtime, skeleton);
+    const summary = {
       ok: true,
+      outputMode: options.includeDetails ? 'full' : 'summary',
       jsonPath,
       runtimeEntry,
       version: skeletonData.version,
@@ -412,11 +450,30 @@ async function main() {
         atlasPages: atlas.pages.length,
         atlasRegions: atlas.regions.length,
       },
-      constraintOrders: constraintRecords,
-      updateCacheConstraints: cacheConstraints,
-      bounds: setupBounds(runtime, skeleton),
-      bones: validateBoneMatrices(skeleton),
+      constraintOrders: summarizeConstraintOrders(constraintRecords),
+      updateCache: {
+        expectedConstraints: constraintRecords.length,
+        scheduledConstraints: cacheConstraints.length,
+        everyConstraintScheduledExactlyOnce: true,
+      },
+      matrices: {
+        finiteBones: boneSnapshots.length,
+        allFinite: true,
+      },
+      bounds,
     };
+
+    const report = options.includeDetails
+      ? {
+          ...summary,
+          details: {
+            constraintOrders: constraintRecords,
+            updateCacheConstraints: cacheConstraints,
+            bones: boneSnapshots,
+          },
+        }
+      : summary;
+
     console.info(JSON.stringify(report, null, 2));
   } finally {
     atlas.dispose();
