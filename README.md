@@ -45,10 +45,9 @@ Blender 4.x and Blender 5.0/5.1 are not supported by the current extension packa
 - Cycles semantic object baking with Blender 5.2 EEVEE scene-state restoration.
 - Generated material fallback for missing or intentionally ignored source materials.
 - Single-object and standalone multi-object export for Spine 4.1 and Spine 4.2.
-- Connected and mixed export remain Spine 4.2-only production capabilities.
-- Connected multi-object rigs for both 3-Axis Rotation and 2-Axis Rotation + Scale profiles in Spine 4.2 output.
-- The connected 3-Axis rig reproduces the dedicated hierarchy, target lists, offsets, Z-layer order sharing, and compensator behavior of the working historical `main` exporter.
-- The connected 2-Axis rig uses explicit global X, IK, Scale, depth-scale, and Y targets with the same layer-based scheduling principle.
+- Production selected-object export always creates independent standalone object rigs.
+- Persisted hidden Connect flags from older `.blend` files are ignored by production Analyze/Export.
+- Connected and mixed composition remain development-only internal capabilities.
 - Static texture and frame-sequence output.
 - Readiness analysis with structured blockers, warnings, and statistics.
 - Atomic JSON and texture output with rollback and stale work-file recovery.
@@ -92,7 +91,7 @@ See the [Usage Guide](docs/usage.md) and [Settings Reference](docs/settings-refe
 
 ![Blender to Spine2D Mesh Exporter interface](assets/ui_addon.png)
 
-The panel uses one consistent foldout sequence: Export, Rig, Rewrite Generated Materials, Cut, Bake, and Analysis. Analysis is collapsed by default, runs only when Analyze is pressed, and never disables export. Connected-object composition remains unavailable for Spine 4.1 and is retained only for supported Spine 4.2 workflows.
+The panel uses one consistent foldout sequence: Export, Rig, Rewrite Generated Materials, Cut, Bake, and Analysis. Analysis is collapsed by default, runs only when Analyze is pressed, and never disables export. Connected-object composition is not selected by the production UI and remains a development-only internal capability.
 
 ## Output overview
 
@@ -138,7 +137,7 @@ python tools/prepare_package.py --blender <path-to-Blender-5.2-executable>
 
 The resulting ZIP is written to `dist` unless an explicit output path is supplied. Its root contains `blender_manifest.toml` and `__init__.py`.
 
-See [Installation](docs/installation.md) and [Testing](docs/testing.md) for validation commands for the current 0.47.10 candidate.
+See [Installation](docs/installation.md) and [Testing](docs/testing.md) for validation commands for the current 0.47.11 candidate.
 
 ## Project structure
 
