@@ -130,11 +130,12 @@ def _synchronize_document_build_for_spine41(
 ) -> LegacyMeshDocumentBuildResult:
     """Synchronize builder metadata after final-document bridge insertion.
 
-    The Spine 4.1 adapter inserts parent bones before existing weighted vertex bones. The
-    serialized attachment streams are remapped by the domain adapter, so the immutable
-    ``LegacyMeshDocumentBuildResult`` must point at those same remapped attachments and
-    expose the corresponding new vertex-bone start indices. The canonical rig remains
-    untouched because projection and deterministic rig validation already completed.
+    The legacy 4.0/4.1 adapter inserts parent bones before existing weighted vertex
+    bones. The serialized attachment streams are remapped by the domain adapter, so the
+    immutable ``LegacyMeshDocumentBuildResult`` must point at those same remapped
+    attachments and expose the corresponding new vertex-bone start indices. The
+    canonical rig remains untouched because projection and deterministic rig validation
+    already completed.
     """
 
     if not isinstance(document_build, LegacyMeshDocumentBuildResult):
@@ -150,7 +151,7 @@ def _synchronize_document_build_for_spine41(
         new_start_index = index_map.get(component.vertex_bone_start_index)
         if new_start_index is None:
             raise ValueError(
-                "Spine 4.1 bone remap does not contain component vertex-bone start "
+                "Legacy 4.x bone remap does not contain component vertex-bone start "
                 f"index {component.vertex_bone_start_index} at component "
                 f"{component_index}"
             )
@@ -216,10 +217,10 @@ def finalize_a1_document_assembly_for_target(
     """Apply target-specific rig semantics only after canonical document assembly.
 
     Projection and attachment builders validate the canonical rig against its exact
-    deterministic plan. Spine 4.1 therefore receives an immutable document-level topology
-    adaptation only after weighted attachments, visuals, and animations exist. The adapter
-    returns the exact old-to-new bone-index map so every builder-owned attachment reference
-    stays synchronized with the final document.
+    deterministic plan. Spine 4.0 and 4.1 therefore receive the same immutable
+    document-level safety topology only after weighted attachments, visuals, and
+    animations exist. The adapter returns the exact old-to-new bone-index map so every
+    builder-owned attachment reference stays synchronized with the final document.
     """
 
     if not isinstance(document_assembly, A1DocumentAssemblyResult):
@@ -230,7 +231,10 @@ def finalize_a1_document_assembly_for_target(
     resolved_target = resolve_spine_json_target(spine_target)
     if resolved_target is SpineJsonTarget.SPINE_4_2:
         return document_assembly
-    if resolved_target is not SpineJsonTarget.SPINE_4_1:
+    if resolved_target not in {
+        SpineJsonTarget.SPINE_4_0,
+        SpineJsonTarget.SPINE_4_1,
+    }:
         raise ValueError(
             "A1 document finalization is not implemented for "
             f"{resolved_target.label} ({resolved_target.exact_version})"
@@ -243,7 +247,7 @@ def finalize_a1_document_assembly_for_target(
         or not isinstance(rig.profile, TwoAxisScaleRigProfile)
     ):
         raise ValueError(
-            "Spine 4.1 document finalization currently requires "
+            f"{resolved_target.label} document finalization currently requires "
             "TWO_AXIS_ROTATION_SCALE"
         )
     if rig.request.prefix.strip() != prefix.strip():
@@ -252,6 +256,9 @@ def finalize_a1_document_assembly_for_target(
             f"{rig.request.prefix!r}"
         )
 
+    # Spine 4.0 and 4.1 share the legacy applied-transform failure mode that the
+    # accepted bridge topology resolves. Keep the proven adapter implementation and
+    # its stable bone names until a target requires genuinely different topology.
     adaptation = adapt_two_axis_document_for_spine41_with_report(
         document_assembly.document,
         profile=rig.profile,
