@@ -85,12 +85,13 @@ def test_rig_builder_does_not_apply_target_constraint_mutations() -> None:
     assert "adapt_two_axis_scale_rig_for_spine41" not in imported_names
 
 
-def test_target_finalizer_uses_the_typed_document_adapter() -> None:
+def test_target_finalizer_uses_reported_typed_document_adapter_and_synchronizer() -> None:
     function = _function(
         _tree(ADAPTER),
         "finalize_a1_document_assembly_for_target",
     )
     calls = {name for name, _line in _direct_name_calls(function)}
 
-    assert "adapt_two_axis_document_for_spine41" in calls
+    assert "adapt_two_axis_document_for_spine41_with_report" in calls
+    assert "_synchronize_document_build_for_spine41" in calls
     assert "replace" in calls
