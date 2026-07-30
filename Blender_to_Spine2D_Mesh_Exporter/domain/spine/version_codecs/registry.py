@@ -12,11 +12,13 @@ from ..version_target import (
     require_spine_json_target_serializable,
 )
 from .base import SpineJsonCodecContext, SpineJsonVersionCodec
+from .v41 import Spine41JsonCodec
 from .v42 import Spine42JsonCodec
 
 
 _CODECS: Mapping[SpineJsonTarget, SpineJsonVersionCodec] = MappingProxyType(
     {
+        SpineJsonTarget.SPINE_4_1: Spine41JsonCodec(),
         SpineJsonTarget.SPINE_4_2: Spine42JsonCodec(),
     }
 )
