@@ -95,8 +95,14 @@ def _preparation_failure(exc: A1MultiObjectPreparationError) -> ExportResult:
     )
 
 
-def _serialize_document(document, spine_target, json_indent: int) -> str:
-    """Keep facade invocation outside the already size-limited output orchestrator."""
+def _resolve_target(connected_sources, standalone_sources):
+    """Resolve one target without expanding the size-limited output orchestrator."""
+
+    return resolve_a1_sources_spine_target(connected_sources, standalone_sources)
+
+
+def _serialize(document, spine_target, json_indent: int) -> str:
+    """Serialize through the target facade outside the output orchestrator."""
 
     return serialize_spine_document(
         document,
@@ -123,7 +129,7 @@ def export_a1_mixed_object(
         "Starting mixed-object export",
     )
     try:
-        spine_target = resolve_a1_sources_spine_target(connected_sources, standalone_sources)
+        spine_target = _resolve_target(connected_sources, standalone_sources)
         prepared = prepare_a1_mixed_object(
             connected_sources,
             standalone_sources,
@@ -240,7 +246,7 @@ def export_a1_mixed_object(
 
             stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
             _progress(progress_callback, 93, stage, "Serializing Spine JSON")
-            json_text = _serialize_document(document, spine_target, settings.json_indent)
+            json_text = _serialize(document, spine_target, settings.json_indent)
             write_staged_utf8_text(
                 json_reservation.staged_path,
                 json_text,
