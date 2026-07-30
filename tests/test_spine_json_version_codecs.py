@@ -20,7 +20,10 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.model import (
     TransformConstraint,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.serializer import SpineSerializer
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine.validator import SpineValidator
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.validator import (
+    SpineValidationError,
+    SpineValidator,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_codecs import (
     SpineJsonCodecContext,
     registered_spine_json_codecs,
@@ -216,12 +219,12 @@ def test_quarantined_v41_adapter_preserves_authored_constraint_orders() -> None:
     ).to_json(document, indent=2) == before
 
 
-def test_quarantined_v41_adapter_rejects_unknown_skin_membership() -> None:
+def test_quarantined_v41_adapter_rejects_missing_skin_constraint_before_rewrite() -> None:
     document = _v41_research_document()
     broken_skin = replace(document.skins[0], constraints=("missing",))
     broken = replace(document, skins=(broken_skin,))
 
-    with pytest.raises(ValueError, match="unsupported or unknown constraint"):
+    with pytest.raises(SpineValidationError) as exc_info:
         Spine41JsonCodec().to_json(
             broken,
             context=SpineJsonCodecContext(
@@ -229,3 +232,8 @@ def test_quarantined_v41_adapter_rejects_unknown_skin_membership() -> None:
                 validator=ConnectedGroupSerializationValidator(),
             ),
         )
+
+    assert {issue.code for issue in exc_info.value.issues} == {
+        "MISSING_SKIN_CONSTRAINT"
+    }
+    assert "missing" in str(exc_info.value)
