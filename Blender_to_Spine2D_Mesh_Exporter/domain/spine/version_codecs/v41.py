@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 from ..model import SpineDocument
@@ -12,6 +13,8 @@ from .base import SpineJsonCodecContext, SpineJsonVersionCodec
 
 
 _CONSTRAINT_COLLECTIONS = ("ik", "transform", "path")
+_SPINE_41_SAFE_COLLAPSED_SCALE = 1.0e-3
+_SPINE_41_MIN_PARENT_DETERMINANT = 1.0e-4
 
 
 def _require_dict(value: Any, *, path: str) -> dict[str, Any]:
@@ -32,6 +35,15 @@ def _require_constraint_order(value: Any, *, path: str) -> int:
     if value < 0:
         raise ValueError(f"{path} must be a non-negative integer")
     return value
+
+
+def _require_finite_float(value: Any, *, path: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{path} must be a finite number")
+    resolved = float(value)
+    if not math.isfinite(resolved):
+        raise ValueError(f"{path} must be a finite number")
+    return resolved
 
 
 def _extend_unique_names(
@@ -128,6 +140,153 @@ def _normalize_constraint_orders(output: dict[str, Any]) -> None:
         )
 
 
+def _bone_mapping(
+    output: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    bones_raw = _require_list(output.get("bones"), path="document.bones")
+    bones: list[dict[str, Any]] = []
+    by_name: dict[str, dict[str, Any]] = {}
+    for index, value in enumerate(bones_raw):
+        path = f"document.bones[{index}]"
+        bone = _require_dict(value, path=path)
+        name = bone.get("name")
+        if not isinstance(name, str) or not name:
+            raise TypeError(f"{path}.name must be a non-empty string")
+        if name in by_name:
+            raise ValueError(f"{path}.name duplicates bone {name!r}")
+        parent = bone.get("parent")
+        if parent is not None:
+            if not isinstance(parent, str) or not parent:
+                raise TypeError(f"{path}.parent must be a non-empty string")
+            if parent not in by_name:
+                raise ValueError(
+                    f"{path}.parent references missing or forward bone {parent!r}"
+                )
+        bones.append(bone)
+        by_name[name] = bone
+    return bones, by_name
+
+
+def _world_space_transform_constraints(
+    output: dict[str, Any],
+) -> list[tuple[str, dict[str, Any]]]:
+    raw_constraints = output.get("transform")
+    if raw_constraints is None:
+        return []
+    constraints = _require_list(raw_constraints, path="document.transform")
+    result: list[tuple[str, dict[str, Any]]] = []
+    for index, value in enumerate(constraints):
+        path = f"document.transform[{index}]"
+        constraint = _require_dict(value, path=path)
+        if bool(constraint.get("local", False)):
+            continue
+        result.append((path, constraint))
+    return result
+
+
+def _stabilize_spine41_world_constraint_scales(output: dict[str, Any]) -> None:
+    """Avoid singular parent matrices in Spine 4.1 world constraints.
+
+    The 4.1 applied-transform implementation inverts every constrained bone's parent
+    matrix without a zero-determinant guard. The Rewrite rotation/scale rig intentionally
+    uses zero-scale axis-collapse bones. When such a bone appears in the ancestry of a
+    world-space transform constraint, Spine 4.1 can produce infinite or extremely large
+    applied transforms during import. Replace only the zero scale components in those
+    unsafe ancestry chains with a small positive magnitude, then verify every directly
+    inverted parent matrix is safely non-singular.
+    """
+
+    bones, by_name = _bone_mapping(output)
+    constraints = _world_space_transform_constraints(output)
+    if not constraints:
+        return
+
+    unsafe_components: set[tuple[str, str]] = set()
+    constrained_parents: list[tuple[str, str, str]] = []
+    for constraint_path, constraint in constraints:
+        raw_bones = _require_list(
+            constraint.get("bones"),
+            path=f"{constraint_path}.bones",
+        )
+        for bone_index, bone_name in enumerate(raw_bones):
+            if not isinstance(bone_name, str) or not bone_name:
+                raise TypeError(
+                    f"{constraint_path}.bones[{bone_index}] must be a non-empty string"
+                )
+            bone = by_name.get(bone_name)
+            if bone is None:
+                raise ValueError(
+                    f"{constraint_path}.bones[{bone_index}] references unknown bone "
+                    f"{bone_name!r}"
+                )
+            parent_name = bone.get("parent")
+            if parent_name is None:
+                continue
+            constrained_parents.append((constraint_path, bone_name, parent_name))
+
+            ancestor_name: str | None = parent_name
+            while ancestor_name is not None:
+                ancestor = by_name[ancestor_name]
+                for scale_field in ("scaleX", "scaleY"):
+                    scale = _require_finite_float(
+                        ancestor.get(scale_field, 1.0),
+                        path=f"document.bones[{ancestor_name!r}].{scale_field}",
+                    )
+                    if scale == 0.0:
+                        unsafe_components.add((ancestor_name, scale_field))
+                if ancestor.get("transform") == "onlyTranslation":
+                    break
+                ancestor_name = ancestor.get("parent")
+
+    for bone_name, scale_field in sorted(unsafe_components):
+        bone = by_name[bone_name]
+        original = _require_finite_float(
+            bone.get(scale_field, 1.0),
+            path=f"document.bones[{bone_name!r}].{scale_field}",
+        )
+        bone[scale_field] = math.copysign(
+            _SPINE_41_SAFE_COLLAPSED_SCALE,
+            original,
+        )
+
+    world_determinants: dict[str, float] = {}
+    for bone in bones:
+        name = str(bone["name"])
+        scale_x = _require_finite_float(
+            bone.get("scaleX", 1.0),
+            path=f"document.bones[{name!r}].scaleX",
+        )
+        scale_y = _require_finite_float(
+            bone.get("scaleY", 1.0),
+            path=f"document.bones[{name!r}].scaleY",
+        )
+        local_determinant = scale_x * scale_y
+        parent_name = bone.get("parent")
+        if parent_name is None or bone.get("transform") == "onlyTranslation":
+            world_determinant = local_determinant
+        else:
+            world_determinant = world_determinants[parent_name] * local_determinant
+        if not math.isfinite(world_determinant):
+            raise ValueError(
+                f"Spine 4.1 setup determinant is non-finite for bone {name!r}"
+            )
+        world_determinants[name] = world_determinant
+
+    remaining: list[str] = []
+    for constraint_path, bone_name, parent_name in constrained_parents:
+        determinant = world_determinants[parent_name]
+        if abs(determinant) <= _SPINE_41_MIN_PARENT_DETERMINANT:
+            remaining.append(
+                f"{constraint_path}:{bone_name} parent={parent_name} "
+                f"determinant={determinant}"
+            )
+    if remaining:
+        raise ValueError(
+            "Spine 4.1 world transform constraints retain singular parent matrices: "
+            + "; ".join(remaining)
+        )
+
+
 class Spine41JsonCodec(SpineJsonVersionCodec):
     """Encode the add-on's canonical setup-pose subset as Spine 4.1.24 JSON."""
 
@@ -165,6 +324,7 @@ class Spine41JsonCodec(SpineJsonVersionCodec):
         self._rewrite_bone_transform_fields(output)
         self._rewrite_skin_constraint_membership(output, document)
         self._remove_physics(output)
+        _stabilize_spine41_world_constraint_scales(output)
         _normalize_constraint_orders(output)
 
         return json.dumps(
