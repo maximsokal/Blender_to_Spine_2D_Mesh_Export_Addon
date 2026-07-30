@@ -92,15 +92,21 @@ def test_export_settings_reject_unregistered_exact_versions(
         )
 
 
-def test_only_registered_production_serializers_are_enabled() -> None:
-    ready_targets = {
-        SpineJsonTarget.SPINE_4_1,
-        SpineJsonTarget.SPINE_4_2,
-    }
-
+def test_only_spine_four_two_is_production_serializable() -> None:
     for target in SpineJsonTarget:
-        if target in ready_targets:
+        if target is SpineJsonTarget.SPINE_4_2:
             assert require_spine_json_target_serializable(target) is target
-        else:
-            with pytest.raises(SpineJsonTargetUnavailableError):
-                require_spine_json_target_serializable(target)
+            continue
+
+        with pytest.raises(SpineJsonTargetUnavailableError):
+            require_spine_json_target_serializable(target)
+
+
+def test_spine_four_one_remains_selectable_but_is_quarantined() -> None:
+    target = resolve_spine_json_target("4.1.24")
+
+    assert target is SpineJsonTarget.SPINE_4_1
+    assert target.descriptor.serializer_ready is False
+    assert "quarantined" in target.description.lower()
+    with pytest.raises(SpineJsonTargetUnavailableError):
+        require_spine_json_target_serializable(target)
