@@ -101,12 +101,15 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             family="4.0",
             exact_version="4.0.64",
             label="Spine 4.0",
-            description="Export setup-pose JSON for Spine 4.0.64",
+            description=(
+                "Limited Spine 4.0.64 export: 2-Axis single-object and standalone "
+                "multi-object without texture sequences"
+            ),
             uses_legacy_bone_transform_field=True,
             uses_legacy_constraint_mix_fields=False,
             uses_unified_constraints=False,
             supports_attachment_sequences=False,
-            serializer_ready=False,
+            serializer_ready=True,
         ),
         SpineJsonTarget.SPINE_4_1: SpineJsonVersionDescriptor(
             family="4.1",
