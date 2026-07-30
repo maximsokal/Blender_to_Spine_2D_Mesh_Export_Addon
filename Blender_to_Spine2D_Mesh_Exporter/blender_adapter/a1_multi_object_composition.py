@@ -126,6 +126,13 @@ def _validate_composition_inputs(
             "All objects in one multi-object document must use the same rig profile"
         )
 
+    targets = tuple(item.settings.export.spine_target for item in prepared)
+    if len(set(targets)) != 1:
+        raise ValueError(
+            "All prepared objects in one multi-object document must use the same "
+            "Spine JSON target"
+        )
+
 
 def _connected_placement_space(
     prepared: PreparedA1Object,
@@ -207,6 +214,7 @@ def compose_a1_multi_object_document(
             animation_separator=settings.animation_separator,
         ),
         profile=prepared[0].rig.profile,
+        spine_target=prepared[0].settings.export.spine_target,
     )
 
 
