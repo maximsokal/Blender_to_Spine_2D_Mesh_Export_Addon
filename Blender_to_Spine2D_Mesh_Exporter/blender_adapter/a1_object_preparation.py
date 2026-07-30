@@ -13,7 +13,10 @@ from ..application import (
     ExportIssue,
     emit_a1_export_progress,
 )
-from ..domain.spine.version_target import require_spine_json_target_serializable
+from ..domain.spine.export_capabilities import (
+    SpineJsonExportScope,
+    require_spine_json_export_capability,
+)
 from .a1_document_preparation import prepare_a1_document
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
@@ -115,9 +118,13 @@ def prepare_a1_object(
     try:
         if not isinstance(settings, A1SingleObjectExportSettings):
             raise TypeError("settings must be A1SingleObjectExportSettings")
-        # Until each target codec is proven, reject unsupported versions before
-        # touching Blender geometry, UV state, materials, temporary images, or files.
-        require_spine_json_target_serializable(settings.export.spine_target)
+        # A registered codec is only the schema boundary. The selected target must also
+        # accept this rig profile for a single-object topology before Blender data is read.
+        require_spine_json_export_capability(
+            settings.export.spine_target,
+            settings.export.rig_profile,
+            SpineJsonExportScope.SINGLE_OBJECT,
+        )
 
         with _source_uv_integrity_guard(source_obj, context):
             _progress(progress_callback, 0, stage)
