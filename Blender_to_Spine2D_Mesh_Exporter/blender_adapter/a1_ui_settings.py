@@ -51,6 +51,7 @@ def _settings_from_profiles(
             texture_height=scene.texture_size,
             output_directory=scene.output_directory,
             images_relative_path=scene.images_relative_path,
+            spine_version=scene.spine_target.exact_version,
             rig_profile=scene.rig_profile.value,
             seam_mode=scene.seam_mode,
             angle_limit_degrees=scene.angle_limit_degrees,
