@@ -83,7 +83,7 @@ def test_spine_four_one_builder_keeps_canonical_rig_for_projection_validation() 
     actual.validate()
 
 
-def test_spine_four_one_adapter_preserves_bones_and_changes_only_two_constraints() -> None:
+def test_spine_four_one_research_view_preserves_world_scale_constraint_semantics() -> None:
     source = build_two_axis_scale_rig(_request())
 
     adapted = adapt_two_axis_scale_rig_for_spine41(source)
@@ -91,8 +91,8 @@ def test_spine_four_one_adapter_preserves_bones_and_changes_only_two_constraints
     assert adapted.request == source.request
     assert adapted.profile == source.profile
     assert adapted.info == source.info
-    assert adapted.bones == source.bones
     assert adapted.ik == source.ik
+    assert len(adapted.bones) == len(source.bones) + len(source.info.z_groups)
 
     source_by_name = {item.name: item for item in source.transform}
     adapted_by_name = {item.name: item for item in adapted.transform}
@@ -100,18 +100,30 @@ def test_spine_four_one_adapter_preserves_bones_and_changes_only_two_constraints
 
     scale_name = adapted.profile.scale_constraint(source.request.prefix)
     depth_name = adapted.profile.scale_depth_constraint(source.request.prefix)
-    unchanged_names = set(source_by_name) - {scale_name, depth_name}
+    unchanged_names = set(source_by_name) - {scale_name}
     for name in unchanged_names:
         assert adapted_by_name[name] == source_by_name[name]
 
-    assert source_by_name[scale_name].extras.get("local", False) is False
-    assert adapted_by_name[scale_name].extras["local"] is True
-    assert adapted_by_name[scale_name].extras["relative"] is True
-    assert adapted_by_name[scale_name].bones == source_by_name[scale_name].bones
+    source_scale = source_by_name[scale_name]
+    adapted_scale = adapted_by_name[scale_name]
+    assert source_scale.extras.get("local") is None
+    assert adapted_scale.extras.get("local") is None
+    assert adapted_scale.extras["relative"] is True
+    assert source.info.main_rotation_bone_name in source_scale.bones
+    assert source.info.main_rotation_bone_name not in adapted_scale.bones
+    assert source.info.scale_bone_name in adapted_scale.bones
+    assert tuple(
+        name for name in adapted_scale.bones if name in source.info.sub_bone_names
+    ) == source.info.sub_bone_names
 
     assert source_by_name[depth_name].bones == source.info.sub_bone_scale_names
-    assert adapted_by_name[depth_name].bones == source.info.sub_bone_names
-    assert adapted_by_name[depth_name].extras == source_by_name[depth_name].extras
+    assert adapted_by_name[depth_name].bones == source.info.sub_bone_scale_names
+
+    adapted_bones = {bone.name: bone for bone in adapted.bones}
+    for wrapper_name in source.info.sub_bone_scale_names:
+        bridge_name = f"{wrapper_name}_spine41_bridge"
+        assert adapted_bones[bridge_name].parent == source.info.main_rotation_bone_name
+        assert adapted_bones[wrapper_name].parent == bridge_name
 
 
 def test_spine_four_one_two_axis_variant_has_no_singular_world_constraint_parent() -> None:
