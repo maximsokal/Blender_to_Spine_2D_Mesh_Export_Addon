@@ -16,10 +16,12 @@ from ..application import (
     scale_a1_export_progress_callback,
     validate_a1_realized_output_namespace,
 )
-from ..domain.spine import ConnectedGroupBuildResult, SpineSerializer
+from ..domain.spine import ConnectedGroupBuildResult
 from ..domain.spine.connected_group_serialization_validator import (
     ConnectedGroupSerializationValidator,
 )
+from ..domain.spine.validator import SpineValidator
+from ..domain.spine.version_codecs import serialize_spine_document
 from ..infrastructure import (
     AtomicFileCommitError,
     atomic_file_transaction,
@@ -36,6 +38,7 @@ from .a1_output_statistics import (
     record_final_document_statistics,
     record_grouped_camera_statistics,
 )
+from .a1_spine_version_output import resolve_a1_sources_spine_target
 from .grouped_camera_projection_output import stage_grouped_camera_projection_outputs
 from .grouped_camera_projection_policy import resolve_grouped_camera_projection_request
 
@@ -96,12 +99,14 @@ def _preparation_failure(exc: A1MultiObjectPreparationError) -> ExportResult:
     )
 
 
-def _serializer_for_composition(composition) -> SpineSerializer:
-    """Keep strict default serialization outside validated connected composition."""
+def _serialization_validator_for_composition(
+    composition: object,
+) -> SpineValidator | None:
+    """Keep strict default validation outside validated connected composition."""
 
     if isinstance(composition, ConnectedGroupBuildResult):
-        return SpineSerializer(validator=ConnectedGroupSerializationValidator())
-    return SpineSerializer()
+        return ConnectedGroupSerializationValidator()
+    return None
 
 
 def export_a1_multi_object(
@@ -121,6 +126,7 @@ def export_a1_multi_object(
         "Starting multi-object export",
     )
     try:
+        spine_target = resolve_a1_sources_spine_target(sources)
         prepared = prepare_a1_multi_object(
             sources,
             settings,
@@ -236,9 +242,11 @@ def export_a1_multi_object(
 
             stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
             _progress(progress_callback, 93, stage, "Serializing Spine JSON")
-            json_text = _serializer_for_composition(composition).to_json(
+            json_text = serialize_spine_document(
                 document,
+                spine_target,
                 indent=settings.json_indent,
+                validator=_serialization_validator_for_composition(composition),
             )
             write_staged_utf8_text(
                 json_reservation.staged_path,
