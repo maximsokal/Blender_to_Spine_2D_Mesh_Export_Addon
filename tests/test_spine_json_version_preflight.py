@@ -37,7 +37,7 @@ def _settings(root: Path, target: SpineJsonTarget) -> A1SingleObjectExportSettin
     tuple(
         target
         for target in SpineJsonTarget
-        if target is not SpineJsonTarget.SPINE_4_2
+        if not target.descriptor.serializer_ready
     ),
 )
 def test_unready_target_is_rejected_before_geometry(
