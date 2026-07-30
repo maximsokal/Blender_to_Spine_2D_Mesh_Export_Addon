@@ -12,6 +12,7 @@ from ..application import (
 )
 from ..domain.baking import sanitize_filename_stem
 from ..domain.spine.rig_profiles import A1RigSetupPoseMode
+from ..domain.spine.version_target import spine_json_version_filename_token
 from ..domain.uv import UvUnwrapSettings
 from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_ui_scene_capture import (
@@ -28,6 +29,24 @@ from .a1_ui_selection import (
 
 _DEFAULT_BAKE_MARGIN = 4
 _DEFAULT_UV_LAYER_NAME = "SpineBakeUV"
+
+
+def _versioned_json_output_stem(
+    base_stem: str | None,
+    scene: _SceneExportProfile,
+) -> str | None:
+    """Append the exact required Spine Editor version to a final JSON stem."""
+
+    if base_stem is None:
+        return None
+    if not isinstance(scene, _SceneExportProfile):
+        raise TypeError("scene must be _SceneExportProfile")
+    sanitized_base = sanitize_filename_stem(base_stem)
+    token = spine_json_version_filename_token(scene.spine_target)
+    suffix = f"_{token}"
+    if sanitized_base.casefold().endswith(suffix.casefold()):
+        return sanitized_base
+    return sanitize_filename_stem(f"{sanitized_base}{suffix}")
 
 
 def _settings_from_profiles(
@@ -61,7 +80,7 @@ def _settings_from_profiles(
         ),
         prefix=obj.object_name,
         output_stem=sanitize_filename_stem(obj.object_name),
-        json_output_stem=json_output_stem,
+        json_output_stem=_versioned_json_output_stem(json_output_stem, scene),
         source_geometry_mode=A1SourceGeometryMode.ORIGINAL,
         geometry=scene.geometry,
         uv=UvUnwrapSettings(layer_name=_DEFAULT_UV_LAYER_NAME),
