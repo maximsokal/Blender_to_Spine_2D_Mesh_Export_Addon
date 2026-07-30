@@ -7,6 +7,9 @@ import json
 
 import pytest
 
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.connected_group_serialization_validator import (
+    ConnectedGroupSerializationValidator,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.model import (
     Bone,
     IKConstraint,
@@ -72,7 +75,7 @@ def _v41_document() -> SpineDocument:
     }
     return SpineDocument(
         skeleton={
-            "spine": "4.1.19",
+            "spine": "4.1.24",
             "images": "images/",
             "referenceScale": 100,
         },
@@ -99,6 +102,14 @@ def _v41_document() -> SpineDocument:
         animations={"animation": {}},
         extras={"physics": [{"name": "unused-4.2-only-constraint"}]},
     )
+
+
+def _constraint_orders(payload: dict[str, object]) -> list[int]:
+    orders: list[int] = []
+    for collection_name in ("ik", "transform", "path"):
+        for constraint in payload.get(collection_name, ()):
+            orders.append(constraint["order"])
+    return orders
 
 
 @pytest.mark.parametrize("indent", (0, 2, 4))
@@ -136,7 +147,7 @@ def test_v41_codec_writes_native_setup_pose_fields() -> None:
         )
     )
 
-    assert payload["skeleton"]["spine"] == "4.1.19"
+    assert payload["skeleton"]["spine"] == "4.1.24"
     assert "referenceScale" not in payload["skeleton"]
     assert payload["bones"][1]["transform"] == "onlyTranslation"
     assert "inherit" not in payload["bones"][1]
@@ -156,6 +167,56 @@ def test_v41_codec_writes_native_setup_pose_fields() -> None:
     }
     assert attachments["linked"]["parent"] == "mesh"
     assert attachments["linked"]["timelines"] is False
+
+
+def test_v41_codec_linearizes_connected_constraint_order_ties_and_gaps() -> None:
+    document = _v41_document()
+    transforms = (
+        TransformConstraint("transform-a", 1, ("control",), "root"),
+        TransformConstraint("transform-b", 1, ("control",), "root"),
+        TransformConstraint("transform-c", 5, ("control",), "root"),
+    )
+    skin = replace(
+        document.skins[0],
+        constraints=("ik", "transform-a", "transform-b", "transform-c"),
+    )
+    extras = dict(document.extras)
+    extras["path"] = [
+        {
+            "name": "path",
+            "order": 9,
+            "bones": ["control"],
+            "target": "root",
+        }
+    ]
+    connected = replace(
+        document,
+        skins=(skin,),
+        transform=transforms,
+        extras=extras,
+    )
+
+    payload = json.loads(
+        serialize_spine_document(
+            connected,
+            SpineJsonTarget.SPINE_4_1,
+            validator=ConnectedGroupSerializationValidator(),
+        )
+    )
+
+    assert sorted(_constraint_orders(payload)) == list(range(5))
+    order_by_name = {
+        constraint["name"]: constraint["order"]
+        for collection_name in ("ik", "transform", "path")
+        for constraint in payload.get(collection_name, ())
+    }
+    assert order_by_name == {
+        "ik": 0,
+        "transform-a": 1,
+        "transform-b": 2,
+        "transform-c": 3,
+        "path": 4,
+    }
 
 
 def test_v41_codec_does_not_mutate_the_input_document() -> None:
