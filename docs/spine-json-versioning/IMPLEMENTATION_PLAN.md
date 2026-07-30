@@ -12,7 +12,7 @@ Add one `Spine version` selector to the Export foldout and produce setup-pose JS
 | --- | --- |
 | Spine 3.8 | `3.8.99` |
 | Spine 4.0 | `4.0.64` |
-| Spine 4.1 | `4.1.19` |
+| Spine 4.1 | `4.1.24` |
 | Spine 4.2 | `4.2.43` |
 | Spine 4.3 | `4.3.23` |
 
@@ -146,6 +146,7 @@ Implementation is committed, but the focused tests and the complete regression s
 - [ ] Convert bone inheritance spelling where required.
 - [ ] Remove unsupported fields rather than guessing defaults.
 - [ ] Preserve weighted bone indices after multi-object composition.
+- [ ] Normalize target constraint orders when the target loader requires unique contiguous ordinals.
 - [ ] Validate against official matching runtimes and Editor imports.
 
 ### Phase 4 - Spine 3.8
