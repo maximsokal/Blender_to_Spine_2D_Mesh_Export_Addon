@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 from typing import Mapping, Tuple
 
@@ -23,6 +23,15 @@ from ..domain.spine.legacy_rig_contracts import (
     LegacyRigBuildResult,
 )
 from ..domain.spine.rig_builder import build_rig
+from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
+from ..domain.spine.two_axis_scale_profile import TwoAxisScaleRigProfile
+from ..domain.spine.two_axis_scale_spine41 import (
+    adapt_two_axis_document_for_spine41,
+)
+from ..domain.spine.version_target import (
+    SpineJsonTarget,
+    resolve_spine_json_target,
+)
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
     StatisticsValue,
@@ -60,6 +69,67 @@ class A1DocumentPreparationResult:
             raise TypeError("warnings must be a tuple of ExportIssue values")
         if not isinstance(self.statistics, Mapping):
             raise TypeError("statistics must be a mapping")
+
+
+def finalize_a1_document_assembly_for_target(
+    document_assembly: A1DocumentAssemblyResult,
+    *,
+    spine_target: object,
+    prefix: str,
+) -> A1DocumentAssemblyResult:
+    """Apply target-specific rig semantics only after canonical document assembly.
+
+    Projection and attachment builders validate the canonical rig against its exact
+    deterministic plan. Spine 4.1 changes two transform constraints, so applying those
+    changes before projection makes the otherwise valid rig fail its own profile
+    validator. The final immutable document is the correct target boundary: attachments,
+    weighted vertices, slots, visuals, and animations already exist, while constraint
+    topology can still be replaced without mutating the canonical rig result.
+    """
+
+    if not isinstance(document_assembly, A1DocumentAssemblyResult):
+        raise TypeError("document_assembly must be A1DocumentAssemblyResult")
+    if not isinstance(prefix, str) or not prefix.strip():
+        raise ValueError("prefix must be a non-empty string")
+
+    resolved_target = resolve_spine_json_target(spine_target)
+    if resolved_target is SpineJsonTarget.SPINE_4_2:
+        return document_assembly
+    if resolved_target is not SpineJsonTarget.SPINE_4_1:
+        raise ValueError(
+            "A1 document finalization is not implemented for "
+            f"{resolved_target.label} ({resolved_target.exact_version})"
+        )
+
+    rig = document_assembly.rig
+    resolved_profile = resolve_a1_rig_profile(rig.profile.profile_id)
+    if (
+        resolved_profile is not A1RigProfile.TWO_AXIS_ROTATION_SCALE
+        or not isinstance(rig.profile, TwoAxisScaleRigProfile)
+    ):
+        raise ValueError(
+            "Spine 4.1 document finalization currently requires "
+            "TWO_AXIS_ROTATION_SCALE"
+        )
+    if rig.request.prefix.strip() != prefix.strip():
+        raise ValueError(
+            f"Document finalization prefix {prefix!r} does not match rig prefix "
+            f"{rig.request.prefix!r}"
+        )
+
+    adapted_document = adapt_two_axis_document_for_spine41(
+        document_assembly.document,
+        profile=rig.profile,
+        prefix=prefix,
+    )
+    adapted_build = replace(
+        document_assembly.document_build,
+        document=adapted_document,
+    )
+    return replace(
+        document_assembly,
+        document_build=adapted_build,
+    )
 
 
 def prepare_a1_document(
@@ -145,6 +215,12 @@ def prepare_a1_document(
                 assembly_settings,
                 skeleton_metadata=skeleton_metadata,
             )
+
+        document_assembly = finalize_a1_document_assembly_for_target(
+            document_assembly,
+            spine_target=source.settings.export.spine_target,
+            prefix=source.prefix,
+        )
         document = document_assembly.document
         statistics = freeze_statistics(
             statistics,
@@ -159,9 +235,10 @@ def prepare_a1_document(
             },
         )
         logger.debug(
-            "Prepared Spine document for %s: profile=%s setup=%s "
+            "Prepared Spine document for %s: target=%s profile=%s setup=%s "
             "bones=%d slots=%d attachments=%d",
             source.object_id,
+            source.settings.export.spine_version,
             rig.profile.profile_id,
             rig.request.setup_pose_mode.value,
             len(document.bones),
@@ -187,4 +264,8 @@ def prepare_a1_document(
         ) from exc
 
 
-__all__ = ["A1DocumentPreparationResult", "prepare_a1_document"]
+__all__ = [
+    "A1DocumentPreparationResult",
+    "finalize_a1_document_assembly_for_target",
+    "prepare_a1_document",
+]
