@@ -24,6 +24,23 @@ Version `0.47.11` separates the two owners:
 
 The Object RNA property is retained so older `.blend` files load safely, but it no longer affects production Analyze or Export Selected Objects.
 
+## Real-Blender routing gate
+
+`tests/blender_headless/run_production_ui_standalone_policy_integration.py` registers the real extension in Blender 5.2, creates three real Mesh objects, persists `Connect=True` on two of them, and captures both routing surfaces from the same Blender state.
+
+The gate requires:
+
+- the ordinary production plan to be `STANDALONE` with every selected source in `standalone_sources`;
+- Spine 4.1 standalone capability preflight to pass for every production source;
+- the explicit development-only plan to remain `MIXED`, proving the persisted values were preserved rather than deleted;
+- no operator-driven scene setup.
+
+Required success marker:
+
+```text
+[PRODUCTION_UI_STANDALONE] PASS persisted Connect flags ignored by production
+```
+
 ## Unchanged Spine 4.1 rig behavior
 
 The accepted scale fix remains unchanged:
@@ -39,12 +56,13 @@ The accepted scale fix remains unchanged:
 
 Before distributing the ZIP:
 
-1. Run `tests/test_a1_ui_export_plan.py` and the focused `0.47.11` suite.
+1. Run `tests/test_a1_ui_export_plan.py`, `tests/test_production_ui_standalone_headless_contract.py`, and the focused `0.47.11` suite.
 2. Run the complete pure-Python suite.
 3. Run the real-`bpy` suite.
-4. Run the Blender-to-Spine 4.1 standalone acceptance and scale-response probe.
-5. Install the ZIP over a `.blend` containing stale Connect values and confirm standalone JSON without `all_objects_*` identifiers.
-6. Build and validate `blender_to_spine2d_mesh_exporter-0.47.11.zip`.
-7. Run the isolated extension install gate.
+4. Run `tests/blender_headless/run_production_ui_standalone_policy_integration.py` in Blender 5.2.
+5. Run the Blender-to-Spine 4.1 standalone acceptance and scale-response probe.
+6. Import the fresh Blender-generated JSON into Spine Editor 4.1.24 and confirm independent controls without `all_objects_*` identifiers.
+7. Build and validate `blender_to_spine2d_mesh_exporter-0.47.11.zip`.
+8. Run the isolated extension install gate.
 
 The external Spine runtime repository remains read-only input.
