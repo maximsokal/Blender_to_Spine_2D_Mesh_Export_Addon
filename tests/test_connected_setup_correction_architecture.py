@@ -48,9 +48,20 @@ def test_connected_assembly_skips_setup_correction_for_legacy_wrapper():
     )
     correction_call = source.index("correct_connected_setup_pose(", profile_branch)
     scheduling_call = source.index("apply_connected_constraint_schedule(")
-    validation_call = source.index("_validate_connected_final(final_document)")
+    validation_call = source.index(
+        "_validate_connected_final(final_document, resolved_target)"
+    )
+    runtime_safety_call = source.index(
+        "_validate_target_runtime_safety(final_document, resolved_target)"
+    )
 
-    assert profile_branch < correction_call < scheduling_call < validation_call
+    assert (
+        profile_branch
+        < correction_call
+        < scheduling_call
+        < validation_call
+        < runtime_safety_call
+    )
     assert "if profile_id is A1RigProfile.THREE_AXIS_ROTATION" not in source[
         profile_branch:correction_call
     ]
