@@ -17,8 +17,7 @@ def test_spine41_oracle_binds_textures_through_runtime_page_api() -> None:
     source = _source()
 
     atlas_creation = source.index(
-        "const atlas = new runtime.TextureAtlas("
-        "createAtlasText(collectAtlasRegions(document)));"
+        "const atlas = new runtime.TextureAtlas(createAtlasText(atlasRegions));"
     )
     texture_binding = source.index("bindAtlasPageTextures(atlas);", atlas_creation)
     loader_creation = source.index(
@@ -85,3 +84,37 @@ def test_spine41_oracle_rejects_unknown_output_options() -> None:
 
     assert "function parseOutputOptions(argumentsList)" in source
     assert "fail(`Unknown oracle option: ${String(argument)}`);" in source
+
+
+def test_spine41_oracle_detects_renderables_by_runtime_class_identity() -> None:
+    source = _source()
+
+    assert "'RegionAttachment'" in source
+    assert "'MeshAttachment'" in source
+    assert "attachment instanceof runtime.RegionAttachment" in source
+    assert "attachment instanceof runtime.MeshAttachment" in source
+    assert "attachment.constructor?.name" not in source
+
+
+def test_spine41_oracle_requires_runtime_setup_attachments_to_match_json() -> None:
+    source = _source()
+
+    expected_collection = source.index(
+        "const expectedSetupAttachments = collectExpectedSetupRenderableAttachments(document);"
+    )
+    runtime_validation = source.index(
+        "const setupAttachments = validateSetupAttachments(",
+        expected_collection,
+    )
+    bounds_validation = source.index(
+        "const bounds = setupBounds(runtime, skeleton, setupAttachments);",
+        runtime_validation,
+    )
+    validation_function = source.index("function validateSetupAttachments(")
+    deep_equal = source.index("assert.deepEqual(", validation_function)
+    validation_return = source.index("return actualAttachments;", deep_equal)
+
+    assert validation_function < deep_equal < validation_return
+    assert expected_collection < runtime_validation < bounds_validation
+    assert "setupRenderableAttachments: setupAttachments.length" in source
+    assert "Runtime setup bounds must have positive width and height" in source
