@@ -11,11 +11,14 @@ MANIFEST = (
     / "Blender_to_Spine2D_Mesh_Exporter"
     / "blender_manifest.toml"
 )
+EXPECTED_RELEASE_VERSION = "0.47.10"
 
 
-def test_extension_manifest_version_is_0_47_5():
+def test_extension_manifest_version_is_current_release() -> None:
+    """Keep the packaged manifest pinned to the reviewed release candidate."""
+
     source = MANIFEST.read_text(encoding="utf-8")
     match = re.search(r'^version\s*=\s*"([^"]+)"\s*$', source, re.MULTILINE)
 
     assert match is not None
-    assert match.group(1) == "0.47.5"
+    assert match.group(1) == EXPECTED_RELEASE_VERSION
