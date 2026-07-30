@@ -102,14 +102,20 @@ def test_shared_staging_finalizes_before_output_composition_and_serialization():
     assert staging and finalization and max(staging) < min(finalization)
 
     expectations = {
-        "a1_multi_object_output.py": "compose_a1_multi_object_document",
-        "a1_mixed_object_output.py": "compose_a1_mixed_document",
+        "a1_multi_object_output.py": (
+            "compose_a1_multi_object_document",
+            "_serialize_composition",
+        ),
+        "a1_mixed_object_output.py": (
+            "compose_a1_mixed_document",
+            "_serialize",
+        ),
     }
-    for filename, composition_name in expectations.items():
+    for filename, (composition_name, serialization_name) in expectations.items():
         tree = _tree(filename)
         stage_calls = _call_lines(tree, "stage_and_finalize_a1_objects")
         composition = _call_lines(tree, composition_name)
-        serialization = _call_lines(tree, "to_json")
+        serialization = _call_lines(tree, serialization_name)
         assert stage_calls and composition and serialization
         assert max(stage_calls) < min(composition) < min(serialization)
 
