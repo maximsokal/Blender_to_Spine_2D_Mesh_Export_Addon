@@ -42,6 +42,7 @@ def build_rig(
 
     if resolved_profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
         if resolved_target in {
+            SpineJsonTarget.SPINE_4_0,
             SpineJsonTarget.SPINE_4_1,
             SpineJsonTarget.SPINE_4_2,
         }:
