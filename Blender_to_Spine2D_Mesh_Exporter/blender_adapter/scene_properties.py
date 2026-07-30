@@ -10,6 +10,10 @@ import bpy
 from .. import config
 from ..domain.baking import A1TextureExportMode
 from ..domain.spine.rig_profiles import A1RigProfile
+from ..domain.spine.version_target import (
+    DEFAULT_SPINE_JSON_TARGET,
+    spine_json_target_enum_items,
+)
 from .scene_settings_migration import (
     CURRENT_SETTINGS_SCHEMA_VERSION,
     migration_file_loading,
@@ -70,11 +74,21 @@ def _invalidate_readiness_for_setting(
 
 
 def _update_texture_export_mode(_self: Any, context: bpy.types.Context) -> None:
-    """Invalidate diagnostics and schedule one analysis for the new texture mode."""
+    """Invalidate diagnostics after changing the texture export mode."""
 
     _invalidate_readiness_for_setting(
         context,
         reason="texture export mode changed",
+    )
+    _update_ui_for_paths(_self, context)
+
+
+def _update_spine_target_version(_self: Any, context: bpy.types.Context) -> None:
+    """Invalidate diagnostics because the final JSON schema has changed."""
+
+    _invalidate_readiness_for_setting(
+        context,
+        reason="Spine target version changed",
     )
     _update_ui_for_paths(_self, context)
 
@@ -160,6 +174,16 @@ PROPERTIES = (
             ),
             default=A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
             update=_update_texture_export_mode,
+        ),
+    ),
+    (
+        "spine2d_target_spine_version",
+        bpy.props.EnumProperty(
+            name="Spine Version",
+            description="Choose the target Spine JSON schema and exact version metadata",
+            items=spine_json_target_enum_items(),
+            default=DEFAULT_SPINE_JSON_TARGET.value,
+            update=_update_spine_target_version,
         ),
     ),
     (
