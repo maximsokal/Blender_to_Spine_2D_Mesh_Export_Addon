@@ -31,6 +31,8 @@ def _scene(
         spine2d_seam_maker_mode="AUTO",
         spine2d_angle_limit=30.0,
         spine2d_control_icons=True,
+        # Legacy .blend files may still persist this value. The target-version
+        # setup-pose pipeline must ignore it until animation versioning is explicit.
         spine2d_export_preview_animation=True,
         spine2d_bake_frame_start=0,
         spine2d_frames_for_render=0,
@@ -72,6 +74,7 @@ def test_single_settings_request_a_neutral_authoring_setup_pose(tmp_path):
 
     assert settings.export.rig_profile == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
     assert settings.rig_setup_pose_mode is A1RigSetupPoseMode.NORMALIZED_SINGLE
+    assert settings.include_preview_animation is False
 
 
 def test_multi_sources_share_one_immutable_scene_snapshot(tmp_path):
@@ -107,6 +110,10 @@ def test_multi_sources_share_one_immutable_scene_snapshot(tmp_path):
     assert all(
         source.settings.rig_setup_pose_mode
         is A1RigSetupPoseMode.PRESERVE_COMPOSITION
+        for source in sources
+    )
+    assert all(
+        source.settings.include_preview_animation is False
         for source in sources
     )
     assert sources[1].settings.export.sequence_start_frame == 4
