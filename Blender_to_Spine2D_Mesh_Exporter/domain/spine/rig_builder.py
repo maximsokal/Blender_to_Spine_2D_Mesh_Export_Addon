@@ -6,7 +6,6 @@ from .legacy_rig_assembly import build_legacy_rig
 from .legacy_rig_contracts import LegacyRigBuildRequest, LegacyRigBuildResult
 from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from .two_axis_scale_rig import build_two_axis_scale_rig
-from .two_axis_scale_spine41 import adapt_two_axis_scale_rig_for_spine41
 from .version_target import (
     DEFAULT_SPINE_JSON_TARGET,
     SpineJsonTarget,
@@ -20,7 +19,13 @@ def build_rig(
     *,
     spine_target: object = DEFAULT_SPINE_JSON_TARGET,
 ) -> LegacyRigBuildResult:
-    """Build one validated target-aware rig without downstream profile guessing."""
+    """Build one canonical validated rig accepted by the selected target pipeline.
+
+    Attachment projection and mesh-document assembly repeatedly call ``rig.validate()``.
+    They therefore require the exact deterministic profile result. Target-specific
+    constraint variants are applied to the immutable assembled ``SpineDocument`` after
+    every projection and weighted attachment has been built.
+    """
 
     if not isinstance(request, LegacyRigBuildRequest):
         raise TypeError("request must be LegacyRigBuildRequest")
@@ -36,11 +41,11 @@ def build_rig(
         return build_legacy_rig(request)
 
     if resolved_profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
-        rig = build_two_axis_scale_rig(request)
-        if resolved_target is SpineJsonTarget.SPINE_4_2:
-            return rig
-        if resolved_target is SpineJsonTarget.SPINE_4_1:
-            return adapt_two_axis_scale_rig_for_spine41(rig)
+        if resolved_target in {
+            SpineJsonTarget.SPINE_4_1,
+            SpineJsonTarget.SPINE_4_2,
+        }:
+            return build_two_axis_scale_rig(request)
         raise ValueError(
             "TWO_AXIS_ROTATION_SCALE is not implemented for "
             f"{resolved_target.label} ({resolved_target.exact_version})"
