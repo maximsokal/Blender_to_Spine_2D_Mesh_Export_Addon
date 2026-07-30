@@ -327,9 +327,9 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         row = column.row(align=True)
         row.label(text="Control icons")
         row.prop(scene, "spine2d_control_icons", text="")
-        row = column.row(align=True)
-        row.label(text="Preview animation")
-        row.prop(scene, "spine2d_export_preview_animation", text="")
+        # Preview animation is intentionally hidden while target-version JSON export
+        # supports setup pose only. The legacy RNA property remains registered so old
+        # .blend files can load without losing their persisted setting.
 
         selected_meshes = tuple(
             candidate
