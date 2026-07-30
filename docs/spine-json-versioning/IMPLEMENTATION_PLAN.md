@@ -54,11 +54,11 @@ The complete user-provided multi-object captures are stored next to this plan:
 - [`reference/Cone_plus_2_objects_spine_4.2.json`](reference/Cone_plus_2_objects_spine_4.2.json)
 - [`reference/Cone_plus_2_objects_spine_4.3.json`](reference/Cone_plus_2_objects_spine_4.3.json)
 
-These files are immutable research references, not approved golden outputs yet. They intentionally remain byte-for-byte copies of the supplied files.
+These are complete semantic JSON copies of the supplied captures and are immutable research references, not approved golden outputs. Formatting may be normalized for repository storage, so the inventory below records the byte length and SHA-256 of the original uploaded source files rather than promising repository byte identity.
 
 ### Reference inventory
 
-| File | Stored `skeleton.spine` | Bytes | SHA-256 | Bones | Slots | IK | Transform | Constraints | Animations |
+| File | Stored `skeleton.spine` | Source bytes | Source SHA-256 | Bones | Slots | IK | Transform | Constraints | Animations |
 | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | 3.8 | `3.8-from-4.0-from-4.1-from-4.2.43` | 21257 | `5a363eb8f8a95adf87de127dfce6e0886d21d8baeb7e902f24b5bcad49d7d41e` | 58 | 24 | 3 | 12 | 0 | 6 |
 | 4.0 | `4.0-from-4.1-from-4.2.43` | 21170 | `ad5a7477d634282487ba8421c7912f4faefab60f7bcaac0211c003d470204171` | 58 | 24 | 3 | 12 | 0 | 6 |
@@ -113,9 +113,11 @@ No production module may branch on ad hoc `startswith()` or floating-point versi
 - [x] Create isolated feature branch.
 - [x] Store this implementation plan.
 - [x] Store all five complete multi-object JSON captures.
-- [ ] Hide the Preview animation UI row.
-- [ ] Force immutable Scene capture to disable preview animation even when an old `.blend` stores `True`.
-- [ ] Add focused UI/request-boundary tests.
+- [x] Hide the Preview animation UI row.
+- [x] Force immutable Scene capture to disable preview animation even when an old `.blend` stores `True`.
+- [x] Add focused UI/request-boundary tests.
+
+Implementation is committed, but the focused tests and the complete regression suites have not yet been executed on this feature branch.
 
 ### Phase 1 - target registry and Blender UI
 
