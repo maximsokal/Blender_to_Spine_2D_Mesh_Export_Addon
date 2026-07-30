@@ -13,6 +13,11 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping, Tuple
 
 from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
+from ..domain.spine.version_target import (
+    DEFAULT_SPINE_JSON_VERSION,
+    SpineJsonTarget,
+    resolve_spine_json_exact_version,
+)
 from .a1_numeric_contracts import (
     require_finite_number,
     require_integer,
@@ -51,7 +56,7 @@ class ExportSettings:
     texture_height: int
     output_directory: Path
     images_relative_path: str = "images"
-    spine_version: str = "4.2.43"
+    spine_version: str = DEFAULT_SPINE_JSON_VERSION
     rig_profile: str = A1RigProfile.THREE_AXIS_ROTATION.value
     seam_mode: str = "AUTO"
     angle_limit_degrees: float = 30.0
@@ -69,7 +74,9 @@ class ExportSettings:
             self.images_relative_path,
             "images_relative_path",
         )
-        require_non_empty_string(self.spine_version, "spine_version")
+        # Application settings must carry an exact registered version. UI identifiers
+        # and family-only strings are resolved before this immutable boundary.
+        resolve_spine_json_exact_version(self.spine_version)
         require_non_empty_string(self.rig_profile, "rig_profile")
         resolve_a1_rig_profile(self.rig_profile)
         if not isinstance(self.seam_mode, str):
@@ -96,6 +103,12 @@ class ExportSettings:
         )
         if not isinstance(self.preserve_debug_artifacts, bool):
             raise TypeError("preserve_debug_artifacts must be bool")
+
+    @property
+    def spine_target(self) -> SpineJsonTarget:
+        """Return the canonical target represented by ``spine_version``."""
+
+        return resolve_spine_json_exact_version(self.spine_version)
 
 
 @dataclass(frozen=True, slots=True)
