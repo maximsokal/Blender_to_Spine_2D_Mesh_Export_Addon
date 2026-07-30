@@ -13,6 +13,7 @@ from ..application import (
     ExportIssue,
     emit_a1_export_progress,
 )
+from ..domain.spine.version_target import require_spine_json_target_serializable
 from .a1_document_preparation import prepare_a1_document
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
@@ -112,6 +113,12 @@ def prepare_a1_object(
     statistics: Mapping[str, StatisticsValue] = {}
     warnings: Tuple[ExportIssue, ...] = ()
     try:
+        if not isinstance(settings, A1SingleObjectExportSettings):
+            raise TypeError("settings must be A1SingleObjectExportSettings")
+        # Until each target codec is proven, reject unsupported versions before
+        # touching Blender geometry, UV state, materials, temporary images, or files.
+        require_spine_json_target_serializable(settings.export.spine_target)
+
         with _source_uv_integrity_guard(source_obj, context):
             _progress(progress_callback, 0, stage)
             _progress(progress_callback, 10, A1SingleObjectStage.READ_GEOMETRY)
