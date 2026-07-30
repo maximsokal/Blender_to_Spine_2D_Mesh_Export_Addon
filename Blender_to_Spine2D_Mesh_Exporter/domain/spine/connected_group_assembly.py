@@ -1,4 +1,4 @@
-"""Assemble connected A1 object documents under one profile-aware global rig."""
+"""Assemble connected A1 object documents under one target-aware global rig."""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from .connected_group_object_setup import normalize_connected_object_control_spa
 from .connected_group_schedule import (
     apply_connected_constraint_schedule,
     build_constraint_schedule,
+    validate_constraint_schedule_for_target,
 )
 from .connected_group_setup_correction import correct_connected_setup_pose
 from .connected_group_validation import (
@@ -41,6 +42,11 @@ from .legacy_rig_scale import calculate_uniform_scale
 from .model import Bone, SpineDocument
 from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from .validator import SpineValidator
+from .version_target import (
+    DEFAULT_SPINE_JSON_TARGET,
+    SpineJsonTarget,
+    resolve_spine_json_target,
+)
 
 
 def apply_object_placements(
@@ -107,20 +113,32 @@ def apply_object_placements(
     return replace(document, bones=tuple(updated_bones))
 
 
-def _validate_connected_final(document: SpineDocument) -> None:
-    """Validate everything except intentional Legacy same-layer order sharing."""
+def _validate_connected_final(
+    document: SpineDocument,
+    spine_target: SpineJsonTarget,
+) -> None:
+    """Validate the final document using the selected runtime order contract."""
 
-    issues = tuple(
-        issue
-        for issue in SpineValidator().validate(document)
-        if issue.code != "DUPLICATE_CONSTRAINT_ORDER"
-    )
+    if not isinstance(document, SpineDocument):
+        raise TypeError("document must be SpineDocument")
+    if not isinstance(spine_target, SpineJsonTarget):
+        raise TypeError("spine_target must be SpineJsonTarget")
+
+    issues = SpineValidator().validate(document)
+    if spine_target is SpineJsonTarget.SPINE_4_2:
+        # Existing 4.2 connected output intentionally preserves historical same-layer
+        # order sharing. No other validation issue is suppressed.
+        issues = tuple(
+            issue for issue in issues if issue.code != "DUPLICATE_CONSTRAINT_ORDER"
+        )
+
     if issues:
         details = "\n".join(
             f"- [{issue.code}] {issue.path}: {issue.message}" for issue in issues
         )
         raise ConnectedGroupBuildError(
-            "Connected A1 group failed final validation:\n" + details
+            f"Connected A1 group failed {spine_target.exact_version} validation:\n"
+            + details
         )
 
 
@@ -197,14 +215,25 @@ def build_connected_group_document(
     objects: Tuple[ConnectedObjectDocument, ...],
     settings: ConnectedGroupSettings,
     profile: LegacyRigProfile | None = None,
+    *,
+    spine_target: object = DEFAULT_SPINE_JSON_TARGET,
 ) -> ConnectedGroupBuildResult:
-    """Compose A1 object documents under one Legacy-compatible connected wrapper."""
+    """Compose A1 documents under one target-aware connected wrapper."""
 
     if not isinstance(settings, ConnectedGroupSettings):
         raise TypeError("settings must be ConnectedGroupSettings")
     resolved_profile = LegacyRigProfile() if profile is None else profile
     if not isinstance(resolved_profile, LegacyRigProfile):
         raise TypeError("profile must be LegacyRigProfile")
+    resolved_target = resolve_spine_json_target(spine_target)
+    if resolved_target not in {
+        SpineJsonTarget.SPINE_4_1,
+        SpineJsonTarget.SPINE_4_2,
+    }:
+        raise ValueError(
+            f"Connected rig construction is not implemented for "
+            f"{resolved_target.label} ({resolved_target.exact_version})"
+        )
 
     validate_connected_group_inputs(objects, settings, resolved_profile)
     layers, placements = resolve_layers_and_placements(
@@ -218,7 +247,12 @@ def build_connected_group_document(
         resolved_profile,
         layers,
     )
-    schedule = build_constraint_schedule(placements, resolved_profile)
+    schedule = build_constraint_schedule(
+        placements,
+        resolved_profile,
+        spine_target=resolved_target,
+    )
+    validate_constraint_schedule_for_target(schedule, resolved_target)
     uniform_scale = calculate_uniform_scale(
         settings.texture_width,
         settings.texture_height,
@@ -256,8 +290,8 @@ def build_connected_group_document(
         ),
         SpineCompositionSettings(
             shared_bone_names=(resolved_profile.root_bone(),),
-            # Generic composition remains collision-strict. Final Legacy layer orders are
-            # applied only after every weighted bone index has been safely remapped.
+            # Generic composition remains collision-strict. Target scheduling is applied
+            # only after every weighted bone index has been safely remapped.
             constraint_order_policy=ConstraintOrderPolicy.REBASE_CONTIGUOUS,
             namespace_animations=settings.namespace_animations,
             animation_separator=settings.animation_separator,
@@ -282,9 +316,8 @@ def build_connected_group_document(
         resolved_profile,
         uniform_scale,
     )
-    # Keep the exact main-branch array ownership: object constraints already exist in
-    # component order and global constraints are appended afterward. Only their ``order``
-    # values are replaced; the arrays are deliberately not sorted.
+    # Object constraints remain in component order and global constraints are appended.
+    # Only ``order`` values are replaced; the arrays are deliberately not sorted.
     with_global_constraints = replace(
         placed_document,
         ik=(*placed_document.ik, *global_ik),
@@ -312,7 +345,7 @@ def build_connected_group_document(
         resolved_profile,
         settings.group_prefix,
     )
-    _validate_connected_final(final_document)
+    _validate_connected_final(final_document, resolved_target)
 
     composition = replace(
         composition,
