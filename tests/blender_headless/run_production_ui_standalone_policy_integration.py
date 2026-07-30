@@ -50,17 +50,28 @@ def _assert(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def _clear_scene_objects() -> None:
-    """Remove every scene object and its owned test mesh without using operators."""
+def _mesh_identity(mesh: bpy.types.Mesh) -> tuple[str, int]:
+    """Return a stable process-local identity for one Blender Mesh datablock."""
 
-    meshes = {
-        obj.data
-        for obj in tuple(bpy.data.objects)
-        if getattr(obj, "type", None) == "MESH" and obj.data is not None
-    }
+    pointer = getattr(mesh, "as_pointer", None)
+    if callable(pointer):
+        resolved = int(pointer())
+        if resolved:
+            return "RNA_POINTER", resolved
+    return "PYTHON_ID", id(mesh)
+
+
+def _clear_scene_objects() -> None:
+    """Remove every scene object and each now-unused owned mesh without operators."""
+
+    meshes_by_identity: dict[tuple[str, int], bpy.types.Mesh] = {}
     for obj in tuple(bpy.data.objects):
+        mesh = obj.data if getattr(obj, "type", None) == "MESH" else None
+        if mesh is not None:
+            meshes_by_identity.setdefault(_mesh_identity(mesh), mesh)
         bpy.data.objects.remove(obj, do_unlink=True)
-    for mesh in meshes:
+
+    for mesh in tuple(meshes_by_identity.values()):
         if mesh.users == 0:
             bpy.data.meshes.remove(mesh)
 
@@ -109,21 +120,8 @@ def _configure_scene(output_directory: Path) -> None:
     scene.spine2d_bake_frame_start = 0
 
 
-def _run_integration() -> None:
-    """Exercise production and development routing against the same persisted state."""
-
-    output_directory = Path(tempfile.mkdtemp(prefix="spine2d-ui-standalone-"))
-    _clear_scene_objects()
-    objects = tuple(
-        _create_mesh_object(name)
-        for name in ("StaleConnectA", "StaleConnectB", "StandaloneC")
-    )
-    _select_objects(objects)
-    _configure_scene(output_directory)
-
-    objects[0].spine2d_connect_settings.enabled = True
-    objects[1].spine2d_connect_settings.enabled = True
-    objects[2].spine2d_connect_settings.enabled = False
+def _assert_production_plan(objects: tuple[bpy.types.Object, ...]) -> None:
+    """Require standalone production routing and accepted Spine 4.1 preflight."""
 
     production = build_selected_ui_export_plan(bpy.context)
     _assert(
@@ -152,6 +150,10 @@ def _run_integration() -> None:
             "production source target changed",
         )
 
+
+def _assert_development_plan() -> None:
+    """Prove that persisted flags remain available only to the explicit dev builder."""
+
     development = build_development_connected_ui_export_plan(bpy.context)
     _assert(
         development.settings.mode is A1MultiObjectMode.MIXED,
@@ -159,6 +161,26 @@ def _run_integration() -> None:
     )
     _assert(len(development.connected_sources) == 2, "development Connect flags were lost")
     _assert(len(development.standalone_sources) == 1, "development partition changed")
+
+
+def _run_integration() -> None:
+    """Exercise production and development routing against the same persisted state."""
+
+    with tempfile.TemporaryDirectory(prefix="spine2d-ui-standalone-") as output_text:
+        _clear_scene_objects()
+        objects = tuple(
+            _create_mesh_object(name)
+            for name in ("StaleConnectA", "StaleConnectB", "StandaloneC")
+        )
+        _select_objects(objects)
+        _configure_scene(Path(output_text))
+
+        objects[0].spine2d_connect_settings.enabled = True
+        objects[1].spine2d_connect_settings.enabled = True
+        objects[2].spine2d_connect_settings.enabled = False
+
+        _assert_production_plan(objects)
+        _assert_development_plan()
 
 
 def main() -> None:
