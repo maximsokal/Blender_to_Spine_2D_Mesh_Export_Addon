@@ -10,6 +10,8 @@
  *   ../Spine2D_curve_optimization/vendor/spine-webgl-41/index.js
  *
  * The runtime path may also be supplied through SPINE41_RUNTIME_ENTRY.
+ * The referenced runtime repository is treated as read-only; this script never writes
+ * to it and creates only in-memory atlas/texture objects.
  */
 
 import assert from 'node:assert/strict';
@@ -47,12 +49,19 @@ function requireFinite(value, path) {
   return value;
 }
 
+function requirePositiveInteger(value, path) {
+  if (!Number.isInteger(value) || value <= 0) {
+    fail(`${path} must be a positive integer`, { value });
+  }
+  return value;
+}
+
 function resolveRuntimeEntry(argument) {
   const configured = argument ?? process.env.SPINE41_RUNTIME_ENTRY;
   if (!configured || !configured.trim()) {
     fail(
       'Missing Spine 4.1 runtime entry. Pass it as the second argument or set ' +
-      'SPINE41_RUNTIME_ENTRY.',
+        'SPINE41_RUNTIME_ENTRY.',
     );
   }
 
@@ -60,6 +69,7 @@ function resolveRuntimeEntry(argument) {
   if (!existsSync(entry)) fail(`Spine 4.1 runtime entry does not exist: ${entry}`);
   if (statSync(entry).isDirectory()) entry = resolve(entry, 'index.js');
   if (!existsSync(entry)) fail(`Spine 4.1 runtime index does not exist: ${entry}`);
+  if (!statSync(entry).isFile()) fail(`Spine 4.1 runtime entry is not a file: ${entry}`);
   return entry;
 }
 
@@ -125,6 +135,10 @@ function collectAtlasRegions(document) {
 }
 
 function createAtlasText(regions) {
+  if (!Array.isArray(regions) || !regions.every((value) => typeof value === 'string')) {
+    fail('regions must be an array of strings');
+  }
+
   const header = [
     'oracle.png',
     'size: 1,1',
@@ -142,6 +156,53 @@ function createAtlasText(regions) {
     '  index: -1',
   ]);
   return [...header, ...regionLines, ''].join('\n');
+}
+
+function createOracleTexture(width, height) {
+  const image = Object.freeze({
+    width: requirePositiveInteger(width, 'oracle texture width'),
+    height: requirePositiveInteger(height, 'oracle texture height'),
+  });
+
+  return {
+    setFilters() {},
+    setWraps() {},
+    getImage() {
+      return image;
+    },
+    dispose() {},
+  };
+}
+
+function bindAtlasPageTextures(atlas) {
+  if (!isRecord(atlas) || !Array.isArray(atlas.pages)) {
+    fail('Spine 4.1 TextureAtlas must expose a pages array');
+  }
+  if (atlas.pages.length === 0) {
+    fail('Synthetic Spine 4.1 atlas contains no pages');
+  }
+
+  for (let pageIndex = 0; pageIndex < atlas.pages.length; pageIndex += 1) {
+    const page = requireRecord(atlas.pages[pageIndex], `atlas.pages[${pageIndex}]`);
+    if (typeof page.setTexture !== 'function') {
+      fail(`atlas.pages[${pageIndex}].setTexture must be a function`);
+    }
+
+    const width = requirePositiveInteger(page.width, `atlas.pages[${pageIndex}].width`);
+    const height = requirePositiveInteger(page.height, `atlas.pages[${pageIndex}].height`);
+    page.setTexture(createOracleTexture(width, height));
+
+    if (!page.texture || typeof page.texture.getImage !== 'function') {
+      fail(`atlas.pages[${pageIndex}] did not retain the assigned texture`);
+    }
+    const image = page.texture.getImage();
+    if (image.width !== width || image.height !== height) {
+      fail(`atlas.pages[${pageIndex}] texture image dimensions changed`, {
+        expected: { width, height },
+        actual: image,
+      });
+    }
+  }
 }
 
 function readConstraintRecords(document) {
@@ -200,6 +261,9 @@ function validateUpdateCache(skeleton, expectedRecords) {
   const runtimeNames = constraints.map((constraint) => constraint.data.name).sort();
   assert.deepEqual(runtimeNames, expectedNames, 'Runtime constraint inventory differs');
 
+  if (!Array.isArray(skeleton._updateCache)) {
+    fail('Spine 4.1 Skeleton does not expose the expected _updateCache array');
+  }
   const constraintSet = new Set(constraints);
   const cachedConstraints = skeleton._updateCache.filter((item) => constraintSet.has(item));
   assert.equal(
@@ -253,8 +317,9 @@ function validateBoneMatrices(skeleton) {
 function setupBounds(runtime, skeleton) {
   const hasRenderableAttachment = skeleton.drawOrder.some((slot) => {
     const attachment = slot.getAttachment();
-    return attachment && ['RegionAttachment', 'MeshAttachment'].includes(
-      attachment.constructor?.name,
+    return (
+      attachment &&
+      ['RegionAttachment', 'MeshAttachment'].includes(attachment.constructor?.name)
     );
   });
   if (!hasRenderableAttachment) return null;
@@ -262,12 +327,16 @@ function setupBounds(runtime, skeleton) {
   const offset = new runtime.Vector2();
   const size = new runtime.Vector2();
   skeleton.getBounds(offset, size);
-  return {
+  const bounds = {
     x: requireFinite(offset.x, 'runtime.bounds.x'),
     y: requireFinite(offset.y, 'runtime.bounds.y'),
     width: requireFinite(size.x, 'runtime.bounds.width'),
     height: requireFinite(size.y, 'runtime.bounds.height'),
   };
+  if (bounds.width <= 0 || bounds.height <= 0) {
+    fail('Runtime setup bounds must have positive width and height', bounds);
+  }
+  return bounds;
 }
 
 async function main() {
@@ -278,6 +347,8 @@ async function main() {
 
   const jsonPath = resolve(process.cwd(), jsonArgument);
   if (!existsSync(jsonPath)) fail(`JSON file does not exist: ${jsonPath}`);
+  if (!statSync(jsonPath).isFile()) fail(`JSON path is not a file: ${jsonPath}`);
+
   const runtimeEntry = resolveRuntimeEntry(process.argv[3]);
   const runtime = await import(pathToFileURL(runtimeEntry).href);
 
@@ -309,15 +380,10 @@ async function main() {
   const constraintRecords = readConstraintRecords(document);
   validateConstraintOrders(constraintRecords);
 
-  const atlas = new runtime.TextureAtlas(
-    createAtlasText(collectAtlasRegions(document)),
-    () => ({
-      setFilters() {},
-      setWraps() {},
-      getImage: () => ({ width: 1, height: 1 }),
-      dispose() {},
-    }),
-  );
+  // Spine 4.1 TextureAtlas accepts atlas text only. Its page textures must be attached
+  // explicitly through TextureAtlasPage.setTexture before SkeletonJson reads meshes.
+  const atlas = new runtime.TextureAtlas(createAtlasText(collectAtlasRegions(document)));
+  bindAtlasPageTextures(atlas);
 
   try {
     const loader = new runtime.AtlasAttachmentLoader(atlas);
@@ -343,6 +409,8 @@ async function main() {
         ik: skeleton.ikConstraints.length,
         transform: skeleton.transformConstraints.length,
         path: skeleton.pathConstraints.length,
+        atlasPages: atlas.pages.length,
+        atlasRegions: atlas.regions.length,
       },
       constraintOrders: constraintRecords,
       updateCacheConstraints: cacheConstraints,
