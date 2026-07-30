@@ -4,7 +4,35 @@ This changelog records public product releases. Internal development milestones 
 
 ## Unreleased candidate status
 
-Version 0.47.5 is a development candidate and is not validated for release. Manual Spine imports of 0.47.4 showed that setup-neutral wrapper corrections were the wrong compatibility model: the working historical connected exporter used a dedicated global hierarchy, exact transform payloads, Z-layer-based order sharing, source-order constraint arrays, and unchanged object scale-compensator orders. The candidate must not be merged or released until all automated layers and fresh manual Blender-to-Spine exports pass on the same commit.
+Version 0.47.10 is the current release candidate. Spine 4.2.43 remains the primary full target. Spine 4.1.24 is enabled only for `2-Axis Rotation + Scale` in single-object and standalone multi-object exports; connected, mixed, and 3-Axis requests remain fail-closed. The candidate still requires final same-commit package and isolated installation evidence before release.
+
+## [0.47.10] - 2026-07-30
+
+### Added
+
+- A registered Spine 4.1.24 JSON codec with exact legacy bone-transform field mapping and deterministic serialization.
+- A fail-closed capability matrix separating target version, rig profile, and single/standalone/connected/mixed document scope.
+- A Blender 5.2 standalone multi-object acceptance tool that runs the production exporter and the exact read-only Spine 4.1 runtime oracle.
+- A Spine 4.1 scale-response probe that verifies Scale factors `0.5`, `1.5`, and `2.0` against object bounds around each `*_main` bone.
+- Typed weighted-attachment remapping after Spine 4.1 bridge-bone insertion.
+
+### Changed
+
+- Spine 4.1 target adaptation now occurs after canonical attachment projection and document assembly, preserving strict deterministic rig validation.
+- Spine 4.1 world-relative Scale keeps the canonical Spine 4.2 semantics and replaces only the unsafe `*_rotate_X` constrained driver with its invertible parent.
+- Depth-scale constraints retain their original `*_scale` bone ownership; internal `onlyTranslation` bridge bones provide invertible parents without replacing authored zero scales.
+- The extension manifest version is now `0.47.10`.
+
+### Fixed
+
+- Spine 4.1 exports no longer fail during projection because a target-adapted rig was incorrectly revalidated against the canonical Spine 4.2 deterministic plan.
+- Standalone Spine 4.1 Scale controls no longer use the rejected `local=true` policy or allow the depth constraint to overwrite scaling on the final layer bones.
+- Optional absent top-level `path` constraints are correctly treated as an empty collection by the Blender acceptance worker.
+
+### Limitations
+
+- Spine 4.1 connected, mixed, and 3-Axis exports remain disabled.
+- Spine 4.2.43 remains the only target with the complete profile and composition matrix.
 
 ## [0.47.5] - 2026-07-29
 
