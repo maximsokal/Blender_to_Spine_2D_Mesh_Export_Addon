@@ -148,8 +148,8 @@ def test_spine40_codec_rejects_setup_attachment_sequences() -> None:
     assert "document.skins[0].attachments.slot.mesh.sequence" in str(exc_info.value)
 
 
-def test_spine40_codec_rejects_animation_sequence_members() -> None:
-    document = _document()
+def test_spine40_codec_rejects_valid_animation_sequence_members() -> None:
+    document = _document(sequence=True)
     animated = SpineDocument(
         skeleton=document.skeleton,
         bones=document.bones,
@@ -159,9 +159,15 @@ def test_spine40_codec_rejects_animation_sequence_members() -> None:
         transform=document.transform,
         animations={
             "animation": {
-                "slots": {
-                    "slot": {
-                        "sequence": [{"time": 0.0, "mode": "hold", "index": 0}]
+                "attachments": {
+                    "default": {
+                        "slot": {
+                            "mesh": {
+                                "sequence": [
+                                    {"time": 0.0, "mode": "hold", "index": 0}
+                                ]
+                            }
+                        }
                     }
                 }
             }
@@ -169,11 +175,18 @@ def test_spine40_codec_rejects_animation_sequence_members() -> None:
         extras=document.extras,
     )
 
-    with pytest.raises(ValueError, match="does not support.*sequences"):
+    with pytest.raises(ValueError, match="does not support.*sequences") as exc_info:
         Spine40JsonCodec().to_json(
             animated,
             context=SpineJsonCodecContext(target=SpineJsonTarget.SPINE_4_0),
         )
+
+    message = str(exc_info.value)
+    assert "document.skins[0].attachments.slot.mesh.sequence" in message
+    assert (
+        "document.animations.animation.attachments.default.slot.mesh.sequence"
+        in message
+    )
 
 
 def test_spine40_codec_rejects_wrong_context_target() -> None:
