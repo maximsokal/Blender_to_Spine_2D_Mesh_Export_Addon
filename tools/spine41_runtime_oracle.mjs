@@ -6,15 +6,9 @@
  * Usage:
  *   node tools/spine41_runtime_oracle.mjs <json-file> <runtime-entry> [--full]
  *
- * runtime-entry must point to the self-contained ESM entry, for example:
- *   ../Spine2D_curve_optimization/vendor/spine-webgl-41/index.js
- *
  * The runtime path may also be supplied through SPINE41_RUNTIME_ENTRY.
- * The referenced runtime repository is treated as read-only; this script never writes
- * to it and creates only in-memory atlas/texture objects.
- *
- * Output is concise by default. Pass --full only when the complete per-constraint and
- * per-bone diagnostic payload is required.
+ * The referenced runtime repository is read-only: this script imports runtime code and
+ * creates only in-memory atlas/texture objects.
  */
 
 import assert from 'node:assert/strict';
@@ -24,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, '..');
+const RENDERABLE_ATTACHMENT_TYPES = new Set(['region', 'mesh', 'linkedmesh']);
 
 function fail(message, details = undefined) {
   const error = new Error(message);
@@ -59,6 +54,13 @@ function requirePositiveInteger(value, path) {
   return value;
 }
 
+function requireNonEmptyString(value, path) {
+  if (typeof value !== 'string' || !value.trim()) {
+    fail(`${path} must be a non-empty string`, { value });
+  }
+  return value;
+}
+
 function parseOutputOptions(argumentsList) {
   if (!Array.isArray(argumentsList)) fail('argumentsList must be an array');
 
@@ -76,7 +78,7 @@ function parseOutputOptions(argumentsList) {
 
 function resolveRuntimeEntry(argument) {
   const configured = argument ?? process.env.SPINE41_RUNTIME_ENTRY;
-  if (!configured || !configured.trim()) {
+  if (typeof configured !== 'string' || !configured.trim()) {
     fail(
       'Missing Spine 4.1 runtime entry. Pass it as the second argument or set ' +
         'SPINE41_RUNTIME_ENTRY.',
@@ -93,6 +95,7 @@ function resolveRuntimeEntry(argument) {
 
 function sequenceRegionNames(basePath, sequence) {
   if (!isRecord(sequence)) return [basePath];
+
   const count = sequence.count;
   const start = sequence.start ?? 0;
   const digits = sequence.digits ?? 0;
@@ -110,6 +113,10 @@ function sequenceRegionNames(basePath, sequence) {
     const frame = String(start + index).padStart(digits, '0');
     return `${basePath}${frame}`;
   });
+}
+
+function attachmentType(attachment) {
+  return typeof attachment.type === 'string' ? attachment.type : 'region';
 }
 
 function collectAtlasRegions(document) {
@@ -133,8 +140,7 @@ function collectAtlasRegions(document) {
           attachmentValue,
           `document.skins[${skinIndex}].attachments.${slotName}.${entryName}`,
         );
-        const type = typeof attachment.type === 'string' ? attachment.type : 'region';
-        if (!['region', 'mesh', 'linkedmesh'].includes(type)) continue;
+        if (!RENDERABLE_ATTACHMENT_TYPES.has(attachmentType(attachment))) continue;
 
         const basePath =
           typeof attachment.path === 'string' && attachment.path
@@ -150,6 +156,58 @@ function collectAtlasRegions(document) {
   }
 
   return [...result].sort();
+}
+
+function collectExpectedSetupRenderableAttachments(document) {
+  const slots = requireArray(document.slots ?? [], 'document.slots');
+  const skins = requireArray(document.skins ?? [], 'document.skins');
+  const defaultSkinIndex = skins.findIndex(
+    (skin) => isRecord(skin) && (skin.name ?? 'default') === 'default',
+  );
+
+  if (defaultSkinIndex < 0) return [];
+
+  const defaultSkin = requireRecord(
+    skins[defaultSkinIndex],
+    `document.skins[${defaultSkinIndex}]`,
+  );
+  const attachments = requireRecord(
+    defaultSkin.attachments ?? {},
+    `document.skins[${defaultSkinIndex}].attachments`,
+  );
+  const expected = [];
+
+  for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
+    const slot = requireRecord(slots[slotIndex], `document.slots[${slotIndex}]`);
+    const slotName = requireNonEmptyString(slot.name, `document.slots[${slotIndex}].name`);
+    const setupAttachmentName = slot.attachment;
+    if (setupAttachmentName === undefined || setupAttachmentName === null) continue;
+    requireNonEmptyString(
+      setupAttachmentName,
+      `document.slots[${slotIndex}].attachment`,
+    );
+
+    const slotAttachments = attachments[slotName];
+    if (!isRecord(slotAttachments)) {
+      fail(`Setup slot '${slotName}' has no attachment table in the default skin`, {
+        slotName,
+        setupAttachmentName,
+      });
+    }
+    const attachment = slotAttachments[setupAttachmentName];
+    if (!isRecord(attachment)) {
+      fail(`Setup attachment '${setupAttachmentName}' is missing for slot '${slotName}'`, {
+        slotName,
+        setupAttachmentName,
+      });
+    }
+
+    const type = attachmentType(attachment);
+    if (!RENDERABLE_ATTACHMENT_TYPES.has(type)) continue;
+    expected.push({ slotName, attachmentName: setupAttachmentName, type });
+  }
+
+  return expected;
 }
 
 function createAtlasText(regions) {
@@ -233,16 +291,17 @@ function readConstraintRecords(document) {
         values[index],
         `document.${collectionName}[${index}]`,
       );
-      if (typeof constraint.name !== 'string' || !constraint.name) {
-        fail(`document.${collectionName}[${index}].name must be non-empty`);
-      }
+      const name = requireNonEmptyString(
+        constraint.name,
+        `document.${collectionName}[${index}].name`,
+      );
       const order = constraint.order ?? 0;
       if (!Number.isInteger(order) || order < 0) {
         fail(`document.${collectionName}[${index}].order must be non-negative`, {
           value: order,
         });
       }
-      records.push({ collectionName, index, name: constraint.name, order });
+      records.push({ collectionName, index, name, order });
     }
   }
   return records;
@@ -345,15 +404,54 @@ function validateBoneMatrices(skeleton) {
   return snapshots;
 }
 
-function setupBounds(runtime, skeleton) {
-  const hasRenderableAttachment = skeleton.drawOrder.some((slot) => {
+function collectRuntimeSetupRenderableAttachments(runtime, skeleton) {
+  const result = [];
+  for (
+    let drawOrderIndex = 0;
+    drawOrderIndex < skeleton.drawOrder.length;
+    drawOrderIndex += 1
+  ) {
+    const slot = skeleton.drawOrder[drawOrderIndex];
     const attachment = slot.getAttachment();
-    return (
-      attachment &&
-      ['RegionAttachment', 'MeshAttachment'].includes(attachment.constructor?.name)
-    );
-  });
-  if (!hasRenderableAttachment) return null;
+    if (!attachment) continue;
+
+    let type = null;
+    if (attachment instanceof runtime.RegionAttachment) type = 'region';
+    else if (attachment instanceof runtime.MeshAttachment) type = 'mesh';
+    else continue;
+
+    result.push({
+      drawOrderIndex,
+      slotName: slot.data.name,
+      attachmentName: attachment.name,
+      type,
+    });
+  }
+  return result;
+}
+
+function validateSetupAttachments(runtime, skeleton, expectedAttachments) {
+  const actualAttachments = collectRuntimeSetupRenderableAttachments(runtime, skeleton);
+  const expectedKeys = expectedAttachments
+    .map((item) => `${item.slotName}\u0000${item.attachmentName}`)
+    .sort();
+  const actualKeys = actualAttachments
+    .map((item) => `${item.slotName}\u0000${item.attachmentName}`)
+    .sort();
+
+  assert.deepEqual(
+    actualKeys,
+    expectedKeys,
+    'Runtime setup renderable attachments differ from JSON setup attachments',
+  );
+  return actualAttachments;
+}
+
+function setupBounds(runtime, skeleton, renderableAttachments) {
+  if (!Array.isArray(renderableAttachments)) {
+    fail('renderableAttachments must be an array');
+  }
+  if (renderableAttachments.length === 0) return null;
 
   const offset = new runtime.Vector2();
   const size = new runtime.Vector2();
@@ -393,6 +491,8 @@ async function main() {
     'SkeletonJson',
     'Skeleton',
     'Vector2',
+    'RegionAttachment',
+    'MeshAttachment',
   ]) {
     if (typeof runtime[exportName] !== 'function') {
       fail(`Runtime is missing required export '${exportName}'`, {
@@ -414,10 +514,12 @@ async function main() {
 
   const constraintRecords = readConstraintRecords(document);
   validateConstraintOrders(constraintRecords);
+  const expectedSetupAttachments = collectExpectedSetupRenderableAttachments(document);
+  const atlasRegions = collectAtlasRegions(document);
 
   // Spine 4.1 TextureAtlas accepts atlas text only. Its page textures must be attached
   // explicitly through TextureAtlasPage.setTexture before SkeletonJson reads meshes.
-  const atlas = new runtime.TextureAtlas(createAtlasText(collectAtlasRegions(document)));
+  const atlas = new runtime.TextureAtlas(createAtlasText(atlasRegions));
   bindAtlasPageTextures(atlas);
 
   try {
@@ -433,7 +535,12 @@ async function main() {
     skeleton.updateWorldTransform();
 
     const boneSnapshots = validateBoneMatrices(skeleton);
-    const bounds = setupBounds(runtime, skeleton);
+    const setupAttachments = validateSetupAttachments(
+      runtime,
+      skeleton,
+      expectedSetupAttachments,
+    );
+    const bounds = setupBounds(runtime, skeleton, setupAttachments);
     const summary = {
       ok: true,
       outputMode: options.includeDetails ? 'full' : 'summary',
@@ -449,6 +556,7 @@ async function main() {
         path: skeleton.pathConstraints.length,
         atlasPages: atlas.pages.length,
         atlasRegions: atlas.regions.length,
+        setupRenderableAttachments: setupAttachments.length,
       },
       constraintOrders: summarizeConstraintOrders(constraintRecords),
       updateCache: {
@@ -469,6 +577,7 @@ async function main() {
           details: {
             constraintOrders: constraintRecords,
             updateCacheConstraints: cacheConstraints,
+            setupAttachments,
             bones: boneSnapshots,
           },
         }
