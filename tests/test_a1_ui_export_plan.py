@@ -46,14 +46,6 @@ def _source(index: int, name: str) -> A1MultiObjectSource:
     )
 
 
-def _persisted_connect_object(name: str, *, enabled: bool) -> SimpleNamespace:
-    return SimpleNamespace(
-        name=name,
-        name_full=name,
-        spine2d_connect_settings=SimpleNamespace(enabled=enabled),
-    )
-
-
 def test_active_ui_plan_explicitly_requests_normalized_single_setup(monkeypatch):
     source_object = SimpleNamespace(name="Cone")
     object_profile = _ObjectExportProfile(source_object, "Cone", 0, 0, False)
@@ -128,63 +120,6 @@ def test_multi_ui_plan_rejects_mode_and_partition_disagreement():
         )
 
 
-def test_profile_capture_ignores_persisted_connect_flags_in_production():
-    objects = (
-        _persisted_connect_object("First", enabled=True),
-        _persisted_connect_object("Second", enabled=True),
-        _persisted_connect_object("Third", enabled=False),
-    )
-
-    production = a1_ui_export_plan._capture_selected_profiles(objects)
-    development = a1_ui_export_plan._capture_development_selected_profiles(objects)
-
-    assert tuple(profile.connect_enabled for profile in production) == (
-        False,
-        False,
-        False,
-    )
-    assert tuple(profile.connect_enabled for profile in development) == (
-        True,
-        True,
-        False,
-    )
-
-
-def test_production_selected_plan_is_standalone_with_stale_connected_properties(
-    monkeypatch,
-):
-    objects = (
-        _persisted_connect_object("First", enabled=True),
-        _persisted_connect_object("Second", enabled=True),
-    )
-    sources = (_source(1, "First"), _source(2, "Second"))
-    monkeypatch.setattr(
-        a1_ui_export_plan,
-        "_ordered_selected_meshes",
-        lambda _context: objects,
-    )
-    monkeypatch.setattr(
-        a1_ui_export_plan,
-        "_capture_scene_profile",
-        lambda _scene: SimpleNamespace(output_directory=Path("ui-plan-output")),
-    )
-    monkeypatch.setattr(
-        a1_ui_export_plan,
-        "_build_sources_from_profiles",
-        lambda _profiles, _scene: sources,
-    )
-
-    plan = a1_ui_export_plan.build_selected_ui_export_plan(
-        SimpleNamespace(scene=object())
-    )
-
-    assert plan.settings.mode is A1MultiObjectMode.STANDALONE
-    assert plan.connected_sources == ()
-    assert plan.standalone_sources == sources
-    assert plan.settings.anchor_component_id is None
-    assert plan.issues == ()
-
-
 def test_single_connect_selection_falls_back_to_standalone_once(monkeypatch):
     objects = (SimpleNamespace(name="First"), SimpleNamespace(name="Second"))
     profiles = (
@@ -204,7 +139,7 @@ def test_single_connect_selection_falls_back_to_standalone_once(monkeypatch):
     )
     monkeypatch.setattr(
         a1_ui_export_plan,
-        "_capture_development_selected_profiles",
+        "_capture_selected_profiles",
         lambda _objects: profiles,
     )
     monkeypatch.setattr(
@@ -213,7 +148,7 @@ def test_single_connect_selection_falls_back_to_standalone_once(monkeypatch):
         lambda _profiles, _scene: sources,
     )
 
-    plan = a1_ui_export_plan.build_development_connected_ui_export_plan(
+    plan = a1_ui_export_plan.build_selected_ui_export_plan(
         SimpleNamespace(scene=object())
     )
 
@@ -225,7 +160,7 @@ def test_single_connect_selection_falls_back_to_standalone_once(monkeypatch):
     assert plan.issues[0].code == "A1_SINGLE_CONNECT_FALLBACK"
 
 
-def test_two_connected_and_one_standalone_build_development_mixed_plan(monkeypatch):
+def test_two_connected_and_one_standalone_build_mixed_plan(monkeypatch):
     objects = (
         SimpleNamespace(name="First"),
         SimpleNamespace(name="Second"),
@@ -253,7 +188,7 @@ def test_two_connected_and_one_standalone_build_development_mixed_plan(monkeypat
     )
     monkeypatch.setattr(
         a1_ui_export_plan,
-        "_capture_development_selected_profiles",
+        "_capture_selected_profiles",
         lambda _objects: profiles,
     )
     monkeypatch.setattr(
@@ -262,7 +197,7 @@ def test_two_connected_and_one_standalone_build_development_mixed_plan(monkeypat
         lambda _profiles, _scene: sources,
     )
 
-    plan = a1_ui_export_plan.build_development_connected_ui_export_plan(
+    plan = a1_ui_export_plan.build_selected_ui_export_plan(
         SimpleNamespace(scene=object())
     )
 
