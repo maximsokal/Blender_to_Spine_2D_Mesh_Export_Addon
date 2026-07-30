@@ -35,6 +35,10 @@ REFERENCE_CASES = (
 )
 
 
+def _reference(filename: str) -> dict:
+    return json.loads((REFERENCE_ROOT / filename).read_text(encoding="utf-8"))
+
+
 @pytest.mark.parametrize(
     "filename,expected_version,expected_ik,expected_transform",
     REFERENCE_CASES,
@@ -45,8 +49,7 @@ def test_reference_document_is_complete_multi_object_json(
     expected_ik: int,
     expected_transform: int,
 ) -> None:
-    path = REFERENCE_ROOT / filename
-    document = json.loads(path.read_text(encoding="utf-8"))
+    document = _reference(filename)
 
     assert document["skeleton"]["spine"] == expected_version
     assert len(document["bones"]) == 58
@@ -62,3 +65,18 @@ def test_reference_document_is_complete_multi_object_json(
     assert any(name.startswith("Cone_Segment_") for name in attachment_groups)
     assert any(name.startswith("Cone.001_Segment_") for name in attachment_groups)
     assert any(name.startswith("Cone.002_Segment_") for name in attachment_groups)
+
+
+def test_reference_documents_confirm_the_41_bone_transform_field_boundary() -> None:
+    v41 = _reference("Cone_plus_2_objects_spine_4.1.json")
+    v42 = _reference("Cone_plus_2_objects_spine_4.2.json")
+
+    v41_bone = next(bone for bone in v41["bones"] if bone["name"] == "Cone_1_scale")
+    v42_bone = next(bone for bone in v42["bones"] if bone["name"] == "Cone_1_scale")
+
+    assert v41_bone["transform"] == "onlyTranslation"
+    assert "inherit" not in v41_bone
+    assert v42_bone["inherit"] == "onlyTranslation"
+    assert "transform" not in v42_bone
+    assert v41["ik"] == v42["ik"]
+    assert v41["transform"] == v42["transform"]
