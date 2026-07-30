@@ -13,6 +13,10 @@ from types import MappingProxyType
 from typing import Mapping, Tuple
 
 
+class SpineJsonTargetUnavailableError(ValueError):
+    """Raised before geometry work when a selected target has no production codec."""
+
+
 @dataclass(frozen=True, slots=True)
 class SpineJsonVersionDescriptor:
     """Immutable capabilities and metadata for one supported Spine JSON family."""
@@ -25,6 +29,7 @@ class SpineJsonVersionDescriptor:
     uses_legacy_constraint_mix_fields: bool
     uses_unified_constraints: bool
     supports_attachment_sequences: bool
+    serializer_ready: bool
     supports_preview_animation: bool = False
 
     def __post_init__(self) -> None:
@@ -42,6 +47,7 @@ class SpineJsonVersionDescriptor:
             "uses_legacy_constraint_mix_fields",
             "uses_unified_constraints",
             "supports_attachment_sequences",
+            "serializer_ready",
             "supports_preview_animation",
         ):
             if not isinstance(getattr(self, field_name), bool):
@@ -89,6 +95,7 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             uses_legacy_constraint_mix_fields=True,
             uses_unified_constraints=False,
             supports_attachment_sequences=False,
+            serializer_ready=False,
         ),
         SpineJsonTarget.SPINE_4_0: SpineJsonVersionDescriptor(
             family="4.0",
@@ -99,6 +106,7 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             uses_legacy_constraint_mix_fields=False,
             uses_unified_constraints=False,
             supports_attachment_sequences=False,
+            serializer_ready=False,
         ),
         SpineJsonTarget.SPINE_4_1: SpineJsonVersionDescriptor(
             family="4.1",
@@ -109,6 +117,7 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             uses_legacy_constraint_mix_fields=False,
             uses_unified_constraints=False,
             supports_attachment_sequences=True,
+            serializer_ready=False,
         ),
         SpineJsonTarget.SPINE_4_2: SpineJsonVersionDescriptor(
             family="4.2",
@@ -119,6 +128,7 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             uses_legacy_constraint_mix_fields=False,
             uses_unified_constraints=False,
             supports_attachment_sequences=True,
+            serializer_ready=True,
         ),
         SpineJsonTarget.SPINE_4_3: SpineJsonVersionDescriptor(
             family="4.3",
@@ -129,6 +139,7 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             uses_legacy_constraint_mix_fields=False,
             uses_unified_constraints=True,
             supports_attachment_sequences=True,
+            serializer_ready=False,
         ),
     }
 )
@@ -209,11 +220,25 @@ def resolve_spine_json_exact_version(value: object) -> SpineJsonTarget:
     return target
 
 
+def require_spine_json_target_serializable(value: object) -> SpineJsonTarget:
+    """Fail closed unless the selected target has an implemented production codec."""
+
+    target = resolve_spine_json_target(value)
+    if not target.descriptor.serializer_ready:
+        raise SpineJsonTargetUnavailableError(
+            f"Spine JSON target {target.label} ({target.exact_version}) is selectable "
+            "for implementation testing but its production serializer is not ready"
+        )
+    return target
+
+
 __all__ = [
     "DEFAULT_SPINE_JSON_TARGET",
     "DEFAULT_SPINE_JSON_VERSION",
     "SpineJsonTarget",
+    "SpineJsonTargetUnavailableError",
     "SpineJsonVersionDescriptor",
+    "require_spine_json_target_serializable",
     "resolve_spine_json_exact_version",
     "resolve_spine_json_target",
     "spine_json_target_enum_items",
