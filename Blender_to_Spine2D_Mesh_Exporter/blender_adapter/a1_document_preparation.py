@@ -18,15 +18,20 @@ from ..application import (
     calculate_a1_object_bake_main_position_pixels,
 )
 from ..domain.baking import CameraProjectionPlan
+from ..domain.spine.legacy_attachment_builder import (
+    LegacyMeshDocumentBuildResult,
+)
 from ..domain.spine.legacy_rig_contracts import (
     LegacyRigBuildRequest,
     LegacyRigBuildResult,
 )
+from ..domain.spine.model import MeshAttachment, Skin, SpineDocument
 from ..domain.spine.rig_builder import build_rig
 from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from ..domain.spine.two_axis_scale_profile import TwoAxisScaleRigProfile
 from ..domain.spine.two_axis_scale_spine41 import (
-    adapt_two_axis_document_for_spine41,
+    Spine41TwoAxisDocumentAdaptation,
+    adapt_two_axis_document_for_spine41_with_report,
 )
 from ..domain.spine.version_target import (
     SpineJsonTarget,
@@ -71,6 +76,137 @@ class A1DocumentPreparationResult:
             raise TypeError("statistics must be a mapping")
 
 
+def _skin_by_name(document: SpineDocument) -> dict[str, Skin]:
+    """Index final document skins while rejecting ambiguous names."""
+
+    if not isinstance(document, SpineDocument):
+        raise TypeError("document must be SpineDocument")
+    result: dict[str, Skin] = {}
+    for skin in document.skins:
+        if skin.name in result:
+            raise ValueError(f"Duplicate skin name in finalized document: {skin.name!r}")
+        result[skin.name] = skin
+    return result
+
+
+def _adapted_mesh_attachment(
+    skins_by_name: Mapping[str, Skin],
+    *,
+    skin_name: str,
+    slot_name: str,
+    attachment_name: str,
+) -> MeshAttachment:
+    """Resolve one remapped typed mesh attachment by its stable document path."""
+
+    for field_name, value in (
+        ("skin_name", skin_name),
+        ("slot_name", slot_name),
+        ("attachment_name", attachment_name),
+    ):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{field_name} must be a non-empty string")
+
+    skin = skins_by_name.get(skin_name)
+    if skin is None:
+        raise ValueError(f"Finalized document is missing skin {skin_name!r}")
+    slot_attachments = skin.attachments.get(slot_name)
+    if not isinstance(slot_attachments, Mapping):
+        raise ValueError(
+            f"Finalized skin {skin_name!r} is missing slot attachment table "
+            f"{slot_name!r}"
+        )
+    attachment = slot_attachments.get(attachment_name)
+    if not isinstance(attachment, MeshAttachment):
+        raise TypeError(
+            f"Finalized attachment {skin_name!r}/{slot_name!r}/{attachment_name!r} "
+            "must be MeshAttachment"
+        )
+    return attachment
+
+
+def _synchronize_document_build_for_spine41(
+    document_build: LegacyMeshDocumentBuildResult,
+    adaptation: Spine41TwoAxisDocumentAdaptation,
+) -> LegacyMeshDocumentBuildResult:
+    """Synchronize builder metadata after final-document bridge insertion.
+
+    The Spine 4.1 adapter inserts parent bones before existing weighted vertex bones. The
+    serialized attachment streams are remapped by the domain adapter, so the immutable
+    ``LegacyMeshDocumentBuildResult`` must point at those same remapped attachments and
+    expose the corresponding new vertex-bone start indices. The canonical rig remains
+    untouched because projection and deterministic rig validation already completed.
+    """
+
+    if not isinstance(document_build, LegacyMeshDocumentBuildResult):
+        raise TypeError("document_build must be LegacyMeshDocumentBuildResult")
+    if not isinstance(adaptation, Spine41TwoAxisDocumentAdaptation):
+        raise TypeError("adaptation must be Spine41TwoAxisDocumentAdaptation")
+
+    index_map = adaptation.old_to_new_bone_indices
+    skins_by_name = _skin_by_name(adaptation.document)
+
+    adapted_components = []
+    for component_index, component in enumerate(document_build.components):
+        new_start_index = index_map.get(component.vertex_bone_start_index)
+        if new_start_index is None:
+            raise ValueError(
+                "Spine 4.1 bone remap does not contain component vertex-bone start "
+                f"index {component.vertex_bone_start_index} at component "
+                f"{component_index}"
+            )
+        adapted_attachment = _adapted_mesh_attachment(
+            skins_by_name,
+            skin_name=component.request.skin_name,
+            slot_name=component.request.slot_name,
+            attachment_name=component.request.attachment_name,
+        )
+        adapted_components.append(
+            replace(
+                component,
+                vertex_bone_start_index=new_start_index,
+                attachment=adapted_attachment,
+            )
+        )
+
+    adapted_build_skins: list[Skin] = []
+    for source_skin in document_build.skins:
+        final_skin = skins_by_name.get(source_skin.name)
+        if final_skin is None:
+            raise ValueError(
+                f"Finalized document is missing builder skin {source_skin.name!r}"
+            )
+        attachment_groups: dict[
+            str,
+            dict[str, MeshAttachment | Mapping[str, object]],
+        ] = {}
+        for slot_name, source_attachments in source_skin.attachments.items():
+            final_attachments = final_skin.attachments.get(slot_name)
+            if not isinstance(final_attachments, Mapping):
+                raise ValueError(
+                    f"Finalized skin {source_skin.name!r} is missing slot "
+                    f"{slot_name!r}"
+                )
+            resolved_group: dict[str, MeshAttachment | Mapping[str, object]] = {}
+            for attachment_name in source_attachments:
+                if attachment_name not in final_attachments:
+                    raise ValueError(
+                        f"Finalized skin {source_skin.name!r} slot {slot_name!r} "
+                        f"is missing attachment {attachment_name!r}"
+                    )
+                resolved_group[attachment_name] = final_attachments[attachment_name]
+            attachment_groups[slot_name] = resolved_group
+        adapted_build_skins.append(
+            replace(source_skin, attachments=attachment_groups)
+        )
+
+    return replace(
+        document_build,
+        components=tuple(adapted_components),
+        skins=tuple(adapted_build_skins),
+        document=adaptation.document,
+    )
+
+
 def finalize_a1_document_assembly_for_target(
     document_assembly: A1DocumentAssemblyResult,
     *,
@@ -80,11 +216,10 @@ def finalize_a1_document_assembly_for_target(
     """Apply target-specific rig semantics only after canonical document assembly.
 
     Projection and attachment builders validate the canonical rig against its exact
-    deterministic plan. Spine 4.1 changes two transform constraints, so applying those
-    changes before projection makes the otherwise valid rig fail its own profile
-    validator. The final immutable document is the correct target boundary: attachments,
-    weighted vertices, slots, visuals, and animations already exist, while constraint
-    topology can still be replaced without mutating the canonical rig result.
+    deterministic plan. Spine 4.1 therefore receives an immutable document-level topology
+    adaptation only after weighted attachments, visuals, and animations exist. The adapter
+    returns the exact old-to-new bone-index map so every builder-owned attachment reference
+    stays synchronized with the final document.
     """
 
     if not isinstance(document_assembly, A1DocumentAssemblyResult):
@@ -117,14 +252,14 @@ def finalize_a1_document_assembly_for_target(
             f"{rig.request.prefix!r}"
         )
 
-    adapted_document = adapt_two_axis_document_for_spine41(
+    adaptation = adapt_two_axis_document_for_spine41_with_report(
         document_assembly.document,
         profile=rig.profile,
         prefix=prefix,
     )
-    adapted_build = replace(
+    adapted_build = _synchronize_document_build_for_spine41(
         document_assembly.document_build,
-        document=adapted_document,
+        adaptation,
     )
     return replace(
         document_assembly,
