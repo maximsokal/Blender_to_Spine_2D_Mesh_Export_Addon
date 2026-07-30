@@ -10,7 +10,10 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.scene_settings_migration i
     clear_pre_registration_scene_state,
     migrate_scene_settings,
 )
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
+    A1RigProfile,
+    SpineJsonTarget,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,17 +26,28 @@ class _Scene:
         *,
         schema: int,
         rig_profile: A1RigProfile,
+        spine_target: object = SpineJsonTarget.SPINE_4_2.value,
         persisted_keys=(),
         seam_mode: str = "AUTO",
     ):
         self.name = "Fixture"
         self.spine2d_settings_schema_version = schema
         self.spine2d_rig_profile = rig_profile.value
+        self.spine2d_target_spine_version = spine_target
         self.spine2d_seam_maker_mode = seam_mode
         self._persisted_keys = tuple(persisted_keys)
+        self._raw = {
+            "spine2d_settings_schema_version": schema,
+            "spine2d_rig_profile": rig_profile.value,
+            "spine2d_target_spine_version": spine_target,
+            "spine2d_seam_maker_mode": seam_mode,
+        }
 
     def keys(self):
         return self._persisted_keys
+
+    def __getitem__(self, key):
+        return self._raw[key]
 
 
 class _RnaReboundScene:
@@ -44,6 +58,7 @@ class _RnaReboundScene:
         self.spine2d_settings_schema_version = 0
         self.spine2d_seam_maker_mode = "AUTO"
         self.spine2d_rig_profile = A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+        self.spine2d_target_spine_version = SpineJsonTarget.SPINE_4_2.value
         self._raw = {
             "spine2d_settings_schema_version": 2,
             "spine2d_seam_maker_mode": "CUSTOM",
@@ -62,7 +77,7 @@ class _RnaReboundScene:
         return self._raw[key]
 
 
-def test_scene_schema_property_is_hidden_and_fresh_default_is_two_axis():
+def test_scene_schema_property_is_hidden_and_fresh_defaults_are_current():
     source = (PACKAGE / "blender_adapter" / "scene_properties.py").read_text(
         encoding="utf-8"
     )
@@ -75,9 +90,12 @@ def test_scene_schema_property_is_hidden_and_fresh_default_is_two_axis():
     assert '"spine2d_rig_profile"' in source
     assert "default=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value" in source
     assert "update=_update_rig_profile" in source
+    assert '"spine2d_target_spine_version"' in source
+    assert "default=DEFAULT_SPINE_JSON_TARGET.value" in source
+    assert "update=_update_spine_target_version" in source
 
 
-def test_schema_five_assigns_two_axis_only_to_genuinely_fresh_scene():
+def test_schema_six_assigns_current_defaults_only_to_genuinely_fresh_scene():
     scene = _Scene(
         schema=0,
         rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
@@ -87,6 +105,7 @@ def test_schema_five_assigns_two_axis_only_to_genuinely_fresh_scene():
     assert migrate_scene_settings(scene) is True
     assert scene.spine2d_settings_schema_version == CURRENT_SETTINGS_SCHEMA_VERSION
     assert scene.spine2d_rig_profile == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+    assert scene.spine2d_target_spine_version == SpineJsonTarget.SPINE_4_2.value
 
 
 def test_pre_profile_saved_scene_remains_on_compatibility_three_axis():
@@ -104,6 +123,7 @@ def test_pre_profile_saved_scene_remains_on_compatibility_three_axis():
     assert scene.spine2d_settings_schema_version == CURRENT_SETTINGS_SCHEMA_VERSION
     assert scene.spine2d_rig_profile == A1RigProfile.THREE_AXIS_ROTATION.value
     assert scene.spine2d_seam_maker_mode == "CUSTOM"
+    assert scene.spine2d_target_spine_version == SpineJsonTarget.SPINE_4_2.value
 
 
 def test_pre_registration_snapshot_survives_rna_default_rebind():
@@ -115,6 +135,7 @@ def test_pre_registration_snapshot_survives_rna_default_rebind():
         assert scene.spine2d_settings_schema_version == CURRENT_SETTINGS_SCHEMA_VERSION
         assert scene.spine2d_seam_maker_mode == "AUTO"
         assert scene.spine2d_rig_profile == A1RigProfile.THREE_AXIS_ROTATION.value
+        assert scene.spine2d_target_spine_version == SpineJsonTarget.SPINE_4_2.value
     finally:
         clear_pre_registration_scene_state()
 
@@ -133,19 +154,72 @@ def test_schema_four_preserves_the_users_selected_rig(profile):
     assert migrate_scene_settings(scene) is True
     assert scene.spine2d_settings_schema_version == CURRENT_SETTINGS_SCHEMA_VERSION
     assert scene.spine2d_rig_profile == profile.value
+    assert scene.spine2d_target_spine_version == SpineJsonTarget.SPINE_4_2.value
 
 
-def test_current_schema_is_idempotent():
+@pytest.mark.parametrize("target", tuple(SpineJsonTarget))
+def test_schema_five_preserves_a_valid_persisted_spine_target(target):
     scene = _Scene(
-        schema=CURRENT_SETTINGS_SCHEMA_VERSION,
+        schema=5,
         rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+        spine_target=target.value,
+        persisted_keys=(
+            "spine2d_settings_schema_version",
+            "spine2d_rig_profile",
+            "spine2d_target_spine_version",
+        ),
+    )
+
+    assert migrate_scene_settings(scene) is True
+    assert scene.spine2d_settings_schema_version == CURRENT_SETTINGS_SCHEMA_VERSION
+    assert scene.spine2d_target_spine_version == target.value
+
+
+def test_schema_five_defaults_a_missing_spine_target_to_four_two():
+    scene = _Scene(
+        schema=5,
+        rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+        spine_target=SpineJsonTarget.SPINE_3_8.value,
         persisted_keys=(
             "spine2d_settings_schema_version",
             "spine2d_rig_profile",
         ),
     )
 
+    assert migrate_scene_settings(scene) is True
+    assert scene.spine2d_target_spine_version == SpineJsonTarget.SPINE_4_2.value
+
+
+def test_schema_five_repairs_an_invalid_persisted_spine_target():
+    scene = _Scene(
+        schema=5,
+        rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+        spine_target="LATEST",
+        persisted_keys=(
+            "spine2d_settings_schema_version",
+            "spine2d_rig_profile",
+            "spine2d_target_spine_version",
+        ),
+    )
+
+    assert migrate_scene_settings(scene) is True
+    assert scene.spine2d_target_spine_version == SpineJsonTarget.SPINE_4_2.value
+
+
+def test_current_schema_is_idempotent():
+    scene = _Scene(
+        schema=CURRENT_SETTINGS_SCHEMA_VERSION,
+        rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+        spine_target=SpineJsonTarget.SPINE_3_8.value,
+        persisted_keys=(
+            "spine2d_settings_schema_version",
+            "spine2d_rig_profile",
+            "spine2d_target_spine_version",
+        ),
+    )
+
     assert migrate_scene_settings(scene) is False
+    assert scene.spine2d_target_spine_version == SpineJsonTarget.SPINE_3_8.value
 
 
 def test_root_registers_snapshot_before_scene_rna_and_migration_before_ui():
