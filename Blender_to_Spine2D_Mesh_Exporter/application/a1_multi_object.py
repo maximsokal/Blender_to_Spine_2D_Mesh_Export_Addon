@@ -8,6 +8,10 @@ from pathlib import Path
 
 from ..domain.baking import sanitize_filename_stem
 from ..domain.spine import UniformScaleMode
+from ..domain.spine.export_capabilities import (
+    SpineJsonExportScope,
+    require_spine_json_export_capability,
+)
 from .a1_numeric_contracts import (
     require_finite_number,
     require_identity,
@@ -104,26 +108,42 @@ class A1MultiObjectExportSettings:
         return root / f"{self.resolved_output_stem}.json"
 
 
+def _export_scope_for_multi_object_mode(
+    mode: A1MultiObjectMode,
+) -> SpineJsonExportScope:
+    """Map one preparation mode to the matching target capability scope."""
+
+    if not isinstance(mode, A1MultiObjectMode):
+        raise TypeError("mode must be A1MultiObjectMode")
+    if mode is A1MultiObjectMode.STANDALONE:
+        return SpineJsonExportScope.STANDALONE_MULTI_OBJECT
+    if mode is A1MultiObjectMode.CONNECTED:
+        return SpineJsonExportScope.CONNECTED_MULTI_OBJECT
+    raise ValueError(
+        "MIXED mode must be resolved to CONNECTED or STANDALONE before preparation"
+    )
+
+
 def resolve_a1_multi_object_preparation_settings(
     settings: A1SingleObjectExportSettings,
     mode: A1MultiObjectMode,
 ) -> A1SingleObjectExportSettings:
     """Return the exact per-object settings used by multi-object preparation.
 
-    Connected documents must omit each object's absolute Blender world translation;
-    connected composition adds anchor-relative translation later. Standalone documents
-    preserve the caller's settings unchanged. MIXED must be resolved into an explicit
-    connected or standalone subgroup before this helper is called.
+    The target capability is checked before geometry work. Connected documents omit each
+    object's absolute Blender world translation; connected composition adds anchor-relative
+    translation later. Standalone documents preserve the caller's settings unchanged.
+    MIXED must be resolved into an explicit connected or standalone subgroup first.
     """
 
     if not isinstance(settings, A1SingleObjectExportSettings):
         raise TypeError("settings must be A1SingleObjectExportSettings")
-    if not isinstance(mode, A1MultiObjectMode):
-        raise TypeError("mode must be A1MultiObjectMode")
-    if mode is A1MultiObjectMode.MIXED:
-        raise ValueError(
-            "MIXED mode must be resolved to CONNECTED or STANDALONE before preparation"
-        )
+    scope = _export_scope_for_multi_object_mode(mode)
+    require_spine_json_export_capability(
+        settings.export.spine_target,
+        settings.export.rig_profile,
+        scope,
+    )
     if mode is A1MultiObjectMode.CONNECTED:
         if not settings.use_world_location_for_main_bone:
             return settings
