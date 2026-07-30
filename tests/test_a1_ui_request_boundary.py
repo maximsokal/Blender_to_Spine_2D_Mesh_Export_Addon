@@ -5,6 +5,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.baking import A1TextureExportMode
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
     A1RigProfile,
     A1RigSetupPoseMode,
+    SpineJsonTarget,
 )
 
 
@@ -22,11 +23,13 @@ class _RnaObject:
 
 def _scene(
     rig_profile: A1RigProfile = A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+    spine_target: SpineJsonTarget = SpineJsonTarget.SPINE_4_2,
 ):
     return SimpleNamespace(
         spine2d_texture_export_mode=(
             A1TextureExportMode.NORMAL_UV_SEGMENTS.value
         ),
+        spine2d_target_spine_version=spine_target.value,
         spine2d_rig_profile=rig_profile.value,
         spine2d_seam_maker_mode="AUTO",
         spine2d_angle_limit=30.0,
@@ -73,6 +76,8 @@ def test_single_settings_request_a_neutral_authoring_setup_pose(tmp_path):
     )
 
     assert settings.export.rig_profile == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+    assert settings.export.spine_version == "4.2.43"
+    assert settings.export.spine_target is SpineJsonTarget.SPINE_4_2
     assert settings.rig_setup_pose_mode is A1RigSetupPoseMode.NORMALIZED_SINGLE
     assert settings.include_preview_animation is False
 
@@ -83,7 +88,10 @@ def test_multi_sources_share_one_immutable_scene_snapshot(tmp_path):
             _object("A"),
             _object("B", frame_start=4, frame_count=3),
         ),
-        _scene(A1RigProfile.TWO_AXIS_ROTATION_SCALE),
+        _scene(
+            A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+            SpineJsonTarget.SPINE_3_8,
+        ),
         output_directory=tmp_path,
         texture_size=128,
         images_relative_path="images",
@@ -106,6 +114,14 @@ def test_multi_sources_share_one_immutable_scene_snapshot(tmp_path):
     assert (
         sources[1].settings.export.rig_profile
         == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+    )
+    assert all(
+        source.settings.export.spine_version == "3.8.99"
+        for source in sources
+    )
+    assert all(
+        source.settings.export.spine_target is SpineJsonTarget.SPINE_3_8
+        for source in sources
     )
     assert all(
         source.settings.rig_setup_pose_mode
