@@ -18,7 +18,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import (
 EXPECTED_TARGETS = (
     (SpineJsonTarget.SPINE_3_8, "3.8", "3.8.99"),
     (SpineJsonTarget.SPINE_4_0, "4.0", "4.0.64"),
-    (SpineJsonTarget.SPINE_4_1, "4.1", "4.1.19"),
+    (SpineJsonTarget.SPINE_4_1, "4.1", "4.1.24"),
     (SpineJsonTarget.SPINE_4_2, "4.2", "4.2.43"),
     (SpineJsonTarget.SPINE_4_3, "4.3", "4.3.23"),
 )
