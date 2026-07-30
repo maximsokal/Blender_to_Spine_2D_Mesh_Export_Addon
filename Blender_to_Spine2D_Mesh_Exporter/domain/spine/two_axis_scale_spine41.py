@@ -20,7 +20,7 @@ from dataclasses import replace
 
 from .connected_group_contracts import ConnectedZLayer
 from .legacy_rig_contracts import LegacyRigBuildResult
-from .model import IKConstraint, SpineDocument, TransformConstraint
+from .model import Bone, IKConstraint, SpineDocument, TransformConstraint
 from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from .spine41_setup_safety import validate_spine41_setup_safety
 from .two_axis_scale_profile import TwoAxisScaleRigProfile
@@ -49,10 +49,6 @@ def _adapt_uniform_scale_constraint(
         raise ValueError(
             f"Constraint {constraint.name!r} must be relative before Spine 4.1 adaptation"
         )
-    if extras.get("local", False) not in {False, None}:
-        raise ValueError(
-            f"Constraint {constraint.name!r} is already local and cannot be adapted"
-        )
     for field_name in ("mixRotate", "mixX", "mixShearY"):
         if extras.get(field_name) != 0:
             raise ValueError(
@@ -60,6 +56,12 @@ def _adapt_uniform_scale_constraint(
                 "Spine 4.1 adaptation"
             )
 
+    if extras.get("local", False) is True:
+        return constraint
+    if extras.get("local", False) not in {False, None}:
+        raise ValueError(
+            f"Constraint {constraint.name!r} has a non-boolean local field"
+        )
     extras["local"] = True
     return replace(constraint, extras=extras)
 
@@ -72,13 +74,15 @@ def _adapt_depth_scale_constraint(
 ) -> TransformConstraint:
     """Retarget depth scaling to bones with invertible setup parents."""
 
+    if len(target_layer_bones) != len(source_wrapper_bones):
+        raise ValueError("Spine 4.1 depth target mapping must be one-to-one")
+    if constraint.bones == target_layer_bones:
+        return constraint
     if constraint.bones != source_wrapper_bones:
         raise ValueError(
             f"Constraint {constraint.name!r} bone schema changed: "
             f"expected={source_wrapper_bones}, actual={constraint.bones}"
         )
-    if len(target_layer_bones) != len(source_wrapper_bones):
-        raise ValueError("Spine 4.1 depth target mapping must be one-to-one")
     return replace(constraint, bones=target_layer_bones)
 
 
@@ -102,14 +106,87 @@ def _adapt_transform_collection(
     return tuple(adapted_by_name[item.name] for item in transform)
 
 
+def _document_depth_mapping(
+    document: SpineDocument,
+    depth_constraint: TransformConstraint,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Resolve wrapper-to-layer mapping from the validated generated hierarchy."""
+
+    bone_by_name = {bone.name: bone for bone in document.bones}
+    children_by_parent: dict[str, list[Bone]] = {}
+    for bone in document.bones:
+        if bone.parent is not None:
+            children_by_parent.setdefault(bone.parent, []).append(bone)
+
+    wrappers: list[str] = []
+    layers: list[str] = []
+    for constrained_name in depth_constraint.bones:
+        constrained = bone_by_name.get(constrained_name)
+        if constrained is None:
+            raise ValueError(
+                f"Depth constraint {depth_constraint.name!r} references missing bone "
+                f"{constrained_name!r}"
+            )
+
+        if constrained.extras.get("inherit") == "onlyTranslation":
+            children = children_by_parent.get(constrained.name, [])
+            if len(children) != 1:
+                raise ValueError(
+                    f"Depth wrapper {constrained.name!r} must have exactly one layer "
+                    f"child, found {len(children)}"
+                )
+            wrappers.append(constrained.name)
+            layers.append(children[0].name)
+            continue
+
+        parent = bone_by_name.get(constrained.parent or "")
+        if parent is None or parent.extras.get("inherit") != "onlyTranslation":
+            raise ValueError(
+                f"Depth constraint bone {constrained.name!r} is neither a generated "
+                "onlyTranslation wrapper nor its direct layer child"
+            )
+        wrappers.append(parent.name)
+        layers.append(constrained.name)
+
+    return tuple(wrappers), tuple(layers)
+
+
+def adapt_two_axis_document_for_spine41(
+    document: SpineDocument,
+    *,
+    profile: TwoAxisScaleRigProfile,
+    prefix: str,
+) -> SpineDocument:
+    """Return an idempotent target-safe variant of one assembled object document."""
+
+    if not isinstance(document, SpineDocument):
+        raise TypeError("document must be SpineDocument")
+    if not isinstance(profile, TwoAxisScaleRigProfile):
+        raise TypeError("profile must be TwoAxisScaleRigProfile")
+    if not isinstance(prefix, str) or not prefix.strip():
+        raise ValueError("prefix must be a non-empty string")
+
+    depth_name = profile.scale_depth_constraint(prefix)
+    depth_constraint = _constraint_by_name(document.transform, depth_name)
+    wrappers, layers = _document_depth_mapping(document, depth_constraint)
+    adapted = replace(
+        document,
+        transform=_adapt_transform_collection(
+            document.transform,
+            scale_name=profile.scale_constraint(prefix),
+            depth_name=depth_name,
+            source_wrapper_bones=wrappers,
+            target_layer_bones=layers,
+        ),
+    )
+    validate_spine41_setup_safety(adapted)
+    return adapted
+
+
 def adapt_two_axis_scale_rig_for_spine41(
     rig: LegacyRigBuildResult,
 ) -> LegacyRigBuildResult:
-    """Return a detached Spine 4.1-safe per-object constraint variant.
-
-    The input result is not mutated. Constraint names, targets, orders, bone hierarchy,
-    and attachment-facing layer names remain stable.
-    """
+    """Return a detached Spine 4.1-safe per-object constraint variant."""
 
     if not isinstance(rig, LegacyRigBuildResult):
         raise TypeError("rig must be LegacyRigBuildResult")
@@ -130,9 +207,6 @@ def adapt_two_axis_scale_rig_for_spine41(
             target_layer_bones=rig.info.sub_bone_names,
         ),
     )
-
-    # The exact runtime remains the final acceptance oracle. This pure domain guard
-    # catches the known singular-parent failure before any JSON is emitted.
     validate_spine41_setup_safety(
         SpineDocument(
             skeleton={"spine": "4.1.24"},
@@ -183,5 +257,6 @@ def adapt_connected_two_axis_constraints_for_spine41(
 
 __all__ = [
     "adapt_connected_two_axis_constraints_for_spine41",
+    "adapt_two_axis_document_for_spine41",
     "adapt_two_axis_scale_rig_for_spine41",
 ]
