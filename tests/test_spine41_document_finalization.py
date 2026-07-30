@@ -181,9 +181,11 @@ def test_spine_four_one_finalization_preserves_scale_semantics_with_bridges() ->
     assert tuple(final_by_name) == tuple(source_by_name)
     assert final_by_name[scale_name].extras.get("local") is None
     assert final_by_name[scale_name].extras["relative"] is True
-    assert final_by_name[scale_name].bones == (
-        profile.scale_rotate_x_bone("Cone"),
-        *canonical_rig.info.sub_bone_names,
+    assert final_by_name[scale_name].bones == tuple(
+        profile.scale_rotate_x_bone("Cone")
+        if name == profile.rotate_x_bone("Cone")
+        else name
+        for name in source_by_name[scale_name].bones
     )
     assert final_by_name[depth_name] == source_by_name[depth_name]
     assert final_by_name[depth_name].bones == canonical_rig.info.sub_bone_scale_names
