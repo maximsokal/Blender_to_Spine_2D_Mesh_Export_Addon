@@ -19,7 +19,7 @@ from ..application import (
     emit_a1_export_progress,
     scale_a1_export_progress_callback,
 )
-from ..domain.spine import SpineSerializer
+from ..domain.spine.version_codecs import serialize_spine_document
 from ..infrastructure import (
     AtomicFileCommitError,
     atomic_file_transaction,
@@ -178,8 +178,9 @@ def export_a1_single_object(
                 message="Serializing Spine JSON",
                 object_id=prepared.object_id,
             )
-            json_text = SpineSerializer().to_json(
+            json_text = serialize_spine_document(
                 finalized.document,
+                settings.export.spine_target,
                 indent=settings.json_indent,
             )
             write_staged_utf8_text(
