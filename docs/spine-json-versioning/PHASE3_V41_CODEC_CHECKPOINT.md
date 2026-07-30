@@ -67,21 +67,30 @@ subgroup preflight and is rejected before any object preparation starts.
 
 ## Target-aware two-axis implementation
 
-The Spine 4.1 two-axis builder uses no epsilon and does not change setup bone scales.
+The deterministic two-axis rig builder remains canonical for both Spine 4.1 and 4.2.
+Projection, weighted attachment construction, and mesh-document assembly repeatedly call
+`rig.validate()`, so they must receive the exact profile plan rather than a target-mutated
+rig result.
 
-Two constraints have target-aware representations:
+After canonical document assembly completes, the immutable Spine 4.1 document finalizer
+changes exactly two constraint representations:
 
 1. The uniform scale constraint remains relative but evaluates in local applied space.
    This avoids world-space decomposition below the generated axis-collapse parent.
 2. The depth scale constraint targets final layer bones instead of their
    `onlyTranslation` wrappers, keeping the constrained parent matrices invertible.
 
+The finalizer changes no setup bone scale, uses no epsilon, and does not rewrite serialized
+JSON. The canonical `LegacyRigBuildResult` remains attached to the preparation result for
+projection diagnostics and deterministic validation; only the final `SpineDocument` owns
+target-specific constraints.
+
 A pure setup-matrix validator rejects remaining Spine 4.1 world constraints whose
 constrained bone has a singular parent. It reports the constraint, constrained bone,
 parent, and determinant without mutating the document.
 
 The remaining scale-control mismatch observed in Spine Editor is not hidden by the codec
-and must be fixed in the target-aware rig policy later.
+and must be fixed in the target-aware document policy later.
 
 ## Codec ownership
 
