@@ -51,6 +51,7 @@ def _scene_profile(
 @pytest.mark.parametrize(
     "target,expected",
     (
+        (SpineJsonTarget.SPINE_4_0, "spine_4.0.64"),
         (SpineJsonTarget.SPINE_4_1, "spine_4.1.24"),
         (SpineJsonTarget.SPINE_4_2, "spine_4.2.43"),
     ),
@@ -66,6 +67,7 @@ def test_filename_token_uses_the_exact_registered_patch_version(
 @pytest.mark.parametrize(
     "target,expected_name",
     (
+        (SpineJsonTarget.SPINE_4_0, "Hero_merged_spine_4.0.64.json"),
         (SpineJsonTarget.SPINE_4_1, "Hero_merged_spine_4.1.24.json"),
         (SpineJsonTarget.SPINE_4_2, "Hero_merged_spine_4.2.43.json"),
     ),
@@ -94,9 +96,18 @@ def test_single_ui_settings_append_exact_spine_version_once(
     assert repeated.json_output_stem == settings.json_output_stem
 
 
+@pytest.mark.parametrize(
+    "target,expected_token",
+    (
+        (SpineJsonTarget.SPINE_4_0, "4.0.64"),
+        (SpineJsonTarget.SPINE_4_1, "4.1.24"),
+    ),
+)
 def test_multi_ui_plan_appends_exact_spine_version(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    target: SpineJsonTarget,
+    expected_token: str,
 ) -> None:
     objects = (
         SimpleNamespace(name="Cone"),
@@ -113,7 +124,7 @@ def test_multi_ui_plan_appends_exact_spine_version(
         )
         for obj in objects
     )
-    scene = _scene_profile(tmp_path, SpineJsonTarget.SPINE_4_1)
+    scene = _scene_profile(tmp_path, target)
 
     monkeypatch.setattr(
         a1_ui_export_plan,
@@ -136,8 +147,8 @@ def test_multi_ui_plan_appends_exact_spine_version(
     )
 
     assert plan.settings.output_stem == (
-        "Cone_plus_2_objects_spine_4.1.24"
+        f"Cone_plus_2_objects_spine_{expected_token}"
     )
     assert plan.settings.json_path.name == (
-        "Cone_plus_2_objects_spine_4.1.24.json"
+        f"Cone_plus_2_objects_spine_{expected_token}.json"
     )
