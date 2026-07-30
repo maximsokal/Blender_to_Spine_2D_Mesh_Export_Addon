@@ -58,6 +58,12 @@ class SpineJsonExportCapability:
 
 
 _ALL_SCOPES = frozenset(SpineJsonExportScope)
+_LIMITED_LEGACY_4X_SCOPES = frozenset(
+    {
+        SpineJsonExportScope.SINGLE_OBJECT,
+        SpineJsonExportScope.STANDALONE_MULTI_OBJECT,
+    }
+)
 
 _CAPABILITIES: Mapping[
     tuple[SpineJsonTarget, A1RigProfile],
@@ -65,17 +71,23 @@ _CAPABILITIES: Mapping[
 ] = MappingProxyType(
     {
         (
+            SpineJsonTarget.SPINE_4_0,
+            A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+        ): SpineJsonExportCapability(
+            target=SpineJsonTarget.SPINE_4_0,
+            rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+            scopes=_LIMITED_LEGACY_4X_SCOPES,
+            limitations=(
+                "Attachment and animation sequences are not supported by Spine 4.0.64.",
+            ),
+        ),
+        (
             SpineJsonTarget.SPINE_4_1,
             A1RigProfile.TWO_AXIS_ROTATION_SCALE,
         ): SpineJsonExportCapability(
             target=SpineJsonTarget.SPINE_4_1,
             rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
-            scopes=frozenset(
-                {
-                    SpineJsonExportScope.SINGLE_OBJECT,
-                    SpineJsonExportScope.STANDALONE_MULTI_OBJECT,
-                }
-            ),
+            scopes=_LIMITED_LEGACY_4X_SCOPES,
         ),
         (
             SpineJsonTarget.SPINE_4_2,
