@@ -24,21 +24,11 @@ fully detached mapping, and applies only the following target-boundary changes:
 5. The 4.2-only `skeleton.referenceScale` field is removed.
 6. IK, transform, and path constraint orders are stably linearized to the exact
    contiguous range `0..N-1` after unsupported physics constraints are removed.
-7. Zero scale components are stabilized only when they occur in the parent ancestry
-   that Spine 4.1 world-space transform constraints must invert.
 
 Constraint-order linearization is target-boundary behavior. The canonical connected
 composition may retain same-Z-layer order ties for 4.2 parity, while Spine 4.1 receives
 a unique deterministic ordinal for every constraint. Authored phase order is the
 primary sort key and canonical encounter order is the stable tie-break.
-
-The generated two-axis rig intentionally uses zero-scale axis-collapse bones. Spine
-4.1 `Bone.updateAppliedTransform()` inverts a constrained bone's parent matrix without
-the `onlyTranslation` special-case available in 4.2. A zero determinant can therefore
-produce non-finite or extremely large applied transforms. The 4.1 codec replaces only
-the unsafe zero components with `0.001`, preserves unrelated zero-scale bones, and
-recomputes setup determinants before serialization. Any remaining singular parent
-matrix fails closed instead of producing a visually corrupt skeleton.
 
 ## Preserved structures
 
@@ -74,8 +64,6 @@ paths, and baked texture filenames remain unchanged.
 The codec rejects ambiguous or unknown skin constraint membership. It does not guess
 whether an unknown constraint name represents IK, transform, path, or physics.
 Malformed, negative, or non-integer constraint orders fail before JSON is committed.
-Unsafe world-constraint ancestry must resolve to a finite parent determinant greater
-than the codec stability threshold; otherwise serialization fails before atomic commit.
 
 All conversion operates on a JSON mapping detached from `SpineDocument`; input bones,
 skins, attachments, animations, and extras are not mutated.
@@ -88,9 +76,6 @@ The focused tests cover:
 - `inherit` to `transform` conversion;
 - skin constraint membership conversion;
 - stable contiguous order normalization across IK, transform, and path constraints;
-- targeted zero-scale stabilization for Spine 4.1 world constraints;
-- preservation of unrelated and local-constraint zero scales;
-- fail-closed handling of nested near-singular ancestry;
 - exact-version tokens in single and multi JSON filenames;
 - removal of 4.2-only physics and `referenceScale`;
 - sequence preservation;
