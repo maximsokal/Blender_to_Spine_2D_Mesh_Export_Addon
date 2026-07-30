@@ -1,4 +1,4 @@
-"""Contracts for production codec selection and quarantined Spine 4.1 research."""
+"""Contracts for production Spine 4.1 and 4.2 codec selection."""
 
 from __future__ import annotations
 
@@ -25,17 +25,16 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.validator import (
     SpineValidator,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_codecs import (
+    Spine41JsonCodec,
     SpineJsonCodecContext,
     registered_spine_json_codecs,
     serialize_spine_document,
-)
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_codecs.v41 import (
-    Spine41JsonCodec,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import (
     SpineJsonTarget,
     SpineJsonTargetUnavailableError,
 )
+
 
 
 def _document() -> SpineDocument:
@@ -59,7 +58,8 @@ def _document() -> SpineDocument:
     )
 
 
-def _v41_research_document() -> SpineDocument:
+
+def _v41_document() -> SpineDocument:
     attachment = MeshAttachment(
         name="mesh",
         uvs=(0.0, 0.0, 1.0, 0.0, 0.0, 1.0),
@@ -126,6 +126,7 @@ def test_v42_facade_is_byte_identical_to_current_serializer(indent: int) -> None
     ] == {"count": 2, "start": 0, "digits": 4, "setup": 0}
 
 
+
 def test_v42_facade_does_not_mutate_the_input_document() -> None:
     document = _document()
     before = SpineSerializer().to_json(document, indent=2)
@@ -133,6 +134,7 @@ def test_v42_facade_does_not_mutate_the_input_document() -> None:
     serialize_spine_document(document, "4.2.43", indent=2)
 
     assert SpineSerializer().to_json(document, indent=2) == before
+
 
 
 def test_v42_facade_forwards_the_caller_selected_validator() -> None:
@@ -148,35 +150,58 @@ def test_v42_facade_forwards_the_caller_selected_validator() -> None:
         )
 
 
-def test_only_spine_four_two_has_a_registered_production_codec() -> None:
+
+def test_spine_four_one_and_four_two_have_registered_production_codecs() -> None:
     codecs = registered_spine_json_codecs()
 
-    assert tuple(codecs) == (SpineJsonTarget.SPINE_4_2,)
-    assert codecs[SpineJsonTarget.SPINE_4_2].target is SpineJsonTarget.SPINE_4_2
-    assert SpineJsonTarget.SPINE_4_2.descriptor.serializer_ready is True
+    assert tuple(codecs) == (
+        SpineJsonTarget.SPINE_4_1,
+        SpineJsonTarget.SPINE_4_2,
+    )
+    for target in codecs:
+        assert codecs[target].target is target
+        assert target.descriptor.serializer_ready is True
 
 
 @pytest.mark.parametrize(
     "target",
-    tuple(target for target in SpineJsonTarget if target is not SpineJsonTarget.SPINE_4_2),
+    tuple(
+        target
+        for target in SpineJsonTarget
+        if target not in {SpineJsonTarget.SPINE_4_1, SpineJsonTarget.SPINE_4_2}
+    ),
 )
 def test_unready_targets_fail_before_codec_resolution(target: SpineJsonTarget) -> None:
     with pytest.raises(SpineJsonTargetUnavailableError):
         serialize_spine_document(_document(), target)
 
 
-def test_spine_four_one_facade_is_quarantined() -> None:
-    assert SpineJsonTarget.SPINE_4_1.descriptor.serializer_ready is False
 
-    with pytest.raises(SpineJsonTargetUnavailableError):
+def test_spine_four_one_facade_uses_registered_codec() -> None:
+    document = _v41_document()
+    validator = ConnectedGroupSerializationValidator()
+
+    payload = json.loads(
         serialize_spine_document(
-            _v41_research_document(),
+            document,
             SpineJsonTarget.SPINE_4_1,
+            validator=validator,
         )
+    )
+
+    assert payload["skeleton"]["spine"] == "4.1.24"
+    assert "referenceScale" not in payload["skeleton"]
+    assert payload["bones"][1]["transform"] == "onlyTranslation"
+    assert "inherit" not in payload["bones"][1]
+    assert payload["skins"][0]["ik"] == ["ik"]
+    assert payload["skins"][0]["transform"] == ["transform-a", "transform-b"]
+    assert "constraints" not in payload["skins"][0]
+    assert "physics" not in payload
 
 
-def test_quarantined_v41_adapter_preserves_authored_constraint_orders() -> None:
-    document = _v41_research_document()
+
+def test_v41_adapter_preserves_authored_constraint_orders() -> None:
+    document = _v41_document()
     before = SpineSerializer(
         validator=ConnectedGroupSerializationValidator()
     ).to_json(document, indent=2)
@@ -219,8 +244,9 @@ def test_quarantined_v41_adapter_preserves_authored_constraint_orders() -> None:
     ).to_json(document, indent=2) == before
 
 
-def test_quarantined_v41_adapter_rejects_missing_skin_constraint_before_rewrite() -> None:
-    document = _v41_research_document()
+
+def test_v41_adapter_rejects_missing_skin_constraint_before_rewrite() -> None:
+    document = _v41_document()
     broken_skin = replace(document.skins[0], constraints=("missing",))
     broken = replace(document, skins=(broken_skin,))
 
