@@ -95,6 +95,7 @@ def prepare_a1_document(
                 setup_pose_mode=source.settings.rig_setup_pose_mode,
             ),
             source.settings.export.rig_profile,
+            spine_target=source.settings.export.spine_target,
         )
         statistics = freeze_statistics(
             statistics,
