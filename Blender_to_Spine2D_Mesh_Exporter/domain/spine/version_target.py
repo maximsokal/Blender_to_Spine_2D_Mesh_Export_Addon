@@ -113,14 +113,14 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             exact_version="4.1.24",
             label="Spine 4.1",
             description=(
-                "Spine 4.1.24 export is quarantined until the native 4.1 runtime "
-                "acceptance gate passes"
+                "Limited Spine 4.1.24 export: 2-Axis single-object and standalone "
+                "multi-object only; connected, mixed, and 3-Axis remain blocked"
             ),
             uses_legacy_bone_transform_field=True,
             uses_legacy_constraint_mix_fields=False,
             uses_unified_constraints=False,
             supports_attachment_sequences=True,
-            serializer_ready=False,
+            serializer_ready=True,
         ),
         SpineJsonTarget.SPINE_4_2: SpineJsonVersionDescriptor(
             family="4.2",
