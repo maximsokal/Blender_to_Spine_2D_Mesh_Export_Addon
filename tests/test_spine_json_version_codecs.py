@@ -17,7 +17,10 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.model import (
     TransformConstraint,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.serializer import SpineSerializer
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine.validator import SpineValidator
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.validator import (
+    SpineValidationError,
+    SpineValidator,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_codecs import (
     registered_spine_json_codecs,
     serialize_spine_document,
@@ -164,13 +167,18 @@ def test_v41_codec_does_not_mutate_the_input_document() -> None:
     assert SpineSerializer().to_json(document, indent=2) == before
 
 
-def test_v41_codec_rejects_unclassifiable_skin_constraint_membership() -> None:
+def test_v41_facade_rejects_missing_skin_constraint_before_rewrite() -> None:
     document = _v41_document()
     broken_skin = replace(document.skins[0], constraints=("missing",))
     broken = replace(document, skins=(broken_skin,))
 
-    with pytest.raises(ValueError, match="unsupported or unknown constraint"):
+    with pytest.raises(SpineValidationError) as exc_info:
         serialize_spine_document(broken, SpineJsonTarget.SPINE_4_1)
+
+    assert {issue.code for issue in exc_info.value.issues} == {
+        "MISSING_SKIN_CONSTRAINT"
+    }
+    assert "missing" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
