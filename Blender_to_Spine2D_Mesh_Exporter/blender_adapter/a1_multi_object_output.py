@@ -22,6 +22,7 @@ from ..domain.spine.connected_group_serialization_validator import (
 )
 from ..domain.spine.validator import SpineValidator
 from ..domain.spine.version_codecs import serialize_spine_document
+from ..domain.spine.version_target import SpineJsonTarget
 from ..infrastructure import (
     AtomicFileCommitError,
     atomic_file_transaction,
@@ -107,6 +108,21 @@ def _serialization_validator_for_composition(
     if isinstance(composition, ConnectedGroupBuildResult):
         return ConnectedGroupSerializationValidator()
     return None
+
+
+def _serialize_composition(
+    composition: Any,
+    spine_target: SpineJsonTarget,
+    json_indent: int,
+) -> str:
+    """Serialize one completed composition through the selected version codec."""
+
+    return serialize_spine_document(
+        composition.document,
+        spine_target,
+        indent=json_indent,
+        validator=_serialization_validator_for_composition(composition),
+    )
 
 
 def export_a1_multi_object(
@@ -242,11 +258,10 @@ def export_a1_multi_object(
 
             stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
             _progress(progress_callback, 93, stage, "Serializing Spine JSON")
-            json_text = serialize_spine_document(
-                document,
+            json_text = _serialize_composition(
+                composition,
                 spine_target,
-                indent=settings.json_indent,
-                validator=_serialization_validator_for_composition(composition),
+                settings.json_indent,
             )
             write_staged_utf8_text(
                 json_reservation.staged_path,
