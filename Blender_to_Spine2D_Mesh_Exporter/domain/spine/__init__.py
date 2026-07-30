@@ -1,4 +1,4 @@
-"""Typed Spine 4.2 document model and validation utilities."""
+"""Typed Spine document model, validation, and target-version utilities."""
 
 from .attachment_sequence_animation import (
     AttachmentSequenceAnimationError,
@@ -94,6 +94,15 @@ from .two_axis_scale_rig import (
     validate_two_axis_scale_rig_result,
 )
 from .validator import SpineValidationError, SpineValidationIssue, SpineValidator
+from .version_target import (
+    DEFAULT_SPINE_JSON_TARGET,
+    DEFAULT_SPINE_JSON_VERSION,
+    SpineJsonTarget,
+    SpineJsonVersionDescriptor,
+    resolve_spine_json_exact_version,
+    resolve_spine_json_target,
+    spine_json_target_enum_items,
+)
 from .weighted_vertices import (
     WeightedVertex,
     WeightedVertexInfluence,
@@ -168,6 +177,8 @@ __all__ = [
     "ConstraintOrderAssignment",
     "ConstraintOrderPolicy",
     "DEFAULT_SEQUENCE_FRAME_DELAY",
+    "DEFAULT_SPINE_JSON_TARGET",
+    "DEFAULT_SPINE_JSON_VERSION",
     "IKConstraint",
     "LegacyAttachmentComponent",
     "LegacyAttachmentSequence",
@@ -192,6 +203,8 @@ __all__ = [
     "SpineDocument",
     "SpineDocumentComponent",
     "SpineDocumentCompositionResult",
+    "SpineJsonTarget",
+    "SpineJsonVersionDescriptor",
     "SpineSerializer",
     "SpineValidationError",
     "SpineValidationIssue",
@@ -224,5 +237,8 @@ __all__ = [
     "decode_weighted_vertices",
     "encode_weighted_vertices",
     "resolve_a1_rig_profile",
+    "resolve_spine_json_exact_version",
+    "resolve_spine_json_target",
+    "spine_json_target_enum_items",
     "validate_two_axis_scale_rig_result",
 ]
