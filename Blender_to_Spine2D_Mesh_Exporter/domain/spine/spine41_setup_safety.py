@@ -12,7 +12,7 @@ considered runtime-safe. It never rewrites scales, hierarchy, or constraint payl
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import cos, isfinite, pi, sin
+from math import atan2, cos, isfinite, pi, sin
 from typing import Mapping, Tuple
 
 from .model import Bone, SpineDocument, TransformConstraint
@@ -73,7 +73,7 @@ class Spine41UnsafeWorldConstraint:
             raise ValueError("parent_determinant must be a finite float")
 
 
-def _number(value: float | int | None, default: float) -> float:
+def _number(value: object, default: float) -> float:
     if value is None:
         return float(default)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -135,13 +135,11 @@ def _no_rotation_or_reflection_matrix(
         parent_scale = abs(parent.determinant) / parent_axis_length_squared
         pb = pc * parent_scale
         pd = pa * parent_scale
-        parent_rotation = float(__import__("math").atan2(pc, pa) / _DEGREES_TO_RADIANS)
+        parent_rotation = float(atan2(pc, pa) / _DEGREES_TO_RADIANS)
     else:
         pa = 0.0
         pc = 0.0
-        parent_rotation = float(
-            90.0 - __import__("math").atan2(pd, pb) / _DEGREES_TO_RADIANS
-        )
+        parent_rotation = float(90.0 - atan2(pd, pb) / _DEGREES_TO_RADIANS)
 
     rotation = _number(bone.rotation, 0.0)
     scale_x = _number(bone.scale_x, 1.0)
@@ -185,7 +183,7 @@ def _no_scale_matrix(
     perpendicular_scale = (axis_a * axis_a + axis_c * axis_c) ** 0.5
     if preserve_reflection and parent.determinant < 0.0:
         perpendicular_scale = -perpendicular_scale
-    perpendicular_rotation = pi / 2.0 + __import__("math").atan2(axis_c, axis_a)
+    perpendicular_rotation = pi / 2.0 + atan2(axis_c, axis_a)
     axis_b = cos(perpendicular_rotation) * perpendicular_scale
     axis_d = sin(perpendicular_rotation) * perpendicular_scale
 
