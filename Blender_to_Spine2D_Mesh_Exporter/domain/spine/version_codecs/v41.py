@@ -11,6 +11,9 @@ from ..version_target import SpineJsonTarget
 from .base import SpineJsonCodecContext, SpineJsonVersionCodec
 
 
+_CONSTRAINT_COLLECTIONS = ("ik", "transform", "path")
+
+
 def _require_dict(value: Any, *, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TypeError(f"{path} must be a JSON object")
@@ -20,6 +23,14 @@ def _require_dict(value: Any, *, path: str) -> dict[str, Any]:
 def _require_list(value: Any, *, path: str) -> list[Any]:
     if not isinstance(value, list):
         raise TypeError(f"{path} must be a JSON array")
+    return value
+
+
+def _require_constraint_order(value: Any, *, path: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{path} must be a non-negative integer")
+    if value < 0:
+        raise ValueError(f"{path} must be a non-negative integer")
     return value
 
 
@@ -47,8 +58,78 @@ def _extend_unique_names(
             existing.append(name)
 
 
+def _constraint_records(
+    output: dict[str, Any],
+) -> list[tuple[int, int, str, int, dict[str, Any]]]:
+    """Collect every Spine 4.1 constraint with a deterministic stable tie-break."""
+
+    records: list[tuple[int, int, str, int, dict[str, Any]]] = []
+    encounter_index = 0
+    for collection_name in _CONSTRAINT_COLLECTIONS:
+        raw_collection = output.get(collection_name)
+        if raw_collection is None:
+            continue
+        constraints = _require_list(
+            raw_collection,
+            path=f"document.{collection_name}",
+        )
+        for item_index, value in enumerate(constraints):
+            constraint_path = f"document.{collection_name}[{item_index}]"
+            constraint = _require_dict(value, path=constraint_path)
+            original_order = _require_constraint_order(
+                constraint.get("order", 0),
+                path=f"{constraint_path}.order",
+            )
+            records.append(
+                (
+                    original_order,
+                    encounter_index,
+                    collection_name,
+                    item_index,
+                    constraint,
+                )
+            )
+            encounter_index += 1
+    return records
+
+
+def _normalize_constraint_orders(output: dict[str, Any]) -> None:
+    """Linearize tied or gapped canonical orders for the Spine 4.1 loader.
+
+    Connected composition intentionally allows constraints on one Z layer to share an
+    order. Spine 4.1 imports require one global ordinal for every IK, transform, and
+    path constraint. Sorting by authored order preserves phase semantics; the stable
+    encounter index preserves deterministic component order within a tie.
+    """
+
+    records = _constraint_records(output)
+    ordered = sorted(records, key=lambda item: (item[0], item[1]))
+    for normalized_order, record in enumerate(ordered):
+        record[4]["order"] = normalized_order
+
+    final_orders = sorted(
+        _require_constraint_order(
+            constraint.get("order"),
+            path=f"document.{collection_name}[{item_index}].order",
+        )
+        for (
+            _original_order,
+            _encounter_index,
+            collection_name,
+            item_index,
+            constraint,
+        ) in records
+    )
+    expected_orders = list(range(len(records)))
+    if final_orders != expected_orders:
+        raise ValueError(
+            "Spine 4.1 constraint order normalization failed: "
+            f"expected={expected_orders}, actual={final_orders}"
+        )
+
+
 class Spine41JsonCodec(SpineJsonVersionCodec):
-    """Encode the add-on's canonical setup-pose subset as Spine 4.1.19 JSON."""
+    """Encode the add-on's canonical setup-pose subset as Spine 4.1.24 JSON."""
 
     @property
     def target(self) -> SpineJsonTarget:
@@ -84,6 +165,7 @@ class Spine41JsonCodec(SpineJsonVersionCodec):
         self._rewrite_bone_transform_fields(output)
         self._rewrite_skin_constraint_membership(output, document)
         self._remove_physics(output)
+        _normalize_constraint_orders(output)
 
         return json.dumps(
             output,
