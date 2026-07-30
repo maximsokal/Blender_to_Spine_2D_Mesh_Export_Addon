@@ -25,7 +25,6 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import (
 )
 
 
-
 def _settings(
     root: Path,
     target: SpineJsonTarget,
@@ -84,6 +83,10 @@ def test_unready_target_is_rejected_before_geometry(
     "target,profile",
     (
         (
+            SpineJsonTarget.SPINE_4_0,
+            A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+        ),
+        (
             SpineJsonTarget.SPINE_4_1,
             A1RigProfile.TWO_AXIS_ROTATION_SCALE,
         ),
@@ -125,10 +128,14 @@ def test_supported_target_rig_pair_reaches_geometry_preparation(
     assert error.cause is sentinel
 
 
-
-def test_spine41_three_axis_is_rejected_before_geometry(
+@pytest.mark.parametrize(
+    "target",
+    (SpineJsonTarget.SPINE_4_0, SpineJsonTarget.SPINE_4_1),
+)
+def test_legacy_four_x_three_axis_is_rejected_before_geometry(
     tmp_path: Path,
     monkeypatch,
+    target: SpineJsonTarget,
 ) -> None:
     geometry_called = False
 
@@ -148,7 +155,7 @@ def test_spine41_three_axis_is_rejected_before_geometry(
             object(),
             _settings(
                 tmp_path,
-                SpineJsonTarget.SPINE_4_1,
+                target,
                 A1RigProfile.THREE_AXIS_ROTATION,
             ),
         )
