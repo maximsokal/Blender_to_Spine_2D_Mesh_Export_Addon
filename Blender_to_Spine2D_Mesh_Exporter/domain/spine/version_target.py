@@ -117,7 +117,7 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             uses_legacy_constraint_mix_fields=False,
             uses_unified_constraints=False,
             supports_attachment_sequences=True,
-            serializer_ready=False,
+            serializer_ready=True,
         ),
         SpineJsonTarget.SPINE_4_2: SpineJsonVersionDescriptor(
             family="4.2",
