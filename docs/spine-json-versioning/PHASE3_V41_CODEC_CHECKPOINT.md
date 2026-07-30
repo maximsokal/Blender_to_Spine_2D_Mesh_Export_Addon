@@ -6,7 +6,7 @@ This checkpoint enables production serialization for `SPINE_4_1` while leaving t
 existing Spine 4.2 serializer path unchanged. Spine 3.8, 4.0, and 4.3 remain
 fail-closed before geometry preparation.
 
-The target version written to JSON is `4.1.19`.
+The target version written to JSON is `4.1.24`, the final Spine 4.1 Editor patch.
 
 ## Implemented transformations
 
@@ -14,12 +14,19 @@ The canonical Rewrite document remains version-independent. `Spine41JsonCodec`
 serializes it through the existing strict serializer, parses the resulting JSON into a
 fully detached mapping, and applies only the following target-boundary changes:
 
-1. `skeleton.spine` is set to `4.1.19`.
+1. `skeleton.spine` is set to `4.1.24`.
 2. Bone `inherit` is renamed to the Spine 4.1 `transform` field.
 3. Generic skin `constraints` membership is split into Spine 4.1 `ik` and
    `transform` arrays by resolving names against the typed canonical constraints.
 4. Top-level physics constraints and per-animation physics timelines are removed.
 5. The 4.2-only `skeleton.referenceScale` field is removed.
+6. IK, transform, and path constraint orders are stably linearized to the exact
+   contiguous range `0..N-1` after unsupported physics constraints are removed.
+
+Constraint-order linearization is target-boundary behavior. The canonical connected
+composition may retain same-Z-layer order ties for 4.2 parity, while Spine 4.1 receives
+a unique deterministic ordinal for every constraint. Authored phase order is the
+primary sort key and canonical encounter order is the stable tie-break.
 
 ## Preserved structures
 
@@ -42,6 +49,7 @@ This does not disable real attachment sequences requested through frame baking.
 
 The codec rejects ambiguous or unknown skin constraint membership. It does not guess
 whether an unknown constraint name represents IK, transform, path, or physics.
+Malformed, negative, or non-integer constraint orders fail before JSON is committed.
 
 All conversion operates on a JSON mapping detached from `SpineDocument`; input bones,
 skins, attachments, animations, and extras are not mutated.
@@ -50,9 +58,10 @@ skins, attachments, animations, and extras are not mutated.
 
 The focused tests cover:
 
-- exact `4.1.19` metadata;
+- exact `4.1.24` metadata;
 - `inherit` to `transform` conversion;
 - skin constraint membership conversion;
+- stable contiguous order normalization across IK, transform, and path constraints;
 - removal of 4.2-only physics and `referenceScale`;
 - sequence preservation;
 - linked-mesh `timelines` preservation;
@@ -67,7 +76,7 @@ This checkpoint is not considered externally validated until all of the followin
 
 1. the complete pure-Python suite;
 2. the complete real-bpy suite;
-3. import of generated single, standalone multi, and connected JSON into Spine 4.1;
+3. import of generated single, standalone multi, and connected JSON into Spine 4.1.24;
 4. setup-pose comparison of controls, weighted meshes, and connected ordering.
 
 No CI/CD workflow is added or changed by this phase.
