@@ -21,6 +21,9 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.spine41_setup_safety import (
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.two_axis_scale_rig import (
     build_two_axis_scale_rig,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.two_axis_scale_spine41 import (
+    adapt_two_axis_scale_rig_for_spine41,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import SpineJsonTarget
 
 
@@ -64,15 +67,26 @@ def test_spine_four_two_builder_remains_identical_to_existing_two_axis_builder()
     assert actual == expected
 
 
-def test_spine_four_one_builder_preserves_bones_and_changes_only_two_constraints() -> None:
+def test_spine_four_one_builder_keeps_canonical_rig_for_projection_validation() -> None:
     request = _request()
-    source = build_two_axis_scale_rig(request)
+    expected = build_two_axis_scale_rig(request)
 
-    adapted = build_rig(
+    actual = build_rig(
         request,
         A1RigProfile.TWO_AXIS_ROTATION_SCALE,
         spine_target=SpineJsonTarget.SPINE_4_1,
     )
+
+    assert actual == expected
+    # Attachment projection and mesh-document assembly call this exact method. The target
+    # variant must not be applied until those canonical plan checks have completed.
+    actual.validate()
+
+
+def test_spine_four_one_adapter_preserves_bones_and_changes_only_two_constraints() -> None:
+    source = build_two_axis_scale_rig(_request())
+
+    adapted = adapt_two_axis_scale_rig_for_spine41(source)
 
     assert adapted.request == source.request
     assert adapted.profile == source.profile
@@ -84,8 +98,8 @@ def test_spine_four_one_builder_preserves_bones_and_changes_only_two_constraints
     adapted_by_name = {item.name: item for item in adapted.transform}
     assert tuple(adapted_by_name) == tuple(source_by_name)
 
-    scale_name = adapted.profile.scale_constraint(request.prefix)
-    depth_name = adapted.profile.scale_depth_constraint(request.prefix)
+    scale_name = adapted.profile.scale_constraint(source.request.prefix)
+    depth_name = adapted.profile.scale_depth_constraint(source.request.prefix)
     unchanged_names = set(source_by_name) - {scale_name, depth_name}
     for name in unchanged_names:
         assert adapted_by_name[name] == source_by_name[name]
@@ -101,11 +115,8 @@ def test_spine_four_one_builder_preserves_bones_and_changes_only_two_constraints
 
 
 def test_spine_four_one_two_axis_variant_has_no_singular_world_constraint_parent() -> None:
-    adapted = build_rig(
-        _request(),
-        A1RigProfile.TWO_AXIS_ROTATION_SCALE,
-        spine_target=SpineJsonTarget.SPINE_4_1,
-    )
+    source = build_two_axis_scale_rig(_request())
+    adapted = adapt_two_axis_scale_rig_for_spine41(source)
 
     assert find_spine41_unsafe_world_constraints(_minimal_document(adapted)) == ()
 
@@ -120,10 +131,6 @@ def test_spine_four_one_adapter_fails_if_source_constraint_schema_drifted() -> N
         for item in source.transform
     )
     broken = replace(source, transform=changed)
-
-    from Blender_to_Spine2D_Mesh_Exporter.domain.spine.two_axis_scale_spine41 import (
-        adapt_two_axis_scale_rig_for_spine41,
-    )
 
     with pytest.raises(ValueError, match="mixRotate=0"):
         adapt_two_axis_scale_rig_for_spine41(broken)
