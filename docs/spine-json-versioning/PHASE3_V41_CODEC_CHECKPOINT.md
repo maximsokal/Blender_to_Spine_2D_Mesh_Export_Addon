@@ -42,6 +42,38 @@ The quarantined adapter retains only evidence-backed field transformations for f
 research. It deliberately preserves authored constraint order and cannot be reached
 through `serialize_spine_document()`.
 
+## Target-aware two-axis implementation
+
+The builder now has a separate Spine 4.1 two-axis constraint policy. It does not modify
+bone scales and does not use an epsilon.
+
+The two changes are owned by the rig builder:
+
+1. The uniform scale constraint remains relative but is evaluated in local applied space.
+   This avoids a world-space decomposition of `<prefix>_rotate_X`, whose generated parent
+   intentionally collapses one axis with `scaleX == 0`.
+2. The depth correction constraint targets final layer bones rather than their
+   `onlyTranslation` scale wrappers. The final layer bones have invertible parents, so
+   Spine 4.1 can call `Bone.updateAppliedTransform()` safely.
+
+Both per-object rigs and the connected global wrapper use this policy. Application is
+idempotent so already-adapted objects cannot be adapted twice with different semantics.
+Spine 4.2 continues to use the existing constraints unchanged.
+
+A pure domain setup-matrix validator rejects any remaining Spine 4.1 world constraint
+whose constrained bone has a singular parent matrix. This validator reports the exact
+constraint, constrained bone, parent bone, and determinant; it never changes the rig.
+
+## Constraint scheduling
+
+Spine 4.1 connected two-axis output receives one globally unique order for every
+constraint and the exact contiguous order range `0..N-1`. Order ownership is in the
+connected builder, not the serializer.
+
+Spine 4.2 retains its historical same-Z-layer order sharing for byte and behavior parity.
+Spine 4.1 three-axis connected scheduling remains fail-closed because the standalone
+scale compensator still needs a separately proven dependency phase.
+
 ## Architectural ownership
 
 ### Version codec
@@ -66,13 +98,13 @@ The connected builder owns:
 - one global dependency-aware constraint schedule;
 - setup-pose placement and correction.
 
-If Spine 4.1 requires a different topology for the connected two-axis profile, the
-builder must receive the target family and construct that topology explicitly.
-
 ### Runtime acceptance oracle
 
 Production readiness requires validation with the vendored Spine 4.1 runtime, not the
 4.2 runtime and not a pure JSON structural test.
+
+The external local gate is `tools/spine41_runtime_oracle.mjs`; its usage and checked
+invariants are documented in `SPINE41_RUNTIME_ORACLE.md`.
 
 ## Required runtime gate
 
