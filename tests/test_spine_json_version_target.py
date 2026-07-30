@@ -92,13 +92,15 @@ def test_export_settings_reject_unregistered_exact_versions(
         )
 
 
-def test_only_the_proven_four_two_serializer_is_enabled_initially() -> None:
-    assert require_spine_json_target_serializable(
-        SpineJsonTarget.SPINE_4_2
-    ) is SpineJsonTarget.SPINE_4_2
+def test_only_registered_production_serializers_are_enabled() -> None:
+    ready_targets = {
+        SpineJsonTarget.SPINE_4_1,
+        SpineJsonTarget.SPINE_4_2,
+    }
 
     for target in SpineJsonTarget:
-        if target is SpineJsonTarget.SPINE_4_2:
-            continue
-        with pytest.raises(SpineJsonTargetUnavailableError):
-            require_spine_json_target_serializable(target)
+        if target in ready_targets:
+            assert require_spine_json_target_serializable(target) is target
+        else:
+            with pytest.raises(SpineJsonTargetUnavailableError):
+                require_spine_json_target_serializable(target)
