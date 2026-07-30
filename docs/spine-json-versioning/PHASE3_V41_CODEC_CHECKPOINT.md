@@ -1,97 +1,109 @@
-# Phase 3 checkpoint: Spine 4.1 native codec
+# Phase 3 checkpoint: Spine 4.1 quarantined
 
-## Scope
+## Status
 
-This checkpoint enables production serialization for `SPINE_4_1` while leaving the
-existing Spine 4.2 serializer path unchanged. Spine 3.8, 4.0, and 4.3 remain
-fail-closed before geometry preparation.
+The previous Spine 4.1 production checkpoint is invalidated.
 
-The target version written to JSON is `4.1.24`, the final Spine 4.1 Editor patch.
-User-facing final JSON filenames include the exact target version, for example
-`Cone_plus_2_objects_spine_4.1.24.json`.
+`SPINE_4_1` remains a selectable target so requests, filenames, and UI migration stay
+stable, but `serializer_ready` is `False` and no Spine 4.1 codec is registered in the
+production facade. Analyze/export must fail before geometry preparation.
 
-## Implemented transformations
+Spine 4.2 remains the only production-ready target and its serializer path is unchanged.
 
-The canonical Rewrite document remains version-independent. `Spine41JsonCodec`
-serializes it through the existing strict serializer, parses the resulting JSON into a
-fully detached mapping, and applies only the following target-boundary changes:
+## Why the checkpoint was invalidated
 
-1. `skeleton.spine` is set to `4.1.24`.
-2. Bone `inherit` is renamed to the Spine 4.1 `transform` field.
-3. Generic skin `constraints` membership is split into Spine 4.1 `ik` and
-   `transform` arrays by resolving names against the typed canonical constraints.
-4. Top-level physics constraints and per-animation physics timelines are removed.
-5. The 4.2-only `skeleton.referenceScale` field is removed.
-6. IK, transform, and path constraint orders are stably linearized to the exact
-   contiguous range `0..N-1` after unsupported physics constraints are removed.
+The previous implementation serialized the canonical Spine 4.2-oriented document and
+then rewrote a small set of JSON fields. That approach proved insufficient for the
+connected `2-Axis Rotation + Scale` rig.
 
-Constraint-order linearization is target-boundary behavior. The canonical connected
-composition may retain same-Z-layer order ties for 4.2 parity, while Spine 4.1 receives
-a unique deterministic ordinal for every constraint. Authored phase order is the
-primary sort key and canonical encounter order is the stable tie-break.
+Repository evidence from `maximsokal/Spine2D_curve_optimization` shows that version
+support is a complete pipeline concern:
 
-## Preserved structures
+1. select the exact runtime family;
+2. select matching parser/reconstructor transformers;
+3. reconstruct the document for the target family;
+4. parse it again with the target family;
+5. validate the resulting setup pose with that runtime.
 
-Spine 4.1 already supports the structures below, so the codec preserves them without
-conversion:
+Changing `skeleton.spine`, renaming `inherit`, or renumbering constraints after
+serialization does not prove target-runtime compatibility.
 
-- IK and transform constraint setup data;
-- mesh edge coordinate offsets;
-- weighted vertices;
-- array-shaped skins;
-- linked meshes using `parent` and `timelines`;
-- attachment `sequence` objects and sequence timelines;
-- modern 4.x Bezier curve arrays;
-- slot RGB/RGBA/alpha timeline families.
+## Removed production behavior
 
-Preview animation remains disabled by the shared immutable Scene capture contract.
-This does not disable real attachment sequences requested through frame baking.
+The following behavior is no longer part of the production contract:
 
-## Output naming
+- registration of `Spine41JsonCodec` in the production codec registry;
+- `serializer_ready=True` for Spine 4.1;
+- codec-owned constraint-order linearization;
+- any zero-scale replacement or numerical stabilization inside the serializer;
+- claims that the generated connected rig is native Spine 4.1 output.
 
-The filename token is derived from the same canonical registry that writes
-`skeleton.spine`. UI exports therefore produce names such as:
+The quarantined adapter retains only evidence-backed field transformations for focused
+research. It deliberately preserves authored constraint order and cannot be reached
+through `serialize_spine_document()`.
 
-- `Hero_merged_spine_4.1.24.json`;
-- `Cone_plus_2_objects_spine_4.1.24.json`;
-- `Hero_merged_spine_4.2.43.json`.
+## Architectural ownership
 
-Only the final JSON stem changes. Object texture stems, image directories, attachment
-paths, and baked texture filenames remain unchanged.
+### Version codec
 
-## Failure policy
+A version codec may own only target JSON schema representation:
 
-The codec rejects ambiguous or unknown skin constraint membership. It does not guess
-whether an unknown constraint name represents IK, transform, path, or physics.
-Malformed, negative, or non-integer constraint orders fail before JSON is committed.
+- exact `skeleton.spine` metadata;
+- verified field-name differences such as bone `inherit` versus `transform`;
+- verified skin membership representation;
+- removal of fields unsupported by the target schema;
+- deterministic JSON encoding.
 
-All conversion operates on a JSON mapping detached from `SpineDocument`; input bones,
-skins, attachments, animations, and extras are not mutated.
+A codec must not repair hierarchy, setup transforms, or constraint scheduling.
 
-## Regression gates
+### Connected rig builder
 
-The focused tests cover:
+The connected builder owns:
 
-- exact `4.1.24` metadata;
-- `inherit` to `transform` conversion;
-- skin constraint membership conversion;
-- stable contiguous order normalization across IK, transform, and path constraints;
-- exact-version tokens in single and multi JSON filenames;
-- removal of 4.2-only physics and `referenceScale`;
-- sequence preservation;
-- linked-mesh `timelines` preservation;
-- deterministic input immutability;
-- validator forwarding;
-- registry/readiness agreement;
-- unchanged byte-identical Spine 4.2 serialization output.
+- generated bone hierarchy;
+- global and per-object control topology;
+- constraint targets and affected bones;
+- one global dependency-aware constraint schedule;
+- setup-pose placement and correction.
 
-## Pending external validation
+If Spine 4.1 requires a different topology for the connected two-axis profile, the
+builder must receive the target family and construct that topology explicitly.
 
-This checkpoint is not considered externally validated until all of the following pass:
+### Runtime acceptance oracle
 
-1. the complete pure-Python suite;
-2. the complete real-bpy suite;
-3. import of generated single, standalone multi, and connected JSON into Spine 4.1.24;
-4. setup-pose comparison of controls, weighted meshes, and connected ordering.
+Production readiness requires validation with the vendored Spine 4.1 runtime, not the
+4.2 runtime and not a pure JSON structural test.
 
-No CI/CD workflow is added or changed by this phase.
+## Required runtime gate
+
+For single, standalone multi-object, and connected multi-object output, and for both rig
+profiles, the gate must:
+
+1. load the exact Spine 4.1 runtime used by the project;
+2. parse the generated JSON without compatibility shims;
+3. instantiate the skeleton and apply setup pose;
+4. execute the runtime update-cache/setup transform path;
+5. assert finite `worldX`, `worldY`, `a`, `b`, `c`, and `d` for every bone;
+6. assert every expected IK/transform/path constraint is scheduled exactly once;
+7. compute bounds for all setup attachments;
+8. compare setup-pose bounds and control anchors against approved target fixtures;
+9. reject duplicate, missing, or gapped global constraint orders when the runtime would
+   skip a constraint;
+10. import the generated output into Spine Editor 4.1.24.
+
+## Re-enable conditions
+
+Spine 4.1 may return to the production registry only when all conditions below pass:
+
+- complete pure-Python suite;
+- complete real-bpy suite;
+- target-aware connected-rig tests;
+- exact-runtime 4.1 acceptance gate;
+- single-object Editor import;
+- standalone multi-object Editor import;
+- connected multi-object Editor import;
+- setup-pose comparison for `3-Axis Rotation`;
+- setup-pose comparison for `2-Axis Rotation + Scale`;
+- proof that Spine 4.2 output remains byte-identical.
+
+No CI/CD workflow is added or changed by this quarantine checkpoint.
