@@ -1,4 +1,4 @@
-"""Contracts for target-version Spine JSON codec selection and native output."""
+"""Contracts for production codec selection and quarantined Spine 4.1 research."""
 
 from __future__ import annotations
 
@@ -20,13 +20,14 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.model import (
     TransformConstraint,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.serializer import SpineSerializer
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine.validator import (
-    SpineValidationError,
-    SpineValidator,
-)
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.validator import SpineValidator
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_codecs import (
+    SpineJsonCodecContext,
     registered_spine_json_codecs,
     serialize_spine_document,
+)
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_codecs.v41 import (
+    Spine41JsonCodec,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import (
     SpineJsonTarget,
@@ -55,7 +56,7 @@ def _document() -> SpineDocument:
     )
 
 
-def _v41_document() -> SpineDocument:
+def _v41_research_document() -> SpineDocument:
     attachment = MeshAttachment(
         name="mesh",
         uvs=(0.0, 0.0, 1.0, 0.0, 0.0, 1.0),
@@ -75,7 +76,7 @@ def _v41_document() -> SpineDocument:
     }
     return SpineDocument(
         skeleton={
-            "spine": "4.1.24",
+            "spine": "4.2.43",
             "images": "images/",
             "referenceScale": 100,
         },
@@ -92,24 +93,17 @@ def _v41_document() -> SpineDocument:
             Skin(
                 "default",
                 {"slot": {"mesh": attachment, "linked": linked}},
-                constraints=("ik", "transform"),
+                constraints=("ik", "transform-a", "transform-b"),
             ),
         ),
-        ik=(IKConstraint("ik", 0, ("control",), "root"),),
+        ik=(IKConstraint("ik", 5, ("control",), "root"),),
         transform=(
-            TransformConstraint("transform", 1, ("control",), "root"),
+            TransformConstraint("transform-a", 5, ("control",), "root"),
+            TransformConstraint("transform-b", 11, ("control",), "root"),
         ),
         animations={"animation": {}},
         extras={"physics": [{"name": "unused-4.2-only-constraint"}]},
     )
-
-
-def _constraint_orders(payload: dict[str, object]) -> list[int]:
-    orders: list[int] = []
-    for collection_name in ("ik", "transform", "path"):
-        for constraint in payload.get(collection_name, ()):
-            orders.append(constraint["order"])
-    return orders
 
 
 @pytest.mark.parametrize("indent", (0, 2, 4))
@@ -138,11 +132,59 @@ def test_v42_facade_does_not_mutate_the_input_document() -> None:
     assert SpineSerializer().to_json(document, indent=2) == before
 
 
-def test_v41_codec_writes_native_setup_pose_fields() -> None:
-    payload = json.loads(
+def test_v42_facade_forwards_the_caller_selected_validator() -> None:
+    class SentinelValidator(SpineValidator):
+        def validate_or_raise(self, document):
+            raise RuntimeError("sentinel validator used")
+
+    with pytest.raises(RuntimeError, match="sentinel validator used"):
         serialize_spine_document(
-            _v41_document(),
+            _document(),
+            SpineJsonTarget.SPINE_4_2,
+            validator=SentinelValidator(),
+        )
+
+
+def test_only_spine_four_two_has_a_registered_production_codec() -> None:
+    codecs = registered_spine_json_codecs()
+
+    assert tuple(codecs) == (SpineJsonTarget.SPINE_4_2,)
+    assert codecs[SpineJsonTarget.SPINE_4_2].target is SpineJsonTarget.SPINE_4_2
+    assert SpineJsonTarget.SPINE_4_2.descriptor.serializer_ready is True
+
+
+@pytest.mark.parametrize(
+    "target",
+    tuple(target for target in SpineJsonTarget if target is not SpineJsonTarget.SPINE_4_2),
+)
+def test_unready_targets_fail_before_codec_resolution(target: SpineJsonTarget) -> None:
+    with pytest.raises(SpineJsonTargetUnavailableError):
+        serialize_spine_document(_document(), target)
+
+
+def test_spine_four_one_facade_is_quarantined() -> None:
+    assert SpineJsonTarget.SPINE_4_1.descriptor.serializer_ready is False
+
+    with pytest.raises(SpineJsonTargetUnavailableError):
+        serialize_spine_document(
+            _v41_research_document(),
             SpineJsonTarget.SPINE_4_1,
+        )
+
+
+def test_quarantined_v41_adapter_preserves_authored_constraint_orders() -> None:
+    document = _v41_research_document()
+    before = SpineSerializer(
+        validator=ConnectedGroupSerializationValidator()
+    ).to_json(document, indent=2)
+
+    payload = json.loads(
+        Spine41JsonCodec().to_json(
+            document,
+            context=SpineJsonCodecContext(
+                target=SpineJsonTarget.SPINE_4_1,
+                validator=ConnectedGroupSerializationValidator(),
+            ),
             indent=2,
         )
     )
@@ -155,129 +197,35 @@ def test_v41_codec_writes_native_setup_pose_fields() -> None:
 
     skin = payload["skins"][0]
     assert skin["ik"] == ["ik"]
-    assert skin["transform"] == ["transform"]
+    assert skin["transform"] == ["transform-a", "transform-b"]
     assert "constraints" not in skin
 
-    attachments = skin["attachments"]["slot"]
-    assert attachments["mesh"]["sequence"] == {
-        "count": 3,
-        "start": 1,
-        "digits": 4,
-        "setup": 1,
-    }
-    assert attachments["linked"]["parent"] == "mesh"
-    assert attachments["linked"]["timelines"] is False
-
-
-def test_v41_codec_linearizes_connected_constraint_order_ties_and_gaps() -> None:
-    document = _v41_document()
-    transforms = (
-        TransformConstraint("transform-a", 1, ("control",), "root"),
-        TransformConstraint("transform-b", 1, ("control",), "root"),
-        TransformConstraint("transform-c", 5, ("control",), "root"),
-    )
-    skin = replace(
-        document.skins[0],
-        constraints=("ik", "transform-a", "transform-b", "transform-c"),
-    )
-    extras = dict(document.extras)
-    extras["path"] = [
-        {
-            "name": "path",
-            "order": 9,
-            "bones": ["control"],
-            "target": "root",
-        }
-    ]
-    connected = replace(
-        document,
-        skins=(skin,),
-        transform=transforms,
-        extras=extras,
-    )
-
-    payload = json.loads(
-        serialize_spine_document(
-            connected,
-            SpineJsonTarget.SPINE_4_1,
-            validator=ConnectedGroupSerializationValidator(),
-        )
-    )
-
-    assert sorted(_constraint_orders(payload)) == list(range(5))
     order_by_name = {
-        constraint["name"]: constraint["order"]
+        constraint["name"]: constraint.get("order", 0)
         for collection_name in ("ik", "transform", "path")
         for constraint in payload.get(collection_name, ())
     }
     assert order_by_name == {
-        "ik": 0,
-        "transform-a": 1,
-        "transform-b": 2,
-        "transform-c": 3,
-        "path": 4,
+        "ik": 5,
+        "transform-a": 5,
+        "transform-b": 11,
     }
 
-
-def test_v41_codec_does_not_mutate_the_input_document() -> None:
-    document = _v41_document()
-    before = SpineSerializer().to_json(document, indent=2)
-
-    serialize_spine_document(document, SpineJsonTarget.SPINE_4_1, indent=2)
-
-    assert SpineSerializer().to_json(document, indent=2) == before
+    assert SpineSerializer(
+        validator=ConnectedGroupSerializationValidator()
+    ).to_json(document, indent=2) == before
 
 
-def test_v41_facade_rejects_missing_skin_constraint_before_rewrite() -> None:
-    document = _v41_document()
+def test_quarantined_v41_adapter_rejects_unknown_skin_membership() -> None:
+    document = _v41_research_document()
     broken_skin = replace(document.skins[0], constraints=("missing",))
     broken = replace(document, skins=(broken_skin,))
 
-    with pytest.raises(SpineValidationError) as exc_info:
-        serialize_spine_document(broken, SpineJsonTarget.SPINE_4_1)
-
-    assert {issue.code for issue in exc_info.value.issues} == {
-        "MISSING_SKIN_CONSTRAINT"
-    }
-    assert "missing" in str(exc_info.value)
-
-
-@pytest.mark.parametrize(
-    "target,document",
-    (
-        (SpineJsonTarget.SPINE_4_1, _v41_document()),
-        (SpineJsonTarget.SPINE_4_2, _document()),
-    ),
-)
-def test_facade_forwards_the_caller_selected_validator(
-    target: SpineJsonTarget,
-    document: SpineDocument,
-) -> None:
-    class SentinelValidator(SpineValidator):
-        def validate_or_raise(self, document):
-            raise RuntimeError("sentinel validator used")
-
-    with pytest.raises(RuntimeError, match="sentinel validator used"):
-        serialize_spine_document(
-            document,
-            target,
-            validator=SentinelValidator(),
+    with pytest.raises(ValueError, match="unsupported or unknown constraint"):
+        Spine41JsonCodec().to_json(
+            broken,
+            context=SpineJsonCodecContext(
+                target=SpineJsonTarget.SPINE_4_1,
+                validator=ConnectedGroupSerializationValidator(),
+            ),
         )
-
-
-def test_only_ready_targets_have_registered_production_codecs() -> None:
-    codecs = registered_spine_json_codecs()
-
-    assert tuple(codecs) == (
-        SpineJsonTarget.SPINE_4_1,
-        SpineJsonTarget.SPINE_4_2,
-    )
-    for target, codec in codecs.items():
-        assert codec.target is target
-        assert target.descriptor.serializer_ready
-
-    for target in SpineJsonTarget:
-        if target.descriptor.serializer_ready:
-            continue
-        with pytest.raises(SpineJsonTargetUnavailableError):
-            serialize_spine_document(_document(), target)
