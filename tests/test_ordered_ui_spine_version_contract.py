@@ -14,26 +14,38 @@ UI_LAYOUT_PATH = (
 
 
 def _ordered_export_method() -> ast.FunctionDef:
-    tree = ast.parse(UI_LAYOUT_PATH.read_text(encoding="utf-8"), filename="ui_layout.py")
+    tree = ast.parse(
+        UI_LAYOUT_PATH.read_text(encoding="utf-8"),
+        filename="ui_layout.py",
+    )
     for node in tree.body:
         if not isinstance(node, ast.ClassDef):
             continue
         if node.name != "OBJECT_PT_Spine2DOrderedMeshPanel":
             continue
         for member in node.body:
-            if isinstance(member, ast.FunctionDef) and member.name == "_draw_export_settings":
+            if (
+                isinstance(member, ast.FunctionDef)
+                and member.name == "_draw_export_settings"
+            ):
                 return member
     raise AssertionError("Ordered panel _draw_export_settings method is missing")
 
 
 def _property_call_line(method: ast.FunctionDef, property_name: str) -> int:
     for node in ast.walk(method):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        if not isinstance(node, ast.Call) or not isinstance(
+            node.func,
+            ast.Attribute,
+        ):
             continue
         if node.func.attr != "prop" or len(node.args) < 2:
             continue
         property_argument = node.args[1]
-        if isinstance(property_argument, ast.Constant) and property_argument.value == property_name:
+        if (
+            isinstance(property_argument, ast.Constant)
+            and property_argument.value == property_name
+        ):
             return node.lineno
     raise AssertionError(f"Ordered export UI does not draw {property_name!r}")
 
