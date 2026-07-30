@@ -141,8 +141,9 @@ class A1SingleObjectExportSettings:
     def __post_init__(self) -> None:
         if not isinstance(self.export, ExportSettings):
             raise TypeError("export must be ExportSettings")
-        if self.export.spine_version != "4.2.43":
-            raise ValueError("A1 currently supports Spine 4.2.43 only")
+        # ExportSettings already guarantees a registered exact Spine version. Codec
+        # readiness is deliberately enforced by prepare_a1_object before geometry work,
+        # so UI/request capture can represent selectable targets that are still blocked.
         resolve_a1_rig_profile(self.export.rig_profile)
         for field_name in ("prefix", "output_stem", "json_output_stem"):
             value = getattr(self, field_name)
