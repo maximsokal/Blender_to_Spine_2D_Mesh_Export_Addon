@@ -41,6 +41,10 @@ from .legacy_profile import LegacyRigProfile
 from .legacy_rig_scale import calculate_uniform_scale
 from .model import Bone, SpineDocument
 from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
+from .spine41_setup_safety import (
+    Spine41RigSafetyError,
+    validate_spine41_setup_safety,
+)
 from .validator import SpineValidator
 from .version_target import (
     DEFAULT_SPINE_JSON_TARGET,
@@ -140,6 +144,23 @@ def _validate_connected_final(
             f"Connected A1 group failed {spine_target.exact_version} validation:\n"
             + details
         )
+
+
+def _validate_target_runtime_safety(
+    document: SpineDocument,
+    spine_target: SpineJsonTarget,
+) -> None:
+    """Run target-specific setup checks owned by the target runtime boundary."""
+
+    if spine_target is not SpineJsonTarget.SPINE_4_1:
+        return
+    try:
+        validate_spine41_setup_safety(document)
+    except Spine41RigSafetyError as exc:
+        raise ConnectedGroupBuildError(
+            "Connected A1 group is not safe for Spine 4.1 setup evaluation: "
+            + str(exc)
+        ) from exc
 
 
 def _connected_constraint_assignments(
@@ -346,6 +367,7 @@ def build_connected_group_document(
         settings.group_prefix,
     )
     _validate_connected_final(final_document, resolved_target)
+    _validate_target_runtime_safety(final_document, resolved_target)
 
     composition = replace(
         composition,
