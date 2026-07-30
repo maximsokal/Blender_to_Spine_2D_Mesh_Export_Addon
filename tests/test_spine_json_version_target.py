@@ -24,7 +24,6 @@ EXPECTED_TARGETS = (
 )
 
 
-
 def test_registry_order_and_exact_versions_are_stable() -> None:
     assert tuple(
         (target, target.family, target.exact_version)
@@ -32,7 +31,6 @@ def test_registry_order_and_exact_versions_are_stable() -> None:
     ) == EXPECTED_TARGETS
     assert DEFAULT_SPINE_JSON_TARGET is SpineJsonTarget.SPINE_4_2
     assert DEFAULT_SPINE_JSON_VERSION == "4.2.43"
-
 
 
 def test_blender_enum_items_are_derived_from_the_registry() -> None:
@@ -69,7 +67,6 @@ def test_application_exact_version_resolver_rejects_family_only_strings(
         resolve_spine_json_exact_version(value)
 
 
-
 def test_export_settings_default_to_exact_spine_four_two(tmp_path: Path) -> None:
     settings = ExportSettings(
         texture_width=128,
@@ -95,9 +92,9 @@ def test_export_settings_reject_unregistered_exact_versions(
         )
 
 
-
-def test_spine_four_one_and_four_two_are_production_serializable() -> None:
+def test_spine_four_zero_through_four_two_are_production_serializable() -> None:
     ready = {
+        SpineJsonTarget.SPINE_4_0,
         SpineJsonTarget.SPINE_4_1,
         SpineJsonTarget.SPINE_4_2,
     }
@@ -110,6 +107,16 @@ def test_spine_four_one_and_four_two_are_production_serializable() -> None:
         with pytest.raises(SpineJsonTargetUnavailableError):
             require_spine_json_target_serializable(target)
 
+
+def test_spine_four_zero_is_selectable_with_limited_scope_description() -> None:
+    target = resolve_spine_json_target("4.0.64")
+
+    assert target is SpineJsonTarget.SPINE_4_0
+    assert target.descriptor.serializer_ready is True
+    assert target.descriptor.supports_attachment_sequences is False
+    assert "limited" in target.description.lower()
+    assert "standalone" in target.description.lower()
+    assert require_spine_json_target_serializable(target) is target
 
 
 def test_spine_four_one_is_selectable_with_limited_scope_description() -> None:
