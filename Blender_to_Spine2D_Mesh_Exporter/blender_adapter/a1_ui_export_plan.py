@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Tuple
+from typing import Any, Tuple
 
 from ..application import (
     A1MultiObjectExportSettings,
@@ -26,12 +26,6 @@ from .a1_ui_selection import (
     _ordered_selected_meshes,
 )
 from .a1_ui_settings import _build_sources_from_profiles, _settings_from_profiles
-
-
-_ProfileCapture = Callable[
-    [Tuple[Any, ...]],
-    Tuple[_ObjectExportProfile, ...],
-]
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,17 +123,11 @@ def _single_connect_fallback_issue(
     )
 
 
-def _capture_profiles_with_connect_resolver(
+def _capture_selected_profiles(
     ordered_objects: Tuple[Any, ...],
-    connect_resolver: Callable[[Any], bool],
 ) -> Tuple[_ObjectExportProfile, ...]:
-    """Capture selected objects with an explicit connected-state resolver."""
-
     if not isinstance(ordered_objects, tuple) or len(ordered_objects) < 2:
         raise ValueError("ordered_objects must contain at least two objects")
-    if not callable(connect_resolver):
-        raise TypeError("connect_resolver must be callable")
-
     return tuple(
         _capture_object_profile(
             obj,
@@ -157,31 +145,9 @@ def _capture_profiles_with_connect_resolver(
                     0,
                 )
             ),
-            connect_enabled=bool(connect_resolver(obj)),
+            connect_enabled=_connect_enabled(obj),
         )
         for obj in ordered_objects
-    )
-
-
-def _capture_selected_profiles(
-    ordered_objects: Tuple[Any, ...],
-) -> Tuple[_ObjectExportProfile, ...]:
-    """Capture production profiles while ignoring hidden persisted Connect flags."""
-
-    return _capture_profiles_with_connect_resolver(
-        ordered_objects,
-        lambda _obj: False,
-    )
-
-
-def _capture_development_selected_profiles(
-    ordered_objects: Tuple[Any, ...],
-) -> Tuple[_ObjectExportProfile, ...]:
-    """Capture the explicit development-only connected/mixed profile set."""
-
-    return _capture_profiles_with_connect_resolver(
-        ordered_objects,
-        _connect_enabled,
     )
 
 
@@ -202,92 +168,6 @@ def _partition_sources(
         if not profile.connect_enabled
     )
     return connected, standalone
-
-
-def _capture_multi_plan_inputs(
-    context: Any,
-    profile_capture: _ProfileCapture,
-) -> tuple[
-    _SceneExportProfile,
-    Tuple[_ObjectExportProfile, ...],
-    Tuple[A1MultiObjectSource, ...],
-]:
-    if context is None:
-        raise ValueError("context cannot be None")
-    if not callable(profile_capture):
-        raise TypeError("profile_capture must be callable")
-    scene = getattr(context, "scene", None)
-    if scene is None:
-        raise ValueError("context.scene is missing")
-
-    ordered_objects = _ordered_selected_meshes(context)
-    scene_profile = _capture_scene_profile(scene)
-    object_profiles = profile_capture(ordered_objects)
-    sources = _build_sources_from_profiles(object_profiles, scene_profile)
-    return scene_profile, object_profiles, sources
-
-
-def _resolve_development_partition(
-    sources: Tuple[A1MultiObjectSource, ...],
-    profiles: Tuple[_ObjectExportProfile, ...],
-) -> tuple[
-    Tuple[A1MultiObjectSource, ...],
-    Tuple[A1MultiObjectSource, ...],
-    Tuple[ExportIssue, ...],
-]:
-    connected, standalone = _partition_sources(sources, profiles)
-    if len(connected) != 1:
-        return connected, standalone, ()
-
-    fallback_profile = next(
-        profile for profile in profiles if profile.connect_enabled
-    )
-    issue = _single_connect_fallback_issue(
-        fallback_profile,
-        selected_count=len(profiles),
-    )
-    return (), sources, (issue,)
-
-
-def _resolve_multi_mode(
-    connected: Tuple[A1MultiObjectSource, ...],
-    standalone: Tuple[A1MultiObjectSource, ...],
-) -> A1MultiObjectMode:
-    if connected and standalone:
-        return A1MultiObjectMode.MIXED
-    if connected:
-        return A1MultiObjectMode.CONNECTED
-    return A1MultiObjectMode.STANDALONE
-
-
-def _build_multi_plan(
-    scene_profile: _SceneExportProfile,
-    profiles: Tuple[_ObjectExportProfile, ...],
-    sources: Tuple[A1MultiObjectSource, ...],
-    *,
-    connected: Tuple[A1MultiObjectSource, ...],
-    standalone: Tuple[A1MultiObjectSource, ...],
-    issues: Tuple[ExportIssue, ...] = (),
-) -> A1UiMultiExportPlan:
-    base_name = sanitize_filename_stem(profiles[0].object_name)
-    version_token = spine_json_version_filename_token(
-        sources[0].settings.export.spine_target
-    )
-    output_stem = (
-        f"{base_name}_plus_{len(profiles) - 1}_objects_{version_token}"
-    )
-    settings = A1MultiObjectExportSettings(
-        output_directory=scene_profile.output_directory,
-        output_stem=output_stem,
-        mode=_resolve_multi_mode(connected, standalone),
-        anchor_component_id=(connected[0].component_id if connected else None),
-    )
-    return A1UiMultiExportPlan(
-        connected_sources=connected,
-        standalone_sources=standalone,
-        settings=settings,
-        issues=issues,
-    )
 
 
 def build_active_ui_export_plan(context: Any) -> A1UiSingleExportPlan:
@@ -323,41 +203,57 @@ def build_active_ui_export_plan(context: Any) -> A1UiSingleExportPlan:
 
 
 def build_selected_ui_export_plan(context: Any) -> A1UiMultiExportPlan:
-    """Build the production selected-object plan as standalone unconditionally."""
+    if context is None:
+        raise ValueError("context cannot be None")
+    scene = getattr(context, "scene", None)
+    if scene is None:
+        raise ValueError("context.scene is missing")
 
-    scene_profile, profiles, sources = _capture_multi_plan_inputs(
-        context,
-        _capture_selected_profiles,
-    )
-    return _build_multi_plan(
-        scene_profile,
-        profiles,
-        sources,
-        connected=(),
-        standalone=sources,
-    )
+    ordered_objects = _ordered_selected_meshes(context)
+    scene_profile: _SceneExportProfile = _capture_scene_profile(scene)
+    object_profiles = _capture_selected_profiles(ordered_objects)
+    sources = _build_sources_from_profiles(object_profiles, scene_profile)
+    connected, standalone = _partition_sources(sources, object_profiles)
 
+    issues: list[ExportIssue] = []
+    if len(connected) == 1:
+        fallback_profile = next(
+            profile for profile in object_profiles if profile.connect_enabled
+        )
+        issues.append(
+            _single_connect_fallback_issue(
+                fallback_profile,
+                selected_count=len(object_profiles),
+            )
+        )
+        connected = ()
+        standalone = sources
 
-def build_development_connected_ui_export_plan(
-    context: Any,
-) -> A1UiMultiExportPlan:
-    """Build the explicit development-only connected/mixed selected-object plan."""
+    base_name = sanitize_filename_stem(object_profiles[0].object_name)
+    version_token = spine_json_version_filename_token(
+        sources[0].settings.export.spine_target
+    )
+    output_stem = (
+        f"{base_name}_plus_{len(object_profiles) - 1}_objects_{version_token}"
+    )
+    if connected and standalone:
+        mode = A1MultiObjectMode.MIXED
+    elif connected:
+        mode = A1MultiObjectMode.CONNECTED
+    else:
+        mode = A1MultiObjectMode.STANDALONE
 
-    scene_profile, profiles, sources = _capture_multi_plan_inputs(
-        context,
-        _capture_development_selected_profiles,
+    settings = A1MultiObjectExportSettings(
+        output_directory=scene_profile.output_directory,
+        output_stem=output_stem,
+        mode=mode,
+        anchor_component_id=(connected[0].component_id if connected else None),
     )
-    connected, standalone, issues = _resolve_development_partition(
-        sources,
-        profiles,
-    )
-    return _build_multi_plan(
-        scene_profile,
-        profiles,
-        sources,
-        connected=connected,
-        standalone=standalone,
-        issues=issues,
+    return A1UiMultiExportPlan(
+        connected_sources=connected,
+        standalone_sources=standalone,
+        settings=settings,
+        issues=tuple(issues),
     )
 
 
@@ -365,6 +261,5 @@ __all__ = [
     "A1UiMultiExportPlan",
     "A1UiSingleExportPlan",
     "build_active_ui_export_plan",
-    "build_development_connected_ui_export_plan",
     "build_selected_ui_export_plan",
 ]
