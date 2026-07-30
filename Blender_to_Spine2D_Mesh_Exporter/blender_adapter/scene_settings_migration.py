@@ -9,6 +9,11 @@ from typing import Any
 import bpy
 
 from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
+from ..domain.spine.version_target import (
+    DEFAULT_SPINE_JSON_TARGET,
+    SpineJsonTarget,
+    resolve_spine_json_target,
+)
 
 try:
     from bpy.app.handlers import persistent
@@ -18,12 +23,13 @@ except Exception:  # pragma: no cover - real Blender always provides this decora
 
 
 logger = logging.getLogger(__name__)
-CURRENT_SETTINGS_SCHEMA_VERSION = 5
+CURRENT_SETTINGS_SCHEMA_VERSION = 6
 _REGISTERED = False
 _FILE_LOADING = False
 _SCHEMA_PROPERTY = "spine2d_settings_schema_version"
 _RIG_PROPERTY = "spine2d_rig_profile"
 _SEAM_PROPERTY = "spine2d_seam_maker_mode"
+_TARGET_PROPERTY = "spine2d_target_spine_version"
 _MISSING = object()
 
 
@@ -36,6 +42,8 @@ class _PreRegistrationSceneState:
     seam_mode: str
     rig_profile_raw: object
     rig_profile_persisted: bool
+    spine_target_raw: object
+    spine_target_persisted: bool
 
 
 _PRE_REGISTRATION_SCENE_STATES: dict[
@@ -152,12 +160,20 @@ def _capture_scene_state(scene: Any) -> _PreRegistrationSceneState:
         persisted_keys,
         _MISSING,
     )
+    raw_target = _persisted_id_value(
+        scene,
+        _TARGET_PROPERTY,
+        persisted_keys,
+        _MISSING,
+    )
     return _PreRegistrationSceneState(
         schema_version=_coerce_schema_version(raw_schema),
         persisted_keys=persisted_keys,
         seam_mode=_normalize_seam_mode(raw_seam),
         rig_profile_raw=raw_rig,
         rig_profile_persisted=raw_rig is not _MISSING,
+        spine_target_raw=raw_target,
+        spine_target_persisted=raw_target is not _MISSING,
     )
 
 
@@ -185,7 +201,8 @@ def capture_pre_registration_scene_state() -> int:
 
     Registering an EnumProperty over an older saved ID-property can make Blender expose
     the new RNA default before the migration owner runs. This snapshot preserves the
-    actual pre-registration schema, seam mode, and rig choice for that one lifecycle.
+    actual pre-registration schema, seam mode, rig choice, and target-version choice for
+    that one lifecycle.
     """
 
     scenes = tuple(getattr(bpy.data, "scenes", ()))
@@ -242,12 +259,48 @@ def _stored_rig_profile(
     return _resolve_stored_rig_profile(raw)
 
 
+def _resolve_stored_spine_target(raw: object) -> SpineJsonTarget:
+    try:
+        return resolve_spine_json_target(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid persisted Spine JSON target %r; using %s",
+            raw,
+            DEFAULT_SPINE_JSON_TARGET.value,
+        )
+        return DEFAULT_SPINE_JSON_TARGET
+
+
+def _stored_spine_target(
+    scene: Any,
+    snapshot: _PreRegistrationSceneState | None,
+) -> SpineJsonTarget:
+    """Preserve one valid saved target and default missing/invalid values to 4.2."""
+
+    if snapshot is not None:
+        if not snapshot.spine_target_persisted:
+            return DEFAULT_SPINE_JSON_TARGET
+        return _resolve_stored_spine_target(snapshot.spine_target_raw)
+
+    persisted_keys = _persisted_scene_keys(scene)
+    if _TARGET_PROPERTY not in persisted_keys:
+        return DEFAULT_SPINE_JSON_TARGET
+    raw = _persisted_id_value(
+        scene,
+        _TARGET_PROPERTY,
+        persisted_keys,
+        DEFAULT_SPINE_JSON_TARGET.value,
+    )
+    return _resolve_stored_spine_target(raw)
+
+
 def migrate_scene_settings(scene: Any) -> bool:
-    """Migrate one Scene once without overwriting established rig choices.
+    """Migrate one Scene once without overwriting established user choices.
 
     Schema 4 introduced selectable rig profiles and assigned older saved projects to the
-    byte-compatible three-axis rig. Schema 5 changes only the default for genuinely fresh
-    Scenes. Existing schema-4 Scenes keep the profile already chosen by the user.
+    byte-compatible three-axis rig. Schema 5 changed only the rig default for genuinely
+    fresh Scenes. Schema 6 adds the Spine JSON target and assigns every Scene without an
+    explicit valid target to Spine 4.2, preserving any valid target already stored.
     """
 
     if scene is None:
@@ -280,10 +333,13 @@ def migrate_scene_settings(scene: Any) -> bool:
         # Never silently change established pre-profile projects.
         rig_profile = A1RigProfile.THREE_AXIS_ROTATION
 
+    spine_target = _stored_spine_target(scene, snapshot)
+
     try:
         if seam_changed:
             scene.spine2d_seam_maker_mode = "AUTO"
         scene.spine2d_rig_profile = rig_profile.value
+        scene.spine2d_target_spine_version = spine_target.value
         scene.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION
     except Exception:
         logger.exception(
@@ -296,7 +352,7 @@ def migrate_scene_settings(scene: Any) -> bool:
 
     logger.info(
         "Migrated Spine2D Rewrite Scene '%s' settings schema %d -> %d; "
-        "fresh=%s; Seam Maker %s -> %s; Rig -> %s",
+        "fresh=%s; Seam Maker %s -> %s; Rig -> %s; Spine target -> %s (%s)",
         str(getattr(scene, "name", "<unnamed>")),
         current,
         CURRENT_SETTINGS_SCHEMA_VERSION,
@@ -304,6 +360,8 @@ def migrate_scene_settings(scene: Any) -> bool:
         previous_mode,
         "AUTO" if seam_changed else previous_mode,
         rig_profile.value,
+        spine_target.value,
+        spine_target.exact_version,
     )
     return True
 
