@@ -25,6 +25,10 @@ from .blender_adapter.a1_ui_bridge import (
 )
 from .config import get_default_output_dir
 from .domain.baking import A1TextureExportMode
+from .domain.spine.version_target import (
+    DEFAULT_SPINE_JSON_TARGET,
+    resolve_spine_json_target,
+)
 from .infrastructure.blender_registration import (
     RegistrationCleanupAction,
     RnaPropertyRegistration,
@@ -71,6 +75,7 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene.spine2d_texture_export_mode = (
                 A1TextureExportMode.NORMAL_UV_SEGMENTS.value
             )
+            scene.spine2d_target_spine_version = DEFAULT_SPINE_JSON_TARGET.value
             scene.spine2d_texture_size = 1024
             scene.spine2d_json_path = get_default_output_dir()
             scene.spine2d_images_path = "images/"
@@ -307,6 +312,35 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             column.label(
                 text="Preserves cut regions and generated UV meshes",
                 icon="UV",
+            )
+        column.separator()
+
+        column.prop(
+            scene,
+            "spine2d_target_spine_version",
+            text="Spine version",
+        )
+        try:
+            target = resolve_spine_json_target(
+                getattr(
+                    scene,
+                    "spine2d_target_spine_version",
+                    DEFAULT_SPINE_JSON_TARGET.value,
+                )
+            )
+            column.label(
+                text=f"Exact JSON version: {target.exact_version}",
+                icon="INFO",
+            )
+            if not target.descriptor.serializer_ready:
+                column.label(
+                    text="Codec implementation in progress; Analyze blocks export",
+                    icon="ERROR",
+                )
+        except (TypeError, ValueError):
+            column.label(
+                text="Invalid Spine target; reset settings to Spine 4.2",
+                icon="ERROR",
             )
         column.separator()
 
