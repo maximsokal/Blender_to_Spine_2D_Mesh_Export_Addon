@@ -220,6 +220,18 @@ def resolve_spine_json_exact_version(value: object) -> SpineJsonTarget:
     return target
 
 
+def spine_json_version_filename_token(value: object) -> str:
+    """Return one deterministic filesystem-safe token for a Spine JSON target.
+
+    The exact patch version is part of the token because the Spine Editor requires an
+    exact version match when importing JSON. Dots are valid filename characters on all
+    supported desktop platforms and keep the required Editor version human-readable.
+    """
+
+    target = resolve_spine_json_target(value)
+    return f"spine_{target.exact_version}"
+
+
 def require_spine_json_target_serializable(value: object) -> SpineJsonTarget:
     """Fail closed unless the selected target has an implemented production codec."""
 
@@ -242,4 +254,5 @@ __all__ = [
     "resolve_spine_json_exact_version",
     "resolve_spine_json_target",
     "spine_json_target_enum_items",
+    "spine_json_version_filename_token",
 ]
