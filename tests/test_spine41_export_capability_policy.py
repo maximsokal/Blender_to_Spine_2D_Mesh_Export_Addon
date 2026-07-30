@@ -56,7 +56,7 @@ def test_spine41_two_axis_accepts_single_and_standalone_only() -> None:
         assert capability.target is SpineJsonTarget.SPINE_4_1
         assert capability.rig_profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE
         assert capability.scopes == frozenset(accepted)
-        assert capability.limitations
+        assert capability.limitations == ()
 
 
 @pytest.mark.parametrize(
