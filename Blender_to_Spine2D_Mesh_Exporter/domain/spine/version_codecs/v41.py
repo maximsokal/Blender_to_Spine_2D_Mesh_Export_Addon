@@ -1,9 +1,8 @@
-"""Quarantined Spine 4.1 JSON boundary adapter.
+"""Spine 4.1 JSON schema adapter for the limited production export scope.
 
-This module is intentionally not registered as a production codec. It contains only
-schema transformations supported by repository evidence. Rig topology, constraint
-scheduling, and setup-pose compatibility belong to target-aware builders and must be
-validated with the actual Spine 4.1 runtime before this adapter can be registered.
+This codec owns only evidence-backed schema representation. Rig topology, constraint
+targets, setup-pose safety, and export-scope acceptance remain target-aware builder and
+capability responsibilities.
 """
 
 from __future__ import annotations
@@ -17,16 +16,19 @@ from ..version_target import SpineJsonTarget
 from .base import SpineJsonCodecContext, SpineJsonVersionCodec
 
 
+
 def _require_dict(value: Any, *, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TypeError(f"{path} must be a JSON object")
     return value
 
 
+
 def _require_list(value: Any, *, path: str) -> list[Any]:
     if not isinstance(value, list):
         raise TypeError(f"{path} must be a JSON array")
     return value
+
 
 
 def _extend_unique_names(
@@ -54,11 +56,11 @@ def _extend_unique_names(
 
 
 class Spine41JsonCodec(SpineJsonVersionCodec):
-    """Apply evidence-backed Spine 4.1 field mappings without changing rig semantics.
+    """Apply verified Spine 4.1 schema mappings without changing rig semantics.
 
-    The class remains available for focused research tests, but production resolution
-    rejects Spine 4.1 before geometry because the target descriptor is not ready and the
-    registry does not expose this codec.
+    The production capability matrix permits only target/profile/scope combinations that
+    passed the external runtime and Editor acceptance gates. This codec deliberately does
+    not decide those combinations and never repairs builder-owned constraint scheduling.
     """
 
     @property
