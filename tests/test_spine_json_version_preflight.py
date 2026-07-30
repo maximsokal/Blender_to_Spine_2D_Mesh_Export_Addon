@@ -1,4 +1,4 @@
-"""Fail-closed preflight contracts for target codecs that are not production ready."""
+"""Fail-closed preflight contracts for target codec readiness."""
 
 from __future__ import annotations
 
@@ -68,3 +68,38 @@ def test_unready_target_is_rejected_before_geometry(
     assert error.stage is A1SingleObjectStage.VALIDATE_REQUEST
     assert isinstance(error.cause, SpineJsonTargetUnavailableError)
     assert geometry_called is False
+
+
+@pytest.mark.parametrize(
+    "target",
+    tuple(
+        target
+        for target in SpineJsonTarget
+        if target.descriptor.serializer_ready
+    ),
+)
+def test_ready_target_reaches_geometry_preparation(
+    tmp_path: Path,
+    monkeypatch,
+    target: SpineJsonTarget,
+) -> None:
+    sentinel = RuntimeError(f"geometry reached for {target.value}")
+
+    def stop_at_geometry(*_args, **_kwargs):
+        raise sentinel
+
+    monkeypatch.setattr(
+        a1_object_preparation,
+        "prepare_a1_source_geometry",
+        stop_at_geometry,
+    )
+
+    with pytest.raises(A1ObjectPreparationError) as exc_info:
+        a1_object_preparation.prepare_a1_object(
+            object(),
+            _settings(tmp_path, target),
+        )
+
+    error = exc_info.value
+    assert error.stage is A1SingleObjectStage.VALIDATE_REQUEST
+    assert error.cause is sentinel
