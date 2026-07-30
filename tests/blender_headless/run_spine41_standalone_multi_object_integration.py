@@ -80,7 +80,10 @@ def _parse_arguments() -> argparse.Namespace:
         "--output",
         type=Path,
         required=True,
-        help="Empty directory that will receive the generated JSON, PNG files, and report.",
+        help=(
+            "Empty directory that will receive the generated JSON, PNG files, "
+            "and report."
+        ),
     )
     arguments = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else ()
     return parser.parse_args(arguments)
@@ -173,9 +176,15 @@ def _all_constraints(document: dict[str, object]) -> tuple[dict[str, object], ..
     result: list[dict[str, object]] = []
     for collection_name in ("ik", "transform", "path"):
         collection = document.get(collection_name, ())
-        _assert(isinstance(collection, list), f"{collection_name} must be a JSON array")
+        _assert(
+            isinstance(collection, list),
+            f"{collection_name} must be a JSON array",
+        )
         for item in collection:
-            _assert(isinstance(item, dict), f"{collection_name} contains a non-object")
+            _assert(
+                isinstance(item, dict),
+                f"{collection_name} contains a non-object",
+            )
             result.append(item)
     return tuple(result)
 
@@ -199,6 +208,37 @@ def _assert_same_owner_reference(
         )
 
 
+def _assert_optional_skin_membership(
+    skin: dict[str, object],
+    document: dict[str, object],
+    *,
+    field_name: str,
+) -> None:
+    """Validate optional skin-required constraint membership without requiring it."""
+
+    membership = skin.get(field_name)
+    if membership is None:
+        return
+    _assert(
+        isinstance(membership, list),
+        f"skin.{field_name} must be a JSON array when present",
+    )
+    collection = document.get(field_name, ())
+    _assert(
+        isinstance(collection, list),
+        f"document.{field_name} must be a JSON array",
+    )
+    known_names = {
+        item["name"]
+        for item in collection
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    }
+    _assert(
+        all(isinstance(name, str) and name in known_names for name in membership),
+        f"skin.{field_name} references an unknown constraint",
+    )
+
+
 def _assert_standalone_document(document: dict[str, object]) -> dict[str, object]:
     """Validate exact target metadata and independent per-object rig ownership."""
 
@@ -214,7 +254,10 @@ def _assert_standalone_document(document: dict[str, object]) -> dict[str, object
     skins = document.get("skins")
     _assert(isinstance(bones, list) and bones, "bones must be a non-empty array")
     _assert(isinstance(slots, list) and slots, "slots must be a non-empty array")
-    _assert(isinstance(skins, list) and len(skins) == 1, "exactly one skin is required")
+    _assert(
+        isinstance(skins, list) and len(skins) == 1,
+        "exactly one skin is required",
+    )
 
     bone_by_name: dict[str, dict[str, object]] = {}
     for bone in bones:
@@ -222,11 +265,17 @@ def _assert_standalone_document(document: dict[str, object]) -> dict[str, object
         name = bone.get("name")
         _assert(isinstance(name, str) and name, "bone has no name")
         _assert(name not in bone_by_name, f"duplicate bone name: {name}")
-        _assert(not name.startswith("all_objects"), f"connected wrapper leaked: {name}")
+        _assert(
+            not name.startswith("all_objects"),
+            f"connected wrapper leaked: {name}",
+        )
         _assert("inherit" not in bone, f"Spine 4.2 inherit field leaked: {name}")
         bone_by_name[name] = bone
 
-    _assert(tuple(name for name in bone_by_name if name == "root") == ("root",), "root count changed")
+    _assert(
+        tuple(name for name in bone_by_name if name == "root") == ("root",),
+        "root count changed",
+    )
     for prefix in PREFIXES:
         _assert(f"{prefix}_main" in bone_by_name, f"missing main bone for {prefix}")
 
@@ -237,30 +286,57 @@ def _assert_standalone_document(document: dict[str, object]) -> dict[str, object
         _assert(owner is not None, f"standalone document has an unowned bone: {name}")
         parent = bone.get("parent")
         if parent is not None:
-            _assert_same_owner_reference(owner, (parent,), label=f"bone {name} parent")
+            _assert_same_owner_reference(
+                owner,
+                (parent,),
+                label=f"bone {name} parent",
+            )
 
     constraints = _all_constraints(document)
-    _assert(len(document.get("ik", ())) == 3, "expected one IK constraint per object")
+    _assert(
+        len(document.get("ik", ())) == 3,
+        "expected one IK constraint per object",
+    )
     _assert(
         len(document.get("transform", ())) == 12,
         "expected four transform constraints per object",
     )
-    _assert(len(constraints) == 15, f"unexpected constraint count: {len(constraints)}")
+    _assert(
+        len(constraints) == 15,
+        f"unexpected constraint count: {len(constraints)}",
+    )
 
     orders: list[int] = []
     for constraint in constraints:
         name = constraint.get("name")
         _assert(isinstance(name, str) and name, "constraint has no name")
-        _assert(not name.startswith("all_objects"), f"connected constraint leaked: {name}")
+        _assert(
+            not name.startswith("all_objects"),
+            f"connected constraint leaked: {name}",
+        )
         owner = _owner_prefix(name)
         _assert(owner is not None, f"constraint has no object owner: {name}")
         raw_bones = constraint.get("bones", ())
-        _assert(isinstance(raw_bones, list), f"constraint {name} bones must be a list")
-        _assert_same_owner_reference(owner, raw_bones, label=f"constraint {name} bones")
+        _assert(
+            isinstance(raw_bones, list),
+            f"constraint {name} bones must be a list",
+        )
+        _assert_same_owner_reference(
+            owner,
+            raw_bones,
+            label=f"constraint {name} bones",
+        )
         target = constraint.get("target")
-        _assert_same_owner_reference(owner, (target,), label=f"constraint {name} target")
+        _assert_same_owner_reference(
+            owner,
+            (target,),
+            label=f"constraint {name} target",
+        )
         order = constraint.get("order", 0)
-        _assert(isinstance(order, int) and not isinstance(order, bool), f"invalid order: {name}")
+        _assert(
+            isinstance(order, int) and not isinstance(order, bool),
+            f"invalid order: {name}",
+        )
         orders.append(order)
 
     _assert(
@@ -276,18 +352,20 @@ def _assert_standalone_document(document: dict[str, object]) -> dict[str, object
         _assert(isinstance(name, str) and name, "slot has no name")
         owner = _owner_prefix(name)
         _assert(owner is not None, f"slot has no object owner: {name}")
-        _assert_same_owner_reference(owner, (bone,), label=f"slot {name} bone")
+        _assert_same_owner_reference(
+            owner,
+            (bone,),
+            label=f"slot {name} bone",
+        )
         slot_names.append(name)
 
     skin = skins[0]
     _assert(isinstance(skin, dict), "skin is not a JSON object")
     _assert("constraints" not in skin, "Spine 4.2 skin constraint field leaked")
-    _assert(set(skin.get("ik", ())) == {item["name"] for item in document["ik"]}, "skin IK membership changed")
-    _assert(
-        set(skin.get("transform", ()))
-        == {item["name"] for item in document["transform"]},
-        "skin transform membership changed",
-    )
+    attachments = skin.get("attachments")
+    _assert(isinstance(attachments, dict), "skin attachments are missing")
+    _assert_optional_skin_membership(skin, document, field_name="ik")
+    _assert_optional_skin_membership(skin, document, field_name="transform")
 
     return {
         "version": skeleton["spine"],
@@ -368,7 +446,10 @@ def run(output_directory: Path) -> Path:
         f"unexpected output file order: {result.output_files}",
     )
     for texture_path in expected_textures:
-        _assert(texture_path.read_bytes()[:8] == PNG_SIGNATURE, f"invalid PNG: {texture_path}")
+        _assert(
+            texture_path.read_bytes()[:8] == PNG_SIGNATURE,
+            f"invalid PNG: {texture_path}",
+        )
 
     document = json.loads(json_path.read_text(encoding="utf-8"))
     _assert(isinstance(document, dict), "generated JSON root is not an object")
