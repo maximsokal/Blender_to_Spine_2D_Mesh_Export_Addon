@@ -61,7 +61,10 @@ def test_connected_serializer_does_not_hide_any_other_validation_error():
 def test_multi_output_selects_relaxed_validator_only_for_connected_result():
     source = OUTPUT_OWNER.read_text(encoding="utf-8")
 
-    assert "def _serializer_for_composition(" in source
+    assert "def _serialization_validator_for_composition(" in source
     assert "isinstance(composition, ConnectedGroupBuildResult)" in source
     assert "ConnectedGroupSerializationValidator()" in source
-    assert "return SpineSerializer()" in source
+    assert "return None" in source
+    assert "def _serialize_composition(" in source
+    assert "serialize_spine_document(" in source
+    assert "validator=_serialization_validator_for_composition(composition)" in source
