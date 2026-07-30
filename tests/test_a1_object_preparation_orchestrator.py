@@ -1,16 +1,29 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from Blender_to_Spine2D_Mesh_Exporter.application import (
+    A1SingleObjectExportSettings,
     A1SingleObjectStage,
     ExportIssue,
+    ExportSettings,
     IssueSeverity,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import a1_object_preparation
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_preparation_contracts import (
     A1ObjectPreparationError,
 )
+
+
+def _settings() -> A1SingleObjectExportSettings:
+    return A1SingleObjectExportSettings(
+        export=ExportSettings(
+            texture_width=64,
+            texture_height=64,
+            output_directory=Path.cwd(),
+        )
+    )
 
 
 def _warning(code: str) -> ExportIssue:
@@ -94,7 +107,7 @@ def test_orchestrator_passes_each_typed_stage_result_to_the_next(monkeypatch):
     monkeypatch.setattr(a1_object_preparation, "PreparedA1Object", prepared_builder)
 
     source_obj = object()
-    settings = object()
+    settings = _settings()
     context = object()
     scene = object()
     result = a1_object_preparation.prepare_a1_object(
@@ -136,7 +149,7 @@ def test_typed_stage_error_is_not_rewrapped(monkeypatch):
     monkeypatch.setattr(a1_object_preparation, "prepare_a1_source_geometry", fail)
 
     with pytest.raises(A1ObjectPreparationError) as captured:
-        a1_object_preparation.prepare_a1_object(object(), object())
+        a1_object_preparation.prepare_a1_object(object(), _settings())
     assert captured.value is error
 
 
@@ -154,7 +167,7 @@ def test_unexpected_stage_error_keeps_current_stage_and_partial_diagnostics(monk
     monkeypatch.setattr(a1_object_preparation, "prepare_a1_uv", fail_uv)
 
     with pytest.raises(A1ObjectPreparationError) as captured:
-        a1_object_preparation.prepare_a1_object(object(), object())
+        a1_object_preparation.prepare_a1_object(object(), _settings())
 
     error = captured.value
     assert error.stage is A1SingleObjectStage.BUILD_TEXTURING_TOPOLOGY
