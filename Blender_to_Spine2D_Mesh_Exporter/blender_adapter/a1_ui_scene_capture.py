@@ -20,6 +20,7 @@ from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
 
 _DEFAULT_PROJECTION_ALPHA_THRESHOLD = 1.0 / 255.0
 _DEFAULT_GENERATED_GRAY: ColorRGBA = (0.5, 0.5, 0.5, 1.0)
+_PREVIEW_ANIMATION_EXPORT_ENABLED = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,9 +371,10 @@ def _capture_scene_profile(
         include_control_icons=bool(
             getattr(scene, "spine2d_control_icons", False)
         ),
-        include_preview_animation=bool(
-            getattr(scene, "spine2d_export_preview_animation", False)
-        ),
+        # Keep the persisted RNA value for old .blend compatibility, but do not let
+        # it create version-specific timelines while target-version JSON support is
+        # setup-pose only.
+        include_preview_animation=_PREVIEW_ANIMATION_EXPORT_ENABLED,
         rig_profile=_resolve_rig_profile(scene),
         material_source_policy=_resolve_material_source_policy(scene),
         generated_material_pattern=_resolve_generated_material_pattern(scene),
