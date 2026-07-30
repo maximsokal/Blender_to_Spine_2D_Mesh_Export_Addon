@@ -13,6 +13,7 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1ExportReadinessReport,
     A1ObjectReadiness,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine import SpineJsonTarget
 
 
 class _OperatorResult:
@@ -87,6 +88,8 @@ def test_face_orientation_uses_inverse_transpose_normal_matrix():
 
 def test_reset_settings_resets_rewrite_properties_and_clears_analysis(monkeypatch):
     scene = SimpleNamespace(
+        spine2d_texture_export_mode="CAMERA_PROJECTION",
+        spine2d_target_spine_version=SpineJsonTarget.SPINE_3_8.value,
         spine2d_texture_size=256,
         spine2d_json_path="old",
         spine2d_images_path="old-images",
@@ -113,6 +116,7 @@ def test_reset_settings_resets_rewrite_properties_and_clears_analysis(monkeypatc
     result = operator.execute(context)
 
     assert result == {"FINISHED"}
+    assert scene.spine2d_target_spine_version == SpineJsonTarget.SPINE_4_2.value
     assert scene.spine2d_texture_size == 1024
     assert scene.spine2d_json_path == "/exports"
     assert scene.spine2d_images_path == "images/"
@@ -255,5 +259,8 @@ def test_ui_runtime_uses_only_rewrite_export_operators():
     assert "OBJECT_OT_Spine2DSingleExport" in class_names
     assert "OBJECT_OT_Spine2DMultiExport" in class_names
     assert 'row.operator("object.save_uv_as_json"' not in source
+    assert '"spine2d_target_spine_version"' in source
+    assert 'text="Spine version"' in source
+    assert 'text=f"Exact JSON version: {target.exact_version}"' in source
     assert not hasattr(ui, "resolve_multi_backend")
     assert not hasattr(ui, "MULTI_BACKEND_PROPERTY")
