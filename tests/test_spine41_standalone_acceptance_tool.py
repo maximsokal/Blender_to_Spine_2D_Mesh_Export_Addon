@@ -115,6 +115,17 @@ def test_parse_oracle_report_accepts_complete_runtime_evidence() -> None:
             {"bounds": {"x": 0.0, "y": 0.0, "width": 0.0, "height": 1.0}},
             "not positive",
         ),
+        (
+            {
+                "bounds": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "width": float("nan"),
+                    "height": 1.0,
+                }
+            },
+            "not finite",
+        ),
     ),
 )
 def test_parse_oracle_report_rejects_incomplete_evidence(
