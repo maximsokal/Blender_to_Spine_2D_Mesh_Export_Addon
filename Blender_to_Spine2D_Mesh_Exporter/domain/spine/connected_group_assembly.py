@@ -45,6 +45,10 @@ from .spine41_setup_safety import (
     Spine41RigSafetyError,
     validate_spine41_setup_safety,
 )
+from .two_axis_scale_profile import TwoAxisScaleRigProfile
+from .two_axis_scale_spine41 import (
+    adapt_connected_two_axis_constraints_for_spine41,
+)
 from .validator import SpineValidator
 from .version_target import (
     DEFAULT_SPINE_JSON_TARGET,
@@ -256,6 +260,7 @@ def build_connected_group_document(
             f"{resolved_target.label} ({resolved_target.exact_version})"
         )
 
+    profile_id = resolve_a1_rig_profile(resolved_profile.profile_id)
     validate_connected_group_inputs(objects, settings, resolved_profile)
     layers, placements = resolve_layers_and_placements(
         objects,
@@ -337,6 +342,25 @@ def build_connected_group_document(
         resolved_profile,
         uniform_scale,
     )
+    if resolved_target is SpineJsonTarget.SPINE_4_1:
+        if profile_id is not A1RigProfile.TWO_AXIS_ROTATION_SCALE or not isinstance(
+            resolved_profile,
+            TwoAxisScaleRigProfile,
+        ):
+            raise ConnectedGroupBuildError(
+                "Spine 4.1 connected output currently requires "
+                "TWO_AXIS_ROTATION_SCALE"
+            )
+        global_ik, global_transform = (
+            adapt_connected_two_axis_constraints_for_spine41(
+                global_ik,
+                global_transform,
+                profile=resolved_profile,
+                group_prefix=settings.group_prefix,
+                layers=layers,
+            )
+        )
+
     # Object constraints remain in component order and global constraints are appended.
     # Only ``order`` values are replaced; the arrays are deliberately not sorted.
     with_global_constraints = replace(
@@ -345,7 +369,6 @@ def build_connected_group_document(
         transform=(*placed_document.transform, *global_transform),
     )
 
-    profile_id = resolve_a1_rig_profile(resolved_profile.profile_id)
     if profile_id is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
         # Two-axis generated layers intentionally store depth in setup Y. Compensate that
         # profile only; the Legacy connected layers are neutral and need no correction.
