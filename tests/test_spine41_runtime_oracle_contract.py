@@ -55,3 +55,33 @@ def test_spine41_oracle_treats_the_external_runtime_as_read_only() -> None:
         "cpSync",
     ):
         assert forbidden_api not in source
+
+
+def test_spine41_oracle_is_concise_by_default_and_full_only_on_request() -> None:
+    source = _source()
+
+    option_parse = source.index("const options = parseOutputOptions(process.argv.slice(4));")
+    matrix_validation = source.index(
+        "const boneSnapshots = validateBoneMatrices(skeleton);",
+        option_parse,
+    )
+    summary_creation = source.index("const summary = {", matrix_validation)
+    conditional_report = source.index(
+        "const report = options.includeDetails",
+        summary_creation,
+    )
+
+    assert option_parse < matrix_validation < summary_creation < conditional_report
+    assert "if (argument === '--full')" in source
+    assert "outputMode: options.includeDetails ? 'full' : 'summary'" in source
+    assert "finiteBones: boneSnapshots.length" in source
+    assert "everyConstraintScheduledExactlyOnce: true" in source
+    assert "details: {" in source
+    assert "bones: boneSnapshots" in source
+
+
+def test_spine41_oracle_rejects_unknown_output_options() -> None:
+    source = _source()
+
+    assert "function parseOutputOptions(argumentsList)" in source
+    assert "fail(`Unknown oracle option: ${String(argument)}`);" in source
