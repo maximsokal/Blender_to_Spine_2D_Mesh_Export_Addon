@@ -110,9 +110,9 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
         ),
         SpineJsonTarget.SPINE_4_1: SpineJsonVersionDescriptor(
             family="4.1",
-            exact_version="4.1.19",
+            exact_version="4.1.24",
             label="Spine 4.1",
-            description="Export setup-pose JSON for Spine 4.1.19",
+            description="Export setup-pose JSON for Spine 4.1.24",
             uses_legacy_bone_transform_field=True,
             uses_legacy_constraint_mix_fields=False,
             uses_unified_constraints=False,
