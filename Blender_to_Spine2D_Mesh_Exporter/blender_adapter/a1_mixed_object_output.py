@@ -15,7 +15,7 @@ from ..application import (
     scale_a1_export_progress_callback,
     validate_a1_realized_output_namespace,
 )
-from ..domain.spine import SpineSerializer
+from ..domain.spine.version_codecs import serialize_spine_document
 from ..infrastructure import (
     AtomicFileCommitError,
     atomic_file_transaction,
@@ -34,6 +34,7 @@ from .a1_output_statistics import (
     record_final_document_statistics,
     record_grouped_camera_statistics,
 )
+from .a1_spine_version_output import resolve_a1_sources_spine_target
 from .grouped_camera_projection_output import stage_grouped_camera_projection_outputs
 from .grouped_camera_projection_policy import resolve_grouped_camera_projection_request
 
@@ -112,6 +113,10 @@ def export_a1_mixed_object(
         "Starting mixed-object export",
     )
     try:
+        spine_target = resolve_a1_sources_spine_target(
+            connected_sources,
+            standalone_sources,
+        )
         prepared = prepare_a1_mixed_object(
             connected_sources,
             standalone_sources,
@@ -228,8 +233,9 @@ def export_a1_mixed_object(
 
             stage = A1MultiObjectStage.SERIALIZE_DOCUMENT
             _progress(progress_callback, 93, stage, "Serializing Spine JSON")
-            json_text = SpineSerializer().to_json(
+            json_text = serialize_spine_document(
                 document,
+                spine_target,
                 indent=settings.json_indent,
             )
             write_staged_utf8_text(
