@@ -1,9 +1,9 @@
-"""Build and apply Legacy-compatible connected A1 constraint schedules."""
+"""Build and apply target-aware connected A1 constraint schedules."""
 
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Tuple
+from typing import Callable, Tuple
 
 from .connected_group_contracts import (
     ConnectedConstraintSchedule,
@@ -14,12 +14,22 @@ from .legacy_profile import LegacyRigProfile
 from .model import SpineDocument
 from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from .two_axis_scale_profile import TwoAxisScaleRigProfile
+from .version_target import (
+    DEFAULT_SPINE_JSON_TARGET,
+    SpineJsonTarget,
+    resolve_spine_json_target,
+)
 
 
-# The old single-object builder always serialized the compensator at order 6. The
-# historical connected merger did not renumber or remove it, so exact main-branch
-# parity requires preserving this value for every connected three-axis object.
+# The historical three-axis standalone builder serializes this compensator at order 6.
+# Spine 4.2 connected parity intentionally preserves it. Spine 4.1 cannot reuse this
+# constant because its runtime requires one globally unique order per constraint.
 _LEGACY_SCALE_COMPENSATOR_ORDER = 6
+
+_PhaseAllocator = Callable[
+    [Tuple[ConnectedObjectPlacement, ...], int],
+    tuple[Tuple[Tuple[str, int], ...], int],
+]
 
 
 def _layer_count(placements: Tuple[ConnectedObjectPlacement, ...]) -> int:
@@ -34,7 +44,7 @@ def _assign_layer_phase(
     placements: Tuple[ConnectedObjectPlacement, ...],
     first_order: int,
 ) -> tuple[Tuple[Tuple[str, int], ...], int]:
-    """Assign one order per Z layer while preserving source component order."""
+    """Assign one historical order per Z layer, preserving component order."""
 
     count = _layer_count(placements)
     assignments = tuple(
@@ -44,11 +54,25 @@ def _assign_layer_phase(
     return assignments, first_order + count
 
 
+def _assign_component_phase(
+    placements: Tuple[ConnectedObjectPlacement, ...],
+    first_order: int,
+) -> tuple[Tuple[Tuple[str, int], ...], int]:
+    """Assign one globally unique order to every component in encounter order."""
+
+    _layer_count(placements)
+    assignments = tuple(
+        (placement.component_id, first_order + index)
+        for index, placement in enumerate(placements)
+    )
+    return assignments, first_order + len(placements)
+
+
 def _build_legacy_schedule(
     placements: Tuple[ConnectedObjectPlacement, ...],
     profile: LegacyRigProfile,
 ) -> ConnectedConstraintSchedule:
-    """Reproduce the connected order formula from historical ``main``."""
+    """Reproduce the historical connected three-axis schedule for Spine 4.2."""
 
     next_order = 0
     global_rotation_x = next_order
@@ -81,8 +105,7 @@ def _build_legacy_schedule(
         global_scale=global_scale,
         object_scale=object_scale,
         object_rotation_z=object_rotation_z,
-        # Compensators keep their original standalone order and are intentionally not
-        # part of the layer-phase model, exactly like main._renumber_object_constraints.
+        # Historical 4.2 parity keeps standalone compensators at order 6.
         object_scale_compensator=(),
         profile_id=profile.profile_id,
     )
@@ -91,29 +114,31 @@ def _build_legacy_schedule(
 def _build_two_axis_schedule(
     placements: Tuple[ConnectedObjectPlacement, ...],
     profile: TwoAxisScaleRigProfile,
+    *,
+    allocate_phase: _PhaseAllocator,
 ) -> ConnectedConstraintSchedule:
-    """Generalize Legacy layer phases to the five two-axis operations."""
+    """Build the five two-axis phases using the selected target allocation policy."""
 
     next_order = 0
     global_rotation_x = next_order
     next_order += 1
-    object_rotation_x, next_order = _assign_layer_phase(placements, next_order)
+    object_rotation_x, next_order = allocate_phase(placements, next_order)
 
     global_scale_ik = next_order
     next_order += 1
-    object_scale_ik, next_order = _assign_layer_phase(placements, next_order)
+    object_scale_ik, next_order = allocate_phase(placements, next_order)
 
     global_scale = next_order
     next_order += 1
-    object_scale, next_order = _assign_layer_phase(placements, next_order)
+    object_scale, next_order = allocate_phase(placements, next_order)
 
     global_scale_depth = next_order
     next_order += 1
-    object_scale_depth, next_order = _assign_layer_phase(placements, next_order)
+    object_scale_depth, next_order = allocate_phase(placements, next_order)
 
     global_rotation_y = next_order
     next_order += 1
-    object_rotation_y, next_order = _assign_layer_phase(placements, next_order)
+    object_rotation_y, next_order = allocate_phase(placements, next_order)
 
     return ConnectedConstraintSchedule(
         global_rotation_x=global_rotation_x,
@@ -133,27 +158,93 @@ def _build_two_axis_schedule(
     )
 
 
+def validate_constraint_schedule_for_target(
+    schedule: ConnectedConstraintSchedule,
+    spine_target: object,
+) -> ConnectedConstraintSchedule:
+    """Validate the runtime-level global order contract for one target family."""
+
+    if not isinstance(schedule, ConnectedConstraintSchedule):
+        raise TypeError("schedule must be ConnectedConstraintSchedule")
+    target = resolve_spine_json_target(spine_target)
+
+    if target is SpineJsonTarget.SPINE_4_2:
+        # Historical connected parity permits independent same-layer constraints to share
+        # an order. ConnectedGroupSerializationValidator owns this explicit exception.
+        return schedule
+
+    if target is not SpineJsonTarget.SPINE_4_1:
+        raise ValueError(
+            f"Connected scheduling is not implemented for {target.label} "
+            f"({target.exact_version})"
+        )
+
+    orders = schedule.all_orders
+    unique_orders = set(orders)
+    if len(unique_orders) != len(orders):
+        duplicates = tuple(
+            sorted(order for order in unique_orders if orders.count(order) > 1)
+        )
+        raise ValueError(
+            "Spine 4.1 connected constraints require globally unique orders; "
+            f"duplicates={duplicates}"
+        )
+
+    expected = tuple(range(len(orders)))
+    actual = tuple(sorted(orders))
+    if actual != expected:
+        raise ValueError(
+            "Spine 4.1 connected constraint orders must be contiguous; "
+            f"expected={expected}, actual={actual}"
+        )
+    return schedule
+
+
 def build_constraint_schedule(
     placements: Tuple[ConnectedObjectPlacement, ...],
     profile: LegacyRigProfile | None = None,
+    *,
+    spine_target: object = DEFAULT_SPINE_JSON_TARGET,
 ) -> ConnectedConstraintSchedule:
-    """Assign the exact connected schedule for the selected rig profile."""
+    """Assign the connected schedule for the selected rig profile and target runtime."""
 
     resolved_profile = LegacyRigProfile() if profile is None else profile
     if not isinstance(resolved_profile, LegacyRigProfile):
         raise TypeError("profile must be LegacyRigProfile")
+    target = resolve_spine_json_target(spine_target)
 
     profile_id = resolve_a1_rig_profile(resolved_profile.profile_id)
     if profile_id is A1RigProfile.THREE_AXIS_ROTATION:
-        return _build_legacy_schedule(placements, resolved_profile)
-    if profile_id is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
+        if target is not SpineJsonTarget.SPINE_4_2:
+            raise ValueError(
+                "Connected three-axis scheduling is not yet proven for Spine 4.1: "
+                "the per-object scale compensator needs an explicit dependency phase"
+            )
+        schedule = _build_legacy_schedule(placements, resolved_profile)
+    elif profile_id is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
         if not isinstance(resolved_profile, TwoAxisScaleRigProfile):
             raise TypeError(
                 "TWO_AXIS_ROTATION_SCALE connected schedule requires "
                 "TwoAxisScaleRigProfile"
             )
-        return _build_two_axis_schedule(placements, resolved_profile)
-    raise AssertionError(f"Unhandled connected rig profile: {profile_id}")
+        if target is SpineJsonTarget.SPINE_4_2:
+            allocator = _assign_layer_phase
+        elif target is SpineJsonTarget.SPINE_4_1:
+            allocator = _assign_component_phase
+        else:
+            raise ValueError(
+                f"Connected two-axis scheduling is not implemented for {target.label} "
+                f"({target.exact_version})"
+            )
+        schedule = _build_two_axis_schedule(
+            placements,
+            resolved_profile,
+            allocate_phase=allocator,
+        )
+    else:
+        raise AssertionError(f"Unhandled connected rig profile: {profile_id}")
+
+    return validate_constraint_schedule_for_target(schedule, target)
 
 
 def _object_order_by_name(
@@ -214,7 +305,7 @@ def reorder_object_constraints(
     schedule: ConnectedConstraintSchedule,
     profile: LegacyRigProfile,
 ) -> SpineDocument:
-    """Return one object document with connected Legacy-compatible orders."""
+    """Return one object document with target-selected connected orders."""
 
     if not isinstance(item, ConnectedObjectDocument):
         raise TypeError("item must be ConnectedObjectDocument")
@@ -331,4 +422,5 @@ __all__ = [
     "apply_connected_constraint_schedule",
     "build_constraint_schedule",
     "reorder_object_constraints",
+    "validate_constraint_schedule_for_target",
 ]
