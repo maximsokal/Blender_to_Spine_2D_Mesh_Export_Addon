@@ -114,7 +114,9 @@ def test_spine_four_one_research_view_preserves_world_scale_constraint_semantics
     assert source.info.scale_bone_name in adapted_scale.bones
     assert tuple(
         name for name in adapted_scale.bones if name in source.info.sub_bone_names
-    ) == source.info.sub_bone_names
+    ) == tuple(
+        name for name in source_scale.bones if name in source.info.sub_bone_names
+    )
 
     assert source_by_name[depth_name].bones == source.info.sub_bone_scale_names
     assert adapted_by_name[depth_name].bones == source.info.sub_bone_scale_names
