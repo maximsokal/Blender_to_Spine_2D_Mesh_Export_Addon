@@ -7,12 +7,14 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import a1_single_object_ex
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_single_object_export import (
     export_a1_single_object,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import SpineJsonTarget
 from Blender_to_Spine2D_Mesh_Exporter.infrastructure import AtomicFileCommitError
 
 
-class _Serializer:
-    def to_json(self, document, *, indent):
-        return f'{{"document": "{document}", "indent": {indent}}}'
+def _serialize(document, target, *, indent, validator=None):
+    assert target is SpineJsonTarget.SPINE_4_2
+    assert validator is None
+    return f'{{"document": "{document}", "indent": {indent}}}'
 
 
 def _prepared(tmp_path: Path):
@@ -30,7 +32,11 @@ def _prepared(tmp_path: Path):
 
 
 def _settings():
-    return SimpleNamespace(bake_execution=object(), json_indent=2)
+    return SimpleNamespace(
+        bake_execution=object(),
+        json_indent=2,
+        export=SimpleNamespace(spine_target=SpineJsonTarget.SPINE_4_2),
+    )
 
 
 def _install_common_pipeline(monkeypatch, tmp_path: Path, *, fail_stage=None):
@@ -87,7 +93,11 @@ def _install_common_pipeline(monkeypatch, tmp_path: Path, *, fail_stage=None):
         "finalize_prepared_camera_projection",
         finalize,
     )
-    monkeypatch.setattr(a1_single_object_export, "SpineSerializer", _Serializer)
+    monkeypatch.setattr(
+        a1_single_object_export,
+        "serialize_spine_document",
+        _serialize,
+    )
     return prepared.output_paths.json_path, texture_path
 
 
@@ -127,12 +137,17 @@ def test_single_output_fault_matrix_preserves_existing_outputs_and_cleans_work_f
     texture_path.write_bytes(b"previous-texture")
 
     if failure_stage == "serialize":
-        class FailingSerializer:
-            def to_json(self, _document, *, indent):
-                assert indent == 2
-                raise RuntimeError(message)
+        def fail_serialize(_document, target, *, indent, validator=None):
+            assert target is SpineJsonTarget.SPINE_4_2
+            assert indent == 2
+            assert validator is None
+            raise RuntimeError(message)
 
-        monkeypatch.setattr(a1_single_object_export, "SpineSerializer", FailingSerializer)
+        monkeypatch.setattr(
+            a1_single_object_export,
+            "serialize_spine_document",
+            fail_serialize,
+        )
     elif failure_stage == "write":
         def fail_write(path, _text, *, ensure_trailing_newline):
             assert ensure_trailing_newline
