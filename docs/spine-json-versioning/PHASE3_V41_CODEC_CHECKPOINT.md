@@ -1,141 +1,151 @@
-# Phase 3 checkpoint: Spine 4.1 quarantined
+# Phase 3 checkpoint: Spine 4.1 limited production scope
 
 ## Status
 
-The previous Spine 4.1 production checkpoint is invalidated.
+`SPINE_4_1` now has a registered JSON codec and `serializer_ready=True`, but this does
+not enable every rig topology.
 
-`SPINE_4_1` remains a selectable target so requests, filenames, and UI migration stay
-stable, but `serializer_ready` is `False` and no Spine 4.1 codec is registered in the
-production facade. Analyze/export must fail before geometry preparation.
+The production capability matrix permits only:
 
-Spine 4.2 remains the only production-ready target and its serializer path is unchanged.
+- exact target `4.1.24`;
+- rig profile `2-Axis Rotation + Scale`;
+- one object in one skeleton;
+- several independent objects composed in `STANDALONE` mode under the shared `root`.
 
-## Why the checkpoint was invalidated
+The following Spine 4.1 combinations remain fail-closed before Blender geometry work:
 
-The previous implementation serialized the canonical Spine 4.2-oriented document and
-then rewrote a small set of JSON fields. That approach proved insufficient for the
-connected `2-Axis Rotation + Scale` rig.
+- `3-Axis Rotation`;
+- `CONNECTED` multi-object mode;
+- `MIXED` multi-object mode;
+- any future topology that is not explicitly present in the capability registry.
 
-Repository evidence from `maximsokal/Spine2D_curve_optimization` shows that version
-support is a complete pipeline concern:
+Spine 4.2 remains unchanged and retains both rig profiles and all existing composition
+modes.
 
-1. select the exact runtime family;
-2. select matching parser/reconstructor transformers;
-3. reconstruct the document for the target family;
-4. parse it again with the target family;
-5. validate the resulting setup pose with that runtime.
+## Accepted evidence
 
-Changing `skeleton.spine`, renaming `inherit`, or renumbering constraints after
-serialization does not prove target-runtime compatibility.
+The standalone multi-object fixture contains three independent object rigs in one
+skeleton. It has no `all_objects_*` wrapper, no shared object-control constraints, and no
+cross-object constraint references.
 
-## Removed production behavior
+The exact vendored Spine 4.1 runtime accepted the fixture with:
 
-The following behavior is no longer part of the production contract:
+- version `4.1.24`;
+- 58 finite bones;
+- 24 slots;
+- 3 IK constraints;
+- 12 transform constraints;
+- 15 globally unique contiguous orders (`0..14`);
+- all 15 constraints scheduled exactly once;
+- 12 setup renderable attachments;
+- finite positive setup bounds.
 
-- registration of `Spine41JsonCodec` in the production codec registry;
-- `serializer_ready=True` for Spine 4.1;
-- codec-owned constraint-order linearization;
-- any zero-scale replacement or numerical stabilization inside the serializer;
-- claims that the generated connected rig is native Spine 4.1 output.
+Manual Spine Editor 4.1.24 import displayed the three standalone objects in a usable
+state. Scale-constraint behavior is not yet fully equivalent to Spine 4.2 and is tracked
+as a separate compatibility defect.
 
-The quarantined adapter retains only evidence-backed field transformations for focused
-research. It deliberately preserves authored constraint order and cannot be reached
-through `serialize_spine_document()`.
+The earlier connected candidate is not evidence for normal multi-object export. Connected
+composition is development-only for this target and remains blocked by capability policy.
+
+## Capability ownership
+
+`domain/spine/export_capabilities.py` owns the accepted matrix:
+
+- target JSON family;
+- rig profile;
+- document composition scope;
+- known limitations attached to the accepted pair.
+
+A registered codec proves only that a typed document can be represented in the target
+JSON schema. It does not prove that every generated hierarchy or constraint graph is safe
+for that runtime.
+
+Single-object preparation checks `SINGLE_OBJECT` before reading Blender geometry.
+Multi-object preparation resolves either `STANDALONE_MULTI_OBJECT` or
+`CONNECTED_MULTI_OBJECT` before geometry. A Spine 4.1 mixed request enters its connected
+subgroup preflight and is rejected before any object preparation starts.
 
 ## Target-aware two-axis implementation
 
-The builder now has a separate Spine 4.1 two-axis constraint policy. It does not modify
-bone scales and does not use an epsilon.
+The Spine 4.1 two-axis builder uses no epsilon and does not change setup bone scales.
 
-The two changes are owned by the rig builder:
+Two constraints have target-aware representations:
 
-1. The uniform scale constraint remains relative but is evaluated in local applied space.
-   This avoids a world-space decomposition of `<prefix>_rotate_X`, whose generated parent
-   intentionally collapses one axis with `scaleX == 0`.
-2. The depth correction constraint targets final layer bones rather than their
-   `onlyTranslation` scale wrappers. The final layer bones have invertible parents, so
-   Spine 4.1 can call `Bone.updateAppliedTransform()` safely.
+1. The uniform scale constraint remains relative but evaluates in local applied space.
+   This avoids world-space decomposition below the generated axis-collapse parent.
+2. The depth scale constraint targets final layer bones instead of their
+   `onlyTranslation` wrappers, keeping the constrained parent matrices invertible.
 
-Both per-object rigs and the connected global wrapper use this policy. Application is
-idempotent so already-adapted objects cannot be adapted twice with different semantics.
-Spine 4.2 continues to use the existing constraints unchanged.
+A pure setup-matrix validator rejects remaining Spine 4.1 world constraints whose
+constrained bone has a singular parent. It reports the constraint, constrained bone,
+parent, and determinant without mutating the document.
 
-A pure domain setup-matrix validator rejects any remaining Spine 4.1 world constraint
-whose constrained bone has a singular parent matrix. This validator reports the exact
-constraint, constrained bone, parent bone, and determinant; it never changes the rig.
+The remaining scale-control mismatch observed in Spine Editor is not hidden by the codec
+and must be fixed in the target-aware rig policy later.
 
-## Constraint scheduling
+## Codec ownership
 
-Spine 4.1 connected two-axis output receives one globally unique order for every
-constraint and the exact contiguous order range `0..N-1`. Order ownership is in the
-connected builder, not the serializer.
+`Spine41JsonCodec` owns only verified schema representation:
 
-Spine 4.2 retains its historical same-Z-layer order sharing for byte and behavior parity.
-Spine 4.1 three-axis connected scheduling remains fail-closed because the standalone
-scale compensator still needs a separately proven dependency phase.
-
-## Architectural ownership
-
-### Version codec
-
-A version codec may own only target JSON schema representation:
-
-- exact `skeleton.spine` metadata;
-- verified field-name differences such as bone `inherit` versus `transform`;
-- verified skin membership representation;
-- removal of fields unsupported by the target schema;
+- exact `skeleton.spine = 4.1.24`;
+- `inherit` to legacy `transform` bone-field mapping;
+- Spine 4.1 skin IK/transform membership arrays;
+- removal of unsupported physics data;
 - deterministic JSON encoding.
 
-A codec must not repair hierarchy, setup transforms, or constraint scheduling.
+The codec deliberately preserves builder-authored constraint order. It never repairs
+hierarchy, setup transforms, scale values, constraint targets, or dependency phases.
 
-### Connected rig builder
+## Production registry
 
-The connected builder owns:
+The production registry contains:
 
-- generated bone hierarchy;
-- global and per-object control topology;
-- constraint targets and affected bones;
-- one global dependency-aware constraint schedule;
-- setup-pose placement and correction.
+- `Spine41JsonCodec` for `SPINE_4_1`;
+- `Spine42JsonCodec` for `SPINE_4_2`.
 
-### Runtime acceptance oracle
+Registry readiness and descriptor readiness must remain exactly equal. Unsupported targets
+3.8, 4.0, and 4.3 remain selectable for migration/testing but fail before geometry.
 
-Production readiness requires validation with the vendored Spine 4.1 runtime, not the
-4.2 runtime and not a pure JSON structural test.
+## Runtime oracle
 
-The external local gate is `tools/spine41_runtime_oracle.mjs`; its usage and checked
-invariants are documented in `SPINE41_RUNTIME_ORACLE.md`.
+`tools/spine41_runtime_oracle.mjs` remains the external acceptance gate. It imports the
+vendored runtime as read-only input and creates atlas/texture objects only in memory.
 
-## Required runtime gate
+The oracle checks:
 
-For single, standalone multi-object, and connected multi-object output, and for both rig
-profiles, the gate must:
+1. exact 4.1 metadata;
+2. globally unique contiguous constraint order;
+3. parser and skeleton construction;
+4. setup pose and update cache;
+5. every runtime constraint scheduled exactly once;
+6. finite world/applied bone transforms;
+7. setup attachment agreement with JSON;
+8. finite positive setup bounds.
 
-1. load the exact Spine 4.1 runtime used by the project;
-2. parse the generated JSON without compatibility shims;
-3. instantiate the skeleton and apply setup pose;
-4. execute the runtime update-cache/setup transform path;
-5. assert finite `worldX`, `worldY`, `a`, `b`, `c`, and `d` for every bone;
-6. assert every expected IK/transform/path constraint is scheduled exactly once;
-7. compute bounds for all setup attachments;
-8. compare setup-pose bounds and control anchors against approved target fixtures;
-9. reject duplicate, missing, or gapped global constraint orders when the runtime would
-   skip a constraint;
-10. import the generated output into Spine Editor 4.1.24.
+The oracle does not prove UI control behavior. Spine Editor import and control testing are
+still required for every new fixture.
 
-## Re-enable conditions
+## Known limitation
 
-Spine 4.1 may return to the production registry only when all conditions below pass:
+Spine 4.1 scale-constraint behavior is not fully equivalent to the Spine 4.2 result. The
+current limited release allows export for continued integration testing, but the defect
+must remain documented and must not be described as solved.
 
-- complete pure-Python suite;
-- complete real-bpy suite;
-- target-aware connected-rig tests;
-- exact-runtime 4.1 acceptance gate;
-- single-object Editor import;
-- standalone multi-object Editor import;
-- connected multi-object Editor import;
-- setup-pose comparison for `3-Axis Rotation`;
-- setup-pose comparison for `2-Axis Rotation + Scale`;
-- proof that Spine 4.2 output remains byte-identical.
+The follow-up must compare the generated per-object scale constraints against a native
+Spine Editor 4.1.24 authoring fixture and verify control response, not only setup bounds.
 
-No CI/CD workflow is added or changed by this quarantine checkpoint.
+## Next gates
+
+Before expanding the Spine 4.1 capability matrix:
+
+- run the complete pure-Python suite;
+- run the complete real-bpy suite;
+- export single and standalone multi-object JSON directly from Blender;
+- rerun the exact 4.1 runtime oracle on those Blender-generated files;
+- import those exact files into Spine Editor 4.1.24;
+- fix and certify scale-control behavior;
+- keep connected/mixed disabled until their own Editor fixtures and acceptance gates pass;
+- keep 3-Axis disabled until its setup and compensator phases are proven;
+- verify Spine 4.2 output remains byte-identical.
+
+No CI/CD workflow is added or changed by this checkpoint.
