@@ -36,13 +36,15 @@ This reduction covers only the generated preview animation. Texture-sequence exp
 Blender Scene RNA
   -> immutable Scene/Object export profiles
   -> ExportSettings
+  -> target-aware rig/composition policy
   -> canonical typed SpineDocument
   -> target-version serializer/codec
+  -> target-runtime acceptance oracle
   -> JSON-compatible mapping
   -> atomic UTF-8 output
 ```
 
-Geometry, UVs, weighted vertices, slots, skins, texture staging, multi-object composition, and connected placement remain version-independent. Version differences belong at the final JSON boundary unless a target schema cannot represent the current canonical constraint model.
+Geometry, UVs, weighted vertices, slots, skins, and texture staging remain version-independent. Rig topology, constraint scheduling, and connected setup correction may be target-specific when the target runtime cannot evaluate the canonical setup safely. JSON codecs own representation only; they must not repair builder-owned hierarchy or scheduling after serialization.
 
 ## Reference captures
 
@@ -72,6 +74,7 @@ These are complete semantic JSON copies of the supplied captures and are immutab
 2. The 4.3 capture contains no `ik`, `transform`, or unified `constraints` section. It cannot prove 4.3 constraint conversion and must not be used as the sole 4.3 golden oracle.
 3. All captures contain preview animations. Those sections are retained only as source evidence and are out of scope for the first target-version implementation.
 4. The references show three objects in one JSON, which makes them the primary structural comparison source for standalone multi-object composition. Connected exports require separate generated fixtures because their shared global rig is not represented here.
+5. Structural similarity between 4.1 and 4.2 captures does not prove that a generated connected rig has the same setup pose in both runtimes.
 
 ## Directly observed schema differences
 
@@ -142,12 +145,17 @@ Implementation is committed, but the focused tests and the complete regression s
 
 ### Phase 3 - Spine 4.1 and 4.0
 
+- [ ] Keep Spine 4.1 fail-closed until the exact-runtime gate passes.
+- [ ] Thread the selected target family into rig and connected composition policy.
+- [ ] Build one dependency-aware global constraint schedule in the builder; do not renumber constraints in the codec.
+- [ ] Implement a target-safe connected `2-Axis Rotation + Scale` topology without serializer scale hacks.
 - [ ] Implement only evidence-backed setup, bone, slot, skin, mesh, IK, and transform mappings.
 - [ ] Convert bone inheritance spelling where required.
 - [ ] Remove unsupported fields rather than guessing defaults.
 - [ ] Preserve weighted bone indices after multi-object composition.
-- [ ] Normalize target constraint orders when the target loader requires unique contiguous ordinals.
-- [ ] Validate against official matching runtimes and Editor imports.
+- [ ] Validate single, standalone multi, and connected outputs with the exact Spine 4.1 runtime.
+- [ ] Compare setup-pose matrices, attachment bounds, controls, and scheduled constraints.
+- [ ] Re-enable 4.1 only after runtime and Spine Editor 4.1.24 acceptance.
 
 ### Phase 4 - Spine 3.8
 
@@ -189,6 +197,7 @@ Use structured errors before texture files are committed:
 - `SPINE_VERSION_SEQUENCE_UNSUPPORTED`
 - `SPINE_VERSION_CONSTRAINT_MAPPING_FAILED`
 - `SPINE_VERSION_FIELD_MAPPING_FAILED`
+- `SPINE_VERSION_RUNTIME_ACCEPTANCE_FAILED`
 
 A syntactically valid JSON file is not considered a successful export unless the target runtime accepts it and setup-pose invariants remain correct.
 
