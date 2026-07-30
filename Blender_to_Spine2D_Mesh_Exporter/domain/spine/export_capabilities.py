@@ -76,9 +76,6 @@ _CAPABILITIES: Mapping[
                     SpineJsonExportScope.STANDALONE_MULTI_OBJECT,
                 }
             ),
-            limitations=(
-                "Scale-constraint behavior requires a dedicated follow-up compatibility fix",
-            ),
         ),
         (
             SpineJsonTarget.SPINE_4_2,
@@ -154,7 +151,9 @@ def require_spine_json_export_capability(
 
     if resolved_scope not in capability.scopes:
         supported_scopes = tuple(
-            candidate.value for candidate in SpineJsonExportScope if candidate in capability.scopes
+            candidate.value
+            for candidate in SpineJsonExportScope
+            if candidate in capability.scopes
         )
         raise SpineJsonExportCapabilityError(
             f"{resolved_target.label} ({resolved_target.exact_version}) with rig profile "
