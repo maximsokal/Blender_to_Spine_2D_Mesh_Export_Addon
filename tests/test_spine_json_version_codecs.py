@@ -1,4 +1,4 @@
-"""Contracts for production Spine 4.1 and 4.2 codec selection."""
+"""Contracts for production Spine 4.0, 4.1, and 4.2 codec selection."""
 
 from __future__ import annotations
 
@@ -36,7 +36,6 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import (
 )
 
 
-
 def _document() -> SpineDocument:
     attachment = MeshAttachment(
         name="mesh",
@@ -56,7 +55,6 @@ def _document() -> SpineDocument:
         skins=(Skin("default", {"slot": {"mesh": attachment}}),),
         animations={"animation": {}},
     )
-
 
 
 def _v41_document() -> SpineDocument:
@@ -126,7 +124,6 @@ def test_v42_facade_is_byte_identical_to_current_serializer(indent: int) -> None
     ] == {"count": 2, "start": 0, "digits": 4, "setup": 0}
 
 
-
 def test_v42_facade_does_not_mutate_the_input_document() -> None:
     document = _document()
     before = SpineSerializer().to_json(document, indent=2)
@@ -134,7 +131,6 @@ def test_v42_facade_does_not_mutate_the_input_document() -> None:
     serialize_spine_document(document, "4.2.43", indent=2)
 
     assert SpineSerializer().to_json(document, indent=2) == before
-
 
 
 def test_v42_facade_forwards_the_caller_selected_validator() -> None:
@@ -150,11 +146,11 @@ def test_v42_facade_forwards_the_caller_selected_validator() -> None:
         )
 
 
-
-def test_spine_four_one_and_four_two_have_registered_production_codecs() -> None:
+def test_spine_four_zero_through_four_two_have_registered_production_codecs() -> None:
     codecs = registered_spine_json_codecs()
 
     assert tuple(codecs) == (
+        SpineJsonTarget.SPINE_4_0,
         SpineJsonTarget.SPINE_4_1,
         SpineJsonTarget.SPINE_4_2,
     )
@@ -168,13 +164,12 @@ def test_spine_four_one_and_four_two_have_registered_production_codecs() -> None
     tuple(
         target
         for target in SpineJsonTarget
-        if target not in {SpineJsonTarget.SPINE_4_1, SpineJsonTarget.SPINE_4_2}
+        if not target.descriptor.serializer_ready
     ),
 )
 def test_unready_targets_fail_before_codec_resolution(target: SpineJsonTarget) -> None:
     with pytest.raises(SpineJsonTargetUnavailableError):
         serialize_spine_document(_document(), target)
-
 
 
 def test_spine_four_one_facade_uses_registered_codec() -> None:
@@ -197,7 +192,6 @@ def test_spine_four_one_facade_uses_registered_codec() -> None:
     assert payload["skins"][0]["transform"] == ["transform-a", "transform-b"]
     assert "constraints" not in payload["skins"][0]
     assert "physics" not in payload
-
 
 
 def test_v41_adapter_preserves_authored_constraint_orders() -> None:
@@ -242,7 +236,6 @@ def test_v41_adapter_preserves_authored_constraint_orders() -> None:
     assert SpineSerializer(
         validator=ConnectedGroupSerializationValidator()
     ).to_json(document, indent=2) == before
-
 
 
 def test_v41_adapter_rejects_missing_skin_constraint_before_rewrite() -> None:
