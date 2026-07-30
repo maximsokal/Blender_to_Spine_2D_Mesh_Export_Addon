@@ -125,9 +125,21 @@ def _single_connect_fallback_issue(
 
 def _capture_selected_profiles(
     ordered_objects: Tuple[Any, ...],
+    *,
+    allow_connected: bool,
 ) -> Tuple[_ObjectExportProfile, ...]:
+    """Capture selected objects while explicitly owning connected-state visibility.
+
+    Production UI export always passes ``allow_connected=False``. This deliberately
+    ignores persisted ``spine2d_connect_settings.enabled`` values left in older .blend
+    files. The hidden development-only connected surface must opt in explicitly.
+    """
+
     if not isinstance(ordered_objects, tuple) or len(ordered_objects) < 2:
         raise ValueError("ordered_objects must contain at least two objects")
+    if not isinstance(allow_connected, bool):
+        raise TypeError("allow_connected must be bool")
+
     return tuple(
         _capture_object_profile(
             obj,
@@ -145,7 +157,7 @@ def _capture_selected_profiles(
                     0,
                 )
             ),
-            connect_enabled=_connect_enabled(obj),
+            connect_enabled=(_connect_enabled(obj) if allow_connected else False),
         )
         for obj in ordered_objects
     )
@@ -202,16 +214,27 @@ def build_active_ui_export_plan(context: Any) -> A1UiSingleExportPlan:
     return A1UiSingleExportPlan(source_object=source_object, settings=settings)
 
 
-def build_selected_ui_export_plan(context: Any) -> A1UiMultiExportPlan:
+def _build_selected_ui_export_plan(
+    context: Any,
+    *,
+    allow_connected: bool,
+) -> A1UiMultiExportPlan:
+    """Build one selected-object plan under an explicit connected-mode policy."""
+
     if context is None:
         raise ValueError("context cannot be None")
+    if not isinstance(allow_connected, bool):
+        raise TypeError("allow_connected must be bool")
     scene = getattr(context, "scene", None)
     if scene is None:
         raise ValueError("context.scene is missing")
 
     ordered_objects = _ordered_selected_meshes(context)
     scene_profile: _SceneExportProfile = _capture_scene_profile(scene)
-    object_profiles = _capture_selected_profiles(ordered_objects)
+    object_profiles = _capture_selected_profiles(
+        ordered_objects,
+        allow_connected=allow_connected,
+    )
     sources = _build_sources_from_profiles(object_profiles, scene_profile)
     connected, standalone = _partition_sources(sources, object_profiles)
 
@@ -257,9 +280,29 @@ def build_selected_ui_export_plan(context: Any) -> A1UiMultiExportPlan:
     )
 
 
+def build_selected_ui_export_plan(context: Any) -> A1UiMultiExportPlan:
+    """Build the production selected-object plan.
+
+    Production selected-object export is always standalone. Persisted legacy/development
+    Connect flags are ignored so a hidden Object property cannot silently change export
+    topology or make Spine 4.1 requests enter the blocked connected capability.
+    """
+
+    return _build_selected_ui_export_plan(context, allow_connected=False)
+
+
+def build_development_connected_ui_export_plan(
+    context: Any,
+) -> A1UiMultiExportPlan:
+    """Build the explicit development-only connected/mixed selected-object plan."""
+
+    return _build_selected_ui_export_plan(context, allow_connected=True)
+
+
 __all__ = [
     "A1UiMultiExportPlan",
     "A1UiSingleExportPlan",
     "build_active_ui_export_plan",
+    "build_development_connected_ui_export_plan",
     "build_selected_ui_export_plan",
 ]
