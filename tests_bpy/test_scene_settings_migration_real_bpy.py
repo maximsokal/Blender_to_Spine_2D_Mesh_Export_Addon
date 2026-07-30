@@ -7,11 +7,15 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.scene_settings_migration i
     spine2d_scene_settings_load_post,
     spine2d_scene_settings_load_pre,
 )
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
+    A1RigProfile,
+    SpineJsonTarget,
+)
 
 
 _SEAM_MODE_PROPERTY = "spine2d_seam_maker_mode"
 _RIG_PROFILE_PROPERTY = "spine2d_rig_profile"
+_TARGET_VERSION_PROPERTY = "spine2d_target_spine_version"
 _SCHEMA_PROPERTY = "spine2d_settings_schema_version"
 
 
@@ -19,6 +23,7 @@ def _remove_persisted_test_values(scene) -> None:
     for property_name in (
         _SEAM_MODE_PROPERTY,
         _RIG_PROFILE_PROPERTY,
+        _TARGET_VERSION_PROPERTY,
         _SCHEMA_PROPERTY,
     ):
         try:
@@ -33,7 +38,7 @@ def test_schema_two_custom_scene_is_repaired_during_extension_registration():
     # Reproduce the actual user path: the .blend already contains values written by 0.39,
     # while the extension RNA surface is not registered yet. Registering EnumProperty over
     # these ID properties may invoke its update callback, which must not advance the current
-    # schema before migration resets CUSTOM and assigns the compatibility rig.
+    # schema before migration resets CUSTOM and assigns compatibility defaults.
     extension.unregister()
     scene = bpy.context.scene
     _remove_persisted_test_values(scene)
@@ -42,23 +47,32 @@ def test_schema_two_custom_scene_is_repaired_during_extension_registration():
 
     extension.register()
     try:
-        assert CURRENT_SETTINGS_SCHEMA_VERSION == 5
-        assert scene.spine2d_settings_schema_version == 5
+        assert CURRENT_SETTINGS_SCHEMA_VERSION == 6
+        assert scene.spine2d_settings_schema_version == 6
         assert scene.spine2d_seam_maker_mode == "AUTO"
         assert (
             scene.spine2d_rig_profile
             == A1RigProfile.THREE_AXIS_ROTATION.value
         )
+        assert (
+            scene.spine2d_target_spine_version
+            == SpineJsonTarget.SPINE_4_2.value
+        )
 
-        # Deliberate choices made after schema 5 remain stable.
+        # Deliberate choices made after schema 6 remain stable.
         scene.spine2d_seam_maker_mode = "CUSTOM"
         scene.spine2d_rig_profile = A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
-        assert scene.spine2d_settings_schema_version == 5
+        scene.spine2d_target_spine_version = SpineJsonTarget.SPINE_3_8.value
+        assert scene.spine2d_settings_schema_version == 6
         assert not migrate_scene_settings(scene)
         assert scene.spine2d_seam_maker_mode == "CUSTOM"
         assert (
             scene.spine2d_rig_profile
             == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+        )
+        assert (
+            scene.spine2d_target_spine_version
+            == SpineJsonTarget.SPINE_3_8.value
         )
 
         assert spine2d_scene_settings_load_pre in bpy.app.handlers.load_pre
@@ -71,16 +85,20 @@ def test_schema_two_custom_scene_is_repaired_during_extension_registration():
     assert spine2d_scene_settings_load_post not in bpy.app.handlers.load_post
 
 
-def test_genuinely_fresh_scene_gets_two_axis_default_in_real_bpy():
+def test_genuinely_fresh_scene_gets_current_defaults_in_real_bpy():
     extension.unregister()
     scene = bpy.data.scenes.new("Spine2D Fresh Rig Default")
     _remove_persisted_test_values(scene)
     try:
         extension.register()
-        assert scene.spine2d_settings_schema_version == 5
+        assert scene.spine2d_settings_schema_version == 6
         assert (
             scene.spine2d_rig_profile
             == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
+        )
+        assert (
+            scene.spine2d_target_spine_version
+            == SpineJsonTarget.SPINE_4_2.value
         )
     finally:
         extension.unregister()
