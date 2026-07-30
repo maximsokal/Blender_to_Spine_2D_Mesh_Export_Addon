@@ -15,6 +15,7 @@ from ..application import (
 )
 from ..domain.baking import sanitize_filename_stem
 from ..domain.spine.rig_profiles import A1RigSetupPoseMode
+from ..domain.spine.version_target import spine_json_version_filename_token
 from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_ui_scene_capture import _SceneExportProfile, _capture_scene_profile
 from .a1_ui_selection import (
@@ -229,7 +230,12 @@ def build_selected_ui_export_plan(context: Any) -> A1UiMultiExportPlan:
         standalone = sources
 
     base_name = sanitize_filename_stem(object_profiles[0].object_name)
-    output_stem = f"{base_name}_plus_{len(object_profiles) - 1}_objects"
+    version_token = spine_json_version_filename_token(
+        sources[0].settings.export.spine_target
+    )
+    output_stem = (
+        f"{base_name}_plus_{len(object_profiles) - 1}_objects_{version_token}"
+    )
     if connected and standalone:
         mode = A1MultiObjectMode.MIXED
     elif connected:
