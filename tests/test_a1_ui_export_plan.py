@@ -135,14 +135,8 @@ def test_profile_capture_ignores_persisted_connect_flags_in_production():
         _persisted_connect_object("Third", enabled=False),
     )
 
-    production = a1_ui_export_plan._capture_selected_profiles(
-        objects,
-        allow_connected=False,
-    )
-    development = a1_ui_export_plan._capture_selected_profiles(
-        objects,
-        allow_connected=True,
-    )
+    production = a1_ui_export_plan._capture_selected_profiles(objects)
+    development = a1_ui_export_plan._capture_development_selected_profiles(objects)
 
     assert tuple(profile.connect_enabled for profile in production) == (
         False,
@@ -208,15 +202,10 @@ def test_single_connect_selection_falls_back_to_standalone_once(monkeypatch):
         "_capture_scene_profile",
         lambda _scene: SimpleNamespace(output_directory=Path("ui-plan-output")),
     )
-
-    def _profiles(_objects, *, allow_connected):
-        assert allow_connected is True
-        return profiles
-
     monkeypatch.setattr(
         a1_ui_export_plan,
-        "_capture_selected_profiles",
-        _profiles,
+        "_capture_development_selected_profiles",
+        lambda _objects: profiles,
     )
     monkeypatch.setattr(
         a1_ui_export_plan,
@@ -262,15 +251,10 @@ def test_two_connected_and_one_standalone_build_development_mixed_plan(monkeypat
         "_capture_scene_profile",
         lambda _scene: SimpleNamespace(output_directory=Path("ui-plan-output")),
     )
-
-    def _profiles(_objects, *, allow_connected):
-        assert allow_connected is True
-        return profiles
-
     monkeypatch.setattr(
         a1_ui_export_plan,
-        "_capture_selected_profiles",
-        _profiles,
+        "_capture_development_selected_profiles",
+        lambda _objects: profiles,
     )
     monkeypatch.setattr(
         a1_ui_export_plan,
