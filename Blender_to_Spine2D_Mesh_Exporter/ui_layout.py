@@ -12,6 +12,10 @@ import bpy
 from . import rig_ui, ui
 from .blender_adapter import generated_material_ui
 from .config import get_default_output_dir
+from .domain.spine.version_target import (
+    DEFAULT_SPINE_JSON_TARGET,
+    resolve_spine_json_target,
+)
 from .infrastructure.blender_registration import (
     RnaPropertyRegistration,
     register_rna_properties_transactionally,
@@ -99,12 +103,42 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
         column: bpy.types.UILayout,
         context: bpy.types.Context,
     ) -> None:
-        """Draw output paths and the production export action.
+        """Draw the target Spine schema, texture size, and output paths.
 
-        Export mode and connected-object controls are owned by the Rig foldout.
+        Export mode and connected-object controls are owned by the Rig foldout. The
+        target schema remains an output-format setting and therefore belongs here.
         """
 
         scene = context.scene
+        column.prop(
+            scene,
+            "spine2d_target_spine_version",
+            text="Spine version",
+        )
+        try:
+            target = resolve_spine_json_target(
+                getattr(
+                    scene,
+                    "spine2d_target_spine_version",
+                    DEFAULT_SPINE_JSON_TARGET.value,
+                )
+            )
+            column.label(
+                text=f"Exact JSON version: {target.exact_version}",
+                icon="INFO",
+            )
+            if not target.descriptor.serializer_ready:
+                column.label(
+                    text="Codec implementation in progress; Analyze blocks export",
+                    icon="ERROR",
+                )
+        except (TypeError, ValueError):
+            column.label(
+                text="Invalid Spine target; reset settings to Spine 4.2",
+                icon="ERROR",
+            )
+        column.separator()
+
         column.prop(scene, "spine2d_texture_size", text="Texture size")
         column.separator()
         column.prop(scene, "spine2d_json_path", text="JSON")
