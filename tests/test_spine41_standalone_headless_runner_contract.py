@@ -54,6 +54,16 @@ def test_worker_requests_exact_limited_production_scope() -> None:
         assert fragment in source
 
 
+def test_worker_accepts_omitted_empty_constraint_arrays_but_rejects_bad_present_fields() -> None:
+    source = WORKER.read_text(encoding="utf-8")
+
+    assert "if field_name not in document:" in source
+    assert "return []" in source
+    assert "must be a JSON array when present" in source
+    assert 'path = _json_array(document, "path")' in source
+    assert 'len(path) == 0' in source
+
+
 def test_worker_does_not_mutate_or_address_external_runtime_repository() -> None:
     source = WORKER.read_text(encoding="utf-8")
 
