@@ -48,6 +48,7 @@ from .spine41_setup_safety import (
 from .two_axis_scale_profile import TwoAxisScaleRigProfile
 from .two_axis_scale_spine41 import (
     adapt_connected_two_axis_constraints_for_spine41,
+    adapt_two_axis_document_for_spine41,
 )
 from .validator import SpineValidator
 from .version_target import (
@@ -134,8 +135,6 @@ def _validate_connected_final(
 
     issues = SpineValidator().validate(document)
     if spine_target is SpineJsonTarget.SPINE_4_2:
-        # Existing 4.2 connected output intentionally preserves historical same-layer
-        # order sharing. No other validation issue is suppressed.
         issues = tuple(
             issue for issue in issues if issue.code != "DUPLICATE_CONSTRAINT_ORDER"
         )
@@ -236,6 +235,35 @@ def _connected_constraint_assignments(
     return tuple(assignments)
 
 
+def _target_normalized_objects(
+    objects: Tuple[ConnectedObjectDocument, ...],
+    profile: LegacyRigProfile,
+    spine_target: SpineJsonTarget,
+) -> Tuple[ConnectedObjectDocument, ...]:
+    """Normalize control space and apply idempotent target rig semantics."""
+
+    normalized = tuple(
+        normalize_connected_object_control_space(item, profile) for item in objects
+    )
+    if spine_target is not SpineJsonTarget.SPINE_4_1:
+        return normalized
+    if not isinstance(profile, TwoAxisScaleRigProfile):
+        raise ConnectedGroupBuildError(
+            "Spine 4.1 connected output currently requires TWO_AXIS_ROTATION_SCALE"
+        )
+    return tuple(
+        replace(
+            item,
+            document=adapt_two_axis_document_for_spine41(
+                item.document,
+                profile=profile,
+                prefix=item.prefix,
+            ),
+        )
+        for item in normalized
+    )
+
+
 def build_connected_group_document(
     objects: Tuple[ConnectedObjectDocument, ...],
     settings: ConnectedGroupSettings,
@@ -292,9 +320,10 @@ def build_connected_group_document(
         uniform_scale,
     )
 
-    normalized_objects = tuple(
-        normalize_connected_object_control_space(item, resolved_profile)
-        for item in objects
+    normalized_objects = _target_normalized_objects(
+        objects,
+        resolved_profile,
+        resolved_target,
     )
     group_component_id = f"__{settings.group_prefix}_rig__"
     object_components = tuple(
@@ -316,8 +345,6 @@ def build_connected_group_document(
         ),
         SpineCompositionSettings(
             shared_bone_names=(resolved_profile.root_bone(),),
-            # Generic composition remains collision-strict. Target scheduling is applied
-            # only after every weighted bone index has been safely remapped.
             constraint_order_policy=ConstraintOrderPolicy.REBASE_CONTIGUOUS,
             namespace_animations=settings.namespace_animations,
             animation_separator=settings.animation_separator,
@@ -361,8 +388,6 @@ def build_connected_group_document(
             )
         )
 
-    # Object constraints remain in component order and global constraints are appended.
-    # Only ``order`` values are replaced; the arrays are deliberately not sorted.
     with_global_constraints = replace(
         placed_document,
         ik=(*placed_document.ik, *global_ik),
@@ -370,8 +395,6 @@ def build_connected_group_document(
     )
 
     if profile_id is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
-        # Two-axis generated layers intentionally store depth in setup Y. Compensate that
-        # profile only; the Legacy connected layers are neutral and need no correction.
         with_global_constraints = correct_connected_setup_pose(
             with_global_constraints,
             normalized_objects,
