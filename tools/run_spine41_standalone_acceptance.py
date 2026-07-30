@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from math import isfinite
 import os
 from pathlib import Path
 import shutil
@@ -221,11 +222,19 @@ def parse_oracle_report(stdout: str) -> dict[str, object]:
     bounds = payload.get("bounds")
     if not isinstance(counts, dict):
         raise Spine41StandaloneAcceptanceError("Runtime oracle counts are missing")
-    if int(counts.get("setupRenderableAttachments", 0)) <= 0:
+    attachment_count = counts.get("setupRenderableAttachments")
+    if (
+        not isinstance(attachment_count, int)
+        or isinstance(attachment_count, bool)
+        or attachment_count <= 0
+    ):
         raise Spine41StandaloneAcceptanceError(
             "Runtime oracle found no setup-renderable attachments"
         )
-    if not isinstance(cache, dict) or cache.get("everyConstraintScheduledExactlyOnce") is not True:
+    if (
+        not isinstance(cache, dict)
+        or cache.get("everyConstraintScheduledExactlyOnce") is not True
+    ):
         raise Spine41StandaloneAcceptanceError(
             "Runtime oracle did not schedule every constraint exactly once"
         )
@@ -233,13 +242,20 @@ def parse_oracle_report(stdout: str) -> dict[str, object]:
         raise Spine41StandaloneAcceptanceError("Runtime oracle found non-finite matrices")
     if not isinstance(bounds, dict):
         raise Spine41StandaloneAcceptanceError("Runtime oracle bounds are missing")
+    numeric_bounds: dict[str, float] = {}
     for field_name in ("x", "y", "width", "height"):
         value = bounds.get(field_name)
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise Spine41StandaloneAcceptanceError(
                 f"Runtime oracle bounds.{field_name} is not numeric"
             )
-    if float(bounds["width"]) <= 0.0 or float(bounds["height"]) <= 0.0:
+        numeric = float(value)
+        if not isfinite(numeric):
+            raise Spine41StandaloneAcceptanceError(
+                f"Runtime oracle bounds.{field_name} is not finite"
+            )
+        numeric_bounds[field_name] = numeric
+    if numeric_bounds["width"] <= 0.0 or numeric_bounds["height"] <= 0.0:
         raise Spine41StandaloneAcceptanceError(
             f"Runtime oracle bounds are not positive: {bounds}"
         )
