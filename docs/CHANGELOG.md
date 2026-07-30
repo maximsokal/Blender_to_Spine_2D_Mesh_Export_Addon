@@ -4,7 +4,26 @@ This changelog records public product releases. Internal development milestones 
 
 ## Unreleased candidate status
 
-Version 0.47.10 is the current release candidate. Spine 4.2.43 remains the primary full target. Spine 4.1.24 is enabled only for `2-Axis Rotation + Scale` in single-object and standalone multi-object exports; connected, mixed, and 3-Axis requests remain fail-closed. The candidate still requires final same-commit package and isolated installation evidence before release.
+Version 0.47.11 is the current release candidate. It keeps the validated Spine 4.1.24 scale topology from 0.47.10 and prevents hidden persisted Connect values from routing ordinary selected-object export into development-only connected composition. Final same-commit package and isolated installation evidence are still required before release.
+
+## [0.47.11] - 2026-07-30
+
+### Changed
+
+- Production `Export Selected Objects` now always builds a standalone multi-object plan.
+- Connected and mixed UI planning moved behind the explicit development-only `build_development_connected_ui_export_plan()` entry.
+- The extension manifest version is now `0.47.11` so Blender does not cache the routing fix as the older `0.47.10` package.
+
+### Fixed
+
+- Persisted hidden `Object.spine2d_connect_settings.enabled` values from older `.blend` files no longer select `CONNECTED_MULTI_OBJECT` or `MIXED_MULTI_OBJECT` during ordinary Analyze/Export.
+- Spine 4.1 selected-object exports no longer fail with a connected-scope capability error when the visible production UI requested an ordinary standalone export.
+
+### Unchanged limitations
+
+- Spine 4.1 remains limited to `2-Axis Rotation + Scale` for single-object and standalone multi-object export.
+- Spine 4.1 connected, mixed, and 3-Axis exports remain disabled.
+- Connected and mixed composition remain development-only internal capabilities.
 
 ## [0.47.10] - 2026-07-30
 
