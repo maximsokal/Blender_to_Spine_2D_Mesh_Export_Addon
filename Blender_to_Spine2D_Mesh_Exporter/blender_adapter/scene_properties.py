@@ -22,6 +22,16 @@ from .scene_settings_migration import (
 
 logger = logging.getLogger(__name__)
 _TEXTURE_SIZE_SYNCING = False
+_PUBLIC_RIG_PROFILES = (A1RigProfile.TWO_AXIS_ROTATION_SCALE,)
+
+
+def public_rig_profile_enum_items() -> tuple[tuple[str, str, str], ...]:
+    """Return only runtime-validated rig profiles exposed by the public UI."""
+
+    return tuple(
+        (profile.value, profile.label, profile.description)
+        for profile in _PUBLIC_RIG_PROFILES
+    )
 
 
 def _extension_registration_active() -> bool:
@@ -191,10 +201,7 @@ PROPERTIES = (
         bpy.props.EnumProperty(
             name="Rig Profile",
             description="Choose the generated Spine control hierarchy",
-            items=tuple(
-                (profile.value, profile.label, profile.description)
-                for profile in A1RigProfile
-            ),
+            items=public_rig_profile_enum_items(),
             default=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
             update=_update_rig_profile,
         ),
@@ -277,4 +284,4 @@ PROPERTIES = (
 )
 
 
-__all__ = ["PROPERTIES"]
+__all__ = ["PROPERTIES", "public_rig_profile_enum_items"]
