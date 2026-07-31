@@ -79,7 +79,7 @@ def test_two_axis_connected_global_constraints_use_explicit_profile_targets():
     }
 
 
-def test_two_axis_connected_orders_follow_layers_not_object_count():
+def test_two_axis_connected_orders_complete_global_rig_before_layer_phases():
     profile = TwoAxisScaleRigProfile()
     result = build_connected_group_document(
         _objects(),
@@ -89,12 +89,14 @@ def test_two_axis_connected_orders_follow_layers_not_object_count():
     schedule = result.constraint_schedule
 
     assert schedule.global_rotation_x == 0
-    assert schedule.object_rotation_x == (("first", 2), ("second", 1))
-    assert schedule.global_scale_ik == 3
-    assert schedule.object_scale_ik == (("first", 5), ("second", 4))
-    assert schedule.global_scale == 6
-    assert schedule.object_scale == (("first", 8), ("second", 7))
-    assert schedule.global_scale_depth == 9
-    assert schedule.object_scale_depth == (("first", 11), ("second", 10))
-    assert schedule.global_rotation_y == 12
+    assert schedule.global_scale_ik == 1
+    assert schedule.global_scale == 2
+    assert schedule.global_scale_depth == 3
+    assert schedule.global_rotation_y == 4
+
+    # Assignment tuples preserve source-object order while each value follows Z layer.
+    assert schedule.object_rotation_x == (("first", 6), ("second", 5))
+    assert schedule.object_scale_ik == (("first", 8), ("second", 7))
+    assert schedule.object_scale == (("first", 10), ("second", 9))
+    assert schedule.object_scale_depth == (("first", 12), ("second", 11))
     assert schedule.object_rotation_y == (("first", 14), ("second", 13))
