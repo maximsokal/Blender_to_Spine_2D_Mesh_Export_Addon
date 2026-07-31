@@ -130,7 +130,7 @@ def _synchronize_document_build_for_spine41(
 ) -> LegacyMeshDocumentBuildResult:
     """Synchronize builder metadata after final-document bridge insertion.
 
-    The legacy 4.0/4.1 adapter inserts parent bones before existing weighted vertex
+    The legacy 3.8/4.0/4.1 adapter inserts parent bones before existing weighted vertex
     bones. The serialized attachment streams are remapped by the domain adapter, so the
     immutable ``LegacyMeshDocumentBuildResult`` must point at those same remapped
     attachments and expose the corresponding new vertex-bone start indices. The
@@ -151,7 +151,7 @@ def _synchronize_document_build_for_spine41(
         new_start_index = index_map.get(component.vertex_bone_start_index)
         if new_start_index is None:
             raise ValueError(
-                "Legacy 4.x bone remap does not contain component vertex-bone start "
+                "Legacy 3.8/4.x bone remap does not contain component vertex-bone start "
                 f"index {component.vertex_bone_start_index} at component "
                 f"{component_index}"
             )
@@ -217,9 +217,10 @@ def finalize_a1_document_assembly_for_target(
     """Apply target-specific rig semantics only after canonical document assembly.
 
     Projection and attachment builders validate the canonical rig against its exact
-    deterministic plan. Spine 4.0 and 4.1 receive the same immutable safety topology
-    only after weighted attachments, visuals, and animations exist. Spine 4.2 and 4.3
-    retain the canonical assembled document; their differences are serializer-owned.
+    deterministic plan. Spine 3.8, 4.0, and 4.1 receive the immutable safety topology
+    after weighted attachments, visuals, and animations exist when the selected profile
+    is 2-Axis Rotation + Scale. Spine 3.8 3-Axis, Spine 4.2, and Spine 4.3 retain the
+    canonical assembled topology; their schema differences are serializer-owned.
     """
 
     if not isinstance(document_assembly, A1DocumentAssemblyResult):
@@ -228,12 +229,20 @@ def finalize_a1_document_assembly_for_target(
         raise ValueError("prefix must be a non-empty string")
 
     resolved_target = resolve_spine_json_target(spine_target)
+    rig = document_assembly.rig
+    resolved_profile = resolve_a1_rig_profile(rig.profile.profile_id)
+
     if resolved_target in {
         SpineJsonTarget.SPINE_4_2,
         SpineJsonTarget.SPINE_4_3,
-    }:
+    } or (
+        resolved_target is SpineJsonTarget.SPINE_3_8
+        and resolved_profile is A1RigProfile.THREE_AXIS_ROTATION
+    ):
         return document_assembly
+
     if resolved_target not in {
+        SpineJsonTarget.SPINE_3_8,
         SpineJsonTarget.SPINE_4_0,
         SpineJsonTarget.SPINE_4_1,
     }:
@@ -242,14 +251,12 @@ def finalize_a1_document_assembly_for_target(
             f"{resolved_target.label} ({resolved_target.exact_version})"
         )
 
-    rig = document_assembly.rig
-    resolved_profile = resolve_a1_rig_profile(rig.profile.profile_id)
     if (
         resolved_profile is not A1RigProfile.TWO_AXIS_ROTATION_SCALE
         or not isinstance(rig.profile, TwoAxisScaleRigProfile)
     ):
         raise ValueError(
-            f"{resolved_target.label} document finalization currently requires "
+            f"{resolved_target.label} legacy safety finalization requires "
             "TWO_AXIS_ROTATION_SCALE"
         )
     if rig.request.prefix.strip() != prefix.strip():
