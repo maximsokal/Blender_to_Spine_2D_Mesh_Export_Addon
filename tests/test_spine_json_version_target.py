@@ -92,11 +92,12 @@ def test_export_settings_reject_unregistered_exact_versions(
         )
 
 
-def test_spine_four_zero_through_four_two_are_production_serializable() -> None:
+def test_spine_four_zero_through_four_three_are_production_serializable() -> None:
     ready = {
         SpineJsonTarget.SPINE_4_0,
         SpineJsonTarget.SPINE_4_1,
         SpineJsonTarget.SPINE_4_2,
+        SpineJsonTarget.SPINE_4_3,
     }
 
     for target in SpineJsonTarget:
@@ -127,4 +128,17 @@ def test_spine_four_one_is_selectable_with_limited_scope_description() -> None:
     assert "limited" in target.description.lower()
     assert "standalone" in target.description.lower()
     assert "connected" in target.description.lower()
+    assert require_spine_json_target_serializable(target) is target
+
+
+def test_spine_four_three_is_selectable_with_unified_constraint_description() -> None:
+    target = resolve_spine_json_target("4.3.23")
+
+    assert target is SpineJsonTarget.SPINE_4_3
+    assert target.descriptor.serializer_ready is True
+    assert target.descriptor.uses_unified_constraints is True
+    assert target.descriptor.supports_attachment_sequences is True
+    assert "limited" in target.description.lower()
+    assert "unified-constraint" in target.description.lower()
+    assert "standalone" in target.description.lower()
     assert require_spine_json_target_serializable(target) is target
