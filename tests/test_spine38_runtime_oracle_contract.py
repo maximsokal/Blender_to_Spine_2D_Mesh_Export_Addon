@@ -65,6 +65,48 @@ def test_oracle_bounds_do_not_require_vector2_wrapper_export() -> None:
     assert "    'Vector2'," not in source
 
 
+def test_oracle_scale_response_is_dynamic_and_fail_closed() -> None:
+    source = _source()
+
+    for fragment in (
+        "function scaleControlRecords(document)",
+        "name.endsWith('_scale_constraint')",
+        "target.endsWith('_scale')",
+        "function scaleResponse(runtime, skeletonData, controls)",
+        "disabledConstraint.scaleMix = 0;",
+        "changedByConstraintBoneCount",
+        "allControlsResponded",
+        "constraintAffectsBounds",
+        "fail('One or more Spine 3.8 scale controls did not affect constrained bones'",
+        "scaleResponse: scaleResponseEvidence",
+    ):
+        assert fragment in source
+
+    for hardcoded_fixture_name in (
+        "Spine38TwoA",
+        "Spine38TwoB",
+        "Spine38TwoC",
+    ):
+        assert hardcoded_fixture_name not in source
+
+
+def test_oracle_scale_response_uses_runtime_only_mutation() -> None:
+    source = _source()
+
+    for fragment in (
+        "target.scaleX = setupScaleX * SCALE_RESPONSE_FACTOR;",
+        "target.scaleY = setupScaleY * SCALE_RESPONSE_FACTOR;",
+        "const setupSkeleton = runtimeSkeleton(runtime, skeletonData);",
+        "const scaledSkeleton = runtimeSkeleton(runtime, skeletonData);",
+        "const disabledSkeleton = runtimeSkeleton(runtime, skeletonData);",
+    ):
+        assert fragment in source
+
+    assert "document.transform[" in source
+    assert "document.bones[" not in source
+    assert "constraint.scaleMix = 0" not in source
+
+
 def test_oracle_has_no_external_write_apis() -> None:
     source = _source()
 
