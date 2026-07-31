@@ -29,6 +29,10 @@ from ..domain.spine.model import MeshAttachment, Skin, SpineDocument
 from ..domain.spine.rig_builder import build_rig
 from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from ..domain.spine.two_axis_scale_profile import TwoAxisScaleRigProfile
+from ..domain.spine.two_axis_scale_spine38 import (
+    Spine38TwoAxisDocumentAdaptation,
+    adapt_two_axis_document_for_spine38_with_report,
+)
 from ..domain.spine.two_axis_scale_spine41 import (
     Spine41TwoAxisDocumentAdaptation,
     adapt_two_axis_document_for_spine41_with_report,
@@ -126,11 +130,13 @@ def _adapted_mesh_attachment(
 
 def _synchronize_document_build_for_spine41(
     document_build: LegacyMeshDocumentBuildResult,
-    adaptation: Spine41TwoAxisDocumentAdaptation,
+    adaptation: (
+        Spine38TwoAxisDocumentAdaptation | Spine41TwoAxisDocumentAdaptation
+    ),
 ) -> LegacyMeshDocumentBuildResult:
-    """Synchronize builder metadata after final-document bridge insertion.
+    """Synchronize builder metadata after legacy bridge insertion.
 
-    The legacy 3.8/4.0/4.1 adapter inserts parent bones before existing weighted vertex
+    The legacy 3.8/4.0/4.1 adapters insert parent bones before existing weighted vertex
     bones. The serialized attachment streams are remapped by the domain adapter, so the
     immutable ``LegacyMeshDocumentBuildResult`` must point at those same remapped
     attachments and expose the corresponding new vertex-bone start indices. The
@@ -140,8 +146,13 @@ def _synchronize_document_build_for_spine41(
 
     if not isinstance(document_build, LegacyMeshDocumentBuildResult):
         raise TypeError("document_build must be LegacyMeshDocumentBuildResult")
-    if not isinstance(adaptation, Spine41TwoAxisDocumentAdaptation):
-        raise TypeError("adaptation must be Spine41TwoAxisDocumentAdaptation")
+    if not isinstance(
+        adaptation,
+        (Spine38TwoAxisDocumentAdaptation, Spine41TwoAxisDocumentAdaptation),
+    ):
+        raise TypeError(
+            "adaptation must be a Spine 3.8 or Spine 4.1 two-axis adaptation"
+        )
 
     index_map = adaptation.old_to_new_bone_indices
     skins_by_name = _skin_by_name(adaptation.document)
@@ -217,10 +228,11 @@ def finalize_a1_document_assembly_for_target(
     """Apply target-specific rig semantics only after canonical document assembly.
 
     Projection and attachment builders validate the canonical rig against its exact
-    deterministic plan. Spine 3.8, 4.0, and 4.1 receive the immutable safety topology
-    after weighted attachments, visuals, and animations exist when the selected profile
-    is 2-Axis Rotation + Scale. Spine 3.8 3-Axis, Spine 4.2, and Spine 4.3 retain the
-    canonical assembled topology; their schema differences are serializer-owned.
+    deterministic plan. Spine 4.0 and 4.1 receive the immutable bridge safety topology.
+    Spine 3.8 two-axis export receives the same bridges plus its cache-safe
+    X/IK/Depth/Scale/Y schedule and wrapper-owned uniform scale. Spine 3.8 3-Axis,
+    Spine 4.2, and Spine 4.3 retain the canonical assembled topology; their schema
+    differences are serializer-owned.
     """
 
     if not isinstance(document_assembly, A1DocumentAssemblyResult):
@@ -265,11 +277,18 @@ def finalize_a1_document_assembly_for_target(
             f"{rig.request.prefix!r}"
         )
 
-    adaptation = adapt_two_axis_document_for_spine41_with_report(
-        document_assembly.document,
-        profile=rig.profile,
-        prefix=prefix,
-    )
+    if resolved_target is SpineJsonTarget.SPINE_3_8:
+        adaptation = adapt_two_axis_document_for_spine38_with_report(
+            document_assembly.document,
+            profile=rig.profile,
+            prefix=prefix,
+        )
+    else:
+        adaptation = adapt_two_axis_document_for_spine41_with_report(
+            document_assembly.document,
+            profile=rig.profile,
+            prefix=prefix,
+        )
     adapted_build = _synchronize_document_build_for_spine41(
         document_assembly.document_build,
         adaptation,
