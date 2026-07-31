@@ -22,15 +22,19 @@ from .scene_settings_migration import (
 
 logger = logging.getLogger(__name__)
 _TEXTURE_SIZE_SYNCING = False
-_PUBLIC_RIG_PROFILES = (A1RigProfile.TWO_AXIS_ROTATION_SCALE,)
 
 
-def public_rig_profile_enum_items() -> tuple[tuple[str, str, str], ...]:
-    """Return only runtime-validated rig profiles exposed by the public UI."""
+def rig_profile_rna_enum_items() -> tuple[tuple[str, str, str], ...]:
+    """Return persisted RNA choices required to load historical `.blend` files.
+
+    Three Axis remains an internal compatibility value so schema migration can bind old
+    Scene ID-properties safely. The public panel deliberately does not draw this Enum as
+    a selector; public export capture normalizes every hidden value to Two Axis.
+    """
 
     return tuple(
         (profile.value, profile.label, profile.description)
-        for profile in _PUBLIC_RIG_PROFILES
+        for profile in A1RigProfile
     )
 
 
@@ -200,10 +204,13 @@ PROPERTIES = (
         "spine2d_rig_profile",
         bpy.props.EnumProperty(
             name="Rig Profile",
-            description="Choose the generated Spine control hierarchy",
-            items=public_rig_profile_enum_items(),
+            description=(
+                "Persisted rig profile compatibility value; public UI exports Two Axis"
+            ),
+            items=rig_profile_rna_enum_items(),
             default=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
             update=_update_rig_profile,
+            options={"HIDDEN"},
         ),
     ),
     (
@@ -284,4 +291,4 @@ PROPERTIES = (
 )
 
 
-__all__ = ["PROPERTIES", "public_rig_profile_enum_items"]
+__all__ = ["PROPERTIES", "rig_profile_rna_enum_items"]
