@@ -92,21 +92,21 @@ def test_export_settings_reject_unregistered_exact_versions(
         )
 
 
-def test_spine_four_zero_through_four_three_are_production_serializable() -> None:
-    ready = {
-        SpineJsonTarget.SPINE_4_0,
-        SpineJsonTarget.SPINE_4_1,
-        SpineJsonTarget.SPINE_4_2,
-        SpineJsonTarget.SPINE_4_3,
-    }
-
+def test_all_registered_targets_are_codec_serializable() -> None:
     for target in SpineJsonTarget:
-        if target in ready:
-            assert require_spine_json_target_serializable(target) is target
-            continue
+        assert require_spine_json_target_serializable(target) is target
 
-        with pytest.raises(SpineJsonTargetUnavailableError):
-            require_spine_json_target_serializable(target)
+
+def test_spine_three_eight_is_selectable_with_legacy_mix_description() -> None:
+    target = resolve_spine_json_target("3.8.99")
+
+    assert target is SpineJsonTarget.SPINE_3_8
+    assert target.descriptor.serializer_ready is True
+    assert target.descriptor.uses_legacy_bone_transform_field is True
+    assert target.descriptor.uses_legacy_constraint_mix_fields is True
+    assert target.descriptor.supports_attachment_sequences is False
+    assert "limited" in target.description.lower()
+    assert "standalone" in target.description.lower()
 
 
 def test_spine_four_zero_is_selectable_with_limited_scope_description() -> None:
