@@ -16,7 +16,7 @@ import sys
 from typing import Mapping, Sequence
 
 
-LOGGER = logging.getLogger("spine43_runtime_acceptance")
+LOGGER = logging.getLogger("spine43_standalone_acceptance")
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_ORACLE = ROOT / "tools" / "spine43_runtime_oracle.mjs"
 SOURCE_LOADER = ROOT / "tools" / "spine43_ts_source_loader.mjs"
@@ -202,12 +202,13 @@ def build_runtime_command(
         raise TypeError("runtime must be Spine43RuntimeEntry")
 
     if runtime.mode == "SOURCE_TYPESCRIPT":
+        loader_url = SOURCE_LOADER.resolve(strict=False).as_uri()
         return (
             node,
             "--no-warnings",
             "--experimental-transform-types",
-            "--loader",
-            str(SOURCE_LOADER),
+            "--experimental-loader",
+            loader_url,
             str(RUNTIME_ORACLE),
             str(json_path),
             str(runtime.entry_path),
