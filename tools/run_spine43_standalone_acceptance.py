@@ -30,7 +30,7 @@ EXPECTED_CASES: Mapping[str, Mapping[str, object]] = {
         "ik": 3,
         "transform": 12,
     },
-    "THREE_AXIS_ROTATION": {
+    "LEGACY_ROTATABLE_MESH": {
         "directory": "three_axis",
         "stem": "Spine43ThreeAxisStandaloneMulti",
         "bones": 46,
