@@ -33,18 +33,22 @@ def build_rig(
     resolved_target = resolve_spine_json_target(spine_target)
 
     if resolved_profile is A1RigProfile.THREE_AXIS_ROTATION:
-        if resolved_target is not SpineJsonTarget.SPINE_4_2:
-            raise ValueError(
-                "THREE_AXIS_ROTATION is not yet runtime-validated for "
-                f"{resolved_target.label} ({resolved_target.exact_version})"
-            )
-        return build_legacy_rig(request)
+        if resolved_target in {
+            SpineJsonTarget.SPINE_4_2,
+            SpineJsonTarget.SPINE_4_3,
+        }:
+            return build_legacy_rig(request)
+        raise ValueError(
+            "THREE_AXIS_ROTATION is not yet runtime-validated for "
+            f"{resolved_target.label} ({resolved_target.exact_version})"
+        )
 
     if resolved_profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
         if resolved_target in {
             SpineJsonTarget.SPINE_4_0,
             SpineJsonTarget.SPINE_4_1,
             SpineJsonTarget.SPINE_4_2,
+            SpineJsonTarget.SPINE_4_3,
         }:
             return build_two_axis_scale_rig(request)
         raise ValueError(
