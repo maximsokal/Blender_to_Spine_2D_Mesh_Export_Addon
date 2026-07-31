@@ -64,12 +64,33 @@ _LIMITED_STANDALONE_SCOPES = frozenset(
         SpineJsonExportScope.STANDALONE_MULTI_OBJECT,
     }
 )
+_SEQUENCE_LIMITATION_38 = (
+    "Attachment and animation sequences are not supported by Spine 3.8.99.",
+)
 
 _CAPABILITIES: Mapping[
     tuple[SpineJsonTarget, A1RigProfile],
     SpineJsonExportCapability,
 ] = MappingProxyType(
     {
+        (
+            SpineJsonTarget.SPINE_3_8,
+            A1RigProfile.THREE_AXIS_ROTATION,
+        ): SpineJsonExportCapability(
+            target=SpineJsonTarget.SPINE_3_8,
+            rig_profile=A1RigProfile.THREE_AXIS_ROTATION,
+            scopes=_LIMITED_STANDALONE_SCOPES,
+            limitations=_SEQUENCE_LIMITATION_38,
+        ),
+        (
+            SpineJsonTarget.SPINE_3_8,
+            A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+        ): SpineJsonExportCapability(
+            target=SpineJsonTarget.SPINE_3_8,
+            rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+            scopes=_LIMITED_STANDALONE_SCOPES,
+            limitations=_SEQUENCE_LIMITATION_38,
+        ),
         (
             SpineJsonTarget.SPINE_4_0,
             A1RigProfile.TWO_AXIS_ROTATION_SCALE,
