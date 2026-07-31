@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from math import copysign
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,6 +19,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_export_plan import (
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_scene_capture import (
     _SceneExportProfile,
+    _resolve_rig_profile,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     A1TextureExportMode,
@@ -211,6 +213,20 @@ def test_camera_single_export_keeps_previous_normalized_setup() -> None:
             _scene_profile(A1TextureExportMode.CAMERA_PROJECTION)
         )
         is A1RigSetupPoseMode.NORMALIZED_SINGLE
+    )
+
+
+def test_public_scene_capture_normalizes_hidden_three_axis_profile() -> None:
+    scene = SimpleNamespace(
+        spine2d_rig_profile=A1RigProfile.THREE_AXIS_ROTATION.value
+    )
+
+    assert _resolve_rig_profile(scene) is A1RigProfile.TWO_AXIS_ROTATION_SCALE
+
+
+def test_public_scene_capture_defaults_to_two_axis_profile() -> None:
+    assert _resolve_rig_profile(SimpleNamespace()) is (
+        A1RigProfile.TWO_AXIS_ROTATION_SCALE
     )
 
 
