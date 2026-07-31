@@ -186,6 +186,16 @@ class Spine43JsonCodec(SpineJsonVersionCodec):
 
     @staticmethod
     def _rewrite_unified_constraints(output: dict[str, Any]) -> None:
+        """Merge legacy collections into the ordered Spine 4.3 constraint array.
+
+        Canonical rig builders retain historical numeric orders because the same typed
+        document is serialized to several Spine families. Spine 4.3 does not serialize
+        those numbers: dependency order is represented solely by array position. Unique
+        sparse orders are therefore valid input and are deterministically compacted by
+        sorting. Equal orders remain rejected because they cannot be represented without
+        inventing a dependency between constraints.
+        """
+
         if "constraints" in output:
             raise ValueError(
                 "document.constraints is reserved for the Spine 4.3 codec and cannot "
@@ -224,12 +234,6 @@ class Spine43JsonCodec(SpineJsonVersionCodec):
             raise ValueError(
                 "Spine 4.3 unified constraint order must be globally unique: "
                 f"{orders}"
-            )
-        expected_orders = tuple(range(len(ordered)))
-        if tuple(sorted(orders)) != expected_orders:
-            raise ValueError(
-                "Spine 4.3 unified constraint order must be contiguous 0..N-1: "
-                f"actual={orders}, expected={expected_orders}"
             )
 
         names = tuple(constraint["name"] for _order, constraint in ordered)
