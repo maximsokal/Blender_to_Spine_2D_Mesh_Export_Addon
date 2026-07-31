@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from math import isfinite
 from pathlib import Path
 from typing import Any
@@ -23,9 +24,11 @@ from ..domain.spine.version_target import (
 )
 
 
+logger = logging.getLogger(__name__)
 _DEFAULT_PROJECTION_ALPHA_THRESHOLD = 1.0 / 255.0
 _DEFAULT_GENERATED_GRAY: ColorRGBA = (0.5, 0.5, 0.5, 1.0)
 _PREVIEW_ANIMATION_EXPORT_ENABLED = False
+_PUBLIC_RIG_PROFILE = A1RigProfile.TWO_AXIS_ROTATION_SCALE
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,12 +339,22 @@ def _resolve_spine_target(scene: Any) -> SpineJsonTarget:
 
 
 def _resolve_rig_profile(scene: Any) -> A1RigProfile:
+    """Resolve the only public rig and normalize persisted hidden values safely."""
+
     raw = getattr(
         scene,
         "spine2d_rig_profile",
-        A1RigProfile.THREE_AXIS_ROTATION.value,
+        _PUBLIC_RIG_PROFILE.value,
     )
-    return resolve_a1_rig_profile(raw)
+    resolved = resolve_a1_rig_profile(raw)
+    if resolved is not _PUBLIC_RIG_PROFILE:
+        logger.warning(
+            "Scene requested hidden rig profile %s; public Rewrite UI uses %s",
+            resolved.value,
+            _PUBLIC_RIG_PROFILE.value,
+        )
+        return _PUBLIC_RIG_PROFILE
+    return resolved
 
 
 def _capture_scene_profile(
