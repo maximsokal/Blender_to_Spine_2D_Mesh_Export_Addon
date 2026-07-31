@@ -358,7 +358,15 @@ def run_runtime_matrix(
 
 
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    # Python logging defaults to stderr. Windows PowerShell 5.1 converts even INFO
+    # records on stderr into NativeCommandError when ErrorActionPreference is Stop.
+    # Keep operational diagnostics on stdout; oracle process failures still propagate
+    # through the collector's explicit non-zero exit code.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s: %(message)s",
+        stream=sys.stdout,
+    )
     arguments = _parser().parse_args(sys.argv[1:] if argv is None else argv)
     try:
         summary = run_runtime_matrix(
