@@ -55,6 +55,18 @@ function inputFile(argument, label) {
   return path;
 }
 
+function mutableVector2() {
+  return {
+    x: 0,
+    y: 0,
+    set(x, y) {
+      this.x = x;
+      this.y = y;
+      return this;
+    },
+  };
+}
+
 function attachmentType(attachment) {
   return typeof attachment.type === 'string' ? attachment.type : 'region';
 }
@@ -272,9 +284,9 @@ function validateAttachments(runtime, skeleton, expected) {
   return actual;
 }
 
-function bounds(runtime, skeleton) {
-  const offset = new runtime.Vector2();
-  const size = new runtime.Vector2();
+function bounds(skeleton) {
+  const offset = mutableVector2();
+  const size = mutableVector2();
   skeleton.getBounds(offset, size);
   const result = {
     x: finite(offset.x, 'bounds.x'),
@@ -297,7 +309,6 @@ async function main() {
     'AtlasAttachmentLoader',
     'SkeletonJson',
     'Skeleton',
-    'Vector2',
     'RegionAttachment',
     'MeshAttachment',
   ]) {
@@ -334,7 +345,7 @@ async function main() {
     skeleton.updateWorldTransform();
     validateMatrices(skeleton);
     const attachments = validateAttachments(runtime, skeleton, expectedAttachments);
-    const setupBounds = bounds(runtime, skeleton);
+    const setupBounds = bounds(skeleton);
 
     console.info(
       JSON.stringify(
