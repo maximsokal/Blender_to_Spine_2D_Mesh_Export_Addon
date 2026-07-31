@@ -11,8 +11,8 @@ from ..application import (
     A1SingleObjectExportSettings,
     ExportIssue,
 )
-from ..domain.baking import sanitize_filename_stem
-from ..domain.spine.rig_profiles import A1RigSetupPoseMode
+from ..domain.baking import A1TextureExportMode, sanitize_filename_stem
+from ..domain.spine.rig_profiles import A1RigProfile, A1RigSetupPoseMode
 from ..domain.spine.version_target import spine_json_version_filename_token
 from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_ui_scene_capture import _SceneExportProfile, _capture_scene_profile
@@ -129,8 +129,28 @@ def _capture_selected_profiles(
     )
 
 
+def _single_setup_pose_mode(
+    scene_profile: _SceneExportProfile,
+) -> A1RigSetupPoseMode:
+    """Keep `<prefix>_main` at Blender Origin for approved object-bake exports.
+
+    Camera Projection retains the historical normalized single-object setup. Internal
+    or persisted unapproved rig profiles also retain their previous behavior.
+    """
+
+    if not isinstance(scene_profile, _SceneExportProfile):
+        raise TypeError("scene_profile must be _SceneExportProfile")
+    if (
+        scene_profile.texture_export_mode
+        is A1TextureExportMode.NORMAL_UV_SEGMENTS
+        and scene_profile.rig_profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE
+    ):
+        return A1RigSetupPoseMode.PRESERVE_COMPOSITION
+    return A1RigSetupPoseMode.NORMALIZED_SINGLE
+
+
 def build_active_ui_export_plan(context: Any) -> A1UiSingleExportPlan:
-    """Build one active-object plan with a neutral single-object rig setup pose."""
+    """Build one active-object plan with route-specific setup-pose semantics."""
 
     if context is None:
         raise ValueError("context cannot be None")
@@ -156,7 +176,7 @@ def build_active_ui_export_plan(context: Any) -> A1UiSingleExportPlan:
         json_output_stem=(
             f"{sanitize_filename_stem(object_profile.object_name)}_merged"
         ),
-        rig_setup_pose_mode=A1RigSetupPoseMode.NORMALIZED_SINGLE,
+        rig_setup_pose_mode=_single_setup_pose_mode(scene_profile),
     )
     return A1UiSingleExportPlan(source_object=source_object, settings=settings)
 
