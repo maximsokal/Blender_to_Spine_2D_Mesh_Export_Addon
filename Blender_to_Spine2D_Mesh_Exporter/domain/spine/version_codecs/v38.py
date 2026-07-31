@@ -1,4 +1,4 @@
-"""Spine 3.8 JSON codec for legacy combined transform-constraint mixes.
+"""Spine 3.8 JSON codec for legacy mixes and runtime-safe constraint order.
 
 Spine 3.8 uses the legacy bone ``transform`` field and separate root IK/transform
 collections, but exposes one combined translation mix and one combined scale mix.
@@ -15,6 +15,7 @@ from typing import Any
 from ..model import SpineDocument
 from ..version_target import SpineJsonTarget
 from .base import SpineJsonCodecContext
+from .runtime_constraint_order import normalize_runtime_constraint_orders
 from .v40 import _sequence_paths
 from .v41 import Spine41JsonCodec
 
@@ -159,6 +160,13 @@ class Spine38JsonCodec(Spine41JsonCodec):
                 f"remove sequence data before export: {sequence_paths}"
             )
 
+        # Spine 3.8 updateCache scans phases 0..constraint_count-1. Historical
+        # three-axis rigs author phases 1..6, so normalize only the detached JSON view
+        # while preserving the canonical rig document and its cross-version metadata.
+        normalize_runtime_constraint_orders(
+            output,
+            collections=("ik", "transform", "path"),
+        )
         self._remove_unsupported_bone_ui_fields(output)
         self._rewrite_setup_transform_mixes(output)
         self._rewrite_animation_transform_mixes(output)
