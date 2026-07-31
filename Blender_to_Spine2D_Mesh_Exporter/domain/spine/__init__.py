@@ -48,6 +48,7 @@ from .legacy_rig_contracts import (
     LegacyRigInfo,
     LegacyZGroup,
     LegacyZGroupBuildInfo,
+    LegacyZGroupOriginMode,
     UniformScaleMode,
 )
 from .legacy_rig_error import LegacyRigBuildError
@@ -197,6 +198,7 @@ __all__ = [
     "LegacyRigProfile",
     "LegacyZGroup",
     "LegacyZGroupBuildInfo",
+    "LegacyZGroupOriginMode",
     "MeshAttachment",
     "Skin",
     "Slot",
