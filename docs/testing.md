@@ -2,7 +2,7 @@
 
 ## Current candidate
 
-The current extension candidate is **0.47.10**.
+The current extension candidate is **0.55.1**.
 
 Supported target scope:
 
@@ -180,7 +180,7 @@ Spine 4.2.43 remains the full compatibility target. Existing standalone, connect
 
 Run the complete Python, real-bpy, and relevant Blender-headless suites after any shared document, weighted attachment, constraint, or composition change.
 
-## Build version 0.47.10
+## Build version 0.55.1
 
 ```powershell
 Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
@@ -193,7 +193,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Extension package build failed"
 }
 
-$Zip = ".\dist\blender_to_spine2d_mesh_exporter-0.47.10.zip"
+$Zip = ".\dist\blender_to_spine2d_mesh_exporter-0.55.1.zip"
 
 if (-not (Test-Path -LiteralPath $Zip -PathType Leaf)) {
     throw "Expected ZIP was not created: $Zip"
@@ -212,7 +212,7 @@ if ($LASTEXITCODE -ne 0) {
 python `
     tools\run_extension_install_gate.py `
     --blender $Blender `
-    --output-root "E:\test_BtSe\extension_install_gate_0.47.10"
+    --output-root "E:\test_BtSe\extension_install_gate_0.55.1"
 
 if ($LASTEXITCODE -ne 0) {
     throw "Extension install gate failed"

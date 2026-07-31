@@ -24,7 +24,7 @@ class _RecordingLayout:
 def test_repolish_button_is_headerless_last_child_of_main_exporter_panel():
     panel = repolish_ui.OBJECT_PT_Spine2DRePolishPanel
 
-    assert panel.bl_label == "re-polish"
+    assert panel.bl_label == "re-polish.com"
     assert panel.bl_parent_id == "OBJECT_PT_spine2d_mesh"
     assert panel.bl_space_type == "VIEW_3D"
     assert panel.bl_region_type == "UI"
@@ -44,7 +44,7 @@ def test_repolish_panel_draws_caption_and_lowercase_button_with_exact_url():
     operator_id, properties, operator = layout.operators[0]
     assert operator_id == "wm.url_open"
     assert properties == {
-        "text": "re-polish",
+        "text": "re-polish.com",
         "icon": "URL",
     }
     assert operator.url == "https://www.re-polish.com/"

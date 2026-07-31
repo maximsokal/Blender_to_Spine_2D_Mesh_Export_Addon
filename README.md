@@ -92,7 +92,7 @@ See the [Usage Guide](docs/usage.md) and [Settings Reference](docs/settings-refe
 
 ![Blender to Spine2D Mesh Exporter interface](assets/ui_addon.png)
 
-The panel uses one consistent foldout sequence: Export, Rig, Rewrite Generated Materials, Cut, Bake, and Analysis. Analysis is collapsed by default, runs only when Analyze is pressed, and never disables export. Connected-object composition remains unavailable for Spine 4.1 and is retained only for supported Spine 4.2 workflows.
+The panel uses one consistent foldout sequence: Paths and Spine 2D version, Rig, Rewrite Generated Materials, Cut, Bake, and Analysis. Analysis is collapsed by default, runs only when Analyze is pressed, and never disables export. Connected-object composition remains unavailable for Spine 4.1 and is retained only for supported Spine 4.2 workflows.
 
 ## Output overview
 
@@ -138,7 +138,7 @@ python tools/prepare_package.py --blender <path-to-Blender-5.2-executable>
 
 The resulting ZIP is written to `dist` unless an explicit output path is supplied. Its root contains `blender_manifest.toml` and `__init__.py`.
 
-See [Installation](docs/installation.md) and [Testing](docs/testing.md) for validation commands for the current 0.47.10 candidate.
+See [Installation](docs/installation.md) and [Testing](docs/testing.md) for validation commands for the current 0.55.1 candidate.
 
 ## Project structure
 

@@ -9,7 +9,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import generated_material_
 
 
 EXPECTED_TITLES = (
-    "Export",
+    "Paths and Spine 2D version",
     "Rig",
     "Rewrite Generated Materials",
     "Cut",

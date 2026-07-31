@@ -157,7 +157,7 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
         column: bpy.types.UILayout,
         context: bpy.types.Context,
     ) -> None:
-        """Keep the production export action in the Export foldout."""
+        """Keep the production export action in the paths/version foldout."""
 
         row = column.row()
         row.alert = True
@@ -201,7 +201,7 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
                 layout,
                 scene,
                 property_name="spine2d_show_settings",
-                title="Export",
+                title="Paths and Spine 2D version",
                 draw_content=lambda content: self._draw_export_settings(
                     content,
                     context,

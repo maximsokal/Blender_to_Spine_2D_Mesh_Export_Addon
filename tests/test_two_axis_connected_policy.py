@@ -152,6 +152,10 @@ def test_connected_two_axis_builds_global_and_per_object_controls():
     assert "Second_rotation_Z" not in bone_names
 
     bones = {bone.name: bone for bone in result.document.bones}
+    for prefix in ("First", "Second"):
+        assert bones[f"{prefix}_rotation_X"].rotation == 0.0
+        assert bones[f"{prefix}_rotation_Y"].rotation == 0.0
+
     assert (
         bones["First_main"].parent,
         bones["First_main"].x,

@@ -8,7 +8,7 @@
 4. Switch the active object to Object Mode.
 5. In a 3D View, press `N` and open the **Blender to Spine2D Mesh Exporter** tab.
 
-The main panel contains Export, Cut, and Bake sections, readiness analysis, and the final export button. A separate child panel contains Generated Materials settings.
+The main panel contains Paths and Spine 2D version, Rig, Rewrite Generated Materials, Cut, Bake, and Analysis sections, followed by the final export button. A separate re-polish.com child panel provides the animation-optimization link.
 
 ## Prepare the source scene
 

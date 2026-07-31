@@ -22,7 +22,7 @@ This directory contains the maintained public documentation for Blender to Spine
 
 ## Supported product baseline
 
-- Extension version: 0.47.10.
+- Extension version: 0.55.1.
 - Minimum Blender version: 5.2.0.
 - Primary full Spine target: 4.2.43.
 - Limited Spine target: 4.1.24 with `2-Axis Rotation + Scale` for single-object and standalone multi-object export only.

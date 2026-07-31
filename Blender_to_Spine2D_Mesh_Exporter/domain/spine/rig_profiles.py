@@ -35,8 +35,9 @@ class A1RigSetupPoseMode(str, Enum):
     It keeps the visible main and X/Y controls neutral while moving the existing object
     placement into internal rig coordinates.
 
-    ``PRESERVE_COMPOSITION`` retains the historical setup pose used by standalone and
-    connected multi-object composition so authored scene placement is never flattened.
+    ``PRESERVE_COMPOSITION`` retains the historical object placement used by standalone
+    and connected multi-object composition so authored scene placement is never
+    flattened. Two-axis X/Y controls remain neutral in either setup-pose mode.
     """
 
     NORMALIZED_SINGLE = "NORMALIZED_SINGLE"

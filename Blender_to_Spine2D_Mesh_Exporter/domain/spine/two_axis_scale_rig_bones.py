@@ -25,7 +25,8 @@ def build_two_axis_scale_bones(
     Single-object documents expose a neutral ``main`` and neutral X/Y controls. The
     original object placement is moved into the internal base bone and into the control
     coordinates, preserving the same final world-space geometry. Multi-object documents
-    keep the historical setup pose because composition owns those offsets.
+    keep their calculated main placement, while X/Y controls remain neutral so the
+    animator always receives the same zeroed control defaults.
     """
 
     if not isinstance(plan, LegacyRigBuildPlan):
@@ -35,7 +36,6 @@ def build_two_axis_scale_bones(
     if not isinstance(plan.profile, TwoAxisScaleRigProfile):
         raise TypeError("plan.profile must be TwoAxisScaleRigProfile")
 
-    profile = plan.profile
     normalized_single = (
         plan.request.setup_pose_mode is A1RigSetupPoseMode.NORMALIZED_SINGLE
     )
@@ -50,8 +50,11 @@ def build_two_axis_scale_bones(
     base_y = plan.main_y if normalized_single else None
     control_origin_x = plan.main_x if normalized_single else 0.0
     control_origin_y = plan.main_y if normalized_single else 0.0
-    control_x_rotation = 0.0 if normalized_single else profile.rotation_x_setup_degrees
-    control_y_rotation = 0.0 if normalized_single else profile.rotation_y_setup_degrees
+    # The visible controls are authoring handles, not part of the baked setup pose.
+    # Keep their defaults neutral in both single-object and composed documents. The
+    # reference setup angles are applied by the matching transform-constraint offsets.
+    control_x_rotation = 0.0
+    control_y_rotation = 0.0
 
     z_bones: list[Bone] = []
     for group in plan.z_groups:

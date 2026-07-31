@@ -6,7 +6,6 @@ from typing import Tuple
 
 from .legacy_rig_plan import LegacyRigBuildPlan
 from .model import IKConstraint, TransformConstraint
-from .rig_profiles import A1RigSetupPoseMode
 from .two_axis_scale_profile import TwoAxisScaleRigProfile
 from .two_axis_scale_rig_contracts import TwoAxisScaleRigLayout
 
@@ -17,9 +16,10 @@ def build_two_axis_scale_constraints(
 ) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
     """Build the exact five-phase schedule generalized from the reference rig.
 
-    In normalized single-object mode visible X/Y controls have zero setup rotation. The
-    reference setup angles are therefore moved to the matching transform-constraint
-    offsets. Multi-object mode retains the previously validated setup-pose payload.
+    Visible X/Y controls always have zero setup rotation. The reference setup angles are
+    therefore emitted as offsets on the matching transform constraints for both
+    single-object and composed documents. Setup-pose mode still controls where object
+    placement is stored, but never changes the user-facing control defaults.
     """
 
     if not isinstance(plan, LegacyRigBuildPlan):
@@ -30,9 +30,6 @@ def build_two_axis_scale_constraints(
         raise TypeError("plan.profile must be TwoAxisScaleRigProfile")
 
     profile = plan.profile
-    normalized_single = (
-        plan.request.setup_pose_mode is A1RigSetupPoseMode.NORMALIZED_SINGLE
-    )
     control_x, control_y, scale_control = plan.control_bone_names
     constraint_bone, _scale_ik, rotate_ik, ik_target = plan.ik_chain_bone_names
     front_to_back_rotation_bones = tuple(reversed(plan.info.sub_bone_names))
@@ -66,9 +63,8 @@ def build_two_axis_scale_constraints(
         "mixScaleX": 0,
         "mixShearY": 0,
     }
-    if normalized_single:
-        rotation_x_extras["rotation"] = profile.rotation_x_setup_degrees
-        rotation_y_extras["rotation"] = profile.rotation_y_setup_degrees
+    rotation_x_extras["rotation"] = profile.rotation_x_setup_degrees
+    rotation_y_extras["rotation"] = profile.rotation_y_setup_degrees
 
     transform = (
         TransformConstraint(

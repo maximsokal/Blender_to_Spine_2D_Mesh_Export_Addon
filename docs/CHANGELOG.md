@@ -2,9 +2,17 @@
 
 This changelog records public product releases. Internal development milestones are intentionally omitted.
 
-## Unreleased candidate status
+## Current candidate status
 
-Version 0.47.11 is the current release candidate. It keeps the validated Spine 4.1.24 scale topology from 0.47.10 and prevents hidden persisted Connect values from routing ordinary selected-object export into development-only connected composition. Final same-commit package and isolated installation evidence are still required before release.
+Version 0.55.1 is the current release candidate. It keeps the validated Spine 4.1.24 scale topology and includes the Blender 5.2 headless acceptance correction documented in `releases/0.55.1.md`.
+
+## [0.55.1] - 2026-07-31
+
+### Fixed
+
+- Blender 5.2 headless acceptance now synchronizes dependency-graph transforms before capturing source baselines.
+- The two-axis rotation controls use a neutral setup rotation while their reference angles remain constraint offsets.
+- The main UI labels the output paths and Spine target-version foldout explicitly and exposes the re-polish.com link.
 
 ## [0.47.11] - 2026-07-30
 

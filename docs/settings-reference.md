@@ -108,7 +108,7 @@ The reference X/Y setup angles are retained as transform-constraint rotation off
 
 ### Multi-object setup pose
 
-Each standalone or connected object source uses `PRESERVE_COMPOSITION`: its existing `<prefix>_main` placement and profile-specific controls remain part of the object-local rig so composition cannot flatten or overlap the scene.
+Each standalone or connected object source uses `PRESERVE_COMPOSITION`: its existing `<prefix>_main` placement remains part of the object-local rig so composition cannot flatten or overlap the scene. Two-axis X/Y rotation controls are still created with neutral `rotation = 0`; their reference setup angles live in the matching transform-constraint offsets.
 
 For connected 3-Axis export, the group is not an ordinary object rig and is not post-normalized. It uses the dedicated Legacy hierarchy from `main`: root-space X/Y/Z controls, neutral generated Z layers, exact global helper transforms, exact constrained-bone lists, full object-main X/Y offsets, Z-layer order sharing, and unchanged object scale-compensator order `6`.
 

@@ -560,7 +560,7 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
                 layout,
                 scene,
                 property_name="spine2d_show_settings",
-                title="Export",
+                title="Paths and Spine 2D version",
                 draw_content=lambda column: self._draw_export_settings(column, context),
             )
             self._draw_foldout(

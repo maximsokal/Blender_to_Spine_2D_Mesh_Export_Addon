@@ -37,7 +37,7 @@ def _bone(result, name):
     return next(bone for bone in result.bones if bone.name == name)
 
 
-def test_two_axis_scale_rig_matches_reference_semantic_hierarchy():
+def test_two_axis_scale_rig_has_neutral_controls_and_reference_offsets():
     result = build_two_axis_scale_rig(_request())
 
     assert result.profile.profile_id == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
@@ -65,8 +65,11 @@ def test_two_axis_scale_rig_matches_reference_semantic_hierarchy():
         "Box_rotation_Y",
         "Box_scale",
     )
-    assert _bone(result, "Box_rotation_X").rotation == -134.67
-    assert _bone(result, "Box_rotation_Y").rotation == -17.43
+    assert _bone(result, "Box_rotation_X").rotation == 0.0
+    assert _bone(result, "Box_rotation_Y").rotation == 0.0
+    rotate_x, rotate_y, _scale, _depth = result.transform
+    assert rotate_x.extras["rotation"] == -134.67
+    assert rotate_y.extras["rotation"] == -17.43
     result.validate()
 
 
@@ -82,10 +85,10 @@ def test_two_axis_constraint_schedule_and_scale_targets_are_exact():
         "Box_rotate_X",
     )
     assert rotate_x.target == "Box_rotation_X"
-    assert "rotation" not in rotate_x.extras
+    assert rotate_x.extras["rotation"] == -134.67
     assert rotate_y.bones == ("Box_2", "Box_1")
     assert rotate_y.target == "Box_rotation_Y"
-    assert "rotation" not in rotate_y.extras
+    assert rotate_y.extras["rotation"] == -17.43
     assert scale.bones == ("Box_rotate_X", "Box_2", "Box_1")
     assert scale.target == "Box_scale"
     assert scale.extras["relative"] is True
@@ -122,7 +125,7 @@ def test_normalized_single_pose_keeps_main_and_visible_controls_neutral():
     result.validate()
 
 
-def test_preserved_composition_pose_keeps_main_and_reference_setup_angles():
+def test_preserved_composition_pose_keeps_main_placement_and_neutral_controls():
     result = build_two_axis_scale_rig(
         _request(
             main_position_pixels=(125.0, -50.0),
@@ -138,16 +141,16 @@ def test_preserved_composition_pose_keeps_main_and_reference_setup_angles():
 
     assert (main.x, main.y) == (125.0, -50.0)
     assert (internal_base.x, internal_base.y) == (None, None)
-    assert rotation_x.rotation == -134.67
-    assert rotation_y.rotation == -17.43
+    assert rotation_x.rotation == 0.0
+    assert rotation_y.rotation == 0.0
     # World-space X is equal after applying the main parent transform.
     assert rotation_x.x + main.x == rotation_y.x + main.x == scale.x
     assert rotation_x.y - rotation_y.y == 200.0
     assert rotation_y.y + main.y - scale.y == 200.0
 
     rotate_x, rotate_y, _scale_constraint, _depth = result.transform
-    assert "rotation" not in rotate_x.extras
-    assert "rotation" not in rotate_y.extras
+    assert rotate_x.extras["rotation"] == -134.67
+    assert rotate_y.extras["rotation"] == -17.43
     result.validate()
 
 

@@ -290,6 +290,14 @@ def _assert_standalone_document(document: dict[str, object]) -> dict[str, object
     )
     for prefix in PREFIXES:
         _assert(f"{prefix}_main" in bone_by_name, f"missing main bone for {prefix}")
+        _assert(
+            float(bone_by_name[f"{prefix}_rotation_X"].get("rotation", 0.0)) == 0.0,
+            f"{prefix}_rotation_X must have a neutral setup rotation",
+        )
+        _assert(
+            float(bone_by_name[f"{prefix}_rotation_Y"].get("rotation", 0.0)) == 0.0,
+            f"{prefix}_rotation_Y must have a neutral setup rotation",
+        )
 
     for name, bone in bone_by_name.items():
         if name == "root":
@@ -346,6 +354,22 @@ def _assert_standalone_document(document: dict[str, object]) -> dict[str, object
         tuple(sorted(orders)) == tuple(range(len(constraints))),
         f"constraint orders must be unique and contiguous: {orders}",
     )
+
+    transform_by_name = {
+        item["name"]: item
+        for item in transform
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    }
+    for prefix in PREFIXES:
+        _assert(
+            transform_by_name[f"{prefix}_rotation_X_constraint"].get("rotation")
+            == -134.67,
+            f"{prefix} X reference angle was not preserved as a constraint offset",
+        )
+        _assert(
+            transform_by_name[f"{prefix}_rotation_Y"].get("rotation") == -17.43,
+            f"{prefix} Y reference angle was not preserved as a constraint offset",
+        )
 
     slot_names: list[str] = []
     for slot in slots:

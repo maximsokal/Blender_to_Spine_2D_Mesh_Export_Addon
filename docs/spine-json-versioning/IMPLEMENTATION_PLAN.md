@@ -6,7 +6,7 @@ Base: `rewrite/a1-domain-foundation` at `d51f1a3c1151ae873e3d85ec5365437f7b2b4dc
 
 ## Goal
 
-Add one `Spine version` selector to the Export foldout and produce setup-pose JSON for these target families:
+Add one `Spine version` selector to the Paths and Spine 2D version foldout and produce setup-pose JSON for these target families:
 
 | UI target | Exact output version |
 | --- | --- |

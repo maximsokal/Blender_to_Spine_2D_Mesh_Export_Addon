@@ -1,4 +1,4 @@
-"""Release-scope contract for extension candidate 0.47.10."""
+"""Historical release-scope contract for checkpoint 0.47.10."""
 
 from __future__ import annotations
 
@@ -15,13 +15,23 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import SpineJs
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "blender_manifest.toml"
+RELEASE_CHECKPOINT = (
+    ROOT / "docs" / "spine-json-versioning" / "RELEASE_0_47_10.md"
+)
 
 
-def test_release_manifest_is_04710() -> None:
+def test_historical_release_checkpoint_is_04710() -> None:
+    checkpoint = RELEASE_CHECKPOINT.read_text(encoding="utf-8")
+
+    assert "# Release checkpoint 0.47.10" in checkpoint
+    assert "0.47.10" in checkpoint
+
+
+def test_current_manifest_keeps_supported_blender_minimum() -> None:
     with MANIFEST.open("rb") as stream:
         manifest = tomllib.load(stream)
 
-    assert manifest["version"] == "0.47.10"
+    assert manifest["version"] == "0.55.1"
     assert manifest["blender_version_min"] == "5.2.0"
 
 

@@ -14,7 +14,7 @@ A genuinely fresh Blender Scene defaults to `TWO_AXIS_ROTATION_SCALE`. Existing 
 All sections use the same main-panel foldout style in this exact order:
 
 ```text
-Export
+Paths and Spine 2D version
 Rig
 Rewrite Generated Materials
 Cut
@@ -79,9 +79,9 @@ root
 └── <prefix>_scale
 ```
 
-## Single-object neutral setup pose
+## Neutral rotation controls
 
-For `NORMALIZED_SINGLE`:
+Both setup-pose policies create neutral visible rotation controls:
 
 ```text
 <prefix>_main.x = 0
@@ -90,18 +90,18 @@ For `NORMALIZED_SINGLE`:
 <prefix>_rotation_Y.rotation = 0
 ```
 
-The previous main placement is transferred to the internal `<prefix>` base bone and to the control coordinates. This preserves the same visible object position while exposing a clean neutral setup pose to the animator.
+For `NORMALIZED_SINGLE`, the previous main placement is transferred to the internal `<prefix>` base bone and to the control coordinates. This preserves the same visible object position while exposing a clean neutral setup pose to the animator. For `PRESERVE_COMPOSITION`, the calculated `<prefix>_main` placement remains unchanged so composition keeps each object in place.
 
-The reference setup rotations `-134.67` and `-17.43` are moved to the X/Y transform-constraint rotation offsets. They are not discarded.
+The reference setup rotations `-134.67` and `-17.43` are always emitted as X/Y transform-constraint rotation offsets. They are not used as the visible control bones' defaults and are not discarded.
 
-## Multi-object preserved setup pose
+## Multi-object placement policy
 
 For `PRESERVE_COMPOSITION`:
 
 - `<prefix>_main` retains its calculated nonzero position;
 - the internal base receives no duplicate placement;
-- X/Y controls retain the reference setup rotations;
-- no additional constraint rotation offsets are inserted.
+- X/Y controls are created with `rotation = 0`;
+- the reference angles are stored in the matching constraint offsets.
 
 This keeps standalone and future connected compositions from flattening object placement or overlapping multiple exported components.
 
@@ -148,7 +148,7 @@ Required regression coverage includes:
 - Scene property registration, reset, readiness invalidation, and settings propagation.
 - Exact UI foldout order and reversible main-panel replacement.
 - Exact two-axis bone and constraint order.
-- Normalized single-object and preserved multi-object setup poses.
+- Neutral X/Y controls with normalized single-object and preserved multi-object placement.
 - Arbitrary Z-group counts and vertex counts.
 - No Z rotation control in the two-axis profile.
 - One shared X control column and deterministic vertical spacing.

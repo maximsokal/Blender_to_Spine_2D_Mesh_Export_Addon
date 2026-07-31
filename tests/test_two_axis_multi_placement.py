@@ -65,10 +65,25 @@ def test_standalone_multi_composition_preserves_each_main_position_and_distance(
         second_position[1] - first_position[1],
     )
 
-    assert bones["First_rotation_X"].rotation == -134.67
-    assert bones["First_rotation_Y"].rotation == -17.43
-    assert bones["Second_rotation_X"].rotation == -134.67
-    assert bones["Second_rotation_Y"].rotation == -17.43
+    assert bones["First_rotation_X"].rotation == 0.0
+    assert bones["First_rotation_Y"].rotation == 0.0
+    assert bones["Second_rotation_X"].rotation == 0.0
+    assert bones["Second_rotation_Y"].rotation == 0.0
+
+    for prefix in ("First", "Second"):
+        constraints = {
+            constraint.name: constraint
+            for constraint in result.document.transform
+            if constraint.name in {
+                f"{prefix}_rotation_X_constraint",
+                f"{prefix}_rotation_Y",
+            }
+        }
+        assert (
+            constraints[f"{prefix}_rotation_X_constraint"].extras["rotation"]
+            == -134.67
+        )
+        assert constraints[f"{prefix}_rotation_Y"].extras["rotation"] == -17.43
 
     # Multi mode must not transfer placement into the internal base layer.
     assert bones["First"].x is None and bones["First"].y is None

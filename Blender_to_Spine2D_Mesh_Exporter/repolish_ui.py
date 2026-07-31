@@ -21,7 +21,7 @@ REPOLISH_URL = "https://www.re-polish.com/"
 class OBJECT_PT_Spine2DRePolishPanel(bpy.types.Panel):
     """Show one always-visible re-polish link below every exporter child panel."""
 
-    bl_label = "re-polish"
+    bl_label = "re-polish.com"
     bl_idname = "OBJECT_PT_spine2d_repolish"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -34,7 +34,7 @@ class OBJECT_PT_Spine2DRePolishPanel(bpy.types.Panel):
         self.layout.label(text="Try animation optimization")
         operator = self.layout.operator(
             "wm.url_open",
-            text="re-polish",
+            text="re-polish.com",
             icon="URL",
         )
         operator.url = REPOLISH_URL
