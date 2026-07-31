@@ -9,6 +9,10 @@ import { pathToFileURL } from 'node:url';
 
 const EXPECTED_VERSION = '3.8.99';
 const RENDERABLE_TYPES = new Set(['region', 'mesh', 'linkedmesh']);
+const SCALE_RESPONSE_FACTOR = 1.25;
+const RESPONSE_EPSILON = 1e-6;
+const ZERO_SCALE_EPSILON = 1e-8;
+const MATRIX_FIELDS = Object.freeze(['worldX', 'worldY', 'a', 'b', 'c', 'd']);
 
 function fail(message, details = undefined) {
   const error = new Error(message);
@@ -213,6 +217,73 @@ function constraintRecords(document) {
   return result;
 }
 
+function scaleControlRecords(document) {
+  const transforms = array(document.transform ?? [], 'document.transform');
+  const result = [];
+  for (let index = 0; index < transforms.length; index += 1) {
+    const constraint = record(transforms[index], `document.transform[${index}]`);
+    const name = nonEmptyString(
+      constraint.name,
+      `document.transform[${index}].name`,
+    );
+    if (!name.endsWith('_scale_constraint')) continue;
+
+    const target = nonEmptyString(
+      constraint.target,
+      `document.transform[${index}].target`,
+    );
+    if (!target.endsWith('_scale')) {
+      fail(`Scale control constraint '${name}' has an unexpected target`, { target });
+    }
+
+    const rotateMix = finite(
+      constraint.rotateMix,
+      `document.transform[${index}].rotateMix`,
+    );
+    const translateMix = finite(
+      constraint.translateMix,
+      `document.transform[${index}].translateMix`,
+    );
+    const scaleMix = finite(
+      constraint.scaleMix,
+      `document.transform[${index}].scaleMix`,
+    );
+    const shearMix = finite(
+      constraint.shearMix,
+      `document.transform[${index}].shearMix`,
+    );
+    if (scaleMix <= 0 || rotateMix !== 0 || translateMix !== 0 || shearMix !== 0) {
+      fail(`Scale control constraint '${name}' is not scale-only`, {
+        rotateMix,
+        translateMix,
+        scaleMix,
+        shearMix,
+      });
+    }
+
+    const bones = array(
+      constraint.bones,
+      `document.transform[${index}].bones`,
+    ).map((value, boneIndex) =>
+      nonEmptyString(value, `document.transform[${index}].bones[${boneIndex}]`),
+    );
+    if (bones.length === 0) {
+      fail(`Scale control constraint '${name}' has no constrained bones`);
+    }
+    if (new Set(bones).size !== bones.length) {
+      fail(`Scale control constraint '${name}' repeats constrained bones`, { bones });
+    }
+
+    result.push(Object.freeze({ name, target, bones: Object.freeze(bones) }));
+  }
+
+  const names = result.map((item) => item.name);
+  const targets = result.map((item) => item.target);
+  assert.equal(new Set(names).size, names.length, 'Scale control names must be unique');
+  assert.equal(new Set(targets).size, targets.length, 'Scale control targets must be unique');
+  return Object.freeze(result);
+}
+
 function runtimeConstraints(skeleton) {
   return [
     ...(skeleton.ikConstraints ?? []),
@@ -298,6 +369,209 @@ function bounds(skeleton) {
   return result;
 }
 
+function runtimeSkeleton(runtime, skeletonData) {
+  const skeleton = new runtime.Skeleton(skeletonData);
+  if (skeletonData.defaultSkin) skeleton.setSkin(skeletonData.defaultSkin);
+  skeleton.setToSetupPose();
+  skeleton.updateCache();
+  return skeleton;
+}
+
+function transformConstraintByName(skeleton, name) {
+  const constraint = (skeleton.transformConstraints ?? []).find(
+    (item) => item?.data?.name === name,
+  );
+  if (!constraint) fail(`Runtime transform constraint is missing: ${name}`);
+  return constraint;
+}
+
+function boneByName(skeleton, name, label) {
+  const bone = skeleton.findBone(name);
+  if (!bone) fail(`${label} bone is missing: ${name}`);
+  return bone;
+}
+
+function matrixSnapshot(bone, label) {
+  const result = {};
+  for (const field of MATRIX_FIELDS) {
+    result[field] = finite(bone[field], `${label}.${field}`);
+  }
+  return Object.freeze(result);
+}
+
+function numberDiffers(left, right) {
+  const scale = Math.max(1, Math.abs(left), Math.abs(right));
+  return Math.abs(left - right) > RESPONSE_EPSILON * scale;
+}
+
+function matrixDiffers(left, right) {
+  return MATRIX_FIELDS.some((field) => numberDiffers(left[field], right[field]));
+}
+
+function boundsDiffer(left, right) {
+  return ['x', 'y', 'width', 'height'].some((field) =>
+    numberDiffers(left[field], right[field]),
+  );
+}
+
+function applyScaleTargets(skeleton, controls) {
+  const changes = [];
+  for (const control of controls) {
+    const constraint = transformConstraintByName(skeleton, control.name);
+    if (constraint.target?.data?.name !== control.target) {
+      fail(`Runtime target differs for scale constraint '${control.name}'`, {
+        expected: control.target,
+        actual: constraint.target?.data?.name,
+      });
+    }
+    const target = boneByName(skeleton, control.target, 'Scale target');
+    const setupScaleX = finite(target.scaleX, `${control.target}.scaleX`);
+    const setupScaleY = finite(target.scaleY, `${control.target}.scaleY`);
+    if (
+      Math.abs(setupScaleX) <= ZERO_SCALE_EPSILON ||
+      Math.abs(setupScaleY) <= ZERO_SCALE_EPSILON
+    ) {
+      fail(`Scale target '${control.target}' has a zero setup scale`, {
+        setupScaleX,
+        setupScaleY,
+      });
+    }
+    target.scaleX = setupScaleX * SCALE_RESPONSE_FACTOR;
+    target.scaleY = setupScaleY * SCALE_RESPONSE_FACTOR;
+    changes.push({
+      constraint: control.name,
+      target: control.target,
+      setupScaleX,
+      setupScaleY,
+      scaledScaleX: target.scaleX,
+      scaledScaleY: target.scaleY,
+    });
+  }
+  return changes;
+}
+
+function disableScaleConstraints(skeleton, controls) {
+  for (const control of controls) {
+    const disabledConstraint = transformConstraintByName(skeleton, control.name);
+    disabledConstraint.scaleMix = 0;
+  }
+}
+
+function scaleResponse(runtime, skeletonData, controls) {
+  if (controls.length === 0) {
+    return {
+      applicable: false,
+      scaleFactor: SCALE_RESPONSE_FACTOR,
+      controlCount: 0,
+      respondingControlCount: 0,
+      changedBoneCount: 0,
+      allControlsResponded: true,
+      boundsChanged: false,
+      constraintAffectsBounds: false,
+      matricesFinite: true,
+      controls: [],
+    };
+  }
+
+  const setupSkeleton = runtimeSkeleton(runtime, skeletonData);
+  setupSkeleton.updateWorldTransform();
+  validateMatrices(setupSkeleton);
+  const setupBounds = bounds(setupSkeleton);
+
+  const scaledSkeleton = runtimeSkeleton(runtime, skeletonData);
+  const targetChanges = applyScaleTargets(scaledSkeleton, controls);
+  scaledSkeleton.updateWorldTransform();
+  validateMatrices(scaledSkeleton);
+  const scaledBounds = bounds(scaledSkeleton);
+
+  const disabledSkeleton = runtimeSkeleton(runtime, skeletonData);
+  disableScaleConstraints(disabledSkeleton, controls);
+  applyScaleTargets(disabledSkeleton, controls);
+  disabledSkeleton.updateWorldTransform();
+  validateMatrices(disabledSkeleton);
+  const disabledConstraintBounds = bounds(disabledSkeleton);
+
+  const changedBoneNames = new Set();
+  const responseRecords = controls.map((control) => {
+    const runtimeConstraint = transformConstraintByName(scaledSkeleton, control.name);
+    if (runtimeConstraint.active !== true) {
+      fail(`Scale control constraint '${control.name}' is inactive in updateCache()`);
+    }
+
+    const changedFromSetup = [];
+    const changedByConstraint = [];
+    for (const boneName of control.bones) {
+      const setupMatrix = matrixSnapshot(
+        boneByName(setupSkeleton, boneName, 'Setup constrained'),
+        `setup.${boneName}`,
+      );
+      const scaledMatrix = matrixSnapshot(
+        boneByName(scaledSkeleton, boneName, 'Scaled constrained'),
+        `scaled.${boneName}`,
+      );
+      const disabledMatrix = matrixSnapshot(
+        boneByName(disabledSkeleton, boneName, 'Disabled constrained'),
+        `disabled.${boneName}`,
+      );
+      if (matrixDiffers(scaledMatrix, setupMatrix)) changedFromSetup.push(boneName);
+      if (matrixDiffers(scaledMatrix, disabledMatrix)) {
+        changedByConstraint.push(boneName);
+        changedBoneNames.add(boneName);
+      }
+    }
+
+    return {
+      constraint: control.name,
+      target: control.target,
+      constrainedBoneCount: control.bones.length,
+      changedFromSetupBoneCount: changedFromSetup.length,
+      changedByConstraintBoneCount: changedByConstraint.length,
+      responded:
+        changedFromSetup.length > 0 &&
+        changedByConstraint.length > 0,
+    };
+  });
+
+  const respondingControlCount = responseRecords.filter((item) => item.responded).length;
+  const allControlsResponded = respondingControlCount === controls.length;
+  const boundsChanged = boundsDiffer(scaledBounds, setupBounds);
+  const constraintAffectsBounds = boundsDiffer(
+    scaledBounds,
+    disabledConstraintBounds,
+  );
+
+  const report = {
+    applicable: true,
+    scaleFactor: SCALE_RESPONSE_FACTOR,
+    controlCount: controls.length,
+    respondingControlCount,
+    changedBoneCount: changedBoneNames.size,
+    allControlsResponded,
+    boundsChanged,
+    constraintAffectsBounds,
+    matricesFinite: true,
+    setupBounds,
+    scaledBounds,
+    disabledConstraintBounds,
+    targets: targetChanges,
+    controls: responseRecords,
+  };
+
+  if (!allControlsResponded) {
+    fail('One or more Spine 3.8 scale controls did not affect constrained bones', report);
+  }
+  if (changedBoneNames.size === 0) {
+    fail('Spine 3.8 scale constraints changed no constrained bones', report);
+  }
+  if (!boundsChanged) {
+    fail('Spine 3.8 scale controls did not change render bounds', report);
+  }
+  if (!constraintAffectsBounds) {
+    fail('Disabling Spine 3.8 scale constraints did not change scaled bounds', report);
+  }
+  return report;
+}
+
 async function main() {
   const jsonPath = inputFile(process.argv[2], 'Spine 3.8 JSON');
   const runtimeEntry = inputFile(process.argv[3], 'Spine 3.8 runtime entry');
@@ -327,6 +601,7 @@ async function main() {
   if ('constraints' in document) fail('Unified 4.3 constraints leaked into Spine 3.8');
 
   const records = constraintRecords(document);
+  const scaleControls = scaleControlRecords(document);
   const expectedAttachments = expectedSetupAttachments(document);
   const atlas = new runtime.TextureAtlas(
     atlasText(collectAtlasRegions(document)),
@@ -337,15 +612,13 @@ async function main() {
     const loader = new runtime.AtlasAttachmentLoader(atlas);
     const reader = new runtime.SkeletonJson(loader);
     const skeletonData = reader.readSkeletonData(document);
-    const skeleton = new runtime.Skeleton(skeletonData);
-    if (skeletonData.defaultSkin) skeleton.setSkin(skeletonData.defaultSkin);
-    skeleton.setToSetupPose();
-    skeleton.updateCache();
+    const skeleton = runtimeSkeleton(runtime, skeletonData);
     const scheduled = validateUpdateCache(skeleton, records);
     skeleton.updateWorldTransform();
     validateMatrices(skeleton);
     const attachments = validateAttachments(runtime, skeleton, expectedAttachments);
     const setupBounds = bounds(skeleton);
+    const scaleResponseEvidence = scaleResponse(runtime, skeletonData, scaleControls);
 
     console.info(
       JSON.stringify(
@@ -372,6 +645,7 @@ async function main() {
           },
           matrices: { finiteBones: skeleton.bones.length, allFinite: true },
           bounds: setupBounds,
+          scaleResponse: scaleResponseEvidence,
         },
         null,
         2,
