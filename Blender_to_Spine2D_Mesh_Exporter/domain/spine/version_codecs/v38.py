@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from math import isfinite
+import re
 from typing import Any
 
 from ..model import SpineDocument
@@ -32,6 +33,9 @@ _NEW_MIX_FIELDS = frozenset(
 )
 _LEGACY_MIX_FIELDS = frozenset(
     {"rotateMix", "translateMix", "scaleMix", "shearMix"}
+)
+_SPINE38_BRIDGE_PATTERN = re.compile(
+    r"^(?P<prefix>.+)_(?P<layer>[0-9]+)_scale_spine41_bridge$"
 )
 
 
@@ -127,6 +131,50 @@ def _rewrite_mix_mapping(mapping: dict[str, Any], *, path: str) -> None:
     mapping["shearMix"] = shear_mix
 
 
+def _named_records(
+    output: dict[str, Any],
+    collection_name: str,
+) -> dict[str, dict[str, Any]]:
+    values = _require_list(
+        output.get(collection_name, []),
+        path=f"document.{collection_name}",
+    )
+    records: dict[str, dict[str, Any]] = {}
+    for index, value in enumerate(values):
+        path = f"document.{collection_name}[{index}]"
+        record = _require_dict(value, path=path)
+        name = record.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"{path}.name must be a non-empty string")
+        if name in records:
+            raise ValueError(
+                f"document.{collection_name} contains duplicate name {name!r}"
+            )
+        records[name] = record
+    return records
+
+
+def _constraint_order(record: dict[str, Any], *, path: str) -> int:
+    value = record.get("order", 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{path}.order must be a non-negative integer")
+    return value
+
+
+def _constraint_bones(record: dict[str, Any], *, path: str) -> tuple[str, ...]:
+    values = _require_list(record.get("bones"), path=f"{path}.bones")
+    result: list[str] = []
+    for index, value in enumerate(values):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{path}.bones[{index}] must be a non-empty string")
+        result.append(value)
+    if not result:
+        raise ValueError(f"{path}.bones cannot be empty")
+    if len(result) != len(set(result)):
+        raise ValueError(f"{path}.bones cannot contain duplicates")
+    return tuple(result)
+
+
 class Spine38JsonCodec(Spine41JsonCodec):
     """Translate canonical Spine 4.2-shaped documents to exact Spine 3.8.99 JSON."""
 
@@ -170,6 +218,7 @@ class Spine38JsonCodec(Spine41JsonCodec):
         self._remove_unsupported_bone_ui_fields(output)
         self._rewrite_setup_transform_mixes(output)
         self._rewrite_animation_transform_mixes(output)
+        self._validate_two_axis_runtime_topology(output)
         return json.dumps(
             output,
             ensure_ascii=False,
@@ -232,6 +281,163 @@ class Spine38JsonCodec(Spine41JsonCodec):
                         frame,
                         path=f"{frames_path}[{frame_index}]",
                     )
+
+    @staticmethod
+    def _validate_two_axis_runtime_topology(output: dict[str, Any]) -> None:
+        """Reject the stale-child schedule that distorts Spine 3.8 controls."""
+
+        bones = _require_list(output.get("bones"), path="document.bones")
+        bone_by_name: dict[str, dict[str, Any]] = {}
+        bridge_records: dict[str, list[tuple[str, str]]] = {}
+        children_by_parent: dict[str, list[str]] = {}
+
+        for index, value in enumerate(bones):
+            path = f"document.bones[{index}]"
+            bone = _require_dict(value, path=path)
+            name = bone.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(f"{path}.name must be a non-empty string")
+            if name in bone_by_name:
+                raise ValueError(f"document.bones contains duplicate name {name!r}")
+            bone_by_name[name] = bone
+            parent = bone.get("parent")
+            if parent is not None:
+                if not isinstance(parent, str) or not parent.strip():
+                    raise ValueError(f"{path}.parent must be a non-empty string")
+                children_by_parent.setdefault(parent, []).append(name)
+
+            match = _SPINE38_BRIDGE_PATTERN.fullmatch(name)
+            if match is not None:
+                prefix = match.group("prefix")
+                wrapper_name = name[: -len("_spine41_bridge")]
+                bridge_records.setdefault(prefix, []).append(
+                    (wrapper_name, name)
+                )
+
+        if not bridge_records:
+            # Three-axis Spine 3.8 documents do not use the two-axis bridge topology.
+            return
+
+        ik_by_name = _named_records(output, "ik")
+        transform_by_name = _named_records(output, "transform")
+        for prefix, raw_records in bridge_records.items():
+            wrappers: list[str] = []
+            layers: list[str] = []
+            for wrapper_name, bridge_name in raw_records:
+                wrapper = bone_by_name.get(wrapper_name)
+                bridge = bone_by_name.get(bridge_name)
+                if wrapper is None or bridge is None:
+                    raise ValueError(
+                        f"Spine 3.8 bridge topology is incomplete for {prefix!r}"
+                    )
+                if wrapper.get("parent") != bridge_name:
+                    raise ValueError(
+                        f"Spine 3.8 wrapper {wrapper_name!r} must be parented to "
+                        f"{bridge_name!r}"
+                    )
+                children = tuple(children_by_parent.get(wrapper_name, ()))
+                if len(children) != 1:
+                    raise ValueError(
+                        f"Spine 3.8 wrapper {wrapper_name!r} must have exactly one "
+                        f"final layer child, found {len(children)}"
+                    )
+                wrappers.append(wrapper_name)
+                layers.append(children[0])
+
+            if len(wrappers) != len(set(wrappers)) or len(layers) != len(set(layers)):
+                raise ValueError(
+                    f"Spine 3.8 two-axis wrapper/layer mapping is ambiguous for "
+                    f"{prefix!r}"
+                )
+
+            rotation_x_name = f"{prefix}_rotation_X_constraint"
+            ik_name = f"{prefix}_IK"
+            scale_name = f"{prefix}_scale"
+            depth_name = f"{prefix}_scale_rotate_X_constraint"
+            rotation_y_name = f"{prefix}_rotation_Y"
+            try:
+                rotation_x = transform_by_name[rotation_x_name]
+                scale_ik = ik_by_name[ik_name]
+                uniform_scale = transform_by_name[scale_name]
+                depth_scale = transform_by_name[depth_name]
+                rotation_y = transform_by_name[rotation_y_name]
+            except KeyError as exc:
+                raise ValueError(
+                    f"Spine 3.8 two-axis constraint inventory is incomplete for "
+                    f"{prefix!r}: missing {exc.args[0]!r}"
+                ) from exc
+
+            base_order = _constraint_order(
+                rotation_x,
+                path=f"document.transform[{rotation_x_name}]",
+            )
+            actual_orders = (
+                base_order,
+                _constraint_order(scale_ik, path=f"document.ik[{ik_name}]"),
+                _constraint_order(
+                    depth_scale,
+                    path=f"document.transform[{depth_name}]",
+                ),
+                _constraint_order(
+                    uniform_scale,
+                    path=f"document.transform[{scale_name}]",
+                ),
+                _constraint_order(
+                    rotation_y,
+                    path=f"document.transform[{rotation_y_name}]",
+                ),
+            )
+            expected_orders = tuple(range(base_order, base_order + 5))
+            if actual_orders != expected_orders:
+                raise ValueError(
+                    f"Spine 3.8 two-axis constraints for {prefix!r} must evaluate "
+                    "as X/IK/Depth/Scale/Y in one dense block; "
+                    f"expected={expected_orders}, actual={actual_orders}"
+                )
+
+            wrapper_set = set(wrappers)
+            layer_set = set(layers)
+            depth_bones = _constraint_bones(
+                depth_scale,
+                path=f"document.transform[{depth_name}]",
+            )
+            if len(depth_bones) != len(wrappers) or set(depth_bones) != wrapper_set:
+                raise ValueError(
+                    f"Spine 3.8 depth constraint {depth_name!r} must constrain every "
+                    f"wrapper exactly once; expected={tuple(wrappers)}, "
+                    f"actual={depth_bones}"
+                )
+
+            scale_bones = _constraint_bones(
+                uniform_scale,
+                path=f"document.transform[{scale_name}]",
+            )
+            expected_scale_bones = {f"{prefix}_scale_rotate_X", *wrappers}
+            if (
+                len(scale_bones) != len(expected_scale_bones)
+                or set(scale_bones) != expected_scale_bones
+                or layer_set.intersection(scale_bones)
+            ):
+                raise ValueError(
+                    f"Spine 3.8 uniform Scale constraint {scale_name!r} must own the "
+                    "collapse bone and depth wrappers, never final layer children; "
+                    f"expected={tuple(sorted(expected_scale_bones))}, "
+                    f"actual={scale_bones}"
+                )
+
+            rotation_y_bones = _constraint_bones(
+                rotation_y,
+                path=f"document.transform[{rotation_y_name}]",
+            )
+            if (
+                len(rotation_y_bones) != len(layers)
+                or set(rotation_y_bones) != layer_set
+            ):
+                raise ValueError(
+                    f"Spine 3.8 Rotation Y constraint {rotation_y_name!r} must own "
+                    f"every final layer exactly once; expected={tuple(layers)}, "
+                    f"actual={rotation_y_bones}"
+                )
 
 
 __all__ = ["Spine38JsonCodec"]
