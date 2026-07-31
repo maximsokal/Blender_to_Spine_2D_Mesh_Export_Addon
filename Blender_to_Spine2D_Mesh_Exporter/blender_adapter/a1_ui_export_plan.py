@@ -8,10 +8,8 @@ from typing import Any, Tuple
 from ..application import (
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
-    A1MultiObjectStage,
     A1SingleObjectExportSettings,
     ExportIssue,
-    IssueSeverity,
 )
 from ..domain.baking import sanitize_filename_stem
 from ..domain.spine.rig_profiles import A1RigSetupPoseMode
@@ -22,7 +20,6 @@ from .a1_ui_selection import (
     _ObjectExportProfile,
     _active_mesh,
     _capture_object_profile,
-    _connect_enabled,
     _ordered_selected_meshes,
 )
 from .a1_ui_settings import _build_sources_from_profiles, _settings_from_profiles
@@ -96,36 +93,17 @@ class A1UiMultiExportPlan:
         return self.connected_sources or self.standalone_sources
 
 
-def _single_connect_fallback_issue(
-    profile: _ObjectExportProfile,
-    *,
-    selected_count: int,
-) -> ExportIssue:
-    if not isinstance(profile, _ObjectExportProfile):
-        raise TypeError("profile must be _ObjectExportProfile")
-    if not isinstance(selected_count, int) or selected_count < 2:
-        raise ValueError("selected_count must be at least two")
-    return ExportIssue(
-        severity=IssueSeverity.WARNING,
-        stage=A1MultiObjectStage.VALIDATE_REQUEST.value,
-        code="A1_SINGLE_CONNECT_FALLBACK",
-        message=(
-            "Exactly one selected object has Connect enabled. Connected export "
-            "requires at least two objects, so all selected objects will be "
-            "exported standalone."
-        ),
-        object_id=profile.object_name,
-        context={
-            "selected_object_count": selected_count,
-            "connected_object_count": 1,
-            "fallback_mode": A1MultiObjectMode.STANDALONE.value,
-        },
-    )
-
-
 def _capture_selected_profiles(
     ordered_objects: Tuple[Any, ...],
 ) -> Tuple[_ObjectExportProfile, ...]:
+    """Capture selected objects for the public standalone multi-export route.
+
+    ``spine2d_connect_settings`` is retained in RNA only so existing ``.blend`` files
+    continue to load safely. Connected and mixed composition are developer-only while
+    Spine target-version support is being finalized, therefore persisted per-object
+    Connect values must never affect the public Export Selected Objects operator.
+    """
+
     if not isinstance(ordered_objects, tuple) or len(ordered_objects) < 2:
         raise ValueError("ordered_objects must contain at least two objects")
     return tuple(
@@ -145,29 +123,10 @@ def _capture_selected_profiles(
                     0,
                 )
             ),
-            connect_enabled=_connect_enabled(obj),
+            connect_enabled=False,
         )
         for obj in ordered_objects
     )
-
-
-def _partition_sources(
-    sources: Tuple[A1MultiObjectSource, ...],
-    profiles: Tuple[_ObjectExportProfile, ...],
-) -> tuple[Tuple[A1MultiObjectSource, ...], Tuple[A1MultiObjectSource, ...]]:
-    if len(sources) != len(profiles):
-        raise ValueError("sources and profiles must correspond one-to-one")
-    connected = tuple(
-        source
-        for source, profile in zip(sources, profiles, strict=True)
-        if profile.connect_enabled
-    )
-    standalone = tuple(
-        source
-        for source, profile in zip(sources, profiles, strict=True)
-        if not profile.connect_enabled
-    )
-    return connected, standalone
 
 
 def build_active_ui_export_plan(context: Any) -> A1UiSingleExportPlan:
@@ -203,6 +162,13 @@ def build_active_ui_export_plan(context: Any) -> A1UiSingleExportPlan:
 
 
 def build_selected_ui_export_plan(context: Any) -> A1UiMultiExportPlan:
+    """Build a public multi-object plan that is always standalone.
+
+    Connected/mixed composition remains available only through explicit internal APIs
+    and acceptance workers. The normal UI operator must not infer a hidden composition
+    mode from persistent object data.
+    """
+
     if context is None:
         raise ValueError("context cannot be None")
     scene = getattr(context, "scene", None)
@@ -213,21 +179,6 @@ def build_selected_ui_export_plan(context: Any) -> A1UiMultiExportPlan:
     scene_profile: _SceneExportProfile = _capture_scene_profile(scene)
     object_profiles = _capture_selected_profiles(ordered_objects)
     sources = _build_sources_from_profiles(object_profiles, scene_profile)
-    connected, standalone = _partition_sources(sources, object_profiles)
-
-    issues: list[ExportIssue] = []
-    if len(connected) == 1:
-        fallback_profile = next(
-            profile for profile in object_profiles if profile.connect_enabled
-        )
-        issues.append(
-            _single_connect_fallback_issue(
-                fallback_profile,
-                selected_count=len(object_profiles),
-            )
-        )
-        connected = ()
-        standalone = sources
 
     base_name = sanitize_filename_stem(object_profiles[0].object_name)
     version_token = spine_json_version_filename_token(
@@ -236,24 +187,17 @@ def build_selected_ui_export_plan(context: Any) -> A1UiMultiExportPlan:
     output_stem = (
         f"{base_name}_plus_{len(object_profiles) - 1}_objects_{version_token}"
     )
-    if connected and standalone:
-        mode = A1MultiObjectMode.MIXED
-    elif connected:
-        mode = A1MultiObjectMode.CONNECTED
-    else:
-        mode = A1MultiObjectMode.STANDALONE
-
     settings = A1MultiObjectExportSettings(
         output_directory=scene_profile.output_directory,
         output_stem=output_stem,
-        mode=mode,
-        anchor_component_id=(connected[0].component_id if connected else None),
+        mode=A1MultiObjectMode.STANDALONE,
+        anchor_component_id=None,
     )
     return A1UiMultiExportPlan(
-        connected_sources=connected,
-        standalone_sources=standalone,
+        connected_sources=(),
+        standalone_sources=sources,
         settings=settings,
-        issues=tuple(issues),
+        issues=(),
     )
 
 
