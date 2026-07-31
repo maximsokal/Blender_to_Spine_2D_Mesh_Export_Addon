@@ -95,3 +95,18 @@ def test_target_finalizer_uses_reported_typed_document_adapter_and_synchronizer(
     assert "adapt_two_axis_document_for_spine41_with_report" in calls
     assert "_synchronize_document_build_for_spine41" in calls
     assert "replace" in calls
+
+
+def test_spine43_remains_on_the_canonical_document_path() -> None:
+    source = ADAPTER.read_text(encoding="utf-8")
+    function = _function(_tree(ADAPTER), "finalize_a1_document_assembly_for_target")
+    function_source = ast.get_source_segment(source, function)
+
+    assert function_source is not None
+    assert "SpineJsonTarget.SPINE_4_2" in function_source
+    assert "SpineJsonTarget.SPINE_4_3" in function_source
+    identity_return = function_source.index("return document_assembly")
+    legacy_adapter_call = function_source.index(
+        "adapt_two_axis_document_for_spine41_with_report"
+    )
+    assert identity_return < legacy_adapter_call
