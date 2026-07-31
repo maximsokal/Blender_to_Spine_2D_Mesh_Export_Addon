@@ -54,12 +54,24 @@ def test_worker_covers_both_profiles_through_exact_spine43_target() -> None:
         "mode=A1MultiObjectMode.STANDALONE",
         'output_stem="Spine43TwoAxisStandaloneMulti"',
         'output_stem="Spine43ThreeAxisStandaloneMulti"',
-        "expected_bones=52",
-        "expected_bones=46",
         "[SPINE43_STANDALONE] PASS production profile exports",
     )
     for fragment in required_fragments:
         assert fragment in source
+
+
+def test_worker_derives_exact_profile_bone_inventories() -> None:
+    source = _source()
+
+    assert "def _expected_profile_bone_names(" in source
+    assert 'f"{prefix}_scale"' in source
+    assert 'f"{prefix}_rotation_Z"' in source
+    assert "SOURCE_VERTEX_COUNT = 4" in source
+    assert "SOURCE_SEGMENT_INDEX = 0" in source
+    assert "expected_bone_names.update(_expected_profile_bone_names" in source
+    assert "actual_bone_names == expected_bone_names" in source
+    assert '"profileBoneInventoryExact": True' in source
+    assert "expected_bones=" not in source
 
 
 def test_worker_enforces_unified_constraint_schema_and_ownership() -> None:
