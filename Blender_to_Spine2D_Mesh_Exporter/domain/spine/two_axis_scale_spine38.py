@@ -7,18 +7,19 @@ The canonical five-phase two-axis graph therefore lets Rotation Y decompose stal
 ``*_1``/``*_2`` world matrices, producing shear when Rotation X or Scale is edited.
 
 The target-specific solution keeps the verified legacy bridge topology and splits the
-single public Scale operation into two constraints driven by the same Scale control:
+single Scale control into two transform constraints driven by the same control bone:
 
-1. the public ``<prefix>_scale`` constraint scales only ``*_scale_rotate_X``;
-2. depth-scale then rebuilds the depth wrappers after that parent scale;
+1. an internal ``<prefix>_scale_spine38_position`` constraint scales only
+   ``<prefix>_scale_rotate_X`` before depth evaluation;
+2. depth-scale rebuilds the depth wrappers after that parent scale;
 3. Rotation Y becomes the first update-cache owner of the final layer children;
-4. an internal ``<prefix>_scale_spine38_layers`` constraint applies the same uniform
-   scale to final layer matrices after all local rotation work is complete.
+4. the public ``<prefix>_scale`` constraint remains the final geometry-scale phase and
+   uniformly scales the final layer matrices after all local rotation work completes.
 
-This preserves both parts of uniform object scaling: layer positions are recomputed from
-the scaled collapse hierarchy, while attachment geometry receives the same uniform
-factor without any later applied-transform decomposition. No epsilon scales, serialized
-JSON repair, or fixture-specific names are used.
+Keeping the public Scale name on the geometry phase preserves diagnostics and runtime
+probes that disable the user-facing scale constraint. The internal position phase keeps
+layer distances responsive to the same control. No epsilon scales, serialized JSON
+repair, or fixture-specific names are used.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Mapping, Sequence, TypeVar
 
-from .model import IKConstraint, SpineDocument, TransformConstraint
+from .model import Bone, IKConstraint, SpineDocument, TransformConstraint
 from .spine41_setup_safety import validate_spine41_setup_safety
 from .two_axis_scale_profile import TwoAxisScaleRigProfile
 from .two_axis_scale_spine41 import adapt_two_axis_document_for_spine41_with_report
@@ -112,22 +113,32 @@ def _optional_transform_by_name(
     return matches[0] if matches else None
 
 
-def _layer_scale_constraint_name(prefix: str) -> str:
+def _position_scale_constraint_name(prefix: str) -> str:
     if not isinstance(prefix, str) or not prefix.strip():
         raise ValueError("prefix must be a non-empty string")
-    return f"{prefix}_scale_spine38_layers"
+    return f"{prefix}_scale_spine38_position"
+
+
+def _expected_bridge_name(wrapper_name: str) -> str:
+    if not isinstance(wrapper_name, str) or not wrapper_name.strip():
+        raise ValueError("wrapper_name must be a non-empty string")
+    return f"{wrapper_name}_spine41_bridge"
 
 
 def _wrapper_layer_pairs(
     document: SpineDocument,
     depth_constraint: TransformConstraint,
-) -> tuple[tuple[str, str], ...]:
-    """Resolve every depth wrapper and its one direct final-layer child."""
+    *,
+    expected_parent_name: str,
+) -> tuple[tuple[str, str, str], ...]:
+    """Resolve and validate every bridge, depth wrapper, and final layer child."""
 
     if not isinstance(document, SpineDocument):
         raise TypeError("document must be SpineDocument")
     if not isinstance(depth_constraint, TransformConstraint):
         raise TypeError("depth_constraint must be TransformConstraint")
+    if not isinstance(expected_parent_name, str) or not expected_parent_name.strip():
+        raise ValueError("expected_parent_name must be a non-empty string")
 
     bone_by_name = {bone.name: bone for bone in document.bones}
     if len(bone_by_name) != len(document.bones):
@@ -138,7 +149,7 @@ def _wrapper_layer_pairs(
         if bone.parent is not None:
             children_by_parent.setdefault(bone.parent, []).append(bone.name)
 
-    pairs: list[tuple[str, str]] = []
+    pairs: list[tuple[str, str, str]] = []
     for wrapper_name in depth_constraint.bones:
         wrapper = bone_by_name.get(wrapper_name)
         if wrapper is None:
@@ -150,21 +161,42 @@ def _wrapper_layer_pairs(
             raise ValueError(
                 f"Depth wrapper {wrapper_name!r} must use inherit=onlyTranslation"
             )
+
+        bridge_name = _expected_bridge_name(wrapper_name)
+        bridge = bone_by_name.get(bridge_name)
+        if bridge is None:
+            raise ValueError(
+                f"Depth wrapper {wrapper_name!r} is missing bridge {bridge_name!r}"
+            )
+        if wrapper.parent != bridge_name:
+            raise ValueError(
+                f"Depth wrapper {wrapper_name!r} must be parented to {bridge_name!r}"
+            )
+        if bridge.parent != expected_parent_name:
+            raise ValueError(
+                f"Depth bridge {bridge_name!r} must be parented to "
+                f"{expected_parent_name!r}; actual={bridge.parent!r}"
+            )
+        if bridge.extras.get("inherit") != "onlyTranslation":
+            raise ValueError(
+                f"Depth bridge {bridge_name!r} must use inherit=onlyTranslation"
+            )
+
         children = tuple(children_by_parent.get(wrapper_name, ()))
         if len(children) != 1:
             raise ValueError(
                 f"Depth wrapper {wrapper_name!r} must have exactly one direct layer "
                 f"child, found {len(children)}"
             )
-        pairs.append((wrapper_name, children[0]))
+        pairs.append((bridge_name, wrapper_name, children[0]))
 
     if not pairs:
         raise ValueError(
             f"Depth constraint {depth_constraint.name!r} must constrain wrappers"
         )
-    if len({wrapper for wrapper, _layer in pairs}) != len(pairs):
+    if len({wrapper for _bridge, wrapper, _layer in pairs}) != len(pairs):
         raise ValueError("Depth wrapper names must be unique")
-    if len({layer for _wrapper, layer in pairs}) != len(pairs):
+    if len({layer for _bridge, _wrapper, layer in pairs}) != len(pairs):
         raise ValueError("Final layer names must be unique")
     return tuple(pairs)
 
@@ -189,132 +221,171 @@ def _validate_scale_only_constraint(constraint: TransformConstraint) -> None:
             )
 
 
-def _split_uniform_scale_constraint(
-    source: TransformConstraint,
+def _canonical_scale_layers(
+    constraint: TransformConstraint,
     *,
-    existing_layer_scale: TransformConstraint | None,
     collapse_bone: str,
     layers: tuple[str, ...],
-    layer_scale_name: str,
-    layer_scale_order: int,
-) -> tuple[TransformConstraint, TransformConstraint, bool]:
-    """Return public position-scale and internal geometry-scale constraints."""
+) -> tuple[str, ...]:
+    """Validate canonical collapse-plus-layers ownership and preserve layer order."""
 
-    if not isinstance(source, TransformConstraint):
-        raise TypeError("source must be TransformConstraint")
+    _validate_scale_only_constraint(constraint)
     if not isinstance(collapse_bone, str) or not collapse_bone.strip():
         raise ValueError("collapse_bone must be a non-empty string")
     if not isinstance(layers, tuple) or not layers:
         raise ValueError("layers must be a non-empty tuple")
     if len(layers) != len(set(layers)):
         raise ValueError("layers must be unique")
-    if not isinstance(layer_scale_name, str) or not layer_scale_name.strip():
-        raise ValueError("layer_scale_name must be a non-empty string")
-    if (
-        isinstance(layer_scale_order, bool)
-        or not isinstance(layer_scale_order, int)
-        or layer_scale_order < 0
-    ):
-        raise ValueError("layer_scale_order must be a non-negative integer")
 
-    _validate_scale_only_constraint(source)
+    if constraint.bones.count(collapse_bone) != 1:
+        raise ValueError(
+            f"Uniform scale constraint {constraint.name!r} must contain exactly one "
+            f"collapse bone {collapse_bone!r}; actual={constraint.bones}"
+        )
     layer_set = set(layers)
-
-    if existing_layer_scale is None:
-        if source.bones.count(collapse_bone) != 1:
-            raise ValueError(
-                f"Uniform scale constraint {source.name!r} must contain exactly one "
-                f"collapse bone {collapse_bone!r}; actual={source.bones}"
-            )
-        source_layers = tuple(name for name in source.bones if name in layer_set)
-        if (
-            len(source.bones) != len(layers) + 1
-            or len(source_layers) != len(layers)
-            or set(source_layers) != layer_set
-        ):
-            raise ValueError(
-                f"Uniform scale constraint {source.name!r} must contain the collapse "
-                f"bone and every final layer exactly once before Spine 3.8 splitting; "
-                f"collapse={collapse_bone!r}, layers={layers}, actual={source.bones}"
-            )
-        public_scale = replace(source, bones=(collapse_bone,))
-        layer_scale = replace(
-            source,
-            name=layer_scale_name,
-            order=layer_scale_order,
-            bones=source_layers,
-        )
-        return public_scale, layer_scale, True
-
-    _validate_scale_only_constraint(existing_layer_scale)
-    if source.bones != (collapse_bone,):
-        raise ValueError(
-            f"Adapted public Scale constraint {source.name!r} must constrain only "
-            f"{collapse_bone!r}; actual={source.bones}"
-        )
-    if existing_layer_scale.target != source.target:
-        raise ValueError(
-            f"Internal Scale constraint {existing_layer_scale.name!r} must use target "
-            f"{source.target!r}; actual={existing_layer_scale.target!r}"
-        )
-    if dict(existing_layer_scale.extras) != dict(source.extras):
-        raise ValueError(
-            f"Internal Scale constraint {existing_layer_scale.name!r} must preserve "
-            "the public Scale payload"
-        )
+    source_layers = tuple(name for name in constraint.bones if name in layer_set)
     if (
-        existing_layer_scale.order != layer_scale_order
-        or len(existing_layer_scale.bones) != len(layers)
-        or set(existing_layer_scale.bones) != layer_set
+        len(constraint.bones) != len(layers) + 1
+        or len(source_layers) != len(layers)
+        or set(source_layers) != layer_set
     ):
         raise ValueError(
-            f"Internal Scale constraint {existing_layer_scale.name!r} must own every "
-            f"final layer at order {layer_scale_order}; expected={layers}, "
-            f"actual_order={existing_layer_scale.order}, "
-            f"actual_bones={existing_layer_scale.bones}"
+            f"Uniform scale constraint {constraint.name!r} must contain the collapse "
+            f"bone and every final layer exactly once; collapse={collapse_bone!r}, "
+            f"layers={layers}, actual={constraint.bones}"
         )
-    return source, existing_layer_scale, False
+    return source_layers
 
 
-def _validate_runtime_orders(
+def _validate_canonical_orders(
     *,
     rotation_x: TransformConstraint,
     scale_ik: IKConstraint,
-    public_scale: TransformConstraint,
+    scale: TransformConstraint,
     depth_scale: TransformConstraint,
     rotation_y: TransformConstraint,
-    layer_scale: TransformConstraint | None,
-) -> tuple[int, bool]:
-    """Validate either canonical five-phase or adapted six-phase order."""
-
+) -> int:
     base_order = rotation_x.order
-    canonical_orders = tuple(range(base_order, base_order + 5))
-    authored_orders = (
+    actual = (
         rotation_x.order,
         scale_ik.order,
-        public_scale.order,
+        scale.order,
         depth_scale.order,
         rotation_y.order,
     )
+    expected = tuple(range(base_order, base_order + 5))
+    if actual != expected:
+        raise ValueError(
+            "Spine 3.8 two-axis constraints must form the canonical "
+            "X/IK/Scale/Depth/Y block before target adaptation; "
+            f"expected={expected}, actual={actual}"
+        )
+    return base_order
 
-    if layer_scale is None:
-        if authored_orders != canonical_orders:
-            raise ValueError(
-                "Spine 3.8 two-axis constraints must form the canonical "
-                "X/IK/Scale/Depth/Y block before target adaptation; "
-                f"expected={canonical_orders}, actual={authored_orders}"
-            )
-        return base_order + 5, True
 
-    adapted_orders = authored_orders + (layer_scale.order,)
-    expected_adapted = tuple(range(base_order, base_order + 6))
-    if adapted_orders != expected_adapted:
+def _validate_adapted_orders(
+    *,
+    rotation_x: TransformConstraint,
+    scale_ik: IKConstraint,
+    position_scale: TransformConstraint,
+    depth_scale: TransformConstraint,
+    rotation_y: TransformConstraint,
+    public_scale: TransformConstraint,
+) -> int:
+    base_order = rotation_x.order
+    actual = (
+        rotation_x.order,
+        scale_ik.order,
+        position_scale.order,
+        depth_scale.order,
+        rotation_y.order,
+        public_scale.order,
+    )
+    expected = tuple(range(base_order, base_order + 6))
+    if actual != expected:
         raise ValueError(
             "Spine 3.8 two-axis constraints must form the adapted "
             "X/IK/ScalePosition/Depth/Y/ScaleGeometry block; "
-            f"expected={expected_adapted}, actual={adapted_orders}"
+            f"expected={expected}, actual={actual}"
         )
-    return base_order + 5, False
+    return base_order
+
+
+def _build_scale_phases(
+    public_scale: TransformConstraint,
+    *,
+    existing_position_scale: TransformConstraint | None,
+    collapse_bone: str,
+    layers: tuple[str, ...],
+    position_scale_name: str,
+    base_order: int,
+) -> tuple[TransformConstraint, TransformConstraint, bool]:
+    """Return internal position-scale and public geometry-scale constraints."""
+
+    if not isinstance(public_scale, TransformConstraint):
+        raise TypeError("public_scale must be TransformConstraint")
+    if not isinstance(position_scale_name, str) or not position_scale_name.strip():
+        raise ValueError("position_scale_name must be a non-empty string")
+    if isinstance(base_order, bool) or not isinstance(base_order, int) or base_order < 0:
+        raise ValueError("base_order must be a non-negative integer")
+
+    if existing_position_scale is None:
+        source_layers = _canonical_scale_layers(
+            public_scale,
+            collapse_bone=collapse_bone,
+            layers=layers,
+        )
+        position_scale = replace(
+            public_scale,
+            name=position_scale_name,
+            order=base_order + 2,
+            bones=(collapse_bone,),
+        )
+        adapted_public_scale = replace(
+            public_scale,
+            order=base_order + 5,
+            bones=source_layers,
+        )
+        return position_scale, adapted_public_scale, True
+
+    _validate_scale_only_constraint(existing_position_scale)
+    _validate_scale_only_constraint(public_scale)
+    if existing_position_scale.target != public_scale.target:
+        raise ValueError(
+            f"Split Scale constraints {existing_position_scale.name!r} and "
+            f"{public_scale.name!r} must use the same target"
+        )
+    if dict(existing_position_scale.extras) != dict(public_scale.extras):
+        raise ValueError("Split Spine 3.8 Scale constraints must preserve one payload")
+    if existing_position_scale.bones != (collapse_bone,):
+        raise ValueError(
+            f"Position Scale constraint {existing_position_scale.name!r} must constrain "
+            f"only {collapse_bone!r}; actual={existing_position_scale.bones}"
+        )
+    if existing_position_scale.order != base_order + 2:
+        raise ValueError(
+            f"Position Scale constraint {existing_position_scale.name!r} must use "
+            f"order {base_order + 2}; actual={existing_position_scale.order}"
+        )
+    if (
+        public_scale.order != base_order + 5
+        or len(public_scale.bones) != len(layers)
+        or set(public_scale.bones) != set(layers)
+    ):
+        raise ValueError(
+            f"Public Scale constraint {public_scale.name!r} must own every final layer "
+            f"at order {base_order + 5}; expected={layers}, "
+            f"actual_order={public_scale.order}, actual_bones={public_scale.bones}"
+        )
+    return existing_position_scale, public_scale, False
+
+
+def _identity_index_map(bones: tuple[Bone, ...]) -> Mapping[int, int]:
+    if not isinstance(bones, tuple) or not bones:
+        raise ValueError("bones must be a non-empty tuple")
+    if not all(isinstance(bone, Bone) for bone in bones):
+        raise TypeError("bones must contain Bone values")
+    return MappingProxyType({index: index for index in range(len(bones))})
 
 
 def adapt_two_axis_document_for_spine38_with_report(
@@ -332,12 +403,24 @@ def adapt_two_axis_document_for_spine38_with_report(
     if not isinstance(prefix, str) or not prefix.strip():
         raise ValueError("prefix must be a non-empty string")
 
-    legacy = adapt_two_axis_document_for_spine41_with_report(
-        document,
-        profile=profile,
-        prefix=prefix,
+    position_scale_name = _position_scale_constraint_name(prefix)
+    preexisting_position_scale = _optional_transform_by_name(
+        document.transform,
+        position_scale_name,
     )
-    adapted_document = legacy.document
+    if preexisting_position_scale is None:
+        legacy = adapt_two_axis_document_for_spine41_with_report(
+            document,
+            profile=profile,
+            prefix=prefix,
+        )
+        adapted_document = legacy.document
+        old_to_new_bone_indices = legacy.old_to_new_bone_indices
+        reported_bridge_names = legacy.bridge_bone_names
+    else:
+        adapted_document = document
+        old_to_new_bone_indices = _identity_index_map(document.bones)
+        reported_bridge_names = ()
 
     rotation_x = _constraint_by_name(
         adapted_document.transform,
@@ -364,15 +447,24 @@ def adapt_two_axis_document_for_spine38_with_report(
         profile.rotation_y_constraint(prefix),
         expected_type=TransformConstraint,
     )
-    layer_scale_name = _layer_scale_constraint_name(prefix)
-    existing_layer_scale = _optional_transform_by_name(
+    existing_position_scale = _optional_transform_by_name(
         adapted_document.transform,
-        layer_scale_name,
+        position_scale_name,
     )
 
-    wrapper_layer_pairs = _wrapper_layer_pairs(adapted_document, depth_scale)
-    wrappers = tuple(wrapper for wrapper, _layer in wrapper_layer_pairs)
-    layers = tuple(layer for _wrapper, layer in wrapper_layer_pairs)
+    bridge_wrapper_layer = _wrapper_layer_pairs(
+        adapted_document,
+        depth_scale,
+        expected_parent_name=profile.rotate_x_bone(prefix),
+    )
+    bridge_names = tuple(item[0] for item in bridge_wrapper_layer)
+    wrappers = tuple(item[1] for item in bridge_wrapper_layer)
+    layers = tuple(item[2] for item in bridge_wrapper_layer)
+    if reported_bridge_names and reported_bridge_names != bridge_names:
+        raise ValueError(
+            "Spine 3.8 bridge report differs from validated document topology: "
+            f"reported={reported_bridge_names}, actual={bridge_names}"
+        )
     if depth_scale.bones != wrappers:
         raise ValueError(
             f"Depth constraint {depth_scale.name!r} must preserve wrapper order; "
@@ -384,44 +476,60 @@ def adapt_two_axis_document_for_spine38_with_report(
             f"layer exactly once; expected={layers}, actual={rotation_y.bones}"
         )
 
-    layer_scale_order, should_create_layer_scale = _validate_runtime_orders(
-        rotation_x=rotation_x,
-        scale_ik=scale_ik,
-        public_scale=public_scale,
-        depth_scale=depth_scale,
-        rotation_y=rotation_y,
-        layer_scale=existing_layer_scale,
-    )
-    public_scale, layer_scale, created_layer_scale = _split_uniform_scale_constraint(
+    if existing_position_scale is None:
+        base_order = _validate_canonical_orders(
+            rotation_x=rotation_x,
+            scale_ik=scale_ik,
+            scale=public_scale,
+            depth_scale=depth_scale,
+            rotation_y=rotation_y,
+        )
+    else:
+        base_order = _validate_adapted_orders(
+            rotation_x=rotation_x,
+            scale_ik=scale_ik,
+            position_scale=existing_position_scale,
+            depth_scale=depth_scale,
+            rotation_y=rotation_y,
+            public_scale=public_scale,
+        )
+
+    position_scale, public_scale, created_position_scale = _build_scale_phases(
         public_scale,
-        existing_layer_scale=existing_layer_scale,
+        existing_position_scale=existing_position_scale,
         collapse_bone=profile.scale_rotate_x_bone(prefix),
         layers=layers,
-        layer_scale_name=layer_scale_name,
-        layer_scale_order=layer_scale_order,
+        position_scale_name=position_scale_name,
+        base_order=base_order,
     )
-    if created_layer_scale is not should_create_layer_scale:
-        raise RuntimeError("Spine 3.8 Scale split state is inconsistent")
 
     transformed_by_name = {
         constraint.name: constraint for constraint in adapted_document.transform
     }
+    transformed_by_name[position_scale.name] = position_scale
     transformed_by_name[public_scale.name] = public_scale
-    transformed_by_name[layer_scale.name] = layer_scale
-    transform = tuple(
-        transformed_by_name[constraint.name]
-        for constraint in adapted_document.transform
-    )
-    if created_layer_scale:
-        transform += (layer_scale,)
+    if created_position_scale:
+        transform_values: list[TransformConstraint] = []
+        for constraint in adapted_document.transform:
+            if constraint.name == public_scale.name:
+                transform_values.append(position_scale)
+                transform_values.append(public_scale)
+            else:
+                transform_values.append(constraint)
+        transform = tuple(transform_values)
+    else:
+        transform = tuple(
+            transformed_by_name[constraint.name]
+            for constraint in adapted_document.transform
+        )
 
     final_document = replace(adapted_document, transform=transform)
     SpineValidator().validate_or_raise(final_document)
     validate_spine41_setup_safety(final_document)
     return Spine38TwoAxisDocumentAdaptation(
         document=final_document,
-        old_to_new_bone_indices=legacy.old_to_new_bone_indices,
-        bridge_bone_names=legacy.bridge_bone_names,
+        old_to_new_bone_indices=old_to_new_bone_indices,
+        bridge_bone_names=bridge_names,
     )
 
 
