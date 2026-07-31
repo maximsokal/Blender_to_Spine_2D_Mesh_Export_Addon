@@ -179,10 +179,20 @@ def test_connected_two_axis_schedule_is_layer_grouped_and_semantically_ordered()
     assert schedule.unique_orders == tuple(range(15))
     assert len(orders) == len(set(orders)) == 15
     assert set(orders) == set(schedule.unique_orders)
-    # Assignment tuples preserve source object order while order values come from layer.
-    assert schedule.object_rotation_x == (("first", 2), ("second", 1))
-    assert schedule.object_scale_depth == (("first", 11), ("second", 10))
+    assert (
+        schedule.global_rotation_x,
+        schedule.global_scale_ik,
+        schedule.global_scale,
+        schedule.global_scale_depth,
+        schedule.global_rotation_y,
+    ) == (0, 1, 2, 3, 4)
+    # Assignment tuples preserve source-object order while order values come from layer.
+    assert schedule.object_rotation_x == (("first", 6), ("second", 5))
+    assert schedule.object_scale_depth == (("first", 12), ("second", 11))
     assert schedule.object_rotation_y == (("first", 14), ("second", 13))
+    assert schedule.global_rotation_y < min(
+        order for _, order in schedule.object_rotation_x
+    )
 
     for prefix in ("First", "Second"):
         assert (
