@@ -11,7 +11,6 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1MultiObjectMode,
     A1SingleObjectExportSettings,
     ExportSettings,
-    IssueSeverity,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import a1_ui_export_plan
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_multi_object_contracts import (
@@ -86,6 +85,8 @@ def test_active_ui_plan_explicitly_requests_normalized_single_setup(monkeypatch)
 
 
 def test_multi_ui_plan_preserves_explicit_mixed_subgroup_order():
+    """Internal callers may still build an explicit developer-only mixed plan."""
+
     first = _source(1, "First")
     second = _source(2, "Second")
     third = _source(3, "Third")
@@ -120,13 +121,76 @@ def test_multi_ui_plan_rejects_mode_and_partition_disagreement():
         )
 
 
-def test_single_connect_selection_falls_back_to_standalone_once(monkeypatch):
-    objects = (SimpleNamespace(name="First"), SimpleNamespace(name="Second"))
-    profiles = (
-        _ObjectExportProfile(objects[0], "First", 0, 0, True),
-        _ObjectExportProfile(objects[1], "Second", 0, 0, False),
+def test_capture_selected_profiles_ignores_persisted_connect_values(monkeypatch):
+    objects = (
+        SimpleNamespace(
+            name="First",
+            spine2d_bake_settings=SimpleNamespace(
+                bake_frame_start=3,
+                frames_for_render=4,
+            ),
+            spine2d_connect_settings=SimpleNamespace(enabled=True),
+        ),
+        SimpleNamespace(
+            name="Second",
+            spine2d_bake_settings=SimpleNamespace(
+                bake_frame_start=5,
+                frames_for_render=6,
+            ),
+            spine2d_connect_settings=SimpleNamespace(enabled=True),
+        ),
     )
-    sources = (_source(1, "First"), _source(2, "Second"))
+    captured: list[dict[str, object]] = []
+
+    def _capture(obj, **kwargs):
+        captured.append(dict(kwargs))
+        return _ObjectExportProfile(
+            obj,
+            obj.name,
+            int(kwargs["sequence_start_frame"]),
+            int(kwargs["sequence_frame_count"]),
+            bool(kwargs["connect_enabled"]),
+        )
+
+    monkeypatch.setattr(a1_ui_export_plan, "_capture_object_profile", _capture)
+
+    profiles = a1_ui_export_plan._capture_selected_profiles(objects)
+
+    assert tuple(profile.connect_enabled for profile in profiles) == (False, False)
+    assert captured == [
+        {
+            "sequence_start_frame": 3,
+            "sequence_frame_count": 4,
+            "connect_enabled": False,
+        },
+        {
+            "sequence_start_frame": 5,
+            "sequence_frame_count": 6,
+            "connect_enabled": False,
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "profiles",
+    (
+        (
+            _ObjectExportProfile(SimpleNamespace(name="First"), "First", 0, 0, True),
+            _ObjectExportProfile(SimpleNamespace(name="Second"), "Second", 0, 0, False),
+        ),
+        (
+            _ObjectExportProfile(SimpleNamespace(name="First"), "First", 0, 0, True),
+            _ObjectExportProfile(SimpleNamespace(name="Second"), "Second", 0, 0, True),
+            _ObjectExportProfile(SimpleNamespace(name="Third"), "Third", 0, 0, False),
+        ),
+    ),
+)
+def test_public_selected_ui_plan_is_always_standalone(monkeypatch, profiles):
+    objects = tuple(profile.source_object for profile in profiles)
+    sources = tuple(
+        _source(index, profile.object_name)
+        for index, profile in enumerate(profiles, start=1)
+    )
     monkeypatch.setattr(
         a1_ui_export_plan,
         "_ordered_selected_meshes",
@@ -153,56 +217,7 @@ def test_single_connect_selection_falls_back_to_standalone_once(monkeypatch):
     )
 
     assert plan.settings.mode is A1MultiObjectMode.STANDALONE
+    assert plan.settings.anchor_component_id is None
     assert plan.connected_sources == ()
     assert plan.standalone_sources == sources
-    assert len(plan.issues) == 1
-    assert plan.issues[0].severity is IssueSeverity.WARNING
-    assert plan.issues[0].code == "A1_SINGLE_CONNECT_FALLBACK"
-
-
-def test_two_connected_and_one_standalone_build_mixed_plan(monkeypatch):
-    objects = (
-        SimpleNamespace(name="First"),
-        SimpleNamespace(name="Second"),
-        SimpleNamespace(name="Third"),
-    )
-    profiles = (
-        _ObjectExportProfile(objects[0], "First", 0, 0, True),
-        _ObjectExportProfile(objects[1], "Second", 0, 0, True),
-        _ObjectExportProfile(objects[2], "Third", 0, 0, False),
-    )
-    sources = (
-        _source(1, "First"),
-        _source(2, "Second"),
-        _source(3, "Third"),
-    )
-    monkeypatch.setattr(
-        a1_ui_export_plan,
-        "_ordered_selected_meshes",
-        lambda _context: objects,
-    )
-    monkeypatch.setattr(
-        a1_ui_export_plan,
-        "_capture_scene_profile",
-        lambda _scene: SimpleNamespace(output_directory=Path("ui-plan-output")),
-    )
-    monkeypatch.setattr(
-        a1_ui_export_plan,
-        "_capture_selected_profiles",
-        lambda _objects: profiles,
-    )
-    monkeypatch.setattr(
-        a1_ui_export_plan,
-        "_build_sources_from_profiles",
-        lambda _profiles, _scene: sources,
-    )
-
-    plan = a1_ui_export_plan.build_selected_ui_export_plan(
-        SimpleNamespace(scene=object())
-    )
-
-    assert plan.settings.mode is A1MultiObjectMode.MIXED
-    assert plan.connected_sources == sources[:2]
-    assert plan.standalone_sources == sources[2:]
-    assert plan.settings.anchor_component_id == sources[0].component_id
     assert plan.issues == ()
