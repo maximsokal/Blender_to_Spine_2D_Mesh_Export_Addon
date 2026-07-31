@@ -126,14 +126,14 @@ def _spine38_orders_for_prefix(
     return (
         transforms[f"{prefix}_rotation_X_constraint"].order,
         ik[f"{prefix}_IK"].order,
-        transforms[f"{prefix}_scale"].order,
+        transforms[f"{prefix}_scale_spine38_position"].order,
         transforms[f"{prefix}_scale_rotate_X_constraint"].order,
         transforms[f"{prefix}_rotation_Y"].order,
-        transforms[f"{prefix}_scale_spine38_layers"].order,
+        transforms[f"{prefix}_scale"].order,
     )
 
 
-def test_spine38_splits_uniform_scale_around_depth_and_rotation_y() -> None:
+def test_spine38_splits_scale_position_before_depth_and_geometry_after_y() -> None:
     assembly = _assembly(SpineJsonTarget.SPINE_3_8)
     source_document = assembly.document
     profile = assembly.rig.profile
@@ -145,21 +145,23 @@ def test_spine38_splits_uniform_scale_around_depth_and_rotation_y() -> None:
     )
     document = finalized.document
     transforms = _transform_by_name(document)
-    public_scale = transforms[profile.scale_constraint("Cone")]
+    position_scale = transforms["Cone_scale_spine38_position"]
     depth_scale = transforms[profile.scale_depth_constraint("Cone")]
     rotation_y = transforms[profile.rotation_y_constraint("Cone")]
-    layer_scale = transforms["Cone_scale_spine38_layers"]
+    public_scale = transforms[profile.scale_constraint("Cone")]
 
     assert _spine38_orders_for_prefix(document, "Cone") == (0, 1, 2, 3, 4, 5)
 
     wrappers = assembly.rig.info.sub_bone_scale_names
     layers = assembly.rig.info.sub_bone_names
     assert depth_scale.bones == wrappers
-    assert public_scale.bones == (profile.scale_rotate_x_bone("Cone"),)
+    assert position_scale.bones == (profile.scale_rotate_x_bone("Cone"),)
     assert set(rotation_y.bones) == set(layers)
-    assert set(layer_scale.bones) == set(layers)
-    assert layer_scale.target == public_scale.target == profile.scale_control_bone("Cone")
-    assert dict(layer_scale.extras) == dict(public_scale.extras)
+    assert set(public_scale.bones) == set(layers)
+    assert position_scale.target == public_scale.target == profile.scale_control_bone(
+        "Cone"
+    )
+    assert dict(position_scale.extras) == dict(public_scale.extras)
 
     final_bones = {bone.name: bone for bone in document.bones}
     for wrapper_name in wrappers:
@@ -209,7 +211,7 @@ def test_spine38_standalone_composition_preserves_each_six_phase_block() -> None
     )
 
 
-def test_spine38_codec_serializes_only_the_split_scale_topology() -> None:
+def test_spine38_codec_serializes_internal_position_and_public_geometry_scale() -> None:
     finalized = _finalized(SpineJsonTarget.SPINE_3_8)
     profile = finalized.rig.profile
     payload = json.loads(
@@ -226,19 +228,20 @@ def test_spine38_codec_serializes_only_the_split_scale_topology() -> None:
     assert (
         transform_by_name[profile.rotation_x_constraint("Cone")]["order"],
         ik_by_name[profile.scale_ik_constraint("Cone")]["order"],
-        transform_by_name[profile.scale_constraint("Cone")]["order"],
+        transform_by_name["Cone_scale_spine38_position"]["order"],
         transform_by_name[profile.scale_depth_constraint("Cone")]["order"],
         transform_by_name[profile.rotation_y_constraint("Cone")]["order"],
-        transform_by_name["Cone_scale_spine38_layers"]["order"],
+        transform_by_name[profile.scale_constraint("Cone")]["order"],
     ) == (0, 1, 2, 3, 4, 5)
-    assert transform_by_name[profile.scale_constraint("Cone")]["bones"] == [
+    assert transform_by_name["Cone_scale_spine38_position"]["bones"] == [
         profile.scale_rotate_x_bone("Cone")
     ]
-    assert set(transform_by_name["Cone_scale_spine38_layers"]["bones"]) == set(
+    assert set(transform_by_name[profile.scale_constraint("Cone")]["bones"]) == set(
         finalized.rig.info.sub_bone_names
     )
     assert (
-        transform_by_name["Cone_scale_spine38_layers"]["target"]
+        transform_by_name["Cone_scale_spine38_position"]["target"]
+        == transform_by_name[profile.scale_constraint("Cone")]["target"]
         == profile.scale_control_bone("Cone")
     )
 
@@ -254,21 +257,20 @@ def test_spine38_codec_rejects_the_previous_stale_child_topology() -> None:
     source_scale = _transform_by_name(assembly.document)[
         profile.scale_constraint("Cone")
     ]
-    unsafe_scale_bones = tuple(
+    old_scale_bones = tuple(
         profile.scale_rotate_x_bone("Cone")
         if name == profile.rotate_x_bone("Cone")
         else name
         for name in source_scale.bones
     )
     scale_name = profile.scale_constraint("Cone")
-    depth_name = profile.scale_depth_constraint("Cone")
-    layer_scale_name = "Cone_scale_spine38_layers"
+    position_scale_name = "Cone_scale_spine38_position"
     unsafe_transform = tuple(
-        replace(constraint, bones=unsafe_scale_bones)
+        replace(constraint, order=2, bones=old_scale_bones)
         if constraint.name == scale_name
         else constraint
         for constraint in finalized.document.transform
-        if constraint.name != layer_scale_name
+        if constraint.name != position_scale_name
     )
     unsafe_document = replace(
         finalized.document,
@@ -332,7 +334,7 @@ def test_spine40_and_spine41_keep_their_working_scale_before_depth_policy(
     assert set(assembly.rig.info.sub_bone_scale_names).isdisjoint(
         uniform_scale.bones
     )
-    assert "Cone_scale_spine38_layers" not in transforms
+    assert "Cone_scale_spine38_position" not in transforms
 
 
 def test_spine38_adapter_rejects_non_dense_phase_drift() -> None:
