@@ -1,4 +1,4 @@
-"""Contracts for production Spine 4.0, 4.1, and 4.2 codec selection."""
+"""Contracts for production Spine 4.0 through 4.3 codec selection."""
 
 from __future__ import annotations
 
@@ -146,13 +146,14 @@ def test_v42_facade_forwards_the_caller_selected_validator() -> None:
         )
 
 
-def test_spine_four_zero_through_four_two_have_registered_production_codecs() -> None:
+def test_spine_four_zero_through_four_three_have_registered_production_codecs() -> None:
     codecs = registered_spine_json_codecs()
 
     assert tuple(codecs) == (
         SpineJsonTarget.SPINE_4_0,
         SpineJsonTarget.SPINE_4_1,
         SpineJsonTarget.SPINE_4_2,
+        SpineJsonTarget.SPINE_4_3,
     )
     for target in codecs:
         assert codecs[target].target is target
