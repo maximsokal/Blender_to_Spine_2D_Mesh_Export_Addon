@@ -16,6 +16,9 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.model import (
     SpineDocument,
     TransformConstraint,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.validator import (
+    SpineValidationError,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_codecs import (
     Spine43JsonCodec,
     SpineJsonCodecContext,
@@ -259,7 +262,7 @@ def test_spine43_codec_rejects_duplicate_global_orders() -> None:
         ik=(replace(document.ik[0], order=0),),
     )
 
-    with pytest.raises(Exception, match="DUPLICATE_CONSTRAINT_ORDER|globally unique"):
+    with pytest.raises(SpineValidationError, match="DUPLICATE_CONSTRAINT_ORDER"):
         serialize_spine_document(broken, SpineJsonTarget.SPINE_4_3)
 
 
