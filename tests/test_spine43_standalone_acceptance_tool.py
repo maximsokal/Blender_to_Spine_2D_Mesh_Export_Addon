@@ -58,12 +58,13 @@ def _write_case_artifacts(
         "profile": profile_name,
         "version": acceptance.EXPECTED_VERSION,
         "mode": "STANDALONE",
-        "bones": expected["bones"],
+        "bones": 1,
         "slots": 3,
         "skins": 1,
         "constraints": constraint_count,
         "ik": expected["ik"],
         "transform": expected["transform"],
+        "profileBoneInventoryExact": True,
         "connectedWrapperPresent": False,
         "crossObjectReferencesPresent": False,
         "legacyRootConstraintCollectionsPresent": False,
@@ -173,6 +174,40 @@ def test_validate_blender_report_rejects_invalid_top_level_evidence(
         match=message,
     ):
         acceptance.validate_blender_report(report, output_root=tmp_path)
+
+
+def test_validate_blender_report_rejects_unverified_profile_bone_inventory(
+    tmp_path: Path,
+) -> None:
+    report = _report(tmp_path)
+    broken = deepcopy(report)
+    broken_profiles = broken["profiles"]
+    assert isinstance(broken_profiles, list)
+    assert isinstance(broken_profiles[0], dict)
+    broken_profiles[0]["profileBoneInventoryExact"] = False
+
+    with pytest.raises(
+        acceptance.Spine43StandaloneAcceptanceError,
+        match="exact profile bone inventory",
+    ):
+        acceptance.validate_blender_report(broken, output_root=tmp_path)
+
+
+def test_validate_blender_report_rejects_report_json_bone_count_drift(
+    tmp_path: Path,
+) -> None:
+    report = _report(tmp_path)
+    broken = deepcopy(report)
+    broken_profiles = broken["profiles"]
+    assert isinstance(broken_profiles, list)
+    assert isinstance(broken_profiles[0], dict)
+    broken_profiles[0]["bones"] = 2
+
+    with pytest.raises(
+        acceptance.Spine43StandaloneAcceptanceError,
+        match="differs between worker report and JSON",
+    ):
+        acceptance.validate_blender_report(broken, output_root=tmp_path)
 
 
 def test_validate_blender_report_rejects_connected_wrapper_claim(tmp_path: Path) -> None:
