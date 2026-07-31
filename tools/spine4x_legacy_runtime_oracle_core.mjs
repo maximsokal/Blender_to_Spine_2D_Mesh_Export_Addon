@@ -229,6 +229,45 @@ function runtimeConstraintObjects(skeleton) {
   ];
 }
 
+function runtimeConstraintDiagnostics(skeleton) {
+  const result = [];
+  const collections = [
+    ['ik', skeleton.ikConstraints],
+    ['transform', skeleton.transformConstraints],
+    ['path', skeleton.pathConstraints],
+  ];
+  for (const [collection, constraints] of collections) {
+    if (!Array.isArray(constraints)) continue;
+    for (let index = 0; index < constraints.length; index += 1) {
+      const constraint = constraints[index];
+      const data = constraint?.data;
+      result.push({
+        collection,
+        index,
+        name: data?.name ?? null,
+        order: data?.order ?? null,
+        bones: Array.isArray(constraint?.bones)
+          ? constraint.bones.map((bone) => bone?.data?.name ?? null)
+          : [],
+        target:
+          constraint?.target?.data?.name ??
+          constraint?.target?.bone?.data?.name ??
+          null,
+      });
+    }
+  }
+  result.sort((left, right) => {
+    const leftOrder = Number.isInteger(left.order) ? left.order : Number.MAX_SAFE_INTEGER;
+    const rightOrder = Number.isInteger(right.order) ? right.order : Number.MAX_SAFE_INTEGER;
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    if (left.collection !== right.collection) {
+      return left.collection.localeCompare(right.collection);
+    }
+    return left.index - right.index;
+  });
+  return result;
+}
+
 function validateUpdateCache(skeleton, expectedRecords) {
   const constraints = runtimeConstraintObjects(skeleton);
   const expectedNames = expectedRecords.map((record) => record.name).sort();
@@ -265,7 +304,50 @@ function updateWorldTransform(runtime, skeleton) {
   }
 }
 
-function validateBoneMatrices(skeleton) {
+function diagnosticNumber(value) {
+  if (typeof value !== 'number') return value;
+  if (Number.isNaN(value)) return 'NaN';
+  if (value === Number.POSITIVE_INFINITY) return 'Infinity';
+  if (value === Number.NEGATIVE_INFINITY) return '-Infinity';
+  return value;
+}
+
+function boneDiagnostic(bone, index) {
+  const data = bone?.data;
+  return {
+    index,
+    boneName: data?.name ?? null,
+    parentName: bone?.parent?.data?.name ?? null,
+    setup: {
+      x: diagnosticNumber(data?.x),
+      y: diagnosticNumber(data?.y),
+      rotation: diagnosticNumber(data?.rotation),
+      scaleX: diagnosticNumber(data?.scaleX),
+      scaleY: diagnosticNumber(data?.scaleY),
+      shearX: diagnosticNumber(data?.shearX),
+      shearY: diagnosticNumber(data?.shearY),
+    },
+    local: {
+      x: diagnosticNumber(bone?.x),
+      y: diagnosticNumber(bone?.y),
+      rotation: diagnosticNumber(bone?.rotation),
+      scaleX: diagnosticNumber(bone?.scaleX),
+      scaleY: diagnosticNumber(bone?.scaleY),
+      shearX: diagnosticNumber(bone?.shearX),
+      shearY: diagnosticNumber(bone?.shearY),
+    },
+    world: {
+      worldX: diagnosticNumber(bone?.worldX),
+      worldY: diagnosticNumber(bone?.worldY),
+      a: diagnosticNumber(bone?.a),
+      b: diagnosticNumber(bone?.b),
+      c: diagnosticNumber(bone?.c),
+      d: diagnosticNumber(bone?.d),
+    },
+  };
+}
+
+function validateBoneMatrices(skeleton, cacheConstraints) {
   const snapshots = [];
   for (let index = 0; index < skeleton.bones.length; index += 1) {
     const bone = skeleton.bones[index];
@@ -278,7 +360,25 @@ function validateBoneMatrices(skeleton) {
       d: bone.d,
     };
     for (const [field, value] of Object.entries(values)) {
-      requireFinite(value, `runtime.bones[${index}].${field}`);
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        const firstNearby = Math.max(0, index - 2);
+        const lastNearby = Math.min(skeleton.bones.length, index + 3);
+        fail(
+          `runtime.bones[${index}] '${bone?.data?.name ?? '<unknown>'}'.${field} must be finite`,
+          {
+            ...boneDiagnostic(bone, index),
+            field,
+            value: diagnosticNumber(value),
+            nearbyBones: skeleton.bones
+              .slice(firstNearby, lastNearby)
+              .map((item, offset) => boneDiagnostic(item, firstNearby + offset)),
+            cachedConstraintOrder: Array.isArray(cacheConstraints)
+              ? [...cacheConstraints]
+              : [],
+            constraints: runtimeConstraintDiagnostics(skeleton),
+          },
+        );
+      }
     }
     snapshots.push({ name: bone.data.name, ...values });
   }
@@ -390,7 +490,7 @@ export async function runLegacySpine4xOracle(options) {
     skeleton.updateCache();
     const cacheConstraints = validateUpdateCache(skeleton, records);
     updateWorldTransform(runtime, skeleton);
-    const bones = validateBoneMatrices(skeleton);
+    const bones = validateBoneMatrices(skeleton, cacheConstraints);
     const attachments = validateSetupAttachments(
       runtime,
       skeleton,
