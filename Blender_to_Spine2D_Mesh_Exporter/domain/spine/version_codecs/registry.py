@@ -15,6 +15,7 @@ from .base import SpineJsonCodecContext, SpineJsonVersionCodec
 from .v40 import Spine40JsonCodec
 from .v41 import Spine41JsonCodec
 from .v42 import Spine42JsonCodec
+from .v43 import Spine43JsonCodec
 
 
 _CODECS: Mapping[SpineJsonTarget, SpineJsonVersionCodec] = MappingProxyType(
@@ -22,6 +23,7 @@ _CODECS: Mapping[SpineJsonTarget, SpineJsonVersionCodec] = MappingProxyType(
         SpineJsonTarget.SPINE_4_0: Spine40JsonCodec(),
         SpineJsonTarget.SPINE_4_1: Spine41JsonCodec(),
         SpineJsonTarget.SPINE_4_2: Spine42JsonCodec(),
+        SpineJsonTarget.SPINE_4_3: Spine43JsonCodec(),
     }
 )
 
@@ -72,8 +74,6 @@ def resolve_spine_json_codec(value: object) -> SpineJsonVersionCodec:
     target = require_spine_json_target_serializable(value)
     codec = _CODECS.get(target)
     if codec is None:
-        # Registry validation makes this unreachable during a healthy import, but retain
-        # an explicit failure if module state is corrupted by reload or test mutation.
         raise RuntimeError(
             f"No Spine JSON codec is registered for ready target {target.value}"
         )
