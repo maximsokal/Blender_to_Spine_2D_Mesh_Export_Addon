@@ -98,6 +98,14 @@ def test_unready_target_is_rejected_before_geometry(
             SpineJsonTarget.SPINE_4_2,
             A1RigProfile.TWO_AXIS_ROTATION_SCALE,
         ),
+        (
+            SpineJsonTarget.SPINE_4_3,
+            A1RigProfile.THREE_AXIS_ROTATION,
+        ),
+        (
+            SpineJsonTarget.SPINE_4_3,
+            A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+        ),
     ),
 )
 def test_supported_target_rig_pair_reaches_geometry_preparation(
