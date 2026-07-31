@@ -217,6 +217,19 @@ function constraintRecords(document) {
   return result;
 }
 
+function twoAxisScalePrefixes(document) {
+  const prefixes = new Set();
+  const bones = array(document.bones ?? [], 'document.bones');
+  const bridgePattern = /^(.*)_\d+_scale_spine41_bridge$/;
+  for (let index = 0; index < bones.length; index += 1) {
+    const bone = record(bones[index], `document.bones[${index}]`);
+    const name = nonEmptyString(bone.name, `document.bones[${index}].name`);
+    const match = bridgePattern.exec(name);
+    if (match && match[1]) prefixes.add(match[1]);
+  }
+  return [...prefixes].sort();
+}
+
 function scaleControlRecords(document) {
   const transforms = array(document.transform ?? [], 'document.transform');
   const result = [];
@@ -226,15 +239,11 @@ function scaleControlRecords(document) {
       constraint.name,
       `document.transform[${index}].name`,
     );
-    if (!name.endsWith('_scale_constraint')) continue;
-
     const target = nonEmptyString(
       constraint.target,
       `document.transform[${index}].target`,
     );
-    if (!target.endsWith('_scale')) {
-      fail(`Scale control constraint '${name}' has an unexpected target`, { target });
-    }
+    if (name !== target || !target.endsWith('_scale')) continue;
 
     const rotateMix = finite(
       constraint.rotateMix,
@@ -281,6 +290,20 @@ function scaleControlRecords(document) {
   const targets = result.map((item) => item.target);
   assert.equal(new Set(names).size, names.length, 'Scale control names must be unique');
   assert.equal(new Set(targets).size, targets.length, 'Scale control targets must be unique');
+
+  const expectedTargets = twoAxisScalePrefixes(document)
+    .map((prefix) => `${prefix}_scale`)
+    .sort();
+  const actualTargets = [...targets].sort();
+  if (
+    expectedTargets.length !== actualTargets.length ||
+    expectedTargets.some((value, index) => value !== actualTargets[index])
+  ) {
+    fail('Spine 3.8 2-Axis scale control inventory differs', {
+      expectedTargets,
+      actualTargets,
+    });
+  }
   return Object.freeze(result);
 }
 
