@@ -175,6 +175,25 @@ def _constraint_bones(record: dict[str, Any], *, path: str) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _require_scale_only_payload(record: dict[str, Any], *, path: str) -> None:
+    expected = {
+        "rotateMix": 0.0,
+        "translateMix": 0.0,
+        "scaleMix": 1.0,
+        "shearMix": 0.0,
+    }
+    for field_name, expected_value in expected.items():
+        actual = _finite_mix(record.get(field_name), path=f"{path}.{field_name}")
+        if float(actual) != expected_value:
+            raise ValueError(
+                f"{path}.{field_name} must be {expected_value}, got {actual!r}"
+            )
+    if record.get("relative") is not True:
+        raise ValueError(f"{path}.relative must be true")
+    if record.get("local") not in {None, False}:
+        raise ValueError(f"{path}.local must be false or omitted")
+
+
 class Spine38JsonCodec(Spine41JsonCodec):
     """Translate canonical Spine 4.2-shaped documents to exact Spine 3.8.99 JSON."""
 
@@ -355,12 +374,14 @@ class Spine38JsonCodec(Spine41JsonCodec):
             scale_name = f"{prefix}_scale"
             depth_name = f"{prefix}_scale_rotate_X_constraint"
             rotation_y_name = f"{prefix}_rotation_Y"
+            layer_scale_name = f"{prefix}_scale_spine38_layers"
             try:
                 rotation_x = transform_by_name[rotation_x_name]
                 scale_ik = ik_by_name[ik_name]
-                uniform_scale = transform_by_name[scale_name]
+                public_scale = transform_by_name[scale_name]
                 depth_scale = transform_by_name[depth_name]
                 rotation_y = transform_by_name[rotation_y_name]
+                layer_scale = transform_by_name[layer_scale_name]
             except KeyError as exc:
                 raise ValueError(
                     f"Spine 3.8 two-axis constraint inventory is incomplete for "
@@ -375,23 +396,27 @@ class Spine38JsonCodec(Spine41JsonCodec):
                 base_order,
                 _constraint_order(scale_ik, path=f"document.ik[{ik_name}]"),
                 _constraint_order(
-                    depth_scale,
-                    path=f"document.transform[{depth_name}]",
+                    public_scale,
+                    path=f"document.transform[{scale_name}]",
                 ),
                 _constraint_order(
-                    uniform_scale,
-                    path=f"document.transform[{scale_name}]",
+                    depth_scale,
+                    path=f"document.transform[{depth_name}]",
                 ),
                 _constraint_order(
                     rotation_y,
                     path=f"document.transform[{rotation_y_name}]",
                 ),
+                _constraint_order(
+                    layer_scale,
+                    path=f"document.transform[{layer_scale_name}]",
+                ),
             )
-            expected_orders = tuple(range(base_order, base_order + 5))
+            expected_orders = tuple(range(base_order, base_order + 6))
             if actual_orders != expected_orders:
                 raise ValueError(
                     f"Spine 3.8 two-axis constraints for {prefix!r} must evaluate "
-                    "as X/IK/Depth/Scale/Y in one dense block; "
+                    "as X/IK/ScalePosition/Depth/Y/ScaleGeometry in one dense block; "
                     f"expected={expected_orders}, actual={actual_orders}"
                 )
 
@@ -408,21 +433,15 @@ class Spine38JsonCodec(Spine41JsonCodec):
                     f"actual={depth_bones}"
                 )
 
-            scale_bones = _constraint_bones(
-                uniform_scale,
+            public_scale_bones = _constraint_bones(
+                public_scale,
                 path=f"document.transform[{scale_name}]",
             )
-            expected_scale_bones = {f"{prefix}_scale_rotate_X", *wrappers}
-            if (
-                len(scale_bones) != len(expected_scale_bones)
-                or set(scale_bones) != expected_scale_bones
-                or layer_set.intersection(scale_bones)
-            ):
+            expected_collapse = f"{prefix}_scale_rotate_X"
+            if public_scale_bones != (expected_collapse,):
                 raise ValueError(
-                    f"Spine 3.8 uniform Scale constraint {scale_name!r} must own the "
-                    "collapse bone and depth wrappers, never final layer children; "
-                    f"expected={tuple(sorted(expected_scale_bones))}, "
-                    f"actual={scale_bones}"
+                    f"Spine 3.8 public Scale constraint {scale_name!r} must constrain "
+                    f"only {expected_collapse!r}; actual={public_scale_bones}"
                 )
 
             rotation_y_bones = _constraint_bones(
@@ -438,6 +457,33 @@ class Spine38JsonCodec(Spine41JsonCodec):
                     f"every final layer exactly once; expected={tuple(layers)}, "
                     f"actual={rotation_y_bones}"
                 )
+
+            layer_scale_bones = _constraint_bones(
+                layer_scale,
+                path=f"document.transform[{layer_scale_name}]",
+            )
+            if (
+                len(layer_scale_bones) != len(layers)
+                or set(layer_scale_bones) != layer_set
+            ):
+                raise ValueError(
+                    f"Spine 3.8 geometry Scale constraint {layer_scale_name!r} must "
+                    f"own every final layer exactly once; expected={tuple(layers)}, "
+                    f"actual={layer_scale_bones}"
+                )
+            if layer_scale.get("target") != public_scale.get("target"):
+                raise ValueError(
+                    f"Spine 3.8 split Scale constraints for {prefix!r} must use the "
+                    "same control target"
+                )
+            _require_scale_only_payload(
+                public_scale,
+                path=f"document.transform[{scale_name}]",
+            )
+            _require_scale_only_payload(
+                layer_scale,
+                path=f"document.transform[{layer_scale_name}]",
+            )
 
 
 __all__ = ["Spine38JsonCodec"]
