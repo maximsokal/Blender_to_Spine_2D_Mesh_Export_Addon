@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Tuple
+from dataclasses import dataclass, replace
+from types import MappingProxyType
+from typing import Mapping, Tuple
 
 from ..application import (
     A1MultiObjectExportSettings,
@@ -13,12 +14,17 @@ from ..application import (
 from ..domain.spine import (
     ConnectedGroupBuildResult,
     ConstraintOrderPolicy,
+    SpineCompositionError,
     SpineCompositionSettings,
     SpineDocument,
     SpineDocumentComponent,
     SpineDocumentCompositionResult,
     compose_spine_documents,
 )
+from ..domain.spine.connected_group_serialization_validator import (
+    ConnectedGroupSerializationValidator,
+)
+from ..domain.spine.validator import SpineValidator
 from .a1_composition_result import replace_a1_composition_document
 from .a1_grouped_output import apply_staged_grouped_camera_overlay
 from .a1_mixed_settings import (
@@ -30,6 +36,10 @@ from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_object_preparation import PreparedA1Object
 from .grouped_camera_projection_executor import GroupedCameraProjectionStageResult
 from .grouped_camera_projection_policy import GroupedCameraProjectionRequest
+
+
+_CONNECTED_COMPONENT_ID = "connected_group"
+_STANDALONE_COMPONENT_ID = "standalone_group"
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +94,37 @@ class A1MixedCompositionResult:
             raise TypeError("overlay must be GroupedCameraOverlayResult or None")
 
 
+@dataclass(frozen=True, slots=True)
+class _ConnectedOuterCompositionInput:
+    """Strict outer-composition view of one validated connected subgroup.
+
+    Spine 4.2 connected parity intentionally permits order ties for independent
+    same-layer constraints. The generic composition service validates strict component
+    documents before it rebases their orders, so MIXED composition needs a temporary
+    unique-order view. ``original_order_by_name`` keeps the connected schedule provenance
+    intact in the returned outer composition metadata.
+    """
+
+    document: SpineDocument
+    original_order_by_name: Mapping[str, int]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.document, SpineDocument):
+            raise TypeError("document must be SpineDocument")
+        if not isinstance(self.original_order_by_name, Mapping):
+            raise TypeError("original_order_by_name must be a mapping")
+        constraint_count = len(self.document.ik) + len(self.document.transform)
+        if len(self.original_order_by_name) != constraint_count:
+            raise ValueError(
+                "original order metadata must cover every connected constraint"
+            )
+        for name, order in self.original_order_by_name.items():
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("constraint metadata names must be non-empty strings")
+            if isinstance(order, bool) or not isinstance(order, int) or order < 0:
+                raise ValueError("constraint metadata orders must be non-negative ints")
+
+
 def partition_mixed_prepared_objects(
     finalized_objects: Tuple[PreparedA1Object, ...],
     connected_sources: Tuple[A1MultiObjectSource, ...],
@@ -114,6 +155,130 @@ def partition_mixed_prepared_objects(
     )
 
 
+def _connected_constraint_records(
+    document: SpineDocument,
+) -> tuple[tuple[int, int, int, str, object], ...]:
+    """Return the exact stable order used by generic Spine composition.
+
+    Records are ordered by the current runtime order, then IK before transform, then
+    their original collection index. This mirrors the generic composer's deterministic
+    tie-break contract without modifying the connected rig schedule itself.
+    """
+
+    if not isinstance(document, SpineDocument):
+        raise TypeError("document must be SpineDocument")
+    records: list[tuple[int, int, int, str, object]] = []
+    for index, constraint in enumerate(document.ik):
+        records.append((constraint.order, 0, index, "ik", constraint))
+    for index, constraint in enumerate(document.transform):
+        records.append((constraint.order, 1, index, "transform", constraint))
+    records.sort(key=lambda item: (item[0], item[1], item[2]))
+    return tuple(records)
+
+
+def _prepare_connected_outer_component(
+    document: SpineDocument,
+) -> _ConnectedOuterCompositionInput:
+    """Validate connected semantics and create a strict temporary order view.
+
+    Only ``DUPLICATE_CONSTRAINT_ORDER`` is accepted by the connected validator. Every
+    other structural, reference, skin, attachment, and weighted-mesh issue remains a hard
+    error. The returned document is then checked by the normal strict validator so the
+    outer composer never receives an invalid component.
+    """
+
+    if not isinstance(document, SpineDocument):
+        raise TypeError("document must be SpineDocument")
+    try:
+        ConnectedGroupSerializationValidator().validate_or_raise(document)
+    except Exception as exc:
+        raise SpineCompositionError(
+            f"Component '{_CONNECTED_COMPONENT_ID}' is not a valid connected "
+            f"Spine document: {exc}"
+        ) from exc
+
+    order_by_identity: dict[tuple[str, int], int] = {}
+    original_order_by_name: dict[str, int] = {}
+    for global_order, record in enumerate(_connected_constraint_records(document)):
+        _order, _kind_rank, local_index, kind, constraint = record
+        name = constraint.name
+        if name in original_order_by_name:
+            raise SpineCompositionError(
+                f"Connected constraint name is duplicated: {name!r}"
+            )
+        original_order_by_name[name] = constraint.order
+        order_by_identity[(kind, local_index)] = global_order
+
+    rebased_document = replace(
+        document,
+        ik=tuple(
+            replace(
+                constraint,
+                order=order_by_identity[("ik", local_index)],
+            )
+            for local_index, constraint in enumerate(document.ik)
+        ),
+        transform=tuple(
+            replace(
+                constraint,
+                order=order_by_identity[("transform", local_index)],
+            )
+            for local_index, constraint in enumerate(document.transform)
+        ),
+    )
+    try:
+        SpineValidator().validate_or_raise(rebased_document)
+    except Exception as exc:
+        raise SpineCompositionError(
+            f"Component '{_CONNECTED_COMPONENT_ID}' failed strict validation "
+            f"after temporary order rebasing: {exc}"
+        ) from exc
+
+    return _ConnectedOuterCompositionInput(
+        document=rebased_document,
+        original_order_by_name=MappingProxyType(dict(original_order_by_name)),
+    )
+
+
+def _restore_connected_order_provenance(
+    composition: SpineDocumentCompositionResult,
+    original_order_by_name: Mapping[str, int],
+) -> SpineDocumentCompositionResult:
+    """Restore historical connected orders in metadata, not in the final document."""
+
+    if not isinstance(composition, SpineDocumentCompositionResult):
+        raise TypeError("composition must be SpineDocumentCompositionResult")
+    if not isinstance(original_order_by_name, Mapping):
+        raise TypeError("original_order_by_name must be a mapping")
+
+    found_names: set[str] = set()
+    assignments = []
+    for assignment in composition.constraint_orders:
+        if assignment.component_id != _CONNECTED_COMPONENT_ID:
+            assignments.append(assignment)
+            continue
+        if assignment.constraint_name not in original_order_by_name:
+            raise SpineCompositionError(
+                "Outer composition produced unknown connected constraint metadata: "
+                f"{assignment.constraint_name!r}"
+            )
+        found_names.add(assignment.constraint_name)
+        assignments.append(
+            replace(
+                assignment,
+                original_order=original_order_by_name[assignment.constraint_name],
+            )
+        )
+
+    missing = set(original_order_by_name) - found_names
+    if missing:
+        raise SpineCompositionError(
+            "Outer composition lost connected constraint metadata for: "
+            f"{tuple(sorted(missing))}"
+        )
+    return replace(composition, constraint_orders=tuple(assignments))
+
+
 def _compose_outer_document(
     connected_document: SpineDocument,
     standalone_document: SpineDocument,
@@ -124,16 +289,22 @@ def _compose_outer_document(
     Spine draws later slots on top. Mixed mode currently has no cross-group Z contract,
     so the standalone subgroup intentionally remains above the connected subgroup while
     each subgroup preserves its own deterministic internal ordering.
+
+    Spine 4.2 connected output may contain intentional same-layer order ties. The generic
+    composer will make all final MIXED orders unique, but its component validator runs
+    first. A strict temporary view bridges those contracts without changing the original
+    connected result or its diagnostic order metadata.
     """
 
-    return compose_spine_documents(
+    connected_input = _prepare_connected_outer_component(connected_document)
+    outer = compose_spine_documents(
         (
             SpineDocumentComponent(
-                component_id="connected_group",
-                document=connected_document,
+                component_id=_CONNECTED_COMPONENT_ID,
+                document=connected_input.document,
             ),
             SpineDocumentComponent(
-                component_id="standalone_group",
+                component_id=_STANDALONE_COMPONENT_ID,
                 document=standalone_document,
             ),
         ),
@@ -143,6 +314,10 @@ def _compose_outer_document(
             namespace_animations=False,
             animation_separator=settings.animation_separator,
         ),
+    )
+    return _restore_connected_order_provenance(
+        outer,
+        connected_input.original_order_by_name,
     )
 
 
