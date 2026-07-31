@@ -1,13 +1,14 @@
-"""Validate Blender Object Origin placement through production object preparation.
+"""Validate Blender Object Origin placement through production preparation.
 
-The worker builds real Blender Mesh objects with geometry above, below, and across their
-local Object Origin. It exercises both single-object and public standalone multi-object
+The worker creates real Blender Mesh objects with geometry above, below, and across
+local Object Origin. It exercises single-object and public standalone multi-object
 preparation without writing final export files.
 """
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import sys
@@ -61,6 +62,21 @@ from run_bake_integration import (  # noqa: E402
 
 _TEXTURE_SIZE = 32
 _EXPECTED_SCALE = float(_TEXTURE_SIZE)
+_MATRIX_ABSOLUTE_TOLERANCE = 1.0e-7
+
+
+@dataclass(frozen=True)
+class _SourceObjectState:
+    """Authored source state captured after Blender dependency-graph evaluation."""
+
+    vertex_coordinates: tuple[tuple[float, float, float], ...]
+    matrix_world: tuple[float, ...]
+    location: tuple[float, float, float]
+    rotation_mode: str
+    rotation_euler: tuple[float, float, float]
+    rotation_quaternion: tuple[float, float, float, float]
+    scale: tuple[float, float, float]
+    parent_name: str | None
 
 
 def _parse_arguments() -> argparse.Namespace:
@@ -82,6 +98,105 @@ def _prepare_output_directory(value: Path) -> Path:
     return resolved
 
 
+def _synchronize_view_layer() -> None:
+    """Force pending Object transform edits into matrix_world before assertions."""
+
+    view_layer = getattr(bpy.context, "view_layer", None)
+    update = getattr(view_layer, "update", None)
+    if not callable(update):
+        raise RuntimeError("Blender context has no callable view_layer.update()")
+    update()
+
+
+def _matrix_tuple(matrix: object) -> tuple[float, ...]:
+    try:
+        return tuple(
+            float(matrix[row][column])
+            for row in range(4)
+            for column in range(4)
+        )
+    except Exception as exc:
+        raise ValueError("Unable to read a finite 4x4 Blender matrix") from exc
+
+
+def _capture_source_state(source_object: bpy.types.Object) -> _SourceObjectState:
+    if source_object is None or source_object.type != "MESH":
+        raise ValueError("source_object must be a Blender MESH object")
+    if source_object.data is None:
+        raise ValueError("source_object.data is missing")
+
+    return _SourceObjectState(
+        vertex_coordinates=tuple(
+            tuple(float(component) for component in vertex.co)
+            for vertex in source_object.data.vertices
+        ),
+        matrix_world=_matrix_tuple(source_object.matrix_world),
+        location=tuple(float(value) for value in source_object.location),
+        rotation_mode=str(source_object.rotation_mode),
+        rotation_euler=tuple(float(value) for value in source_object.rotation_euler),
+        rotation_quaternion=tuple(
+            float(value) for value in source_object.rotation_quaternion
+        ),
+        scale=tuple(float(value) for value in source_object.scale),
+        parent_name=(
+            None
+            if source_object.parent is None
+            else str(source_object.parent.name_full or source_object.parent.name)
+        ),
+    )
+
+
+def _assert_source_state_unchanged(
+    source_object: bpy.types.Object,
+    before: _SourceObjectState,
+    *,
+    label: str,
+) -> float:
+    """Reject source mutation while allowing only matrix float round-off."""
+
+    if not isinstance(before, _SourceObjectState):
+        raise TypeError("before must be _SourceObjectState")
+    _synchronize_view_layer()
+    after = _capture_source_state(source_object)
+
+    _assert(
+        after.vertex_coordinates == before.vertex_coordinates,
+        f"{label} mutated source vertex coordinates",
+    )
+    _assert(after.location == before.location, f"{label} mutated Object.location")
+    _assert(
+        after.rotation_mode == before.rotation_mode,
+        f"{label} mutated Object.rotation_mode",
+    )
+    _assert(
+        after.rotation_euler == before.rotation_euler,
+        f"{label} mutated Object.rotation_euler",
+    )
+    _assert(
+        after.rotation_quaternion == before.rotation_quaternion,
+        f"{label} mutated Object.rotation_quaternion",
+    )
+    _assert(after.scale == before.scale, f"{label} mutated Object.scale")
+    _assert(after.parent_name == before.parent_name, f"{label} mutated Object.parent")
+
+    deltas = tuple(
+        abs(actual - expected)
+        for expected, actual in zip(
+            before.matrix_world,
+            after.matrix_world,
+            strict=True,
+        )
+    )
+    maximum_delta = max(deltas, default=0.0)
+    _assert(
+        maximum_delta <= _MATRIX_ABSOLUTE_TOLERANCE,
+        f"{label} mutated matrix_world: max_delta={maximum_delta:.12g}, "
+        f"tolerance={_MATRIX_ABSOLUTE_TOLERANCE:.12g}, "
+        f"before={before.matrix_world}, after={after.matrix_world}",
+    )
+    return maximum_delta
+
+
 def _canonical_z_values(values: Iterable[float]) -> tuple[float, ...]:
     resolved = tuple(sorted({float(round(float(value), 4)) for value in values}))
     if not resolved:
@@ -95,11 +210,7 @@ def _create_layered_mesh(
     *,
     location: tuple[float, float, float],
 ) -> bpy.types.Object:
-    """Create independent visible quads at exact object-local Z layers.
-
-    Every face is a simple XY disk and every layer receives its own source vertices. The
-    object-local `(0, 0, 0)` remains Blender Object Origin even when no face lies on Z=0.
-    """
+    """Create independent visible quads at exact object-local Z layers."""
 
     if not isinstance(name, str) or not name.strip():
         raise ValueError("name must be a non-empty string")
@@ -110,8 +221,6 @@ def _create_layered_mesh(
     vertices: list[tuple[float, float, float]] = []
     faces: list[tuple[int, int, int, int]] = []
     for layer_index, z_value in enumerate(z_values):
-        # Offset each layer slightly in X so coincident projected faces do not create
-        # ambiguous physical coverage while preserving the exact local depth values.
         center_x = float(layer_index) * 0.15
         first = len(vertices)
         vertices.extend(
@@ -160,12 +269,15 @@ def _settings(
     )
 
 
-def _bone_by_name(prepared) -> dict[str, object]:
-    return {bone.name: bone for bone in prepared.document_assembly.document.bones}
+def _bone_by_name(prepared: object) -> dict[str, object]:
+    return {
+        bone.name: bone
+        for bone in prepared.document_assembly.document.bones
+    }
 
 
 def _assert_prepared_origin(
-    prepared,
+    prepared: object,
     *,
     expected_location_xy: tuple[float, float],
     expected_local_z: tuple[float, ...],
@@ -236,42 +348,29 @@ def _single_case(output_root: Path) -> dict[str, object]:
         (-1.0, 0.0, 2.0),
         location=(1.25, -0.75, 9.0),
     )
-    source_vertices_before = tuple(
-        tuple(float(component) for component in vertex.co)
-        for vertex in source_object.data.vertices
-    )
-    matrix_before = tuple(
-        float(source_object.matrix_world[row][column])
-        for row in range(4)
-        for column in range(4)
-    )
     _activate_only(source_object)
+    _synchronize_view_layer()
+    state_before = _capture_source_state(source_object)
+
     prepared = prepare_a1_object(
         source_object,
         _settings(output_root, prefix="PivotSingle"),
         context=bpy.context,
         scene=bpy.context.scene,
     )
-    source_vertices_after = tuple(
-        tuple(float(component) for component in vertex.co)
-        for vertex in source_object.data.vertices
+    maximum_matrix_delta = _assert_source_state_unchanged(
+        source_object,
+        state_before,
+        label="Single preparation",
     )
-    matrix_after = tuple(
-        float(source_object.matrix_world[row][column])
-        for row in range(4)
-        for column in range(4)
-    )
-    _assert(
-        source_vertices_after == source_vertices_before,
-        "Single preparation mutated source vertex coordinates",
-    )
-    _assert(matrix_after == matrix_before, "Single preparation mutated matrix_world")
+
     result = _assert_prepared_origin(
         prepared,
         expected_location_xy=(1.25, -0.75),
         expected_local_z=(-1.0, 0.0, 2.0),
     )
     result["sourceUnchanged"] = True
+    result["maximumMatrixDelta"] = maximum_matrix_delta
     return result
 
 
@@ -282,13 +381,25 @@ def _standalone_case(output_root: Path) -> dict[str, object]:
         ("PivotAbove", (-4.0, -2.0, -1.0), (0.5, -2.0, 12.0)),
     )
     sources: list[A1MultiObjectSource] = []
-    by_prefix: dict[str, tuple[tuple[float, ...], tuple[float, float, float]]] = {}
+    by_prefix: dict[
+        str,
+        tuple[
+            tuple[float, ...],
+            tuple[float, float, float],
+            bpy.types.Object,
+            _SourceObjectState,
+        ],
+    ] = {}
+
     for index, (prefix, z_values, location) in enumerate(specifications, start=1):
         source_object = _create_layered_mesh(
             prefix,
             tuple(float(value) for value in z_values),
             location=tuple(float(value) for value in location),
         )
+        _activate_only(source_object)
+        _synchronize_view_layer()
+        state_before = _capture_source_state(source_object)
         sources.append(
             A1MultiObjectSource(
                 source_object=source_object,
@@ -297,7 +408,12 @@ def _standalone_case(output_root: Path) -> dict[str, object]:
                 settings=_settings(output_root, prefix=prefix),
             )
         )
-        by_prefix[prefix] = (tuple(z_values), tuple(location))
+        by_prefix[prefix] = (
+            tuple(float(value) for value in z_values),
+            tuple(float(value) for value in location),
+            source_object,
+            state_before,
+        )
 
     prepared = prepare_a1_multi_object(
         tuple(sources),
@@ -314,14 +430,21 @@ def _standalone_case(output_root: Path) -> dict[str, object]:
 
     objects: list[dict[str, object]] = []
     for item in prepared.objects:
-        z_values, location = by_prefix[item.prefix]
-        objects.append(
-            _assert_prepared_origin(
-                item,
-                expected_location_xy=(location[0], location[1]),
-                expected_local_z=z_values,
-            )
+        z_values, location, source_object, state_before = by_prefix[item.prefix]
+        maximum_matrix_delta = _assert_source_state_unchanged(
+            source_object,
+            state_before,
+            label=f"Standalone preparation for {item.prefix}",
         )
+        result = _assert_prepared_origin(
+            item,
+            expected_location_xy=(location[0], location[1]),
+            expected_local_z=z_values,
+        )
+        result["sourceUnchanged"] = True
+        result["maximumMatrixDelta"] = maximum_matrix_delta
+        objects.append(result)
+
     _assert(
         len({tuple(item["mainPosition"]) for item in objects}) == len(objects),
         "Standalone objects did not preserve independent pivots",
@@ -337,14 +460,13 @@ def run(output_directory: Path) -> Path:
     output_root = _prepare_output_directory(output_directory)
     _clear_scene()
     _configure_cycles_scene()
-    report = {
+    report: dict[str, object] = {
         "status": "passed",
         "blenderVersion": bpy.app.version_string,
+        "matrixAbsoluteTolerance": _MATRIX_ABSOLUTE_TOLERANCE,
         "single": _single_case(output_root),
     }
 
-    # Isolate the public standalone path from the single fixture while keeping the same
-    # real Blender Scene and production preparation services.
     _clear_scene()
     _configure_cycles_scene()
     report["standalone"] = _standalone_case(output_root)
