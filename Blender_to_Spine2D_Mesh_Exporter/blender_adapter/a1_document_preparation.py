@@ -217,10 +217,9 @@ def finalize_a1_document_assembly_for_target(
     """Apply target-specific rig semantics only after canonical document assembly.
 
     Projection and attachment builders validate the canonical rig against its exact
-    deterministic plan. Spine 4.0 and 4.1 therefore receive the same immutable
-    document-level safety topology only after weighted attachments, visuals, and
-    animations exist. The adapter returns the exact old-to-new bone-index map so every
-    builder-owned attachment reference stays synchronized with the final document.
+    deterministic plan. Spine 4.0 and 4.1 receive the same immutable safety topology
+    only after weighted attachments, visuals, and animations exist. Spine 4.2 and 4.3
+    retain the canonical assembled document; their differences are serializer-owned.
     """
 
     if not isinstance(document_assembly, A1DocumentAssemblyResult):
@@ -229,7 +228,10 @@ def finalize_a1_document_assembly_for_target(
         raise ValueError("prefix must be a non-empty string")
 
     resolved_target = resolve_spine_json_target(spine_target)
-    if resolved_target is SpineJsonTarget.SPINE_4_2:
+    if resolved_target in {
+        SpineJsonTarget.SPINE_4_2,
+        SpineJsonTarget.SPINE_4_3,
+    }:
         return document_assembly
     if resolved_target not in {
         SpineJsonTarget.SPINE_4_0,
@@ -256,9 +258,6 @@ def finalize_a1_document_assembly_for_target(
             f"{rig.request.prefix!r}"
         )
 
-    # Spine 4.0 and 4.1 share the legacy applied-transform failure mode that the
-    # accepted bridge topology resolves. Keep the proven adapter implementation and
-    # its stable bone names until a target requires genuinely different topology.
     adaptation = adapt_two_axis_document_for_spine41_with_report(
         document_assembly.document,
         profile=rig.profile,
@@ -328,8 +327,6 @@ def prepare_a1_document(
             ),
             attachment_width=source.settings.export.texture_width,
             attachment_height=source.settings.export.texture_height,
-            # Object-bake mesh coordinates are already relative to Blender Object Origin.
-            # Never recenter them around the geometry bounds or the Spine pivot changes.
             center_x=0.0,
             center_y=0.0,
             sequence=build_a1_attachment_sequence(texture.bake_plan),
