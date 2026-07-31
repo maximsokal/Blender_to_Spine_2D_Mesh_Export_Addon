@@ -81,23 +81,26 @@ def test_rig_builder_does_not_apply_target_constraint_mutations() -> None:
         for alias in node.names
     }
 
+    assert not any(module.endswith("two_axis_scale_spine38") for module in imported_modules)
     assert not any(module.endswith("two_axis_scale_spine41") for module in imported_modules)
+    assert "adapt_two_axis_document_for_spine38_with_report" not in imported_names
     assert "adapt_two_axis_scale_rig_for_spine41" not in imported_names
 
 
-def test_target_finalizer_uses_reported_typed_document_adapter_and_synchronizer() -> None:
+def test_target_finalizer_uses_reported_typed_adapters_and_synchronizer() -> None:
     function = _function(
         _tree(ADAPTER),
         "finalize_a1_document_assembly_for_target",
     )
     calls = {name for name, _line in _direct_name_calls(function)}
 
+    assert "adapt_two_axis_document_for_spine38_with_report" in calls
     assert "adapt_two_axis_document_for_spine41_with_report" in calls
     assert "_synchronize_document_build_for_spine41" in calls
     assert "replace" in calls
 
 
-def test_spine43_remains_on_the_canonical_document_path() -> None:
+def test_spine42_and_spine43_remain_on_the_canonical_document_path() -> None:
     source = ADAPTER.read_text(encoding="utf-8")
     function = _function(_tree(ADAPTER), "finalize_a1_document_assembly_for_target")
     function_source = ast.get_source_segment(source, function)
@@ -106,7 +109,11 @@ def test_spine43_remains_on_the_canonical_document_path() -> None:
     assert "SpineJsonTarget.SPINE_4_2" in function_source
     assert "SpineJsonTarget.SPINE_4_3" in function_source
     identity_return = function_source.index("return document_assembly")
-    legacy_adapter_call = function_source.index(
+    spine38_adapter_call = function_source.index(
+        "adapt_two_axis_document_for_spine38_with_report"
+    )
+    spine41_adapter_call = function_source.index(
         "adapt_two_axis_document_for_spine41_with_report"
     )
-    assert identity_return < legacy_adapter_call
+    assert identity_return < spine38_adapter_call
+    assert identity_return < spine41_adapter_call
