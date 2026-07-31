@@ -1,4 +1,4 @@
-"""Production capability contracts for limited legacy 4.x and full Spine 4.2 scope."""
+"""Production capability contracts for legacy 4.x, Spine 4.2, and limited 4.3."""
 
 from __future__ import annotations
 
@@ -121,6 +121,49 @@ def test_spine42_preserves_all_existing_profiles_and_scopes(scope) -> None:
         assert scope in capability.scopes
 
 
+@pytest.mark.parametrize("profile", tuple(A1RigProfile))
+def test_spine43_accepts_single_and_standalone_for_both_profiles(profile) -> None:
+    accepted = frozenset(
+        {
+            SpineJsonExportScope.SINGLE_OBJECT,
+            SpineJsonExportScope.STANDALONE_MULTI_OBJECT,
+        }
+    )
+
+    for scope in accepted:
+        capability = require_spine_json_export_capability(
+            SpineJsonTarget.SPINE_4_3,
+            profile,
+            scope,
+        )
+        assert capability.target is SpineJsonTarget.SPINE_4_3
+        assert capability.rig_profile is profile
+        assert capability.scopes == accepted
+        assert capability.limitations == (
+            "Connected and mixed 4.3 compositions await runtime acceptance.",
+        )
+
+
+@pytest.mark.parametrize("profile", tuple(A1RigProfile))
+@pytest.mark.parametrize(
+    "scope",
+    (
+        SpineJsonExportScope.CONNECTED_MULTI_OBJECT,
+        SpineJsonExportScope.MIXED_MULTI_OBJECT,
+    ),
+)
+def test_spine43_rejects_connected_and_mixed_until_runtime_acceptance(
+    profile,
+    scope,
+) -> None:
+    with pytest.raises(SpineJsonExportCapabilityError, match=scope.value):
+        require_spine_json_export_capability(
+            SpineJsonTarget.SPINE_4_3,
+            profile,
+            scope,
+        )
+
+
 def test_capability_registry_is_immutable_and_contains_only_ready_pairs() -> None:
     capabilities = registered_spine_json_export_capabilities()
 
@@ -139,6 +182,14 @@ def test_capability_registry_is_immutable_and_contains_only_ready_pairs() -> Non
         ),
         (
             SpineJsonTarget.SPINE_4_2,
+            A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+        ),
+        (
+            SpineJsonTarget.SPINE_4_3,
+            A1RigProfile.THREE_AXIS_ROTATION,
+        ),
+        (
+            SpineJsonTarget.SPINE_4_3,
             A1RigProfile.TWO_AXIS_ROTATION_SCALE,
         ),
     }
