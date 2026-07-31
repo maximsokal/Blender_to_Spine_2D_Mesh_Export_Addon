@@ -4,6 +4,10 @@
 Unlike the full export runner, this diagnostic stage never stops at the first runtime
 failure. It writes one report per case and a complete acceptance summary, then exits with
 status 1 only after all version/profile/scope combinations have been attempted.
+
+Console output is intentionally compact. Complete successful runtime reports and full
+failure payloads remain available in ``runtime_oracle_report.json`` files and in the
+matrix-level ``acceptance_summary.json`` report.
 """
 
 from __future__ import annotations
@@ -63,11 +67,13 @@ def _run_process(
     label: str,
     environment: Mapping[str, str],
 ) -> subprocess.CompletedProcess[str]:
+    """Execute one oracle while retaining, but not flooding stdout with, its payload."""
+
     if not isinstance(label, str) or not label.strip():
         raise ValueError("label must be a non-empty string")
     LOGGER.info("%s: %s", label, subprocess.list2cmdline(tuple(command)))
     try:
-        completed = subprocess.run(
+        return subprocess.run(
             tuple(command),
             cwd=ROOT,
             env=dict(environment),
@@ -82,9 +88,6 @@ def _run_process(
             returncode=127,
             stdout=f"Unable to execute {label}: {exc}\n",
         )
-    if completed.stdout:
-        print(completed.stdout.rstrip())
-    return completed
 
 
 def _write_json(path: Path, payload: Mapping[str, object]) -> Path:
@@ -98,6 +101,22 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> Path:
     return path.resolve(strict=False)
 
 
+def _parse_oracle_failure_payload(output: str) -> dict[str, object] | None:
+    """Recover the structured JSON emitted by an oracle failure when available."""
+
+    if not isinstance(output, str):
+        raise TypeError("output must be str")
+    if not output.strip():
+        return None
+    try:
+        payload = _parse_json_stdout(output, label="Runtime oracle failure")
+    except Exception:
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    return dict(payload)
+
+
 def _failure_report(
     *,
     stage: str,
@@ -105,13 +124,96 @@ def _failure_report(
     exit_code: int | None,
     output: str,
 ) -> dict[str, object]:
-    return {
+    report: dict[str, object] = {
         "ok": False,
         "stage": stage,
         "message": message,
         "exitCode": exit_code,
         "output": output,
     }
+    oracle = _parse_oracle_failure_payload(output)
+    if oracle is not None:
+        report["oracle"] = oracle
+    return report
+
+
+def _case_failure_message(report: Mapping[str, object]) -> str:
+    """Build one terminal-safe failure line from a stored case report."""
+
+    if not isinstance(report, Mapping):
+        return "invalid runtime report"
+    oracle = report.get("oracle")
+    if isinstance(oracle, Mapping):
+        message = str(oracle.get("message") or report.get("message") or "oracle failed")
+        details = oracle.get("details")
+        if isinstance(details, Mapping):
+            bone_name = details.get("boneName")
+            parent_name = details.get("parentName")
+            field = details.get("field")
+            if bone_name:
+                message += f"; bone={bone_name}"
+            if parent_name:
+                message += f"; parent={parent_name}"
+            if field:
+                message += f"; field={field}"
+        return message.replace("\r", " ").replace("\n", " ")
+    return str(report.get("message") or "runtime oracle failed").replace(
+        "\n", " "
+    )
+
+
+def _print_case_result(case_key: str, report: Mapping[str, object]) -> None:
+    if not isinstance(case_key, str) or not case_key:
+        raise ValueError("case_key must be a non-empty string")
+    if not isinstance(report, Mapping):
+        raise TypeError("report must be a mapping")
+    if report.get("ok") is True:
+        print(f"[RUNTIME] PASS {case_key}")
+    else:
+        print(f"[RUNTIME] FAIL {case_key}: {_case_failure_message(report)}")
+
+
+def _print_matrix_summary(summary: Mapping[str, object], summary_path: Path) -> None:
+    """Print only target counts and failed case names; full JSON stays on disk."""
+
+    if not isinstance(summary, Mapping):
+        raise TypeError("summary must be a mapping")
+    if not isinstance(summary_path, Path):
+        raise TypeError("summary_path must be pathlib.Path")
+
+    print("\n[SPINE_ALL_RUNTIME_ORACLES] TARGETS")
+    targets = summary.get("targets")
+    if isinstance(targets, Mapping):
+        for target, raw_record in targets.items():
+            record = raw_record if isinstance(raw_record, Mapping) else {}
+            print(
+                f"  {target}: passed={record.get('passed', 0)} "
+                f"failed={record.get('failed', 0)} "
+                f"expected={record.get('expected', 0)}"
+            )
+
+    cases = summary.get("cases")
+    failed_cases: list[tuple[str, Mapping[str, object]]] = []
+    if isinstance(cases, Mapping):
+        for case_key, raw_case in cases.items():
+            if not isinstance(raw_case, Mapping):
+                continue
+            raw_report = raw_case.get("report")
+            report = raw_report if isinstance(raw_report, Mapping) else {}
+            if report.get("ok") is not True:
+                failed_cases.append((str(case_key), report))
+
+    if failed_cases:
+        print("[SPINE_ALL_RUNTIME_ORACLES] FAILED CASES")
+        for case_key, report in failed_cases:
+            print(f"  {case_key}: {_case_failure_message(report)}")
+
+    print(
+        "[SPINE_ALL_RUNTIME_ORACLES] TOTAL "
+        f"passed={summary.get('totalPassed', 0)} "
+        f"failed={summary.get('totalFailed', 0)}"
+    )
+    print(f"[SPINE_ALL_RUNTIME_ORACLES] REPORT {summary_path.resolve(strict=False)}")
 
 
 def run_runtime_matrix(
@@ -222,6 +324,7 @@ def run_runtime_matrix(
             "runtimeReportPath": str(report_path.resolve(strict=False)),
             "report": report,
         }
+        _print_case_result(case.key, report)
 
     total_passed = sum(passed_by_target.values())
     total_failed = sum(failed_by_target.values())
@@ -274,7 +377,8 @@ def main(argv: list[str] | None = None) -> int:
         LOGGER.exception("Unexpected full runtime matrix failure")
         return 3
 
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    summary_path = arguments.output_root.expanduser().resolve(strict=False) / "acceptance_summary.json"
+    _print_matrix_summary(summary, summary_path)
     if summary["totalFailed"]:
         print("SPINE_ALL_RUNTIME_ORACLES=FAIL")
         return 1
