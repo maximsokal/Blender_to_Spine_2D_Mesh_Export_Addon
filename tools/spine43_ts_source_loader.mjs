@@ -13,7 +13,7 @@
  */
 
 import { existsSync, statSync } from 'node:fs';
-import { dirname, relative, resolve as resolvePath } from 'node:path';
+import { dirname, isAbsolute, relative, resolve as resolvePath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 function fail(message) {
@@ -36,7 +36,10 @@ const ALLOWED_ROOT = resolveAllowedRoot();
 
 function isInsideAllowedRoot(path) {
   const rel = relative(ALLOWED_ROOT, path);
-  return rel === '' || (!rel.startsWith('..') && !resolvePath(rel).startsWith('..'));
+  return (
+    rel === '' ||
+    (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`))
+  );
 }
 
 function redirectedTypeScriptPath(specifier, parentURL) {
