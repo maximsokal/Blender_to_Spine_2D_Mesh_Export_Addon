@@ -242,14 +242,31 @@ def _prepare_connected_outer_component(
 
 def _restore_connected_order_provenance(
     composition: SpineDocumentCompositionResult,
+    connected_document: SpineDocument,
     original_order_by_name: Mapping[str, int],
 ) -> SpineDocumentCompositionResult:
-    """Restore historical connected orders in metadata, not in the final document."""
+    """Restore the original connected component and its historical order metadata."""
 
     if not isinstance(composition, SpineDocumentCompositionResult):
         raise TypeError("composition must be SpineDocumentCompositionResult")
+    if not isinstance(connected_document, SpineDocument):
+        raise TypeError("connected_document must be SpineDocument")
     if not isinstance(original_order_by_name, Mapping):
         raise TypeError("original_order_by_name must be a mapping")
+
+    connected_component_count = 0
+    components = []
+    for component in composition.components:
+        if component.component_id != _CONNECTED_COMPONENT_ID:
+            components.append(component)
+            continue
+        connected_component_count += 1
+        components.append(replace(component, document=connected_document))
+    if connected_component_count != 1:
+        raise SpineCompositionError(
+            "Outer composition must contain exactly one connected component; "
+            f"found={connected_component_count}"
+        )
 
     found_names: set[str] = set()
     assignments = []
@@ -276,7 +293,11 @@ def _restore_connected_order_provenance(
             "Outer composition lost connected constraint metadata for: "
             f"{tuple(sorted(missing))}"
         )
-    return replace(composition, constraint_orders=tuple(assignments))
+    return replace(
+        composition,
+        components=tuple(components),
+        constraint_orders=tuple(assignments),
+    )
 
 
 def _compose_outer_document(
@@ -317,6 +338,7 @@ def _compose_outer_document(
     )
     return _restore_connected_order_provenance(
         outer,
+        connected_document,
         connected_input.original_order_by_name,
     )
 
