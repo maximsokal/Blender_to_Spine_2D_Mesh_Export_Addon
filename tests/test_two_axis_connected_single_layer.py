@@ -68,13 +68,20 @@ def test_three_connected_two_axis_objects_share_one_layer_and_keep_controls():
     constraints = (*result.document.ik, *result.document.transform)
     orders = tuple(constraint.order for constraint in constraints)
     assert len(orders) == 20
-    # One global phase plus one shared object-layer phase for each of the five
-    # two-axis operations: X, IK, Scale, depth-scale, Y.
+    # The complete five-step global rig occupies 0..4. Each object operation then uses
+    # one shared order for this single Z layer: X, IK, Scale, depth-scale, and Y.
     assert result.constraint_schedule.unique_orders == tuple(range(10))
     assert set(orders) == set(range(10))
     assert len(orders) > len(set(orders))
+    assert (
+        result.constraint_schedule.global_rotation_x,
+        result.constraint_schedule.global_scale_ik,
+        result.constraint_schedule.global_scale,
+        result.constraint_schedule.global_scale_depth,
+        result.constraint_schedule.global_rotation_y,
+    ) == (0, 1, 2, 3, 4)
     assert result.constraint_schedule.object_rotation_x == (
-        ("first", 1),
-        ("second", 1),
-        ("third", 1),
+        ("first", 5),
+        ("second", 5),
+        ("third", 5),
     )
