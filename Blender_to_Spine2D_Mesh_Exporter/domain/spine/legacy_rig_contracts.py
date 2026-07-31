@@ -43,6 +43,19 @@ class UniformScaleMode(str, Enum):
     MINIMUM = "MINIMUM"
 
 
+class LegacyZGroupOriginMode(str, Enum):
+    """Choose the source Z reference used for generated depth-bone offsets.
+
+    ``MINIMUM_Z`` preserves the historical compatibility behavior where the lowest
+    source layer becomes offset zero. ``OBJECT_ORIGIN`` keeps Blender local Z=0 as the
+    zero depth plane, so negative and positive groups remain on their authored sides of
+    the Object Origin.
+    """
+
+    MINIMUM_Z = "MINIMUM_Z"
+    OBJECT_ORIGIN = "OBJECT_ORIGIN"
+
+
 @dataclass(frozen=True, slots=True)
 class LegacyZGroup:
     """One ordered depth group used to create a scale/rotation bone pair."""
@@ -69,6 +82,10 @@ class LegacyRigBuildRequest:
     scale_mode: UniformScaleMode = UniformScaleMode.AVERAGE
     # Appended so historical positional construction remains stable.
     setup_pose_mode: A1RigSetupPoseMode = A1RigSetupPoseMode.PRESERVE_COMPOSITION
+    # Appended so historical positional construction remains stable. Public Normal /
+    # UV Segments two-axis export opts into OBJECT_ORIGIN explicitly; every legacy and
+    # camera path keeps MINIMUM_Z unless its route owner selects otherwise.
+    z_group_origin_mode: LegacyZGroupOriginMode = LegacyZGroupOriginMode.MINIMUM_Z
 
     def __post_init__(self) -> None:
         _require_canonical_string(self.prefix, "prefix")
@@ -98,6 +115,10 @@ class LegacyRigBuildRequest:
             raise TypeError("scale_mode must be UniformScaleMode")
         if not isinstance(self.setup_pose_mode, A1RigSetupPoseMode):
             raise TypeError("setup_pose_mode must be A1RigSetupPoseMode")
+        if not isinstance(self.z_group_origin_mode, LegacyZGroupOriginMode):
+            raise TypeError(
+                "z_group_origin_mode must be LegacyZGroupOriginMode"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,5 +278,6 @@ __all__ = [
     "LegacyRigInfo",
     "LegacyZGroup",
     "LegacyZGroupBuildInfo",
+    "LegacyZGroupOriginMode",
     "UniformScaleMode",
 ]
