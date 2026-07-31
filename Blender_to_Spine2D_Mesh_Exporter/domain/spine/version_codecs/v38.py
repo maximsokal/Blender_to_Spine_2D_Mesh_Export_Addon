@@ -1,10 +1,9 @@
 """Spine 3.8 JSON codec for legacy combined transform-constraint mixes.
 
-Spine 3.8 uses the legacy bone ``transform`` field and the same separate root IK and
-transform collections as Spine 4.0/4.1, but transform constraints expose one combined
-translation mix and one combined scale mix. Spine 4.2 JSON permits explicit X/Y values;
-when both values are present they must agree before they can be represented exactly in
-3.8. The codec never averages or silently drops a channel.
+Spine 3.8 uses the legacy bone ``transform`` field and separate root IK/transform
+collections, but exposes one combined translation mix and one combined scale mix.
+Explicit X/Y values must agree before they can be represented exactly. The codec never
+averages or silently drops a channel.
 """
 
 from __future__ import annotations
@@ -16,7 +15,8 @@ from typing import Any
 from ..model import SpineDocument
 from ..version_target import SpineJsonTarget
 from .base import SpineJsonCodecContext
-from .v40 import Spine40JsonCodec
+from .v40 import _sequence_paths
+from .v41 import Spine41JsonCodec
 
 
 _NEW_MIX_FIELDS = frozenset(
@@ -78,12 +78,7 @@ def _combined_mix(
 ) -> float | int:
     """Resolve one 4.2 X/Y pair using the official inherited-Y default."""
 
-    x_value = _mix_value(
-        mapping,
-        x_field,
-        default=default,
-        path=path,
-    )
+    x_value = _mix_value(mapping, x_field, default=default, path=path)
     y_value = _finite_mix(
         mapping.get(y_field, x_value),
         path=f"{path}.{y_field}",
@@ -104,12 +99,7 @@ def _rewrite_mix_mapping(mapping: dict[str, Any], *, path: str) -> None:
             f"{collision}"
         )
 
-    rotate_mix = _mix_value(
-        mapping,
-        "mixRotate",
-        default=1.0,
-        path=path,
-    )
+    rotate_mix = _mix_value(mapping, "mixRotate", default=1.0, path=path)
     translate_mix = _combined_mix(
         mapping,
         "mixX",
@@ -126,12 +116,7 @@ def _rewrite_mix_mapping(mapping: dict[str, Any], *, path: str) -> None:
         path=path,
         legacy_name="scaleMix",
     )
-    shear_mix = _mix_value(
-        mapping,
-        "mixShearY",
-        default=1.0,
-        path=path,
-    )
+    shear_mix = _mix_value(mapping, "mixShearY", default=1.0, path=path)
 
     for field_name in _NEW_MIX_FIELDS:
         mapping.pop(field_name, None)
@@ -141,7 +126,7 @@ def _rewrite_mix_mapping(mapping: dict[str, Any], *, path: str) -> None:
     mapping["shearMix"] = shear_mix
 
 
-class Spine38JsonCodec(Spine40JsonCodec):
+class Spine38JsonCodec(Spine41JsonCodec):
     """Translate canonical Spine 4.2-shaped documents to exact Spine 3.8.99 JSON."""
 
     @property
@@ -165,16 +150,18 @@ class Spine38JsonCodec(Spine40JsonCodec):
                 f"got {context.target.value}"
             )
 
-        encoded = super().to_json(
-            document,
-            context=context,
-            indent=indent,
-        )
+        encoded = super().to_json(document, context=context, indent=indent)
         output = _require_dict(json.loads(encoded), path="document")
+        sequence_paths = _sequence_paths(output)
+        if sequence_paths:
+            raise ValueError(
+                "Spine 3.8.99 does not support attachment or animation sequences; "
+                f"remove sequence data before export: {sequence_paths}"
+            )
+
         self._remove_unsupported_bone_ui_fields(output)
         self._rewrite_setup_transform_mixes(output)
         self._rewrite_animation_transform_mixes(output)
-
         return json.dumps(
             output,
             ensure_ascii=False,
@@ -195,10 +182,7 @@ class Spine38JsonCodec(Spine40JsonCodec):
         constraints_value = output.get("transform")
         if constraints_value is None:
             return
-        constraints = _require_list(
-            constraints_value,
-            path="document.transform",
-        )
+        constraints = _require_list(constraints_value, path="document.transform")
         for index, value in enumerate(constraints):
             constraint = _require_dict(
                 value,
@@ -229,9 +213,7 @@ class Spine38JsonCodec(Spine40JsonCodec):
                 path=f"{animation_path}.transform",
             )
             for constraint_name, frames_value in timelines.items():
-                frames_path = (
-                    f"{animation_path}.transform.{constraint_name}"
-                )
+                frames_path = f"{animation_path}.transform.{constraint_name}"
                 frames = _require_list(frames_value, path=frames_path)
                 for frame_index, frame_value in enumerate(frames):
                     frame = _require_dict(
