@@ -54,6 +54,7 @@ def _scene_profile(
         (SpineJsonTarget.SPINE_4_0, "spine_4.0.64"),
         (SpineJsonTarget.SPINE_4_1, "spine_4.1.24"),
         (SpineJsonTarget.SPINE_4_2, "spine_4.2.43"),
+        (SpineJsonTarget.SPINE_4_3, "spine_4.3.23"),
     ),
 )
 def test_filename_token_uses_the_exact_registered_patch_version(
@@ -70,6 +71,7 @@ def test_filename_token_uses_the_exact_registered_patch_version(
         (SpineJsonTarget.SPINE_4_0, "Hero_merged_spine_4.0.64.json"),
         (SpineJsonTarget.SPINE_4_1, "Hero_merged_spine_4.1.24.json"),
         (SpineJsonTarget.SPINE_4_2, "Hero_merged_spine_4.2.43.json"),
+        (SpineJsonTarget.SPINE_4_3, "Hero_merged_spine_4.3.23.json"),
     ),
 )
 def test_single_ui_settings_append_exact_spine_version_once(
@@ -101,6 +103,7 @@ def test_single_ui_settings_append_exact_spine_version_once(
     (
         (SpineJsonTarget.SPINE_4_0, "4.0.64"),
         (SpineJsonTarget.SPINE_4_1, "4.1.24"),
+        (SpineJsonTarget.SPINE_4_3, "4.3.23"),
     ),
 )
 def test_multi_ui_plan_appends_exact_spine_version(
