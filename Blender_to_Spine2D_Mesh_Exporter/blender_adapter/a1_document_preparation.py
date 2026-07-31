@@ -24,6 +24,7 @@ from ..domain.spine.legacy_attachment_builder import (
 from ..domain.spine.legacy_rig_contracts import (
     LegacyRigBuildRequest,
     LegacyRigBuildResult,
+    LegacyZGroupOriginMode,
 )
 from ..domain.spine.model import MeshAttachment, Skin, SpineDocument
 from ..domain.spine.rig_builder import build_rig
@@ -219,6 +220,29 @@ def _synchronize_document_build_for_spine41(
     )
 
 
+def _resolve_z_group_origin_mode(
+    *,
+    camera_projection: bool,
+    rig_profile: A1RigProfile,
+) -> LegacyZGroupOriginMode:
+    """Select the approved depth-reference policy for one preparation route.
+
+    Only public object-bake two-axis documents use Blender Object Origin. Camera
+    Projection and every unapproved/internal profile preserve minimum-Z compatibility.
+    """
+
+    if not isinstance(camera_projection, bool):
+        raise TypeError("camera_projection must be bool")
+    if not isinstance(rig_profile, A1RigProfile):
+        raise TypeError("rig_profile must be A1RigProfile")
+    if (
+        not camera_projection
+        and rig_profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE
+    ):
+        return LegacyZGroupOriginMode.OBJECT_ORIGIN
+    return LegacyZGroupOriginMode.MINIMUM_Z
+
+
 def finalize_a1_document_assembly_for_target(
     document_assembly: A1DocumentAssemblyResult,
     *,
@@ -312,6 +336,13 @@ def prepare_a1_document(
     statistics = texture.statistics
     try:
         camera_projection = isinstance(texture.bake_plan, CameraProjectionPlan)
+        resolved_rig_profile = resolve_a1_rig_profile(
+            source.settings.export.rig_profile
+        )
+        z_group_origin_mode = _resolve_z_group_origin_mode(
+            camera_projection=camera_projection,
+            rig_profile=resolved_rig_profile,
+        )
         main_position_pixels = (
             None
             if camera_projection
@@ -330,8 +361,9 @@ def prepare_a1_document(
                 main_position_pixels=main_position_pixels,
                 scale_mode=source.settings.rig_scale_mode,
                 setup_pose_mode=source.settings.rig_setup_pose_mode,
+                z_group_origin_mode=z_group_origin_mode,
             ),
-            source.settings.export.rig_profile,
+            resolved_rig_profile,
             spine_target=source.settings.export.spine_target,
         )
         statistics = freeze_statistics(
@@ -340,6 +372,7 @@ def prepare_a1_document(
                 "base_rig_bone_count": len(rig.bones),
                 "rig_profile": rig.profile.profile_id,
                 "rig_setup_pose_mode": rig.request.setup_pose_mode.value,
+                "z_group_origin_mode": rig.request.z_group_origin_mode.value,
             },
         )
 
@@ -401,11 +434,12 @@ def prepare_a1_document(
         )
         logger.debug(
             "Prepared Spine document for %s: target=%s profile=%s setup=%s "
-            "bones=%d slots=%d attachments=%d",
+            "z_origin=%s bones=%d slots=%d attachments=%d",
             source.object_id,
             source.settings.export.spine_version,
             rig.profile.profile_id,
             rig.request.setup_pose_mode.value,
+            rig.request.z_group_origin_mode.value,
             len(document.bones),
             len(document.slots),
             statistics["attachment_count"],
