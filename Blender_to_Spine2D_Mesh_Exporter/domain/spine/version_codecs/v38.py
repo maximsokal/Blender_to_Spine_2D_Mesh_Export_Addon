@@ -37,6 +37,7 @@ _LEGACY_MIX_FIELDS = frozenset(
 _SPINE38_BRIDGE_PATTERN = re.compile(
     r"^(?P<prefix>.+)_(?P<layer>[0-9]+)_scale_spine41_bridge$"
 )
+_TWO_AXIS_DEPTH_SUFFIX = "_scale_rotate_X_constraint"
 
 
 def _require_dict(value: Any, *, path: str) -> dict[str, Any]:
@@ -194,6 +195,44 @@ def _require_scale_only_payload(record: dict[str, Any], *, path: str) -> None:
         raise ValueError(f"{path}.local must be false or omitted")
 
 
+def _two_axis_prefixes(
+    transform_by_name: dict[str, dict[str, Any]],
+    ik_by_name: dict[str, dict[str, Any]],
+) -> tuple[str, ...]:
+    """Detect complete 2-Axis rigs by their target-specific depth constraint name."""
+
+    prefixes = tuple(
+        sorted(
+            {
+                name[: -len(_TWO_AXIS_DEPTH_SUFFIX)]
+                for name in transform_by_name
+                if name.endswith(_TWO_AXIS_DEPTH_SUFFIX)
+                and len(name) > len(_TWO_AXIS_DEPTH_SUFFIX)
+            },
+            key=lambda value: (value.casefold(), value),
+        )
+    )
+    for prefix in prefixes:
+        required_transform = (
+            f"{prefix}_rotation_X_constraint",
+            f"{prefix}_scale_spine38_position",
+            f"{prefix}_scale_rotate_X_constraint",
+            f"{prefix}_rotation_Y",
+            f"{prefix}_scale",
+        )
+        missing_transform = tuple(
+            name for name in required_transform if name not in transform_by_name
+        )
+        ik_name = f"{prefix}_IK"
+        if missing_transform or ik_name not in ik_by_name:
+            missing = missing_transform + (() if ik_name in ik_by_name else (ik_name,))
+            raise ValueError(
+                f"Spine 3.8 two-axis constraint inventory is incomplete for "
+                f"{prefix!r}: missing={missing}"
+            )
+    return prefixes
+
+
 class Spine38JsonCodec(Spine41JsonCodec):
     """Translate canonical Spine 4.2-shaped documents to exact Spine 3.8.99 JSON."""
 
@@ -303,7 +342,7 @@ class Spine38JsonCodec(Spine41JsonCodec):
 
     @staticmethod
     def _validate_two_axis_runtime_topology(output: dict[str, Any]) -> None:
-        """Reject the stale-child schedule that distorts Spine 3.8 controls."""
+        """Reject any 2-Axis graph that can feed stale child matrices to Rotation Y."""
 
         bones = _require_list(output.get("bones"), path="document.bones")
         bone_by_name: dict[str, dict[str, Any]] = {}
@@ -333,13 +372,30 @@ class Spine38JsonCodec(Spine41JsonCodec):
                     (wrapper_name, name)
                 )
 
-        if not bridge_records:
-            # Three-axis Spine 3.8 documents do not use the two-axis bridge topology.
-            return
-
         ik_by_name = _named_records(output, "ik")
         transform_by_name = _named_records(output, "transform")
-        for prefix, raw_records in bridge_records.items():
+        prefixes = _two_axis_prefixes(transform_by_name, ik_by_name)
+        if not prefixes:
+            if bridge_records:
+                raise ValueError(
+                    "Spine 3.8 bridge bones exist without a complete two-axis "
+                    f"constraint inventory: prefixes={tuple(sorted(bridge_records))}"
+                )
+            # Three-axis Spine 3.8 documents do not use this target topology.
+            return
+
+        expected_prefixes = set(prefixes)
+        actual_bridge_prefixes = set(bridge_records)
+        if actual_bridge_prefixes != expected_prefixes:
+            raise ValueError(
+                "Spine 3.8 two-axis documents must pass target finalization before "
+                "serialization; bridge topology differs from constraint inventory: "
+                f"missing_bridges={tuple(sorted(expected_prefixes - actual_bridge_prefixes))}, "
+                f"unexpected_bridges={tuple(sorted(actual_bridge_prefixes - expected_prefixes))}"
+            )
+
+        for prefix in prefixes:
+            raw_records = bridge_records[prefix]
             wrappers: list[str] = []
             layers: list[str] = []
             for wrapper_name, bridge_name in raw_records:
@@ -375,18 +431,12 @@ class Spine38JsonCodec(Spine41JsonCodec):
             position_scale_name = f"{prefix}_scale_spine38_position"
             depth_name = f"{prefix}_scale_rotate_X_constraint"
             rotation_y_name = f"{prefix}_rotation_Y"
-            try:
-                rotation_x = transform_by_name[rotation_x_name]
-                scale_ik = ik_by_name[ik_name]
-                position_scale = transform_by_name[position_scale_name]
-                depth_scale = transform_by_name[depth_name]
-                rotation_y = transform_by_name[rotation_y_name]
-                public_scale = transform_by_name[public_scale_name]
-            except KeyError as exc:
-                raise ValueError(
-                    f"Spine 3.8 two-axis constraint inventory is incomplete for "
-                    f"{prefix!r}: missing {exc.args[0]!r}"
-                ) from exc
+            rotation_x = transform_by_name[rotation_x_name]
+            scale_ik = ik_by_name[ik_name]
+            position_scale = transform_by_name[position_scale_name]
+            depth_scale = transform_by_name[depth_name]
+            rotation_y = transform_by_name[rotation_y_name]
+            public_scale = transform_by_name[public_scale_name]
 
             base_order = _constraint_order(
                 rotation_x,
