@@ -271,17 +271,39 @@ def test_spine38_codec_rejects_the_previous_stale_child_topology() -> None:
         else name
         for name in source_scale.bones
     )
+
+    rotation_x_name = profile.rotation_x_constraint("Cone")
+    ik_name = profile.scale_ik_constraint("Cone")
     scale_name = profile.scale_constraint("Cone")
+    depth_name = profile.scale_depth_constraint("Cone")
+    rotation_y_name = profile.rotation_y_constraint("Cone")
     position_scale_name = "Cone_scale_spine38_position"
+
+    # Rebuild the old five-phase graph with unique dense orders so the generic
+    # validator accepts the document and the Spine 3.8 codec rejects the actual
+    # missing target-specific position phase.
     unsafe_transform = tuple(
-        replace(constraint, order=2, bones=old_scale_bones)
+        replace(constraint, order=0)
+        if constraint.name == rotation_x_name
+        else replace(constraint, order=2, bones=old_scale_bones)
         if constraint.name == scale_name
+        else replace(constraint, order=3)
+        if constraint.name == depth_name
+        else replace(constraint, order=4)
+        if constraint.name == rotation_y_name
         else constraint
         for constraint in finalized.document.transform
         if constraint.name != position_scale_name
     )
+    unsafe_ik = tuple(
+        replace(constraint, order=1)
+        if constraint.name == ik_name
+        else constraint
+        for constraint in finalized.document.ik
+    )
     unsafe_document = replace(
         finalized.document,
+        ik=unsafe_ik,
         transform=unsafe_transform,
     )
 
@@ -297,8 +319,10 @@ def test_spine38_codec_rejects_position_scale_below_rotation_x() -> None:
     position_name = "Cone_scale_spine38_position"
     rotation_x_name = "Cone_rotation_X_constraint"
 
+    # Swap only the first two phases. Orders remain unique and dense, so this
+    # reaches the Spine 3.8 topology guard instead of failing generic validation.
     unsafe_transform = tuple(
-        replace(constraint, order=2)
+        replace(constraint, order=1)
         if constraint.name == position_name
         else replace(constraint, order=0)
         if constraint.name == rotation_x_name
