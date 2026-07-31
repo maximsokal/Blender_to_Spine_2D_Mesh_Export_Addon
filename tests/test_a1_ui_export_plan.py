@@ -45,9 +45,10 @@ def _source(index: int, name: str) -> A1MultiObjectSource:
     )
 
 
-def test_active_ui_plan_explicitly_requests_normalized_single_setup(monkeypatch):
+def test_active_ui_plan_uses_route_specific_setup_pose(monkeypatch):
     source_object = SimpleNamespace(name="Cone")
     object_profile = _ObjectExportProfile(source_object, "Cone", 0, 0, False)
+    scene_profile = object()
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
@@ -58,12 +59,21 @@ def test_active_ui_plan_explicitly_requests_normalized_single_setup(monkeypatch)
     monkeypatch.setattr(
         a1_ui_export_plan,
         "_capture_scene_profile",
-        lambda _scene: object(),
+        lambda _scene: scene_profile,
     )
     monkeypatch.setattr(
         a1_ui_export_plan,
         "_capture_object_profile",
         lambda *_args, **_kwargs: object_profile,
+    )
+    monkeypatch.setattr(
+        a1_ui_export_plan,
+        "_single_setup_pose_mode",
+        lambda profile: (
+            A1RigSetupPoseMode.PRESERVE_COMPOSITION
+            if profile is scene_profile
+            else A1RigSetupPoseMode.NORMALIZED_SINGLE
+        ),
     )
 
     def _capture_settings(_object_profile, _scene_profile, **kwargs):
@@ -81,7 +91,10 @@ def test_active_ui_plan_explicitly_requests_normalized_single_setup(monkeypatch)
     )
 
     assert plan.source_object is source_object
-    assert captured["rig_setup_pose_mode"] is A1RigSetupPoseMode.NORMALIZED_SINGLE
+    assert (
+        captured["rig_setup_pose_mode"]
+        is A1RigSetupPoseMode.PRESERVE_COMPOSITION
+    )
 
 
 def test_multi_ui_plan_preserves_explicit_mixed_subgroup_order():
