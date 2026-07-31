@@ -1,6 +1,6 @@
 # Object Origin pivot implementation notes
 
-This note supplements `normal_uv_segments_object_origin_pivot.md` with one setup-pose dependency discovered during implementation.
+This note supplements `normal_uv_segments_object_origin_pivot.md` with setup-pose and persisted-RNA dependencies discovered during implementation.
 
 ## Single-object setup-pose route
 
@@ -26,11 +26,13 @@ Public standalone multi-object export already uses `PRESERVE_COMPOSITION` for ev
 
 This is not a new scope expansion. It is required to satisfy acceptance criterion 1 of the approved task: `<prefix>_main` must correspond to Blender Object Origin.
 
-## Public rig UI
+## Public rig UI and persisted `.blend` compatibility
 
-Only `TWO_AXIS_ROTATION_SCALE` is exposed. `THREE_AXIS_ROTATION` remains available to internal builders and tests but is not offered by the public EnumProperty or public rig description panel.
+Only `TWO_AXIS_ROTATION_SCALE` is shown by the public rig panel. The panel does not draw the persisted rig EnumProperty as a selector.
 
-Persisted historical `THREE_AXIS_ROTATION` values are normalized to `TWO_AXIS_ROTATION_SCALE` at public scene capture so old `.blend` data cannot silently re-enable the hidden profile.
+`THREE_AXIS_ROTATION` remains in the hidden RNA enum solely so Blender can bind and migrate historical Scene ID-properties without rejecting an old `.blend` file. It also remains available to internal builders and tests.
+
+Public scene capture normalizes a persisted `THREE_AXIS_ROTATION` value to `TWO_AXIS_ROTATION_SCALE`, so the hidden compatibility value cannot silently re-enable Three Axis export.
 
 ## Version
 
