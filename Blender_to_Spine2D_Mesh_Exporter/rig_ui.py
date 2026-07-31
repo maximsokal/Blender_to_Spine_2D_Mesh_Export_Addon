@@ -8,7 +8,7 @@ from typing import Set
 
 import bpy
 
-from .domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
+from .domain.spine.rig_profiles import A1RigProfile
 from .domain.baking import A1TextureExportMode
 from .infrastructure.blender_registration import (
     class_cleanup_actions,
@@ -24,17 +24,34 @@ def draw_rig_settings(
     layout: bpy.types.UILayout,
     context: bpy.types.Context,
 ) -> None:
-    """Draw rig settings inside the main panel's standard foldout container."""
+    """Draw the single public, runtime-validated rig profile."""
 
     scene = context.scene
     layout.label(text="Texture export", icon="TEXTURE")
     layout.prop(scene, "spine2d_texture_export_mode", text="Export mode")
-    texture_mode = str(getattr(scene, "spine2d_texture_export_mode", A1TextureExportMode.NORMAL_UV_SEGMENTS.value)).upper()
+    texture_mode = str(
+        getattr(
+            scene,
+            "spine2d_texture_export_mode",
+            A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
+        )
+    ).upper()
     if texture_mode == A1TextureExportMode.CAMERA_PROJECTION.value:
-        layout.label(text="Active camera render -> one screen-space mesh", icon="CAMERA_DATA")
-        layout.prop(scene, "spine2d_projection_alpha_threshold", text="Projection alpha threshold")
+        layout.label(
+            text="Active camera render -> one screen-space mesh",
+            icon="CAMERA_DATA",
+        )
+        layout.prop(
+            scene,
+            "spine2d_projection_alpha_threshold",
+            text="Projection alpha threshold",
+        )
     else:
-        layout.label(text="Preserves cut regions and generated UV meshes", icon="UV")
+        layout.label(
+            text="Preserves cut regions and generated UV meshes",
+            icon="UV",
+        )
+
     row = layout.row(align=True)
     row.prop(scene, "spine2d_rig_profile", text="Rig profile")
     row.operator(
@@ -42,27 +59,17 @@ def draw_rig_settings(
         text="",
         icon="LOOP_BACK",
     )
-    profile = resolve_a1_rig_profile(
-        getattr(
-            scene,
-            "spine2d_rig_profile",
-            A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
-        )
-    )
+
     description = layout.box()
-    if profile is A1RigProfile.THREE_AXIS_ROTATION:
-        description.label(
-            text="Controls: Rotation X / Y / Z",
-            icon="ORIENTATION_GIMBAL",
-        )
-        description.label(text="Compatibility rig; scale is constrained")
+    description.label(
+        text="Controls: Rotation X / Y + Scale",
+        icon="FULLSCREEN_ENTER",
+    )
+    if texture_mode == A1TextureExportMode.CAMERA_PROJECTION.value:
+        description.label(text="Camera Projection keeps compatibility placement")
     else:
-        description.label(
-            text="Controls: Rotation X / Y + Scale",
-            icon="FULLSCREEN_ENTER",
-        )
-        description.label(text="Single export uses a neutral setup pose")
-        description.label(text="Multi export preserves scene placement")
+        description.label(text="Main bone matches Blender Object Origin")
+        description.label(text="Depth layers use the object's local Z=0 pivot")
 
     layout.separator()
     row = layout.row(align=True)
