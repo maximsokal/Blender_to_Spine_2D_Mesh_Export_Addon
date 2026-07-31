@@ -26,14 +26,12 @@ EXPECTED_CASES: Mapping[str, Mapping[str, object]] = {
     "TWO_AXIS_ROTATION_SCALE": {
         "directory": "two_axis",
         "stem": "Spine43TwoAxisStandaloneMulti",
-        "bones": 52,
         "ik": 3,
         "transform": 12,
     },
     "LEGACY_ROTATABLE_MESH": {
         "directory": "three_axis",
         "stem": "Spine43ThreeAxisStandaloneMulti",
-        "bones": 46,
         "ik": 3,
         "transform": 15,
     },
@@ -183,11 +181,18 @@ def _require_non_negative_int(value: object, *, label: str) -> int:
     return value
 
 
+def _require_positive_int(value: object, *, label: str) -> int:
+    resolved = _require_non_negative_int(value, label=label)
+    if resolved <= 0:
+        raise Spine43StandaloneAcceptanceError(f"{label} must be a positive integer")
+    return resolved
+
+
 def _validate_generated_json(
     path: Path,
     *,
     expected_constraint_count: int,
-) -> None:
+) -> dict[str, int]:
     """Recheck the persisted target boundary independently of Blender worker state."""
 
     payload = _load_json_object(path, label="Spine 4.3 JSON")
@@ -201,6 +206,11 @@ def _validate_generated_json(
             raise Spine43StandaloneAcceptanceError(
                 f"Generated JSON retained legacy root field {legacy_field!r}"
             )
+    bones = payload.get("bones")
+    if not isinstance(bones, list) or not bones:
+        raise Spine43StandaloneAcceptanceError(
+            "Generated JSON bones must be a non-empty array"
+        )
     constraints = payload.get("constraints")
     if not isinstance(constraints, list) or len(constraints) != expected_constraint_count:
         raise Spine43StandaloneAcceptanceError(
@@ -221,6 +231,7 @@ def _validate_generated_json(
             raise Spine43StandaloneAcceptanceError(
                 f"constraints[{index}] retained legacy order"
             )
+    return {"bones": len(bones), "constraints": len(constraints)}
 
 
 def validate_blender_report(
@@ -287,7 +298,11 @@ def validate_blender_report(
             raise Spine43StandaloneAcceptanceError(
                 f"Profile {profile_name} did not pass: {profile_report}"
             )
-        for field_name in ("bones", "ik", "transform"):
+        reported_bones = _require_positive_int(
+            profile_report.get("bones"),
+            label=f"{profile_name}.bones",
+        )
+        for field_name in ("ik", "transform"):
             actual = _require_non_negative_int(
                 profile_report.get(field_name),
                 label=f"{profile_name}.{field_name}",
@@ -301,6 +316,10 @@ def validate_blender_report(
         if profile_report.get("constraints") != expected_constraints:
             raise Spine43StandaloneAcceptanceError(
                 f"{profile_name}.constraints mismatch: {profile_report.get('constraints')!r}"
+            )
+        if profile_report.get("profileBoneInventoryExact") is not True:
+            raise Spine43StandaloneAcceptanceError(
+                f"{profile_name} did not validate its exact profile bone inventory"
             )
         if profile_report.get("connectedWrapperPresent") is not False:
             raise Spine43StandaloneAcceptanceError(
@@ -330,10 +349,15 @@ def validate_blender_report(
             raise Spine43StandaloneAcceptanceError(
                 f"{profile_name}.jsonPath differs: {reported_json_path!r}"
             )
-        _validate_generated_json(
+        persisted = _validate_generated_json(
             json_path,
             expected_constraint_count=expected_constraints,
         )
+        if persisted["bones"] != reported_bones:
+            raise Spine43StandaloneAcceptanceError(
+                f"{profile_name}.bones differs between worker report and JSON: "
+                f"report={reported_bones}, json={persisted['bones']}"
+            )
 
         texture_paths = profile_report.get("texturePaths")
         if not isinstance(texture_paths, list) or len(texture_paths) != 3:
