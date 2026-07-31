@@ -97,6 +97,57 @@ def _document() -> SpineDocument:
     )
 
 
+def _legacy_three_axis_sparse_order_document() -> SpineDocument:
+    """Reproduce the canonical Legacy 3-Axis order schedule used by production."""
+
+    base = _document()
+    return replace(
+        base,
+        skins=(replace(base.skins[0], constraints=()),),
+        ik=(
+            IKConstraint(
+                "legacy_scale_ik",
+                3,
+                ("control",),
+                "root",
+                extras={"compress": True, "stretch": True},
+            ),
+        ),
+        transform=(
+            TransformConstraint(
+                "legacy_rotation_x",
+                1,
+                ("control",),
+                "root",
+            ),
+            TransformConstraint(
+                "legacy_rotation_y",
+                2,
+                ("control",),
+                "root",
+            ),
+            TransformConstraint(
+                "legacy_rotation_z",
+                5,
+                ("control",),
+                "root",
+            ),
+            TransformConstraint(
+                "legacy_scale",
+                4,
+                ("control",),
+                "root",
+            ),
+            TransformConstraint(
+                "legacy_scale_compensator",
+                6,
+                ("control",),
+                "root",
+            ),
+        ),
+    )
+
+
 def test_spine43_codec_builds_unified_constraints_in_authored_order() -> None:
     payload = json.loads(
         serialize_spine_document(
@@ -181,14 +232,34 @@ def test_spine43_codec_does_not_mutate_the_canonical_document() -> None:
     assert document.transform[0].extras["relative"] is True
 
 
-def test_spine43_codec_rejects_non_contiguous_global_orders() -> None:
+def test_spine43_codec_compacts_legacy_sparse_orders_by_dependency_order() -> None:
+    document = _legacy_three_axis_sparse_order_document()
+
+    payload = json.loads(
+        serialize_spine_document(document, SpineJsonTarget.SPINE_4_3)
+    )
+
+    assert [item["name"] for item in payload["constraints"]] == [
+        "legacy_rotation_x",
+        "legacy_rotation_y",
+        "legacy_scale_ik",
+        "legacy_scale",
+        "legacy_rotation_z",
+        "legacy_scale_compensator",
+    ]
+    assert all("order" not in item for item in payload["constraints"])
+    assert tuple(item.order for item in document.ik) == (3,)
+    assert tuple(item.order for item in document.transform) == (1, 2, 5, 4, 6)
+
+
+def test_spine43_codec_rejects_duplicate_global_orders() -> None:
     document = _document()
     broken = replace(
         document,
-        ik=(replace(document.ik[0], order=3),),
+        ik=(replace(document.ik[0], order=0),),
     )
 
-    with pytest.raises(ValueError, match="contiguous 0..N-1"):
+    with pytest.raises(Exception, match="DUPLICATE_CONSTRAINT_ORDER|globally unique"):
         serialize_spine_document(broken, SpineJsonTarget.SPINE_4_3)
 
 
