@@ -11,7 +11,7 @@ JSON view without mutating the typed :class:`SpineDocument`.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Iterable, Sequence
 
 
 @dataclass(frozen=True, slots=True)
