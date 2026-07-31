@@ -18,13 +18,14 @@ TASK_PATH = (
     / "tasks"
     / "normal_uv_segments_object_origin_pivot.md"
 )
+CORRECTION_RELEASE_PATH = REPOSITORY_ROOT / "docs" / "releases" / "0.55.1.md"
 
 
-def test_object_origin_release_uses_version_0550() -> None:
+def test_object_origin_release_uses_version_0551() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.0"
+    assert manifest["version"] == "0.55.1"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -35,3 +36,11 @@ def test_object_origin_release_keeps_approved_task_document() -> None:
     assert "TWO_AXIS_ROTATION_SCALE" in task
     assert "OBJECT_ORIGIN" in task
     assert "Camera Projection" in task
+
+
+def test_object_origin_acceptance_correction_has_release_note() -> None:
+    release_note = CORRECTION_RELEASE_PATH.read_text(encoding="utf-8")
+
+    assert "0.55.1" in release_note
+    assert "view_layer.update" in release_note
+    assert "production pivot code" in release_note
