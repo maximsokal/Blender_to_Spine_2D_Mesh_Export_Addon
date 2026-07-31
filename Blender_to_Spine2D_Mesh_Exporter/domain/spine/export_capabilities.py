@@ -58,7 +58,7 @@ class SpineJsonExportCapability:
 
 
 _ALL_SCOPES = frozenset(SpineJsonExportScope)
-_LIMITED_LEGACY_4X_SCOPES = frozenset(
+_LIMITED_STANDALONE_SCOPES = frozenset(
     {
         SpineJsonExportScope.SINGLE_OBJECT,
         SpineJsonExportScope.STANDALONE_MULTI_OBJECT,
@@ -76,7 +76,7 @@ _CAPABILITIES: Mapping[
         ): SpineJsonExportCapability(
             target=SpineJsonTarget.SPINE_4_0,
             rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
-            scopes=_LIMITED_LEGACY_4X_SCOPES,
+            scopes=_LIMITED_STANDALONE_SCOPES,
             limitations=(
                 "Attachment and animation sequences are not supported by Spine 4.0.64.",
             ),
@@ -87,7 +87,7 @@ _CAPABILITIES: Mapping[
         ): SpineJsonExportCapability(
             target=SpineJsonTarget.SPINE_4_1,
             rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
-            scopes=_LIMITED_LEGACY_4X_SCOPES,
+            scopes=_LIMITED_STANDALONE_SCOPES,
         ),
         (
             SpineJsonTarget.SPINE_4_2,
@@ -104,6 +104,28 @@ _CAPABILITIES: Mapping[
             target=SpineJsonTarget.SPINE_4_2,
             rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
             scopes=_ALL_SCOPES,
+        ),
+        (
+            SpineJsonTarget.SPINE_4_3,
+            A1RigProfile.THREE_AXIS_ROTATION,
+        ): SpineJsonExportCapability(
+            target=SpineJsonTarget.SPINE_4_3,
+            rig_profile=A1RigProfile.THREE_AXIS_ROTATION,
+            scopes=_LIMITED_STANDALONE_SCOPES,
+            limitations=(
+                "Connected and mixed 4.3 compositions await runtime acceptance.",
+            ),
+        ),
+        (
+            SpineJsonTarget.SPINE_4_3,
+            A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+        ): SpineJsonExportCapability(
+            target=SpineJsonTarget.SPINE_4_3,
+            rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+            scopes=_LIMITED_STANDALONE_SCOPES,
+            limitations=(
+                "Connected and mixed 4.3 compositions await runtime acceptance.",
+            ),
         ),
     }
 )
