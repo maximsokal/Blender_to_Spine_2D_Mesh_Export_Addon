@@ -1,15 +1,33 @@
-"""Spine 4.2 codec preserving the current production serializer byte-for-byte."""
+"""Spine 4.2 codec with runtime-safe ordered constraint scheduling."""
 
 from __future__ import annotations
+
+import json
+from typing import Any
 
 from ..model import SpineDocument
 from ..serializer import SpineSerializer
 from ..version_target import SpineJsonTarget
 from .base import SpineJsonCodecContext, SpineJsonVersionCodec
+from .runtime_constraint_order import normalize_runtime_constraint_orders
+
+
+def _require_dict(value: Any, *, path: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise TypeError(f"{path} must be a JSON object")
+    return value
 
 
 class Spine42JsonCodec(SpineJsonVersionCodec):
-    """Delegate Spine 4.2.43 output to the proven production serializer."""
+    """Serialize exact Spine 4.2.43 JSON with a complete runtime update schedule.
+
+    Canonical builders retain historical dependency numbers because the same typed
+    document can target multiple Spine families. The 4.2 runtime, however, scans phases
+    ``0..constraint_count-1`` and processes one constraint per phase. This codec therefore
+    normalizes only the detached serialized constraint ``order`` fields. Rig topology,
+    constraint payloads, animations, skins, attachments, and the canonical document stay
+    unchanged.
+    """
 
     @property
     def target(self) -> SpineJsonTarget:
@@ -32,12 +50,20 @@ class Spine42JsonCodec(SpineJsonVersionCodec):
                 f"got {context.target.value}"
             )
 
-        # Do not normalize, copy, strip, or rewrite anything here. This exact delegation
-        # is the regression gate that preserves the existing 4.2.43 JSON representation,
-        # including current animation and attachment-sequence behavior.
-        return SpineSerializer(validator=context.validator).to_json(
+        canonical_json = SpineSerializer(validator=context.validator).to_json(
             document,
             indent=indent,
+        )
+        output = _require_dict(json.loads(canonical_json), path="document")
+        normalize_runtime_constraint_orders(
+            output,
+            collections=("ik", "transform", "path", "physics"),
+        )
+        return json.dumps(
+            output,
+            ensure_ascii=False,
+            indent=indent,
+            allow_nan=False,
         )
 
 
