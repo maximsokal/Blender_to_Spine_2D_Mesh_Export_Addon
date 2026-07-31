@@ -121,19 +121,21 @@ def _spine38_orders_for_prefix(
     document: SpineDocument,
     prefix: str,
 ) -> tuple[int, ...]:
+    """Return the exact user-validated Spine 3.8 runtime order."""
+
     transforms = _transform_by_name(document)
     ik = _ik_by_name(document)
     return (
+        transforms[f"{prefix}_scale_spine38_position"].order,
         transforms[f"{prefix}_rotation_X_constraint"].order,
         ik[f"{prefix}_IK"].order,
-        transforms[f"{prefix}_scale_spine38_position"].order,
         transforms[f"{prefix}_scale_rotate_X_constraint"].order,
         transforms[f"{prefix}_rotation_Y"].order,
         transforms[f"{prefix}_scale"].order,
     )
 
 
-def test_spine38_splits_scale_position_before_depth_and_geometry_after_y() -> None:
+def test_spine38_places_position_scale_before_rotation_x() -> None:
     assembly = _assembly(SpineJsonTarget.SPINE_3_8)
     source_document = assembly.document
     profile = assembly.rig.profile
@@ -146,11 +148,17 @@ def test_spine38_splits_scale_position_before_depth_and_geometry_after_y() -> No
     document = finalized.document
     transforms = _transform_by_name(document)
     position_scale = transforms["Cone_scale_spine38_position"]
+    rotation_x = transforms[profile.rotation_x_constraint("Cone")]
     depth_scale = transforms[profile.scale_depth_constraint("Cone")]
     rotation_y = transforms[profile.rotation_y_constraint("Cone")]
     public_scale = transforms[profile.scale_constraint("Cone")]
 
     assert _spine38_orders_for_prefix(document, "Cone") == (0, 1, 2, 3, 4, 5)
+
+    transform_names = tuple(constraint.name for constraint in document.transform)
+    assert transform_names.index(position_scale.name) < transform_names.index(
+        rotation_x.name
+    )
 
     wrappers = assembly.rig.info.sub_bone_scale_names
     layers = assembly.rig.info.sub_bone_names
@@ -211,7 +219,7 @@ def test_spine38_standalone_composition_preserves_each_six_phase_block() -> None
     )
 
 
-def test_spine38_codec_serializes_internal_position_and_public_geometry_scale() -> None:
+def test_spine38_codec_serializes_position_scale_as_first_object_constraint() -> None:
     finalized = _finalized(SpineJsonTarget.SPINE_3_8)
     profile = finalized.rig.profile
     payload = json.loads(
@@ -226,9 +234,9 @@ def test_spine38_codec_serializes_internal_position_and_public_geometry_scale() 
     }
     ik_by_name = {constraint["name"]: constraint for constraint in payload["ik"]}
     assert (
+        transform_by_name["Cone_scale_spine38_position"].get("order", 0),
         transform_by_name[profile.rotation_x_constraint("Cone")]["order"],
         ik_by_name[profile.scale_ik_constraint("Cone")]["order"],
-        transform_by_name["Cone_scale_spine38_position"]["order"],
         transform_by_name[profile.scale_depth_constraint("Cone")]["order"],
         transform_by_name[profile.rotation_y_constraint("Cone")]["order"],
         transform_by_name[profile.scale_constraint("Cone")]["order"],
@@ -278,6 +286,28 @@ def test_spine38_codec_rejects_the_previous_stale_child_topology() -> None:
     )
 
     with pytest.raises(ValueError, match="constraint inventory is incomplete"):
+        serialize_spine_document(
+            unsafe_document,
+            SpineJsonTarget.SPINE_3_8,
+        )
+
+
+def test_spine38_codec_rejects_position_scale_below_rotation_x() -> None:
+    finalized = _finalized(SpineJsonTarget.SPINE_3_8)
+    position_name = "Cone_scale_spine38_position"
+    rotation_x_name = "Cone_rotation_X_constraint"
+
+    unsafe_transform = tuple(
+        replace(constraint, order=2)
+        if constraint.name == position_name
+        else replace(constraint, order=0)
+        if constraint.name == rotation_x_name
+        else constraint
+        for constraint in finalized.document.transform
+    )
+    unsafe_document = replace(finalized.document, transform=unsafe_transform)
+
+    with pytest.raises(ValueError, match="ScalePosition/X/IK/Depth/Y/ScaleGeometry"):
         serialize_spine_document(
             unsafe_document,
             SpineJsonTarget.SPINE_3_8,
