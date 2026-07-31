@@ -75,6 +75,9 @@ TRANSFORM_PROPERTIES = (
     "scaleY",
     "shearY",
 )
+SOURCE_VERTEX_COUNT = 4
+SOURCE_SEGMENT_INDEX = 0
+SOURCE_Z_GROUP_INDEX = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +88,6 @@ class ProfileCase:
     profile: A1RigProfile
     output_stem: str
     prefixes: tuple[str, str, str]
-    expected_bones: int
     expected_ik: int
     expected_transform: int
 
@@ -98,7 +100,7 @@ class ProfileCase:
             raise ValueError("output_stem must be a non-empty string")
         if len(self.prefixes) != 3 or not all(self.prefixes):
             raise ValueError("prefixes must contain exactly three non-empty names")
-        for field_name in ("expected_bones", "expected_ik", "expected_transform"):
+        for field_name in ("expected_ik", "expected_transform"):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{field_name} must be a positive integer")
@@ -110,7 +112,6 @@ CASES = (
         profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
         output_stem="Spine43TwoAxisStandaloneMulti",
         prefixes=("Spine43TwoA", "Spine43TwoB", "Spine43TwoC"),
-        expected_bones=52,
         expected_ik=3,
         expected_transform=12,
     ),
@@ -119,7 +120,6 @@ CASES = (
         profile=A1RigProfile.THREE_AXIS_ROTATION,
         output_stem="Spine43ThreeAxisStandaloneMulti",
         prefixes=("Spine43ThreeA", "Spine43ThreeB", "Spine43ThreeC"),
-        expected_bones=46,
         expected_ik=3,
         expected_transform=15,
     ),
@@ -277,6 +277,50 @@ def _assert_same_owner_reference(
         )
 
 
+def _expected_profile_bone_names(
+    prefix: str,
+    profile: A1RigProfile,
+) -> frozenset[str]:
+    """Derive the exact final bone inventory for the deterministic quad fixture.
+
+    Both profiles share the legacy physical hierarchy. Their semantic distinction is
+    the third public control: 2-Axis owns ``*_scale`` while 3-Axis owns
+    ``*_rotation_Z``. Vertex-bone names are derived from the actual fixture geometry
+    instead of maintaining a hand-written total bone count.
+    """
+
+    if not isinstance(prefix, str) or not prefix.strip():
+        raise ValueError("prefix must be a non-empty string")
+    if not isinstance(profile, A1RigProfile):
+        raise TypeError("profile must be A1RigProfile")
+
+    third_control = (
+        f"{prefix}_scale"
+        if profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE
+        else f"{prefix}_rotation_Z"
+    )
+    fixed = {
+        f"{prefix}_main",
+        prefix,
+        f"{prefix}_scale_rotate_X",
+        f"{prefix}_rotate_X",
+        f"{prefix}_{SOURCE_Z_GROUP_INDEX}_scale",
+        f"{prefix}_{SOURCE_Z_GROUP_INDEX}",
+        f"{prefix}_rotation_X",
+        f"{prefix}_rotation_Y",
+        third_control,
+        f"{prefix}_rotate_X_constraint",
+        f"{prefix}_rotate_X_constraint_scale_IK",
+        f"{prefix}_rotate_X_constraint_rotate_IK",
+        f"{prefix}_rotate_X_constraint_IK",
+    }
+    vertex_bones = {
+        f"{prefix}_Segment_{SOURCE_SEGMENT_INDEX}_vertex_{vertex_index}"
+        for vertex_index in range(SOURCE_VERTEX_COUNT)
+    }
+    return frozenset((*fixed, *vertex_bones))
+
+
 def _assert_transform_properties(
     constraint: Mapping[str, object],
     *,
@@ -354,10 +398,6 @@ def _assert_standalone_document(
     skins = _json_array(document, "skins", required=True)
     constraints = _json_array(document, "constraints", required=True)
 
-    _assert(
-        len(bones) == case.expected_bones,
-        f"{case.key} expected {case.expected_bones} bones, got {len(bones)}",
-    )
     _assert(len(slots) == 3, f"{case.key} expected 3 slots, got {len(slots)}")
     _assert(len(skins) == 1, f"{case.key} expected exactly one skin")
     _assert(
@@ -380,12 +420,26 @@ def _assert_standalone_document(
         )
         bone_by_name[name] = raw_bone
 
-    _assert(
-        tuple(name for name in bone_by_name if name == "root") == ("root",),
-        "root count changed",
-    )
+    expected_bone_names = {"root"}
     for prefix in case.prefixes:
-        _assert(f"{prefix}_main" in bone_by_name, f"missing main bone for {prefix}")
+        expected_bone_names.update(_expected_profile_bone_names(prefix, case.profile))
+    actual_bone_names = set(bone_by_name)
+    _assert(
+        actual_bone_names == expected_bone_names,
+        f"{case.key} bone inventory differs: "
+        f"missing={sorted(expected_bone_names - actual_bone_names)}, "
+        f"unexpected={sorted(actual_bone_names - expected_bone_names)}",
+    )
+
+    for prefix in case.prefixes:
+        scale_control = f"{prefix}_scale"
+        z_control = f"{prefix}_rotation_Z"
+        if case.profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
+            _assert(scale_control in bone_by_name, f"missing 2-Axis scale control: {prefix}")
+            _assert(z_control not in bone_by_name, f"3-Axis Z control leaked: {prefix}")
+        else:
+            _assert(z_control in bone_by_name, f"missing 3-Axis Z control: {prefix}")
+            _assert(scale_control not in bone_by_name, f"2-Axis scale control leaked: {prefix}")
 
     for name, bone in bone_by_name.items():
         if name == "root":
@@ -509,6 +563,7 @@ def _assert_standalone_document(
         "ik": len(ik_names),
         "transform": len(transform_names),
         "constraintTypes": type_sequence,
+        "profileBoneInventoryExact": True,
         "connectedWrapperPresent": False,
         "crossObjectReferencesPresent": False,
         "legacyRootConstraintCollectionsPresent": False,
