@@ -6,6 +6,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.model import (
     Bone,
     MeshAttachment,
     Skin,
+    Slot,
     SpineDocument,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_codecs import (
@@ -26,7 +27,7 @@ def test_spine38_sequence_error_names_exact_target_and_attachment_path() -> None
     document = SpineDocument(
         skeleton={"spine": "4.2.43"},
         bones=(Bone("root"),),
-        slots=(),
+        slots=(Slot("slot", bone="root", attachment="mesh"),),
         skins=(Skin("default", {"slot": {"mesh": mesh}}),),
         animations={},
     )
