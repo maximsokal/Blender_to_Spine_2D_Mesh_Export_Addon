@@ -5,6 +5,7 @@ from __future__ import annotations
 from .legacy_rig_assembly import build_legacy_rig
 from .legacy_rig_contracts import LegacyRigBuildRequest, LegacyRigBuildResult
 from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
+from .spine38_profile_builder import build_spine38_profile
 from .two_axis_scale_rig import build_two_axis_scale_rig
 from .version_target import (
     DEFAULT_SPINE_JSON_TARGET,
@@ -31,6 +32,9 @@ def build_rig(
         raise TypeError("request must be LegacyRigBuildRequest")
     resolved_profile = resolve_a1_rig_profile(rig_profile)
     resolved_target = resolve_spine_json_target(spine_target)
+
+    if resolved_target is SpineJsonTarget.SPINE_3_8:
+        return build_spine38_profile(request, resolved_profile)
 
     if resolved_profile is A1RigProfile.THREE_AXIS_ROTATION:
         if resolved_target in {
