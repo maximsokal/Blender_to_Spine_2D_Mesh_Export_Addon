@@ -116,29 +116,60 @@ def _build_two_axis_schedule(
     profile: TwoAxisScaleRigProfile,
     *,
     allocate_phase: _PhaseAllocator,
+    complete_global_rig_first: bool,
 ) -> ConnectedConstraintSchedule:
-    """Build the five two-axis phases using the selected target allocation policy."""
+    """Build the five two-axis phases using the target runtime dependency policy.
+
+    Spine 4.1 keeps the already proven phase-interleaved schedule. Spine 4.2 must finish
+    the complete global wrapper before any object-local constraint runs. Its world-space
+    object scale constraint calls ``Bone.updateAppliedTransform`` below a historical
+    ``scaleX == 0`` parent. A later global depth constraint resets that object subtree;
+    the subsequent bone update would then consume the singularly-derived applied values
+    and produce NaN matrices. Global-first ordering removes that invalid reset while
+    preserving per-layer ties between independent object rigs.
+    """
+
+    if not isinstance(complete_global_rig_first, bool):
+        raise TypeError("complete_global_rig_first must be bool")
 
     next_order = 0
-    global_rotation_x = next_order
-    next_order += 1
-    object_rotation_x, next_order = allocate_phase(placements, next_order)
+    if complete_global_rig_first:
+        global_rotation_x = next_order
+        next_order += 1
+        global_scale_ik = next_order
+        next_order += 1
+        global_scale = next_order
+        next_order += 1
+        global_scale_depth = next_order
+        next_order += 1
+        global_rotation_y = next_order
+        next_order += 1
 
-    global_scale_ik = next_order
-    next_order += 1
-    object_scale_ik, next_order = allocate_phase(placements, next_order)
+        object_rotation_x, next_order = allocate_phase(placements, next_order)
+        object_scale_ik, next_order = allocate_phase(placements, next_order)
+        object_scale, next_order = allocate_phase(placements, next_order)
+        object_scale_depth, next_order = allocate_phase(placements, next_order)
+        object_rotation_y, next_order = allocate_phase(placements, next_order)
+    else:
+        global_rotation_x = next_order
+        next_order += 1
+        object_rotation_x, next_order = allocate_phase(placements, next_order)
 
-    global_scale = next_order
-    next_order += 1
-    object_scale, next_order = allocate_phase(placements, next_order)
+        global_scale_ik = next_order
+        next_order += 1
+        object_scale_ik, next_order = allocate_phase(placements, next_order)
 
-    global_scale_depth = next_order
-    next_order += 1
-    object_scale_depth, next_order = allocate_phase(placements, next_order)
+        global_scale = next_order
+        next_order += 1
+        object_scale, next_order = allocate_phase(placements, next_order)
 
-    global_rotation_y = next_order
-    next_order += 1
-    object_rotation_y, next_order = allocate_phase(placements, next_order)
+        global_scale_depth = next_order
+        next_order += 1
+        object_scale_depth, next_order = allocate_phase(placements, next_order)
+
+        global_rotation_y = next_order
+        next_order += 1
+        object_rotation_y, next_order = allocate_phase(placements, next_order)
 
     return ConnectedConstraintSchedule(
         global_rotation_x=global_rotation_x,
@@ -229,8 +260,10 @@ def build_constraint_schedule(
             )
         if target is SpineJsonTarget.SPINE_4_2:
             allocator = _assign_layer_phase
+            complete_global_rig_first = True
         elif target is SpineJsonTarget.SPINE_4_1:
             allocator = _assign_component_phase
+            complete_global_rig_first = False
         else:
             raise ValueError(
                 f"Connected two-axis scheduling is not implemented for {target.label} "
@@ -240,6 +273,7 @@ def build_constraint_schedule(
             placements,
             resolved_profile,
             allocate_phase=allocator,
+            complete_global_rig_first=complete_global_rig_first,
         )
     else:
         raise AssertionError(f"Unhandled connected rig profile: {profile_id}")
