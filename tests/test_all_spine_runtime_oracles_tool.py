@@ -38,6 +38,14 @@ def test_runtime_collector_prints_compact_terminal_output() -> None:
     assert "print(json.dumps(summary" not in source
 
 
+def test_runtime_collector_routes_info_logs_to_stdout_for_windows_powershell() -> None:
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "logging.basicConfig(" in source
+    assert "stream=sys.stdout" in source
+    assert "NativeCommandError" in source
+
+
 def test_runtime_collector_keeps_external_runtimes_read_only() -> None:
     source = TOOL.read_text(encoding="utf-8")
 
