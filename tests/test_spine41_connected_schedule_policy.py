@@ -53,7 +53,7 @@ def _placements() -> tuple[ConnectedObjectPlacement, ...]:
     )
 
 
-def test_spine_four_two_preserves_historical_same_layer_order_sharing() -> None:
+def test_spine_four_two_completes_global_rig_then_shares_same_layer_orders() -> None:
     schedule = build_constraint_schedule(
         _placements(),
         TwoAxisScaleRigProfile(),
@@ -63,9 +63,16 @@ def test_spine_four_two_preserves_historical_same_layer_order_sharing() -> None:
     assert len(schedule.all_orders) == 20
     assert len(schedule.unique_orders) == 15
     assert schedule.unique_orders == tuple(range(15))
-    assert schedule.order_for("object_rotation_x", "cone-a") == 1
-    assert schedule.order_for("object_rotation_x", "cone-b") == 1
-    assert schedule.order_for("object_rotation_x", "cone-c") == 2
+    assert (
+        schedule.global_rotation_x,
+        schedule.global_scale_ik,
+        schedule.global_scale,
+        schedule.global_scale_depth,
+        schedule.global_rotation_y,
+    ) == (0, 1, 2, 3, 4)
+    assert schedule.order_for("object_rotation_x", "cone-a") == 5
+    assert schedule.order_for("object_rotation_x", "cone-b") == 5
+    assert schedule.order_for("object_rotation_x", "cone-c") == 6
 
 
 def test_spine_four_one_assigns_one_global_order_per_constraint() -> None:
