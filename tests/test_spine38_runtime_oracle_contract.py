@@ -65,13 +65,15 @@ def test_oracle_bounds_do_not_require_vector2_wrapper_export() -> None:
     assert "    'Vector2'," not in source
 
 
-def test_oracle_scale_response_is_dynamic_and_fail_closed() -> None:
+def test_oracle_scale_response_matches_production_control_contract() -> None:
     source = _source()
 
     for fragment in (
+        "function twoAxisScalePrefixes(document)",
+        "_scale_spine41_bridge",
         "function scaleControlRecords(document)",
-        "name.endsWith('_scale_constraint')",
-        "target.endsWith('_scale')",
+        "name !== target || !target.endsWith('_scale')",
+        "Spine 3.8 2-Axis scale control inventory differs",
         "function scaleResponse(runtime, skeletonData, controls)",
         "disabledConstraint.scaleMix = 0;",
         "changedByConstraintBoneCount",
@@ -82,6 +84,7 @@ def test_oracle_scale_response_is_dynamic_and_fail_closed() -> None:
     ):
         assert fragment in source
 
+    assert "name.endsWith('_scale_constraint')" not in source
     for hardcoded_fixture_name in (
         "Spine38TwoA",
         "Spine38TwoB",
@@ -103,7 +106,7 @@ def test_oracle_scale_response_uses_runtime_only_mutation() -> None:
         assert fragment in source
 
     assert "document.transform[" in source
-    assert "document.bones[" not in source
+    assert "document.bones[" in source
     assert "constraint.scaleMix = 0" not in source
 
 
