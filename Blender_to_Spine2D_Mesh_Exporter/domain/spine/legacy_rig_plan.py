@@ -10,6 +10,7 @@ from .legacy_rig_contracts import (
     LegacyRigBuildRequest,
     LegacyRigInfo,
     LegacyZGroupBuildInfo,
+    LegacyZGroupOriginMode,
 )
 from .legacy_rig_scale import (
     calculate_uniform_scale,
@@ -48,12 +49,38 @@ def _duplicates(values: Tuple[str, ...]) -> Tuple[str, ...]:
     return tuple(sorted(duplicates))
 
 
+def _resolve_z_reference(
+    request: LegacyRigBuildRequest,
+    ordered_groups: tuple,
+) -> float:
+    """Resolve one explicit finite source-Z reference for depth offsets."""
+
+    if not isinstance(request, LegacyRigBuildRequest):
+        raise TypeError("request must be LegacyRigBuildRequest")
+    if not isinstance(ordered_groups, tuple) or not ordered_groups:
+        raise ValueError("ordered_groups must be a non-empty tuple")
+
+    mode = request.z_group_origin_mode
+    if mode is LegacyZGroupOriginMode.MINIMUM_Z:
+        reference = float(ordered_groups[0].z_value)
+    elif mode is LegacyZGroupOriginMode.OBJECT_ORIGIN:
+        reference = 0.0
+    else:
+        raise TypeError(f"Unsupported z_group_origin_mode: {mode!r}")
+    return require_finite_derived(reference, "z_group_reference_z")
+
+
 def build_legacy_z_group_metadata(
     request: LegacyRigBuildRequest,
     profile: LegacyRigProfile,
     uniform_scale: float,
 ) -> Tuple[LegacyZGroupBuildInfo, ...]:
-    """Sort source Z values and resolve dense legacy names and pixel offsets."""
+    """Sort source Z values and resolve dense names and policy-based offsets.
+
+    Explicit ``height_real_pixels`` values are already-resolved absolute Spine offsets
+    and therefore are never re-referenced. Derived values use either the historical
+    minimum-Z reference or Blender local Z=0, selected by ``request``.
+    """
 
     if not isinstance(request, LegacyRigBuildRequest):
         raise TypeError("request must be LegacyRigBuildRequest")
@@ -66,7 +93,7 @@ def build_legacy_z_group_metadata(
     ordered_groups = tuple(
         sorted(request.z_groups, key=lambda group: float(group.z_value))
     )
-    minimum_z = float(ordered_groups[0].z_value)
+    reference_z = _resolve_z_reference(request, ordered_groups)
     result: list[LegacyZGroupBuildInfo] = []
 
     for offset, group in enumerate(ordered_groups):
@@ -74,11 +101,14 @@ def build_legacy_z_group_metadata(
         scale_bone_name = profile.z_scale_bone(request.prefix, index)
         bone_name = profile.z_bone(request.prefix, index)
         if group.height_real_pixels is not None:
-            y_offset = float(group.height_real_pixels)
+            y_offset = require_finite_derived(
+                float(group.height_real_pixels),
+                f"z_groups[{offset}].height_real_pixels",
+            )
             calculation_method = "height_real_pixels"
         else:
             delta = require_finite_derived(
-                float(group.z_value) - minimum_z,
+                float(group.z_value) - reference_z,
                 f"z_groups[{offset}].delta",
             )
             y_offset = require_finite_derived(
@@ -91,6 +121,10 @@ def build_legacy_z_group_metadata(
             round(y_offset, 2),
             f"z_groups[{offset}].rounded_y_offset_pixels",
         )
+        # Python can retain a textual negative zero after rounding. Spine JSON and
+        # diagnostics must expose one canonical zero regardless of source sign.
+        if rounded_y == 0.0:
+            rounded_y = 0.0
         result.append(
             LegacyZGroupBuildInfo(
                 z_value=float(group.z_value),
