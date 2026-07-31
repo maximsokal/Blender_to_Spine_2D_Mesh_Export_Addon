@@ -75,6 +75,10 @@ def test_mixed_outer_composition_rebases_connected_order_ties(
 
     assert tuple(item.order for item in connected.transform) == (6, 6)
     assert tuple(item.order for item in composition.document.transform) == (0, 1, 2)
+    assert composition.components[0].component_id == "connected_group"
+    assert composition.components[0].document is connected
+    assert composition.components[1].component_id == "standalone_group"
+    assert composition.components[1].document is standalone
 
     assignments = {
         item.constraint_name: (
