@@ -6,6 +6,7 @@ import json
 import math
 import os
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import pytest
 
@@ -129,10 +130,11 @@ def test_built_runtime_command_imports_only_existing_entry(tmp_path: Path) -> No
         str(built.resolve()),
     )
     assert "--loader" not in command
+    assert "--experimental-loader" not in command
     assert "--experimental-transform-types" not in command
 
 
-def test_source_runtime_command_uses_repo_owned_read_only_loader(
+def test_source_runtime_command_uses_file_url_for_repo_owned_loader(
     tmp_path: Path,
 ) -> None:
     root = _runtime_root(tmp_path)
@@ -143,17 +145,22 @@ def test_source_runtime_command_uses_repo_owned_read_only_loader(
     json_path = tmp_path / "project.json"
 
     command = acceptance.build_runtime_command("node", json_path, runtime)
+    loader_url = acceptance.SOURCE_LOADER.resolve(strict=False).as_uri()
 
     assert command == (
         "node",
         "--no-warnings",
         "--experimental-transform-types",
-        "--loader",
-        str(acceptance.SOURCE_LOADER),
+        "--experimental-loader",
+        loader_url,
         str(acceptance.RUNTIME_ORACLE),
         str(json_path),
         str(source.resolve()),
     )
+    parsed = urlparse(command[4])
+    assert parsed.scheme == "file"
+    assert Path(unquote(parsed.path)).name == acceptance.SOURCE_LOADER.name
+    assert command[4] != str(acceptance.SOURCE_LOADER)
     assert "npm" not in command
     assert "install" not in command
     assert "build" not in command
@@ -252,9 +259,7 @@ def test_parse_runtime_report_rejects_incomplete_evidence(
 
 
 def test_runner_never_invokes_package_install_or_build_commands() -> None:
-    source = (
-        Path(acceptance.__file__).resolve().read_text(encoding="utf-8")
-    )
+    source = Path(acceptance.__file__).resolve().read_text(encoding="utf-8")
 
     for forbidden in (
         "npm install",
