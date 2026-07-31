@@ -52,13 +52,11 @@ def draw_rig_settings(
             icon="UV",
         )
 
+    # Keep the historical RNA value loadable, but do not expose a profile selector
+    # until Three Axis receives the same Object Origin implementation and validation.
     row = layout.row(align=True)
-    row.prop(scene, "spine2d_rig_profile", text="Rig profile")
-    row.operator(
-        "spine2d.reset_rig_profile",
-        text="",
-        icon="LOOP_BACK",
-    )
+    row.label(text="Rig profile")
+    row.label(text="2-Axis Rotation + Scale", icon="CON_ROTLIKE")
 
     description = layout.box()
     description.label(
