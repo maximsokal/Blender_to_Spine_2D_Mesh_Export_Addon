@@ -49,6 +49,22 @@ def test_oracle_checks_legacy_mix_schema_and_runtime_execution() -> None:
         assert fragment in source
 
 
+def test_oracle_bounds_do_not_require_vector2_wrapper_export() -> None:
+    source = _source()
+
+    for fragment in (
+        "function mutableVector2()",
+        "set(x, y)",
+        "const offset = mutableVector2();",
+        "const size = mutableVector2();",
+        "const setupBounds = bounds(skeleton);",
+    ):
+        assert fragment in source
+
+    assert "new runtime.Vector2()" not in source
+    assert "    'Vector2'," not in source
+
+
 def test_oracle_has_no_external_write_apis() -> None:
     source = _source()
 
