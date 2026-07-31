@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.two_axis_scale_profile import (
+    TwoAxisScaleRigProfile,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 ORACLE = ROOT / "tools" / "spine38_runtime_oracle.mjs"
@@ -67,6 +71,10 @@ def test_oracle_bounds_do_not_require_vector2_wrapper_export() -> None:
 
 def test_oracle_scale_response_matches_production_control_contract() -> None:
     source = _source()
+    profile = TwoAxisScaleRigProfile()
+
+    assert profile.scale_control_bone("Probe") == "Probe_scale"
+    assert profile.scale_constraint("Probe") == profile.scale_control_bone("Probe")
 
     for fragment in (
         "function twoAxisScalePrefixes(document)",
