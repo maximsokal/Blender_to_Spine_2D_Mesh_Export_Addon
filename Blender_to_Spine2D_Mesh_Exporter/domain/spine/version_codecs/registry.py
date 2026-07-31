@@ -12,6 +12,7 @@ from ..version_target import (
     require_spine_json_target_serializable,
 )
 from .base import SpineJsonCodecContext, SpineJsonVersionCodec
+from .v38 import Spine38JsonCodec
 from .v40 import Spine40JsonCodec
 from .v41 import Spine41JsonCodec
 from .v42 import Spine42JsonCodec
@@ -20,6 +21,7 @@ from .v43 import Spine43JsonCodec
 
 _CODECS: Mapping[SpineJsonTarget, SpineJsonVersionCodec] = MappingProxyType(
     {
+        SpineJsonTarget.SPINE_3_8: Spine38JsonCodec(),
         SpineJsonTarget.SPINE_4_0: Spine40JsonCodec(),
         SpineJsonTarget.SPINE_4_1: Spine41JsonCodec(),
         SpineJsonTarget.SPINE_4_2: Spine42JsonCodec(),
@@ -63,14 +65,10 @@ _validate_registry()
 
 
 def registered_spine_json_codecs() -> Mapping[SpineJsonTarget, SpineJsonVersionCodec]:
-    """Return the immutable production codec registry."""
-
     return _CODECS
 
 
 def resolve_spine_json_codec(value: object) -> SpineJsonVersionCodec:
-    """Resolve a production-ready target and return its registered codec."""
-
     target = require_spine_json_target_serializable(value)
     codec = _CODECS.get(target)
     if codec is None:
@@ -87,8 +85,6 @@ def serialize_spine_document(
     indent: int = 2,
     validator: SpineValidator | None = None,
 ) -> str:
-    """Serialize ``document`` through the only codec registered for ``target``."""
-
     if not isinstance(document, SpineDocument):
         raise TypeError("document must be SpineDocument")
     if validator is not None and not isinstance(validator, SpineValidator):
