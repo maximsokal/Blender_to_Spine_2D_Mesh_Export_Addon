@@ -27,6 +27,18 @@ def test_spine42_oracle_validates_legacy_collections_not_unified_constraints() -
     assert "Constraint orders must form 0..N-1" in source
 
 
+def test_spine42_oracle_reports_exact_non_finite_bone_context() -> None:
+    source = CORE.read_text(encoding="utf-8")
+
+    assert "function boneDiagnostic(bone, index)" in source
+    assert "function runtimeConstraintDiagnostics(skeleton)" in source
+    assert "cachedConstraintOrder" in source
+    assert "nearbyBones" in source
+    assert "constraints: runtimeConstraintDiagnostics(skeleton)" in source
+    assert "Number.isNaN(value)" in source
+    assert "validateBoneMatrices(skeleton, cacheConstraints)" in source
+
+
 def test_spine42_oracle_keeps_external_runtime_read_only() -> None:
     source = CORE.read_text(encoding="utf-8")
 
