@@ -266,9 +266,6 @@ class Spine38JsonCodec(Spine41JsonCodec):
                 f"remove sequence data before export: {sequence_paths}"
             )
 
-        # Spine 3.8 updateCache scans phases 0..constraint_count-1. Historical
-        # three-axis rigs author phases 1..6, so normalize only the detached JSON view
-        # while preserving the canonical rig document and its cross-version metadata.
         normalize_runtime_constraint_orders(
             output,
             collections=("ik", "transform", "path"),
@@ -342,7 +339,7 @@ class Spine38JsonCodec(Spine41JsonCodec):
 
     @staticmethod
     def _validate_two_axis_runtime_topology(output: dict[str, Any]) -> None:
-        """Reject any 2-Axis graph that can feed stale child matrices to Rotation Y."""
+        """Reject any 2-Axis graph with position Scale below Rotation X."""
 
         bones = _require_list(output.get("bones"), path="document.bones")
         bone_by_name: dict[str, dict[str, Any]] = {}
@@ -358,6 +355,7 @@ class Spine38JsonCodec(Spine41JsonCodec):
             if name in bone_by_name:
                 raise ValueError(f"document.bones contains duplicate name {name!r}")
             bone_by_name[name] = bone
+
             parent = bone.get("parent")
             if parent is not None:
                 if not isinstance(parent, str) or not parent.strip():
@@ -381,7 +379,6 @@ class Spine38JsonCodec(Spine41JsonCodec):
                     "Spine 3.8 bridge bones exist without a complete two-axis "
                     f"constraint inventory: prefixes={tuple(sorted(bridge_records))}"
                 )
-            # Three-axis Spine 3.8 documents do not use this target topology.
             return
 
         expected_prefixes = set(prefixes)
@@ -431,6 +428,7 @@ class Spine38JsonCodec(Spine41JsonCodec):
             position_scale_name = f"{prefix}_scale_spine38_position"
             depth_name = f"{prefix}_scale_rotate_X_constraint"
             rotation_y_name = f"{prefix}_rotation_Y"
+
             rotation_x = transform_by_name[rotation_x_name]
             scale_ik = ik_by_name[ik_name]
             position_scale = transform_by_name[position_scale_name]
@@ -439,16 +437,16 @@ class Spine38JsonCodec(Spine41JsonCodec):
             public_scale = transform_by_name[public_scale_name]
 
             base_order = _constraint_order(
-                rotation_x,
-                path=f"document.transform[{rotation_x_name}]",
+                position_scale,
+                path=f"document.transform[{position_scale_name}]",
             )
             actual_orders = (
                 base_order,
-                _constraint_order(scale_ik, path=f"document.ik[{ik_name}]"),
                 _constraint_order(
-                    position_scale,
-                    path=f"document.transform[{position_scale_name}]",
+                    rotation_x,
+                    path=f"document.transform[{rotation_x_name}]",
                 ),
+                _constraint_order(scale_ik, path=f"document.ik[{ik_name}]"),
                 _constraint_order(
                     depth_scale,
                     path=f"document.transform[{depth_name}]",
@@ -466,7 +464,7 @@ class Spine38JsonCodec(Spine41JsonCodec):
             if actual_orders != expected_orders:
                 raise ValueError(
                     f"Spine 3.8 two-axis constraints for {prefix!r} must evaluate "
-                    "as X/IK/ScalePosition/Depth/Y/ScaleGeometry in one dense block; "
+                    "as ScalePosition/X/IK/Depth/Y/ScaleGeometry in one dense block; "
                     f"expected={expected_orders}, actual={actual_orders}"
                 )
 
@@ -527,6 +525,7 @@ class Spine38JsonCodec(Spine41JsonCodec):
                     f"Spine 3.8 split Scale constraints for {prefix!r} must use the "
                     "same control target"
                 )
+
             _require_scale_only_payload(
                 position_scale,
                 path=f"document.transform[{position_scale_name}]",
