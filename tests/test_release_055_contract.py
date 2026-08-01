@@ -33,13 +33,24 @@ AXIS_PROJECTION_RELEASE_PATH = (
 AXIS_ACCEPTANCE_CORRECTION_RELEASE_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.3.md"
 )
+RELEASE_CONTRACT_CORRECTION_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.4.md"
+)
 
 
-def test_current_release_uses_version_0553() -> None:
+def _normalized_prose(value: str) -> str:
+    """Normalize case, whitespace and hyphenation for semantic prose checks."""
+
+    if not isinstance(value, str):
+        raise TypeError("value must be str")
+    return " ".join(value.lower().replace("-", " ").split())
+
+
+def test_current_release_uses_version_0554() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.3"
+    assert manifest["version"] == "0.55.4"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -81,9 +92,20 @@ def test_axis_projection_slice_has_release_note() -> None:
 
 def test_axis_projection_acceptance_correction_has_release_note() -> None:
     release_note = AXIS_ACCEPTANCE_CORRECTION_RELEASE_PATH.read_text(encoding="utf-8")
-    normalized_release_note = release_note.lower()
+    normalized_release_note = _normalized_prose(release_note)
 
     assert "0.55.3" in release_note
     assert "mathutils.Matrix @ Vector" in release_note
     assert "2.38418579e-7" in release_note
-    assert "production axis projection" in normalized_release_note
+    assert "production projection introduced" in normalized_release_note
+    assert "is unchanged" in normalized_release_note
+
+
+def test_release_contract_correction_has_release_note() -> None:
+    release_note = RELEASE_CONTRACT_CORRECTION_PATH.read_text(encoding="utf-8")
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.4" in release_note
+    assert "exact contiguous phrase" in normalized_release_note
+    assert "normalizes case and whitespace" in normalized_release_note
+    assert "production code" in normalized_release_note
