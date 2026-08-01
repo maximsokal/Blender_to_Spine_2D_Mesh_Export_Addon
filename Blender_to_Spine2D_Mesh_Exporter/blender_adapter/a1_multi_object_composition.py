@@ -17,14 +17,15 @@ from ..application import (
     resolve_a1_multi_object_preparation_settings,
 )
 from ..domain.baking import CameraProjectionPlan
-from ..domain.geometry import calculate_a1_projected_snapshot_depth_range
 from ..domain.projection import A1ProjectionDirection
 from ..domain.spine import (
+    A1ProjectedObjectAnalysis,
     ConnectedPlacementSpace,
     ConstraintOrderPolicy,
     SpineCompositionSettings,
     SpineDocumentComponent,
     SpineDocumentCompositionResult,
+    analyse_projected_object,
     compose_spine_documents,
     resolve_a1_rig_profile,
 )
@@ -169,8 +170,6 @@ def _shared_object_bake_projection_direction(
                 "One multi-object subgroup cannot mix rendered Camera Projection with "
                 "Normal / UV Segments object-bake documents"
             )
-        # Existing rendered Camera Projection setup order remains independent from the
-        # Normal / UV Segments projection layout.
         return None
 
     directions = tuple(item.settings.projection_direction for item in prepared)
@@ -185,33 +184,42 @@ def _shared_object_bake_projection_direction(
     return directions[0]
 
 
+def _projected_object_analyses(
+    sources: Tuple[A1MultiObjectSource, ...],
+    prepared: Tuple[PreparedA1Object, ...],
+) -> Tuple[A1ProjectedObjectAnalysis, ...]:
+    """Build complete projected placement, bounds, ownership and depth records."""
+
+    if len(sources) != len(prepared):
+        raise ValueError("sources and prepared must correspond one-to-one")
+    direction = _shared_object_bake_projection_direction(prepared)
+    if direction is None:
+        raise ValueError(
+            "Projected object analyses are unavailable for rendered Camera Projection"
+        )
+    return tuple(
+        analyse_projected_object(
+            component_id=source.component_id,
+            prefix=item.prefix,
+            source_input_index=source_input_index,
+            projection_direction=direction,
+            snapshot=item.source_snapshot,
+            owned_slot_names=tuple(slot.name for slot in item.document.slots),
+        )
+        for source_input_index, (source, item) in enumerate(
+            zip(sources, prepared, strict=True)
+        )
+    )
+
+
 def _object_block_depths(
     sources: Tuple[A1MultiObjectSource, ...],
     prepared: Tuple[PreparedA1Object, ...],
 ) -> Tuple[SpineObjectBlockDepth, ...]:
-    """Build nearest/farthest records from projected immutable snapshots."""
-
-    if len(sources) != len(prepared):
-        raise ValueError("sources and prepared must correspond one-to-one")
-
-    result: list[SpineObjectBlockDepth] = []
-    for source_input_index, (source, item) in enumerate(
-        zip(sources, prepared, strict=True)
-    ):
-        depth_range = calculate_a1_projected_snapshot_depth_range(
-            item.source_snapshot
-        )
-        result.append(
-            SpineObjectBlockDepth(
-                component_id=source.component_id,
-                source_input_index=source_input_index,
-                nearest_vertex_index=depth_range.nearest_vertex_id.index,
-                nearest_vertex_depth=depth_range.nearest_vertex_depth,
-                farthest_vertex_index=depth_range.farthest_vertex_id.index,
-                farthest_vertex_depth=depth_range.farthest_vertex_depth,
-            )
-        )
-    return tuple(result)
+    return tuple(
+        analysis.block_depth
+        for analysis in _projected_object_analyses(sources, prepared)
+    )
 
 
 def _document_components(
@@ -228,6 +236,21 @@ def _document_components(
         )
         for source, item in zip(sources, prepared, strict=True)
     )
+
+
+# Retained private names are compatibility aliases for focused Slice 3 tests and internal
+# callers. Their behavior is now owned by the common projected analysis contract.
+def _standalone_axis_projection_direction(
+    prepared: Tuple[PreparedA1Object, ...],
+) -> A1ProjectionDirection | None:
+    return _shared_object_bake_projection_direction(prepared)
+
+
+def _standalone_object_block_depths(
+    sources: Tuple[A1MultiObjectSource, ...],
+    prepared: Tuple[PreparedA1Object, ...],
+) -> Tuple[SpineObjectBlockDepth, ...]:
+    return _object_block_depths(sources, prepared)
 
 
 def _compose_standalone_document(
@@ -299,8 +322,6 @@ def compose_a1_multi_object_document(
             component_id=source.component_id,
             prefix=item.prefix,
             document=item.document,
-            # source_snapshot.world_matrix translation is already the projected
-            # Object Origin in canonical U/V/depth space.
             world_position=item.world_position,
             animation_namespace=(
                 source.animation_namespace or source.component_id
