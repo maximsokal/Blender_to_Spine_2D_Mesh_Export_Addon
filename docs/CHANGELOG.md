@@ -4,7 +4,20 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.8 is the current release candidate. It corrects the typed Active Camera validation fixture and release wording exposed by the failed 0.55.7 focused gate. Production Active Camera projection, rig assembly, Blender acceptance, public UI, rendered Camera Projection, connected assembly, mixed assembly, and Spine codecs are unchanged.
+Version 0.55.9 is the current release candidate. It corrects the pure Active Camera setup-depth fixture so it uses profile-owned Z-group indices instead of assuming zero-based bindings. Production Active Camera projection, depth compensation, rig assembly, Blender acceptance, public UI, rendered Camera Projection, connected assembly, mixed assembly, and Spine codecs are unchanged.
+
+## [0.55.9] - 2026-08-01
+
+### Fixed
+
+- The Active Camera setup-depth fixture now reads valid group indices from `rig.info.z_groups` instead of hardcoding `(0, 1, 2)`.
+- The zero-depth assertion resolves the owning group by `z_value == 0.0` rather than by a presumed numeric index.
+- The fail-closed unknown-group case derives its invalid index from the profile-owned range.
+
+### Unchanged
+
+- Production Active Camera projection, depth-parent compensation, rig construction, standalone draw order, and Blender acceptance are unchanged.
+- Signed-axis projection, existing rendered Camera Projection, connected and mixed assembly, Spine codecs, UV topology, and texture baking are unchanged.
 
 ## [0.55.8] - 2026-08-01
 
@@ -335,7 +348,7 @@ Version 0.55.8 is the current release candidate. It corrects the typed Active Ca
 - Generated material policies and deterministic diagnostic color patterns.
 - Single-object, standalone multi-object, connected, and mixed composition.
 - Static and per-object sequence texture output.
-- Readiness analysis with structured blockers, warnings, and statistics.
+- Readiness analysis with structured blockers, warnings, logs, stale work recovery, and interprocess ownership.
 - Atomic JSON and texture output with backups, rollback, stale work recovery, and interprocess ownership.
 - Per-file logging and failed-work-file preferences.
 - Real-bpy and Blender 5.2 headless regression layers.
