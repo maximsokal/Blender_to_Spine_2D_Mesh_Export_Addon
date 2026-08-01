@@ -4,7 +4,29 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.14 is the current release candidate. It decomposes the A1 source-geometry stage into explicit typed owners, validates source UV boundary ownership immediately after world normalization, and replaces stale global-order and two-field suffix tests with route-aware and append-only contracts. Projection math and strict tolerances are unchanged.
+Version 0.55.15 is the current release candidate. It applies the shared projected Object Origin and nearest-evaluated-vertex contracts to connected and mixed internal Normal - UV Segments composition while keeping the public export route standalone-only.
+
+## [0.55.15] - 2026-08-01
+
+### Added
+
+- Immutable `A1ProjectedObjectAnalysis` records for projected origin, bounds, nearest/farthest evaluated vertex depth, source order, component identity, prefix, and owned slots.
+- Blender 5.2 headless connected/mixed acceptance for all six signed axes.
+- Blender 5.2 headless connected/mixed acceptance for Perspective and Orthographic Active Camera.
+
+### Changed
+
+- Connected Active Camera preparation now uses the same anchor-relative projected-origin policy as signed-axis Normal - UV Segments.
+- The connected global main stores the selected anchor's absolute projected Object Origin, while object mains remain anchor-relative and evaluate to their standalone setup positions.
+- Connected hierarchy layers remain grouped by projected Object Origin depth.
+- Connected setup slots use complete far-to-near object blocks ordered by nearest evaluated vertex depth.
+- Mixed composition applies one final slot-only nearest-depth pass across connected and standalone subgroup boundaries.
+
+### Preserved
+
+- Slot order inside each object block, subgroup bones, skins, constraints, attachments, weighted indices, animation metadata, and source Blender state remain unchanged.
+- Existing rendered Camera Projection, grouped camera overlay, public standalone-only routing, Spine codecs, UV topology, and texture baking remain unchanged.
+- Spine 4.1 connected and mixed capability restrictions remain fail-closed.
 
 ## [0.55.14] - 2026-08-01
 
