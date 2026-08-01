@@ -75,6 +75,9 @@ CONNECTED_SETUP_AFFINE_CORRECTION_PATH = (
 CONNECTED_SETUP_MODEL_CONTRACT_CORRECTION_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.17.md"
 )
+PROJECTION_UI_RELEASE_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.18.md"
+)
 
 
 def _normalized_prose(value: str) -> str:
@@ -95,11 +98,11 @@ def _normalized_prose(value: str) -> str:
     )
 
 
-def test_current_release_uses_version_05517() -> None:
+def test_current_release_uses_version_05518() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.17"
+    assert manifest["version"] == "0.55.18"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -346,3 +349,27 @@ def test_connected_setup_model_contract_correction_has_release_note() -> None:
     assert "blender acceptance workers" in normalized_release_note
     assert "are unchanged" in normalized_release_note
     assert "production slice 5" in normalized_release_note
+
+
+def test_projection_ui_slice_has_release_note() -> None:
+    release_note = PROJECTION_UI_RELEASE_PATH.read_text(encoding="utf-8")
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.18" in release_note
+    assert "scene.spine2d_projection_direction" in release_note.lower()
+    for identifier in (
+        "POSITIVE_X",
+        "NEGATIVE_X",
+        "POSITIVE_Y",
+        "NEGATIVE_Y",
+        "POSITIVE_Z",
+        "NEGATIVE_Z",
+        "ACTIVE_CAMERA",
+    ):
+        assert identifier in release_note
+    assert "public projection direction selector" in normalized_release_note
+    assert "existing rendered camera projection" in normalized_release_note
+    assert "public selected object export remains standalone only" in normalized_release_note
+    assert "settings schema remains version 6" in normalized_release_note
+    assert "projection mathematics" in normalized_release_note
+    assert "are unchanged" in normalized_release_note
