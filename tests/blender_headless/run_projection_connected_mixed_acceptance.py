@@ -44,10 +44,14 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_multi_object_compositio
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.connected_group_contracts import (  # noqa: E402
     ConnectedGroupBuildResult,
 )
+from spine_setup_transform import (  # noqa: E402
+    evaluate_spine_setup_bone_position,
+)
 
 
 _POSITION_TOLERANCE = 0.011
 _ANCHOR_COMPONENT_ID = "component_beta"
+_SETUP_TRANSFORM_MODEL = "SPINE_AFFINE_NORMAL_ONLY_TRANSLATION"
 
 
 def _parse_arguments() -> argparse.Namespace:
@@ -66,43 +70,10 @@ def _bone_by_name(document, name: str):
     return matches[0]
 
 
-def _translation_only_setup_position(document, bone_name: str) -> tuple[float, float]:
-    """Evaluate the setup parent chain used by projected connected object mains.
+def _setup_world_position(document, bone_name: str) -> tuple[float, float]:
+    """Evaluate one object main through the complete Spine setup hierarchy."""
 
-    The accepted two-axis setup correction keeps every parent on this chain rotation- and
-    scale-neutral. Failing those assertions is preferable to silently applying an
-    incomplete transform evaluator in the acceptance worker.
-    """
-
-    by_name = {bone.name: bone for bone in document.bones}
-    base._assert(
-        len(by_name) == len(document.bones),
-        "Connected document contains duplicate bone names",
-    )
-    current_name: str | None = bone_name
-    visited: set[str] = set()
-    x = 0.0
-    y = 0.0
-    while current_name is not None:
-        base._assert(current_name not in visited, f"Bone parent cycle at {current_name}")
-        visited.add(current_name)
-        bone = by_name.get(current_name)
-        base._assert(bone is not None, f"Missing parent bone {current_name!r}")
-        rotation = 0.0 if bone.rotation is None else float(bone.rotation)
-        scale_x = 1.0 if bone.scale_x is None else float(bone.scale_x)
-        scale_y = 1.0 if bone.scale_y is None else float(bone.scale_y)
-        base._assert(
-            abs(rotation) <= 1.0e-9,
-            f"Projected setup chain contains rotation on {bone.name}: {rotation}",
-        )
-        base._assert(
-            abs(scale_x - 1.0) <= 1.0e-9 and abs(scale_y - 1.0) <= 1.0e-9,
-            f"Projected setup chain contains scale on {bone.name}: {(scale_x, scale_y)}",
-        )
-        x += 0.0 if bone.x is None else float(bone.x)
-        y += 0.0 if bone.y is None else float(bone.y)
-        current_name = bone.parent
-    return x, y
+    return evaluate_spine_setup_bone_position(document, bone_name)
 
 
 def _expected_order(expected_by_component) -> tuple[str, ...]:
@@ -380,7 +351,7 @@ def _run_kind(output_root: Path, camera_kind: str) -> dict[str, object]:
         connected_prepared.objects,
         strict=True,
     ):
-        actual_position = _translation_only_setup_position(
+        actual_position = _setup_world_position(
             connected.document,
             item.rig.info.main_bone_name,
         )
@@ -474,6 +445,7 @@ def _run_kind(output_root: Path, camera_kind: str) -> dict[str, object]:
     return {
         "cameraType": camera_kind,
         "anchorComponentId": _ANCHOR_COMPONENT_ID,
+        "setupTransformModel": _SETUP_TRANSFORM_MODEL,
         "expectedAllObjectOrder": list(expected_order),
         "connectedObjectOrder": list(connected_actual_order),
         "mixedObjectOrder": list(mixed_actual_order),
