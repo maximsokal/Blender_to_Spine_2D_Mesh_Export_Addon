@@ -5,6 +5,11 @@ its local geometry, leaving only world translation in ``world_matrix``. Every wo
 is projected independently, so perspective foreshortening is retained. The returned local
 X/Y coordinates are stored in rig units around the projected Blender Object Origin, while
 local Z remains camera-local depth relative to that origin.
+
+The existing object-bake attachment projector converts internal Mesh Y to Spine Y by
+negating it. Camera-projected local Y is therefore stored with the opposite sign so the
+final Spine setup position matches camera screen-up coordinates without changing the
+legacy axis-projection path.
 """
 
 from __future__ import annotations
@@ -132,6 +137,25 @@ def _projected_translation_matrix(
     )
 
 
+def _attachment_space_normal(
+    frame: A1CameraProjectionFrame,
+    normal: Vector3,
+    *,
+    field_name: str,
+) -> Vector3:
+    """Rotate to camera space, then apply the oriented Y-reflection cofactor."""
+
+    camera_normal = frame.transform_world_direction(
+        normal,
+        field_name=field_name,
+    )
+    return (
+        -camera_normal[0],
+        camera_normal[1],
+        -camera_normal[2],
+    )
+
+
 def project_a1_mesh_snapshot_camera(
     snapshot: MeshSnapshot,
     frame: A1CameraProjectionFrame,
@@ -141,9 +165,10 @@ def project_a1_mesh_snapshot_camera(
     """Project all world vertices into centred export-texture pixel space.
 
     X/Y are divided by the rig uniform scale because the downstream attachment builder
-    multiplies object-bake coordinates by that scale exactly once. Camera-local Z is not
-    converted to pixels; it remains the canonical depth channel used by depth groups and
-    object-block draw-order planning. Geometry outside the camera frame is retained.
+    multiplies object-bake coordinates by that scale exactly once. Internal local Y is
+    negated to compensate the established attachment projection convention. Camera-local
+    Z is not converted to pixels; it remains the canonical depth channel used by depth
+    groups and object-block draw-order planning. Geometry outside the frame is retained.
     """
 
     if not isinstance(snapshot, MeshSnapshot):
@@ -181,7 +206,7 @@ def project_a1_mesh_snapshot_camera(
             _ProjectedVertex(
                 position=(
                     (projected_world.u - projected_origin.u) / resolved_scale,
-                    (projected_world.v - projected_origin.v) / resolved_scale,
+                    -(projected_world.v - projected_origin.v) / resolved_scale,
                     projected_world.depth - projected_origin.depth,
                 ),
                 projected_world=projected_world,
@@ -192,7 +217,8 @@ def project_a1_mesh_snapshot_camera(
         replace(
             vertex,
             position=projected.position,
-            normal=frame.transform_world_direction(
+            normal=_attachment_space_normal(
+                frame,
                 vertex.normal,
                 field_name=f"vertex[{vertex.id.index}].normal",
             ),
@@ -206,7 +232,8 @@ def project_a1_mesh_snapshot_camera(
     faces = tuple(
         replace(
             face,
-            normal=frame.transform_world_direction(
+            normal=_attachment_space_normal(
+                frame,
                 face.normal,
                 field_name=f"face[{face.id.index}].normal",
             ),
