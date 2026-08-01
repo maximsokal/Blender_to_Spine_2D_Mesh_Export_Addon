@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -63,12 +64,9 @@ def test_connected_active_camera_uses_anchor_relative_projected_origin(
 def test_connected_active_camera_preserves_already_local_main_setting(
     tmp_path: Path,
 ) -> None:
-    settings = _settings(tmp_path)
-    local_settings = A1SingleObjectExportSettings(
-        **{
-            **settings.__dict__,
-            "use_world_location_for_main_bone": False,
-        }
+    local_settings = replace(
+        _settings(tmp_path),
+        use_world_location_for_main_bone=False,
     )
 
     resolved = resolve_a1_multi_object_preparation_settings(
