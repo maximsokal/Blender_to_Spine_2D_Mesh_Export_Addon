@@ -22,7 +22,7 @@ This directory contains the maintained public documentation for Blender to Spine
 
 ## Supported product baseline
 
-- Extension version: 0.55.17.
+- Extension version: 0.55.18.
 - Minimum Blender version: 5.2.0.
 - Primary full Spine target: 4.2.43.
 - Limited Spine target: 4.1.24 with `2-Axis Rotation + Scale` for single-object and standalone multi-object export only.
@@ -31,8 +31,10 @@ This directory contains the maintained public documentation for Blender to Spine
 - Default texture mode: Normal - UV Segments.
 - Default Seam Maker mode: Auto.
 - Default rig profile for genuinely fresh scenes: 2-Axis Rotation + Scale (`TWO_AXIS_ROTATION_SCALE`).
-- Default Normal - UV Segments projection remains `+Z` until the later public UI projection slice is implemented.
-- Typed Normal - UV Segments settings can select `ACTIVE_CAMERA` for single-object, standalone, connected, and mixed internal preparation. The public export route remains standalone-only until the UI slice.
+- Normal - UV Segments exposes persisted `+X`, `-X`, `+Y`, `-Y`, `+Z`, `-Z`, and `Active Camera` projection choices; new and older scenes without a stored value use `+Z`.
+- Active Camera object-bake projection supports Perspective and Orthographic cameras using export texture dimensions while preserving UV-segment meshes.
+- Public active-object and selected-object plans carry the chosen projection direction; public selected-object export remains standalone-only.
+- The rendered Camera Projection mode remains a separate render/crop/contour/flattening pipeline and does not consume the Normal - UV Segments projection selector.
 - Active Camera segmentation, decomposition, and strict triangulation complete in normalized world geometry before camera projection; only already-triangulated immutable regions are transformed into camera screen/depth space.
 - Source UV boundary ownership is validated immediately after world-transform normalization for both signed-axis and Active Camera routes.
 - `A1ProjectedObjectAnalysis` records projected Object Origin, nearest/farthest evaluated vertex depth, projected bounds, source order, prefix, component ID, and owned slots for every Normal - UV Segments object.
@@ -42,8 +44,7 @@ This directory contains the maintained public documentation for Blender to Spine
 - Mixed internal composition may interleave connected and standalone object blocks by nearest depth without changing subgroup bones, skins, constraints, attachments, or animation metadata.
 - Connected/mixed Blender acceptance evaluates the complete Spine setup hierarchy with translation, rotation, scale, and `onlyTranslation` inheritance instead of assuming a translation-only parent chain.
 - The Active Camera connected/mixed worker owns the setup-transform evaluator and model ID; the signed-axis worker reuses both through its shared worker module.
-- The existing rendered Camera Projection mode, crop, contour, flattening, grouped-camera behavior, and public standalone-only routing are unchanged.
-- Candidate 0.55.17 corrects only the route-aware architecture contract around that shared acceptance oracle; the 0.55.16 workers/evaluator and production Slice 5 implementation are unchanged.
+- Candidate 0.55.18 implements Slice 6 public projection-direction RNA, UI, planning, Reset, and `.blend` persistence without changing projection mathematics or Slice 5 composition.
 - Saved pre-profile scenes migrate to the compatibility 3-Axis Rotation profile.
 - Spine 4.2 connected 3-Axis composition reproduces the dedicated wrapper, exact constraint payloads, source-order arrays, Z-layer order sharing, and unchanged scale-compensator orders from the historical `main` implementation.
 - Spine 4.2 connected 2-Axis composition uses the same Z-layer scheduling principle with explicit X, IK, Scale, depth-scale, and Y global targets.
