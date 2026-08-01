@@ -8,6 +8,11 @@ from .axis_projection import (
     calculate_a1_projected_snapshot_depth_range,
     project_a1_mesh_snapshot_axis,
 )
+from .camera_projection import (
+    A1MeshCameraProjectionError,
+    A1MeshCameraProjectionResult,
+    project_a1_mesh_snapshot_camera,
+)
 from .correspondence import (
     ConflictingSourceLoopUVError,
     CorrespondenceError,
@@ -107,6 +112,8 @@ __all__ = [
     "A1AngularMode",
     "A1MeshAxisProjectionError",
     "A1MeshAxisProjectionResult",
+    "A1MeshCameraProjectionError",
+    "A1MeshCameraProjectionResult",
     "A1ProjectedSnapshotDepthRange",
     "A1SegmentationError",
     "ConflictingSourceLoopUVError",
@@ -183,6 +190,7 @@ __all__ = [
     "materialize_segment_snapshots",
     "normalize_mesh_snapshot_world_transform",
     "project_a1_mesh_snapshot_axis",
+    "project_a1_mesh_snapshot_camera",
     "require_valid_evaluated_lineage",
     "segment_mesh",
     "segment_mesh_a1",
