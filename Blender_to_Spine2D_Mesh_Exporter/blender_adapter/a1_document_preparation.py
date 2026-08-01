@@ -18,6 +18,7 @@ from ..application import (
     calculate_a1_object_bake_main_position_pixels,
 )
 from ..domain.baking import CameraProjectionPlan
+from ..domain.projection import A1ProjectionDirection
 from ..domain.spine.legacy_attachment_builder import (
     LegacyMeshDocumentBuildResult,
 )
@@ -336,6 +337,11 @@ def prepare_a1_document(
     statistics = texture.statistics
     try:
         camera_projection = isinstance(texture.bake_plan, CameraProjectionPlan)
+        active_camera_layout = (
+            not camera_projection
+            and source.settings.projection_direction
+            is A1ProjectionDirection.ACTIVE_CAMERA
+        )
         resolved_rig_profile = resolve_a1_rig_profile(
             source.settings.export.rig_profile
         )
@@ -373,6 +379,7 @@ def prepare_a1_document(
                 "rig_profile": rig.profile.profile_id,
                 "rig_setup_pose_mode": rig.request.setup_pose_mode.value,
                 "z_group_origin_mode": rig.request.z_group_origin_mode.value,
+                "depth_setup_y_compensated": int(active_camera_layout),
             },
         )
 
@@ -393,6 +400,7 @@ def prepare_a1_document(
             include_preview_animation=source.settings.include_preview_animation,
             uv_range_policy=source.settings.uv.range_policy,
             uv_range_epsilon=source.settings.uv.range_epsilon,
+            compensate_depth_setup_y=active_camera_layout,
         )
         skeleton_metadata = build_skeleton_metadata(source.settings)
         if camera_projection:
@@ -434,12 +442,13 @@ def prepare_a1_document(
         )
         logger.debug(
             "Prepared Spine document for %s: target=%s profile=%s setup=%s "
-            "z_origin=%s bones=%d slots=%d attachments=%d",
+            "z_origin=%s depth_y_compensation=%s bones=%d slots=%d attachments=%d",
             source.object_id,
             source.settings.export.spine_version,
             rig.profile.profile_id,
             rig.request.setup_pose_mode.value,
             rig.request.z_group_origin_mode.value,
+            active_camera_layout,
             len(document.bones),
             len(document.slots),
             statistics["attachment_count"],
