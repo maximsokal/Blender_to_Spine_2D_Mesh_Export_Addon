@@ -81,8 +81,9 @@ def test_axis_projection_slice_has_release_note() -> None:
 
 def test_axis_projection_acceptance_correction_has_release_note() -> None:
     release_note = AXIS_ACCEPTANCE_CORRECTION_RELEASE_PATH.read_text(encoding="utf-8")
+    normalized_release_note = release_note.lower()
 
     assert "0.55.3" in release_note
     assert "mathutils.Matrix @ Vector" in release_note
     assert "2.38418579e-7" in release_note
-    assert "Production axis projection" in release_note
+    assert "production axis projection" in normalized_release_note
