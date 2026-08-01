@@ -43,19 +43,41 @@ def test_standalone_active_camera_settings_are_preserved(tmp_path: Path) -> None
     assert resolved.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
 
 
-def test_connected_active_camera_fails_before_settings_are_mutated(
+def test_connected_active_camera_uses_anchor_relative_projected_origin(
     tmp_path: Path,
 ) -> None:
     settings = _settings(tmp_path)
 
-    with pytest.raises(ValueError, match="Slice 5"):
-        resolve_a1_multi_object_preparation_settings(
-            settings,
-            A1MultiObjectMode.CONNECTED,
-        )
+    resolved = resolve_a1_multi_object_preparation_settings(
+        settings,
+        A1MultiObjectMode.CONNECTED,
+    )
 
+    assert resolved is not settings
     assert settings.use_world_location_for_main_bone is True
-    assert settings.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
+    assert resolved.use_world_location_for_main_bone is False
+    assert resolved.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
+    assert resolved.export is settings.export
+
+
+def test_connected_active_camera_preserves_already_local_main_setting(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    local_settings = A1SingleObjectExportSettings(
+        **{
+            **settings.__dict__,
+            "use_world_location_for_main_bone": False,
+        }
+    )
+
+    resolved = resolve_a1_multi_object_preparation_settings(
+        local_settings,
+        A1MultiObjectMode.CONNECTED,
+    )
+
+    assert resolved is local_settings
+    assert resolved.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
 
 
 def test_mixed_must_still_resolve_to_explicit_subgroups(tmp_path: Path) -> None:
