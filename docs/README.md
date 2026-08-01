@@ -22,7 +22,7 @@ This directory contains the maintained public documentation for Blender to Spine
 
 ## Supported product baseline
 
-- Extension version: 0.55.5.
+- Extension version: 0.55.6.
 - Minimum Blender version: 5.2.0.
 - Primary full Spine target: 4.2.43.
 - Limited Spine target: 4.1.24 with `2-Axis Rotation + Scale` for single-object and standalone multi-object export only.
@@ -32,6 +32,7 @@ This directory contains the maintained public documentation for Blender to Spine
 - Default Seam Maker mode: Auto.
 - Default rig profile for genuinely fresh scenes: 2-Axis Rotation + Scale (`TWO_AXIS_ROTATION_SCALE`).
 - Default Normal - UV Segments projection remains `+Z` until the later public UI projection slice is implemented.
+- Standalone Normal - UV Segments composition emits complete object slot blocks from far to near using each object's nearest projected vertex; segment order inside an object remains unchanged.
 - Saved pre-profile scenes migrate to the compatibility 3-Axis Rotation profile.
 - Spine 4.2 connected 3-Axis composition reproduces the dedicated wrapper, exact constraint payloads, source-order arrays, Z-layer order sharing, and unchanged scale-compensator orders from the historical `main` implementation.
 - Spine 4.2 connected 2-Axis composition uses the same Z-layer scheduling principle with explicit X, IK, Scale, depth-scale, and Y global targets.
