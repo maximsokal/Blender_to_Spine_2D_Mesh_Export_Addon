@@ -57,6 +57,9 @@ ACTIVE_CAMERA_RELEASE_CONTRACT_CORRECTION_PATH = (
 MARKDOWN_NORMALIZATION_CORRECTION_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.11.md"
 )
+ACTIVE_CAMERA_TRIANGULATION_CORRECTION_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.12.md"
+)
 
 
 def _normalized_prose(value: str) -> str:
@@ -77,11 +80,11 @@ def _normalized_prose(value: str) -> str:
     )
 
 
-def test_current_release_uses_version_05511() -> None:
+def test_current_release_uses_version_05512() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.11"
+    assert manifest["version"] == "0.55.12"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -229,3 +232,18 @@ def test_markdown_normalization_correction_has_release_note() -> None:
     assert "inline code identifiers" in normalized_release_note
     assert "production code" in normalized_release_note
     assert "unchanged" in normalized_release_note
+
+
+def test_active_camera_triangulation_correction_has_release_note() -> None:
+    release_note = ACTIVE_CAMERA_TRIANGULATION_CORRECTION_PATH.read_text(
+        encoding="utf-8"
+    )
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.12" in release_note
+    assert "perspective projection is nonlinear" in normalized_release_note
+    assert "before any camera projection" in normalized_release_note
+    assert "already triangulated immutable region snapshots" in normalized_release_note
+    assert "planarity tolerance remains" in normalized_release_note
+    assert "signed axis projection" in normalized_release_note
+    assert "remain unchanged" in normalized_release_note
