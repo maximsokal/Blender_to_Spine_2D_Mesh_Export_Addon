@@ -20,18 +20,24 @@ from ..application import (
     resolve_a1_names,
     resolve_a1_output_paths,
 )
+from ..domain.baking import A1TextureExportMode
 from ..domain.geometry import (
     LineageSeverity,
     MeshSnapshot,
+    calculate_a1_projected_snapshot_depth_range,
     normalize_mesh_snapshot_world_transform,
     project_a1_mesh_snapshot_axis,
+    project_a1_mesh_snapshot_camera,
 )
+from ..domain.projection import A1ProjectionDirection
+from ..domain.spine import calculate_uniform_scale
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
     StatisticsValue,
     freeze_statistics,
     warning_issue,
 )
+from .active_camera_projection import resolve_a1_active_camera_projection_frame
 from .evaluated_mesh_reader import read_evaluated_mesh_snapshot
 from .mesh_reader import _matrix_tuple, read_source_mesh_snapshot
 from .render_engine_contract import (
@@ -200,6 +206,7 @@ def _read_source_snapshot(
     settings: A1SingleObjectExportSettings,
     *,
     scene: Any | None,
+    depsgraph: Any | None = None,
 ) -> tuple[
     MeshSnapshot,
     int,
@@ -212,7 +219,25 @@ def _read_source_snapshot(
     uv_warnings = _ignored_uv_warnings(uv_report, object_id=object_id)
 
     if settings.source_geometry_mode is A1SourceGeometryMode.EVALUATED:
-        resolved_scene, resolved_depsgraph = _resolved_evaluation_owners(scene)
+        if depsgraph is None:
+            resolved_scene, resolved_depsgraph = _resolved_evaluation_owners(scene)
+        else:
+            if scene is None:
+                raise ValueError(
+                    "Evaluated source geometry requires the Scene owning depsgraph"
+                )
+            resolved_scene = scene
+            resolved_depsgraph = depsgraph
+            try:
+                require_depsgraph_scene_consistency(
+                    resolved_depsgraph,
+                    resolved_scene,
+                )
+            except BlenderSceneContextError as exc:
+                raise ValueError(
+                    f"Evaluated geometry scene and dependency graph disagree: {exc}"
+                ) from exc
+
         evaluated = read_evaluated_mesh_snapshot(
             source_obj,
             scene=resolved_scene,
@@ -296,6 +321,21 @@ def _resolve_source_uv_boundary_layer(
     raise TypeError(f"Unsupported source UV boundary mode: {mode!r}")
 
 
+def _validate_projection_route(settings: A1SingleObjectExportSettings) -> None:
+    if not isinstance(settings, A1SingleObjectExportSettings):
+        raise TypeError("settings must be A1SingleObjectExportSettings")
+    if (
+        settings.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
+        and settings.bake_execution.texture_export_mode
+        is not A1TextureExportMode.NORMAL_UV_SEGMENTS
+    ):
+        raise ValueError(
+            "ACTIVE_CAMERA projection direction is available only for "
+            "Normal / UV Segments. Existing Camera Projection mode owns its own "
+            "rendered flattening pipeline."
+        )
+
+
 def prepare_a1_source_geometry(
     source_obj: Any,
     settings: A1SingleObjectExportSettings,
@@ -311,6 +351,7 @@ def prepare_a1_source_geometry(
     try:
         if not isinstance(settings, A1SingleObjectExportSettings):
             raise TypeError("settings must be A1SingleObjectExportSettings")
+        _validate_projection_route(settings)
         object_id = object_name(source_obj)
         prefix, _ = resolve_a1_names(object_id, settings)
         output_paths = resolve_a1_output_paths(object_id, settings)
@@ -332,12 +373,22 @@ def prepare_a1_source_geometry(
             }
         )
 
+        resolved_scene = scene
+        resolved_depsgraph = None
+        if (
+            settings.source_geometry_mode is A1SourceGeometryMode.EVALUATED
+            or settings.projection_direction
+            is A1ProjectionDirection.ACTIVE_CAMERA
+        ):
+            resolved_scene, resolved_depsgraph = _resolved_evaluation_owners(scene)
+
         stage = A1SingleObjectStage.READ_GEOMETRY
         source_snapshot, modifier_count, warnings, uv_report = _read_source_snapshot(
             source_obj,
             object_id,
             settings,
-            scene=scene,
+            scene=resolved_scene,
+            depsgraph=resolved_depsgraph,
         )
 
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
@@ -360,12 +411,63 @@ def prepare_a1_source_geometry(
                 ),
             )
 
-        axis_projection = project_a1_mesh_snapshot_axis(
-            source_snapshot,
-            settings.projection_direction,
-        )
-        source_snapshot = axis_projection.snapshot
+        projection_statistics: dict[str, StatisticsValue]
+        if settings.projection_direction.axis_aligned:
+            axis_projection = project_a1_mesh_snapshot_axis(
+                source_snapshot,
+                settings.projection_direction,
+            )
+            source_snapshot = axis_projection.snapshot
+            projected_origin = axis_projection.projected_origin
+            projection_statistics = {
+                "projection_kind": "SIGNED_AXIS",
+                "axis_projection_applied": int(axis_projection.changed),
+                "active_camera_projection_applied": 0,
+                "active_camera_name": "",
+                "active_camera_type": "",
+                "active_camera_clip_start": 0.0,
+                "active_camera_clip_end": 0.0,
+                "projection_canvas_width": settings.export.texture_width,
+                "projection_canvas_height": settings.export.texture_height,
+                "attachment_invert_y": 1,
+            }
+        else:
+            if resolved_scene is None or resolved_depsgraph is None:
+                raise ValueError(
+                    "ACTIVE_CAMERA projection lost its evaluated Scene context"
+                )
+            frame = resolve_a1_active_camera_projection_frame(
+                resolved_scene,
+                texture_width=settings.export.texture_width,
+                texture_height=settings.export.texture_height,
+                depsgraph=resolved_depsgraph,
+            )
+            uniform_scale = calculate_uniform_scale(
+                settings.export.texture_width,
+                settings.export.texture_height,
+                settings.rig_scale_mode,
+            )
+            camera_projection = project_a1_mesh_snapshot_camera(
+                source_snapshot,
+                frame,
+                uniform_scale=uniform_scale,
+            )
+            source_snapshot = camera_projection.snapshot
+            projected_origin = camera_projection.projected_origin
+            projection_statistics = {
+                "projection_kind": "ACTIVE_CAMERA",
+                "axis_projection_applied": 0,
+                "active_camera_projection_applied": 1,
+                "active_camera_name": frame.camera_id,
+                "active_camera_type": frame.kind.value,
+                "active_camera_clip_start": frame.clip_start,
+                "active_camera_clip_end": frame.clip_end,
+                "projection_canvas_width": frame.texture_width,
+                "projection_canvas_height": frame.texture_height,
+                "attachment_invert_y": 0,
+            }
 
+        depth_range = calculate_a1_projected_snapshot_depth_range(source_snapshot)
         resolved_source_uv_boundary_layer = _resolve_source_uv_boundary_layer(
             source_snapshot,
             settings,
@@ -389,14 +491,26 @@ def prepare_a1_source_geometry(
                 "object_world_translation_x": world_transform.translation[0],
                 "object_world_translation_y": world_transform.translation[1],
                 "object_world_translation_z": world_transform.translation[2],
-                "axis_projection_applied": int(axis_projection.changed),
-                "projected_origin_u": axis_projection.projected_origin.u,
-                "projected_origin_v": axis_projection.projected_origin.v,
-                "projected_origin_depth": axis_projection.projected_origin.depth,
+                "projected_origin_u": projected_origin.u,
+                "projected_origin_v": projected_origin.v,
+                "projected_origin_depth": projected_origin.depth,
+                "projected_nearest_vertex_index": (
+                    depth_range.nearest_vertex_id.index
+                ),
+                "projected_nearest_vertex_depth": (
+                    depth_range.nearest_vertex_depth
+                ),
+                "projected_farthest_vertex_index": (
+                    depth_range.farthest_vertex_id.index
+                ),
+                "projected_farthest_vertex_depth": (
+                    depth_range.farthest_vertex_depth
+                ),
                 "source_uv_boundary_resolved_layer": (
                     resolved_source_uv_boundary_layer or ""
                 ),
             },
+            projection_statistics,
         )
 
         stage = A1SingleObjectStage.ASSIGN_Z_GROUPS
@@ -422,7 +536,8 @@ def prepare_a1_source_geometry(
         logger.debug(
             "Prepared source geometry for %s: vertices=%d faces=%d regions=%d "
             "world_transform_baked=%s determinant=%s mirrored=%s "
-            "projection_direction=%s projected_origin=(%s, %s, %s) "
+            "projection_direction=%s projection_kind=%s "
+            "projected_origin=(%s, %s, %s) nearest=(%s, %s) "
             "source_uv_boundary_mode=%s source_uv_boundary_layer=%s "
             "ignored_malformed_uv=%s",
             object_id,
@@ -433,9 +548,12 @@ def prepare_a1_source_geometry(
             world_transform.determinant,
             world_transform.mirrored,
             settings.projection_direction.value,
-            axis_projection.projected_origin.u,
-            axis_projection.projected_origin.v,
-            axis_projection.projected_origin.depth,
+            projection_statistics["projection_kind"],
+            projected_origin.u,
+            projected_origin.v,
+            projected_origin.depth,
+            depth_range.nearest_vertex_id.index,
+            depth_range.nearest_vertex_depth,
             settings.source_uv_boundary_mode.value,
             resolved_source_uv_boundary_layer,
             uv_report.ignored_malformed_layer_names,
