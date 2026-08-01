@@ -10,7 +10,8 @@ from ..application import (
     A1SourceGeometryMode,
     ExportSettings,
 )
-from ..domain.baking import sanitize_filename_stem
+from ..domain.baking import A1TextureExportMode, sanitize_filename_stem
+from ..domain.projection import A1ProjectionDirection
 from ..domain.spine.rig_profiles import A1RigSetupPoseMode
 from ..domain.spine.version_target import spine_json_version_filename_token
 from ..domain.uv import UvUnwrapSettings
@@ -47,6 +48,24 @@ def _versioned_json_output_stem(
     if sanitized_base.casefold().endswith(suffix.casefold()):
         return sanitized_base
     return sanitize_filename_stem(f"{sanitized_base}{suffix}")
+
+
+def _effective_projection_direction(
+    scene: _SceneExportProfile,
+) -> A1ProjectionDirection:
+    """Return the direction owned by the selected public texture route.
+
+    Normal - UV Segments consumes the new public Scene selector. The historical rendered
+    Camera Projection route owns its own render/crop/flattening pipeline and therefore
+    remains on the neutral +Z object-settings value instead of entering object-bake camera
+    projection accidentally.
+    """
+
+    if not isinstance(scene, _SceneExportProfile):
+        raise TypeError("scene must be _SceneExportProfile")
+    if scene.texture_export_mode is A1TextureExportMode.CAMERA_PROJECTION:
+        return A1ProjectionDirection.POSITIVE_Z
+    return scene.projection_direction
 
 
 def _settings_from_profiles(
@@ -91,6 +110,7 @@ def _settings_from_profiles(
         generated_material_pattern=scene.generated_material_pattern,
         generated_gray_color=scene.generated_gray_color,
         rig_setup_pose_mode=rig_setup_pose_mode,
+        projection_direction=_effective_projection_direction(scene),
     )
 
 
@@ -250,5 +270,6 @@ __all__ = [
     "_build_sources",
     "_build_sources_from_profiles",
     "_common_object_settings",
+    "_effective_projection_direction",
     "_settings_from_profiles",
 ]
