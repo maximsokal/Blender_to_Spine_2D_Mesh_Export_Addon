@@ -183,7 +183,7 @@ def _run_direction(output_root: Path, direction: A1ProjectionDirection):
         connected_prepared.objects,
         strict=True,
     ):
-        actual = shared._translation_only_setup_position(
+        actual = shared._setup_world_position(
             connected.document,
             item.rig.info.main_bone_name,
         )
@@ -269,6 +269,7 @@ def _run_direction(output_root: Path, direction: A1ProjectionDirection):
     return {
         "direction": direction.value,
         "anchorComponentId": _ANCHOR_COMPONENT_ID,
+        "setupTransformModel": shared._SETUP_TRANSFORM_MODEL,
         "expectedAllObjectOrder": list(expected_all_order),
         "connectedObjectOrder": list(connected_actual_order),
         "mixedObjectOrder": list(mixed_actual_order),
