@@ -4,7 +4,21 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.11 is the current release candidate. It makes semantic release-note checks Markdown-aware by removing inline-code backtick delimiters before comparison. Production Active Camera projection, depth compensation, rig assembly, Blender acceptance, public UI, rendered Camera Projection, connected assembly, mixed assembly, Spine codecs, and the corrected fixture are unchanged.
+Version 0.55.12 is the current release candidate. It corrects the Active Camera production ordering so segmentation, decomposition, and strict triangulation finish in normalized world geometry before immutable triangle regions are projected into camera U/V/depth space. The general polygon planarity tolerance remains unchanged.
+
+## [0.55.12] - 2026-08-01
+
+### Fixed
+
+- Perspective Active Camera export no longer sends projected non-planar n-gons into the strict source-geometry triangulator.
+- Segmentation, decomposition, and triangulation now complete before nonlinear camera projection.
+- Already-triangulated region snapshots are projected afterward with Source vertex, edge, loop, and face lineage preserved.
+- A pure tilted-quad regression reproduces the old failure and verifies two valid projected triangles through the corrected route.
+
+### Unchanged
+
+- The shared `1e-6` polygon planarity tolerance remains strict.
+- Signed-axis projection, existing rendered Camera Projection, connected and mixed assembly, Spine codecs, UV topology, texture baking, and public UI remain unchanged.
 
 ## [0.55.11] - 2026-08-01
 
@@ -292,7 +306,7 @@ Version 0.55.11 is the current release candidate. It makes semantic release-note
 
 ### Changed
 
-- Single-object two-axis control bones serialize with neutral setup rotations while reference angles remain in transform-constraint offsets.
+- Single-object two-axis control bones serialize with neutral setup rotations while reference angles remain constraint offsets.
 - Single-object attachments preserve Blender Object Origin as the exported rotation pivot instead of moving the pivot to the geometry bounds center.
 - Extension version advanced from the 0.41 development series to 0.47.0.
 
