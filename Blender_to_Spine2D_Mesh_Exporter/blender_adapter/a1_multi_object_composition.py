@@ -7,6 +7,7 @@ calling :func:`compose_a1_multi_object_document`.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Tuple
 
 from ..application import (
@@ -16,6 +17,8 @@ from ..application import (
     resolve_a1_multi_object_preparation_settings,
 )
 from ..domain.baking import CameraProjectionPlan
+from ..domain.geometry import calculate_a1_projected_snapshot_depth_range
+from ..domain.projection import A1ProjectionDirection
 from ..domain.spine import (
     ConnectedPlacementSpace,
     ConstraintOrderPolicy,
@@ -30,6 +33,10 @@ from ..domain.spine.connected_group_contracts import (
     ConnectedGroupBuildResult,
     ConnectedGroupSettings,
     ConnectedObjectDocument,
+)
+from ..domain.spine.object_block_draw_order import (
+    SpineObjectBlockDepth,
+    apply_object_block_setup_draw_order,
 )
 from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_object_preparation import PreparedA1Object
@@ -146,6 +153,109 @@ def _connected_placement_space(
     return ConnectedPlacementSpace.ANCHOR_RELATIVE_WORLD
 
 
+def _standalone_axis_projection_direction(
+    prepared: Tuple[PreparedA1Object, ...],
+) -> A1ProjectionDirection | None:
+    """Resolve one shared object-bake axis or preserve Camera Projection unchanged."""
+
+    if not isinstance(prepared, tuple) or not prepared:
+        raise ValueError("prepared must be a non-empty tuple")
+    camera_flags = tuple(
+        isinstance(item.bake_plan, CameraProjectionPlan) for item in prepared
+    )
+    if any(camera_flags):
+        # Existing Camera Projection setup order is intentionally untouched in Slice 3.
+        return None
+
+    directions = tuple(item.settings.projection_direction for item in prepared)
+    if not all(isinstance(item, A1ProjectionDirection) for item in directions):
+        raise TypeError("prepared projection directions must be A1ProjectionDirection")
+    unique_directions = set(directions)
+    if len(unique_directions) != 1:
+        raise ValueError(
+            "Standalone Normal / UV Segments objects must use one shared "
+            "projection_direction"
+        )
+    direction = directions[0]
+    if not direction.axis_aligned:
+        raise ValueError(
+            "Standalone axis draw order requires one of +X, -X, +Y, -Y, +Z, or -Z"
+        )
+    return direction
+
+
+def _standalone_object_block_depths(
+    sources: Tuple[A1MultiObjectSource, ...],
+    prepared: Tuple[PreparedA1Object, ...],
+) -> Tuple[SpineObjectBlockDepth, ...]:
+    """Build world-depth records from already projected immutable snapshots."""
+
+    if len(sources) != len(prepared):
+        raise ValueError("sources and prepared must correspond one-to-one")
+
+    result: list[SpineObjectBlockDepth] = []
+    for source_input_index, (source, item) in enumerate(
+        zip(sources, prepared, strict=True)
+    ):
+        depth_range = calculate_a1_projected_snapshot_depth_range(
+            item.source_snapshot
+        )
+        result.append(
+            SpineObjectBlockDepth(
+                component_id=source.component_id,
+                source_input_index=source_input_index,
+                nearest_vertex_index=depth_range.nearest_vertex_id.index,
+                nearest_vertex_depth=depth_range.nearest_vertex_depth,
+                farthest_vertex_index=depth_range.farthest_vertex_id.index,
+                farthest_vertex_depth=depth_range.farthest_vertex_depth,
+            )
+        )
+    return tuple(result)
+
+
+def _compose_standalone_document(
+    sources: Tuple[A1MultiObjectSource, ...],
+    prepared: Tuple[PreparedA1Object, ...],
+    settings: A1MultiObjectExportSettings,
+) -> SpineDocumentCompositionResult:
+    """Compose source-order internals, then move complete setup slot blocks only."""
+
+    components = tuple(
+        SpineDocumentComponent(
+            component_id=source.component_id,
+            document=item.document,
+            animation_namespace=(
+                source.animation_namespace or source.component_id
+            ),
+        )
+        for source, item in zip(sources, prepared, strict=True)
+    )
+    composition = compose_spine_documents(
+        components,
+        SpineCompositionSettings(
+            shared_bone_names=("root",),
+            constraint_order_policy=ConstraintOrderPolicy.REBASE_CONTIGUOUS,
+            namespace_animations=settings.namespace_animations,
+            animation_separator=settings.animation_separator,
+        ),
+    )
+
+    projection_direction = _standalone_axis_projection_direction(prepared)
+    if projection_direction is None:
+        return composition
+
+    depth_entries = _standalone_object_block_depths(sources, prepared)
+    reordered_document = apply_object_block_setup_draw_order(
+        composition.document,
+        components,
+        depth_entries,
+        depth_tolerance=settings.z_tolerance,
+    )
+    if reordered_document is composition.document:
+        return composition
+    return replace(composition, document=reordered_document)
+
+
 def compose_a1_multi_object_document(
     sources: Tuple[A1MultiObjectSource, ...],
     prepared: Tuple[PreparedA1Object, ...],
@@ -156,25 +266,7 @@ def compose_a1_multi_object_document(
     _validate_composition_inputs(sources, prepared, settings)
 
     if settings.mode is A1MultiObjectMode.STANDALONE:
-        components = tuple(
-            SpineDocumentComponent(
-                component_id=source.component_id,
-                document=item.document,
-                animation_namespace=(
-                    source.animation_namespace or source.component_id
-                ),
-            )
-            for source, item in zip(sources, prepared, strict=True)
-        )
-        return compose_spine_documents(
-            components,
-            SpineCompositionSettings(
-                shared_bone_names=("root",),
-                constraint_order_policy=ConstraintOrderPolicy.REBASE_CONTIGUOUS,
-                namespace_animations=settings.namespace_animations,
-                animation_separator=settings.animation_separator,
-            ),
-        )
+        return _compose_standalone_document(sources, prepared, settings)
 
     dimensions = {
         (
