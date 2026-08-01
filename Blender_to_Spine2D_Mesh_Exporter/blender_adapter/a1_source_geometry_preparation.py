@@ -8,6 +8,7 @@ from typing import Any, Mapping, Tuple
 
 from ..application import (
     A1GeometryPreparationResult,
+    A1GeometryPreparationSettings,
     A1ResolvedOutputPaths,
     A1SingleObjectExportSettings,
     A1SingleObjectStage,
@@ -23,14 +24,16 @@ from ..application import (
 )
 from ..domain.baking import A1TextureExportMode
 from ..domain.geometry import (
+    A1ProjectedSnapshotDepthRange,
     LineageSeverity,
     MeshSnapshot,
+    MeshWorldTransformResult,
     calculate_a1_projected_snapshot_depth_range,
     normalize_mesh_snapshot_world_transform,
     project_a1_mesh_snapshot_axis,
     project_a1_mesh_snapshot_camera,
 )
-from ..domain.projection import A1ProjectionDirection
+from ..domain.projection import A1ProjectedPoint, A1ProjectionDirection
 from ..domain.spine import calculate_uniform_scale
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
@@ -102,6 +105,42 @@ class A1SourceGeometryPreparationResult:
             raise TypeError("statistics must be a mapping")
 
 
+@dataclass(frozen=True, slots=True)
+class _ResolvedSourceRequest:
+    """Validated request metadata and optional evaluated Blender owners."""
+
+    object_id: str
+    prefix: str
+    output_paths: A1ResolvedOutputPaths
+    renderer: RenderEngineContract
+    geometry_settings: A1GeometryPreparationSettings
+    scene: Any | None
+    depsgraph: Any | None
+    statistics: Mapping[str, StatisticsValue]
+
+
+@dataclass(frozen=True, slots=True)
+class _NormalizedSourceGeometry:
+    """World-normalized source plus diagnostics required by later stages."""
+
+    snapshot: MeshSnapshot
+    world_transform: MeshWorldTransformResult
+    resolved_uv_boundary_layer: str | None
+    warnings: Tuple[ExportIssue, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ProjectionPreparation:
+    """Projected source, optional prebuilt regions and projection diagnostics."""
+
+    snapshot: MeshSnapshot
+    geometry: A1GeometryPreparationResult | None
+    projected_origin: A1ProjectedPoint
+    depth_range: A1ProjectedSnapshotDepthRange
+    statistics: Mapping[str, StatisticsValue]
+
+
+
 def object_name(source_obj: Any) -> str:
     """Resolve and validate the stable Blender object name used by A1 contracts."""
 
@@ -117,6 +156,7 @@ def object_name(source_obj: Any) -> str:
     if getattr(source_obj, "data", None) is None:
         raise ValueError("source_obj.data is missing")
     return value
+
 
 
 def _resolved_evaluation_owners(
@@ -154,6 +194,7 @@ def _resolved_evaluation_owners(
     return resolved_scene, resolved_depsgraph
 
 
+
 def _evaluated_source_world_matrix(
     source_obj: Any,
     depsgraph: Any,
@@ -173,6 +214,7 @@ def _evaluated_source_world_matrix(
     if matrix_world is None:
         raise ValueError("Evaluated source object has no matrix_world")
     return _matrix_tuple(matrix_world)
+
 
 
 def _ignored_uv_warnings(
@@ -199,6 +241,7 @@ def _ignored_uv_warnings(
         for layer in report.layers
         if layer.name in report.ignored_malformed_layer_names
     )
+
 
 
 def _read_source_snapshot(
@@ -248,10 +291,6 @@ def _read_source_snapshot(
             uv_layer_names=readable_uv_layers,
             lineage_policy=settings.modifier_lineage_policy,
         )
-        # The evaluated Mesh and matrix must come from one dependency-graph state.
-        # The generic reader retains source lineage, while A1 explicitly replaces its
-        # snapshot transform with the actual evaluated source transform before world
-        # normalization. This matters for constraints, parenting, and animated drivers.
         evaluated_snapshot = replace(
             evaluated.snapshot,
             world_matrix=_evaluated_source_world_matrix(
@@ -284,6 +323,7 @@ def _read_source_snapshot(
         uv_layer_names=readable_uv_layers,
     )
     return snapshot, 0, uv_warnings, uv_report
+
 
 
 def _resolve_source_uv_boundary_layer(
@@ -322,6 +362,7 @@ def _resolve_source_uv_boundary_layer(
     raise TypeError(f"Unsupported source UV boundary mode: {mode!r}")
 
 
+
 def _validate_projection_route(settings: A1SingleObjectExportSettings) -> None:
     if not isinstance(settings, A1SingleObjectExportSettings):
         raise TypeError("settings must be A1SingleObjectExportSettings")
@@ -337,6 +378,301 @@ def _validate_projection_route(settings: A1SingleObjectExportSettings) -> None:
         )
 
 
+
+def _resolve_source_request(
+    source_obj: Any,
+    settings: A1SingleObjectExportSettings,
+    scene: Any | None,
+) -> _ResolvedSourceRequest:
+    """Validate request metadata and resolve Blender evaluation owners once."""
+
+    if not isinstance(settings, A1SingleObjectExportSettings):
+        raise TypeError("settings must be A1SingleObjectExportSettings")
+    _validate_projection_route(settings)
+    object_id = object_name(source_obj)
+    prefix, _ = resolve_a1_names(object_id, settings)
+    output_paths = resolve_a1_output_paths(object_id, settings)
+    renderer = render_engine_contract_from_execution(settings.bake_execution)
+    geometry_settings = settings.resolved_geometry_settings()
+
+    resolved_scene = scene
+    resolved_depsgraph = None
+    if (
+        settings.source_geometry_mode is A1SourceGeometryMode.EVALUATED
+        or settings.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
+    ):
+        resolved_scene, resolved_depsgraph = _resolved_evaluation_owners(scene)
+
+    statistics = freeze_statistics(
+        {
+            "source_object": object_id,
+            "rig_prefix": prefix,
+            "source_geometry_mode": settings.source_geometry_mode.value,
+            "source_uv_boundary_mode": settings.source_uv_boundary_mode.value,
+            "source_uv_boundary_configured_layer": (
+                settings.source_uv_boundary_layer_name or ""
+            ),
+            "projection_direction": settings.projection_direction.value,
+            "include_control_icons": int(settings.include_control_icons),
+            "include_preview_animation": int(settings.include_preview_animation),
+            "render_engine": renderer.blender_engine,
+            "shader_render_target": renderer.shader_target,
+        }
+    )
+    return _ResolvedSourceRequest(
+        object_id=object_id,
+        prefix=prefix,
+        output_paths=output_paths,
+        renderer=renderer,
+        geometry_settings=geometry_settings,
+        scene=resolved_scene,
+        depsgraph=resolved_depsgraph,
+        statistics=statistics,
+    )
+
+
+
+def _normalize_source_geometry(
+    source_snapshot: MeshSnapshot,
+    settings: A1SingleObjectExportSettings,
+    warnings: Tuple[ExportIssue, ...],
+    *,
+    object_id: str,
+) -> _NormalizedSourceGeometry:
+    """Bake linear world transform and validate source-UV segmentation ownership."""
+
+    world_transform = normalize_mesh_snapshot_world_transform(source_snapshot)
+    normalized_snapshot = world_transform.snapshot
+    resolved_uv_boundary_layer = _resolve_source_uv_boundary_layer(
+        normalized_snapshot,
+        settings,
+    )
+    resolved_warnings = warnings
+    if world_transform.mirrored:
+        resolved_warnings = warnings + (
+            warning_issue(
+                stage=A1SingleObjectStage.PREPARE_GEOMETRY,
+                code="MIRRORED_OBJECT_TRANSFORM",
+                message=(
+                    "Object matrix_world has a negative determinant. Rewrite "
+                    "preserved the mirrored geometry and oriented normals while "
+                    "normalizing rotation/scale into the mesh snapshot."
+                ),
+                object_id=object_id,
+                context={"determinant": world_transform.determinant},
+            ),
+        )
+    return _NormalizedSourceGeometry(
+        snapshot=normalized_snapshot,
+        world_transform=world_transform,
+        resolved_uv_boundary_layer=resolved_uv_boundary_layer,
+        warnings=resolved_warnings,
+    )
+
+
+
+def _prepare_projection_route(
+    source_snapshot: MeshSnapshot,
+    settings: A1SingleObjectExportSettings,
+    geometry_settings: A1GeometryPreparationSettings,
+    *,
+    scene: Any | None,
+    depsgraph: Any | None,
+) -> _ProjectionPreparation:
+    """Execute the signed-axis or nonlinear Active Camera geometry route."""
+
+    geometry: A1GeometryPreparationResult | None = None
+    if settings.projection_direction.axis_aligned:
+        axis_projection = project_a1_mesh_snapshot_axis(
+            source_snapshot,
+            settings.projection_direction,
+        )
+        projected_snapshot = axis_projection.snapshot
+        projected_origin = axis_projection.projected_origin
+        projection_statistics = {
+            "projection_kind": "SIGNED_AXIS",
+            "axis_projection_applied": int(axis_projection.changed),
+            "active_camera_projection_applied": 0,
+            "active_camera_name": "",
+            "active_camera_type": "",
+            "active_camera_clip_start": 0.0,
+            "active_camera_clip_end": 0.0,
+            "active_camera_preprojection_triangulation": 0,
+            "projection_canvas_width": settings.export.texture_width,
+            "projection_canvas_height": settings.export.texture_height,
+            "attachment_invert_y": 1,
+        }
+    else:
+        if settings.projection_direction is not A1ProjectionDirection.ACTIVE_CAMERA:
+            raise ValueError(
+                f"Unsupported projection direction: {settings.projection_direction!r}"
+            )
+        if scene is None or depsgraph is None:
+            raise ValueError(
+                "ACTIVE_CAMERA projection lost its evaluated Scene context"
+            )
+
+        geometry = prepare_a1_geometry_regions(
+            source_snapshot,
+            geometry_settings,
+        )
+        frame = resolve_a1_active_camera_projection_frame(
+            scene,
+            texture_width=settings.export.texture_width,
+            texture_height=settings.export.texture_height,
+            depsgraph=depsgraph,
+        )
+        uniform_scale = calculate_uniform_scale(
+            settings.export.texture_width,
+            settings.export.texture_height,
+            settings.rig_scale_mode,
+        )
+        camera_projection = project_a1_mesh_snapshot_camera(
+            source_snapshot,
+            frame,
+            uniform_scale=uniform_scale,
+        )
+        projected_snapshot = camera_projection.snapshot
+        geometry = project_a1_prepared_geometry_camera(
+            geometry,
+            frame,
+            uniform_scale=uniform_scale,
+        )
+        projected_origin = camera_projection.projected_origin
+        projection_statistics = {
+            "projection_kind": "ACTIVE_CAMERA",
+            "axis_projection_applied": 0,
+            "active_camera_projection_applied": 1,
+            "active_camera_name": frame.camera_id,
+            "active_camera_type": frame.kind.value,
+            "active_camera_clip_start": frame.clip_start,
+            "active_camera_clip_end": frame.clip_end,
+            "active_camera_preprojection_triangulation": 1,
+            "projection_canvas_width": frame.texture_width,
+            "projection_canvas_height": frame.texture_height,
+            "attachment_invert_y": 0,
+        }
+
+    return _ProjectionPreparation(
+        snapshot=projected_snapshot,
+        geometry=geometry,
+        projected_origin=projected_origin,
+        depth_range=calculate_a1_projected_snapshot_depth_range(projected_snapshot),
+        statistics=freeze_statistics(projection_statistics),
+    )
+
+
+
+def _complete_projected_geometry(
+    projection: _ProjectionPreparation,
+    geometry_settings: A1GeometryPreparationSettings,
+) -> A1GeometryPreparationResult:
+    """Build signed-axis regions after Z assignment or return camera regions."""
+
+    if projection.geometry is not None:
+        return projection.geometry
+    return prepare_a1_geometry_regions(
+        projection.snapshot,
+        geometry_settings,
+    )
+
+
+
+def _build_prepared_statistics(
+    base_statistics: Mapping[str, StatisticsValue],
+    *,
+    modifier_count: int,
+    uv_report: SourceUvIntegrityReport,
+    normalized: _NormalizedSourceGeometry,
+    projection: _ProjectionPreparation,
+    z_groups: A1ZGroupAssignmentPlan,
+    geometry: A1GeometryPreparationResult,
+) -> Mapping[str, StatisticsValue]:
+    """Freeze complete source, projection, Z-group and region diagnostics."""
+
+    snapshot = projection.snapshot
+    world_transform = normalized.world_transform
+    origin = projection.projected_origin
+    depth_range = projection.depth_range
+    return freeze_statistics(
+        base_statistics,
+        {
+            "modifier_count": modifier_count,
+            "source_vertices": len(snapshot.vertices),
+            "source_edges": len(snapshot.edges),
+            "source_faces": len(snapshot.faces),
+            "source_uv_layer_count": len(uv_report.layers),
+            "source_uv_readable_layer_count": len(uv_report.readable_layer_names),
+            "source_uv_ignored_malformed_count": len(
+                uv_report.ignored_malformed_layer_names
+            ),
+            "source_uv_required_layers": ",".join(uv_report.required_layer_names),
+            "object_linear_transform_baked": int(world_transform.changed),
+            "object_world_determinant": world_transform.determinant,
+            "object_world_mirrored": int(world_transform.mirrored),
+            "object_world_translation_x": world_transform.translation[0],
+            "object_world_translation_y": world_transform.translation[1],
+            "object_world_translation_z": world_transform.translation[2],
+            "projected_origin_u": origin.u,
+            "projected_origin_v": origin.v,
+            "projected_origin_depth": origin.depth,
+            "projected_nearest_vertex_index": depth_range.nearest_vertex_id.index,
+            "projected_nearest_vertex_depth": depth_range.nearest_vertex_depth,
+            "projected_farthest_vertex_index": depth_range.farthest_vertex_id.index,
+            "projected_farthest_vertex_depth": depth_range.farthest_vertex_depth,
+            "source_uv_boundary_resolved_layer": (
+                normalized.resolved_uv_boundary_layer or ""
+            ),
+            "z_group_count": len(z_groups.groups),
+            "segment_count": len(geometry.segmentation.segments),
+            "region_count": len(geometry.regions),
+            "decomposition_cut_count": len(geometry.decomposition.cuts),
+        },
+        projection.statistics,
+    )
+
+
+
+def _log_prepared_source(
+    request: _ResolvedSourceRequest,
+    settings: A1SingleObjectExportSettings,
+    normalized: _NormalizedSourceGeometry,
+    projection: _ProjectionPreparation,
+    geometry: A1GeometryPreparationResult,
+    uv_report: SourceUvIntegrityReport,
+) -> None:
+    """Emit one structured source-geometry diagnostic record."""
+
+    logger.debug(
+        "Prepared source geometry for %s: vertices=%d faces=%d regions=%d "
+        "world_transform_baked=%s determinant=%s mirrored=%s "
+        "projection_direction=%s projection_kind=%s "
+        "preprojection_triangulation=%s "
+        "projected_origin=(%s, %s, %s) nearest=(%s, %s) "
+        "source_uv_boundary_mode=%s source_uv_boundary_layer=%s "
+        "ignored_malformed_uv=%s",
+        request.object_id,
+        len(projection.snapshot.vertices),
+        len(projection.snapshot.faces),
+        len(geometry.regions),
+        normalized.world_transform.changed,
+        normalized.world_transform.determinant,
+        normalized.world_transform.mirrored,
+        settings.projection_direction.value,
+        projection.statistics["projection_kind"],
+        projection.statistics["active_camera_preprojection_triangulation"],
+        projection.projected_origin.u,
+        projection.projected_origin.v,
+        projection.projected_origin.depth,
+        projection.depth_range.nearest_vertex_id.index,
+        projection.depth_range.nearest_vertex_depth,
+        settings.source_uv_boundary_mode.value,
+        normalized.resolved_uv_boundary_layer,
+        uv_report.ignored_malformed_layer_names,
+    )
+
+
+
 def prepare_a1_source_geometry(
     source_obj: Any,
     settings: A1SingleObjectExportSettings,
@@ -350,245 +686,68 @@ def prepare_a1_source_geometry(
     warnings: Tuple[ExportIssue, ...] = ()
     statistics: Mapping[str, StatisticsValue] = {}
     try:
-        if not isinstance(settings, A1SingleObjectExportSettings):
-            raise TypeError("settings must be A1SingleObjectExportSettings")
-        _validate_projection_route(settings)
-        object_id = object_name(source_obj)
-        prefix, _ = resolve_a1_names(object_id, settings)
-        output_paths = resolve_a1_output_paths(object_id, settings)
-        renderer = render_engine_contract_from_execution(settings.bake_execution)
-        geometry_settings = settings.resolved_geometry_settings()
-        geometry: A1GeometryPreparationResult | None = None
-        statistics = freeze_statistics(
-            {
-                "source_object": object_id,
-                "rig_prefix": prefix,
-                "source_geometry_mode": settings.source_geometry_mode.value,
-                "source_uv_boundary_mode": settings.source_uv_boundary_mode.value,
-                "source_uv_boundary_configured_layer": (
-                    settings.source_uv_boundary_layer_name or ""
-                ),
-                "projection_direction": settings.projection_direction.value,
-                "include_control_icons": int(settings.include_control_icons),
-                "include_preview_animation": int(settings.include_preview_animation),
-                "render_engine": renderer.blender_engine,
-                "shader_render_target": renderer.shader_target,
-            }
-        )
-
-        resolved_scene = scene
-        resolved_depsgraph = None
-        if (
-            settings.source_geometry_mode is A1SourceGeometryMode.EVALUATED
-            or settings.projection_direction
-            is A1ProjectionDirection.ACTIVE_CAMERA
-        ):
-            resolved_scene, resolved_depsgraph = _resolved_evaluation_owners(scene)
+        request = _resolve_source_request(source_obj, settings, scene)
+        object_id = request.object_id
+        statistics = request.statistics
 
         stage = A1SingleObjectStage.READ_GEOMETRY
         source_snapshot, modifier_count, warnings, uv_report = _read_source_snapshot(
             source_obj,
-            object_id,
+            request.object_id,
             settings,
-            scene=resolved_scene,
-            depsgraph=resolved_depsgraph,
+            scene=request.scene,
+            depsgraph=request.depsgraph,
         )
 
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
-        world_transform = normalize_mesh_snapshot_world_transform(source_snapshot)
-        source_snapshot = world_transform.snapshot
-        if world_transform.mirrored:
-            warnings = warnings + (
-                warning_issue(
-                    stage=stage,
-                    code="MIRRORED_OBJECT_TRANSFORM",
-                    message=(
-                        "Object matrix_world has a negative determinant. Rewrite "
-                        "preserved the mirrored geometry and oriented normals while "
-                        "normalizing rotation/scale into the mesh snapshot."
-                    ),
-                    object_id=object_id,
-                    context={
-                        "determinant": world_transform.determinant,
-                    },
-                ),
-            )
-
-        projection_statistics: dict[str, StatisticsValue]
-        if settings.projection_direction.axis_aligned:
-            axis_projection = project_a1_mesh_snapshot_axis(
-                source_snapshot,
-                settings.projection_direction,
-            )
-            source_snapshot = axis_projection.snapshot
-            projected_origin = axis_projection.projected_origin
-            projection_statistics = {
-                "projection_kind": "SIGNED_AXIS",
-                "axis_projection_applied": int(axis_projection.changed),
-                "active_camera_projection_applied": 0,
-                "active_camera_name": "",
-                "active_camera_type": "",
-                "active_camera_clip_start": 0.0,
-                "active_camera_clip_end": 0.0,
-                "active_camera_preprojection_triangulation": 0,
-                "projection_canvas_width": settings.export.texture_width,
-                "projection_canvas_height": settings.export.texture_height,
-                "attachment_invert_y": 1,
-            }
-        else:
-            if resolved_scene is None or resolved_depsgraph is None:
-                raise ValueError(
-                    "ACTIVE_CAMERA projection lost its evaluated Scene context"
-                )
-
-            # Perspective U/V/depth projection is nonlinear. A valid planar source
-            # n-gon can become non-planar in retained projected 3D coordinates, so
-            # segmentation, decomposition and strict triangulation must finish while
-            # the geometry is still in normalized world space.
-            geometry = prepare_a1_geometry_regions(
-                source_snapshot,
-                geometry_settings,
-            )
-
-            frame = resolve_a1_active_camera_projection_frame(
-                resolved_scene,
-                texture_width=settings.export.texture_width,
-                texture_height=settings.export.texture_height,
-                depsgraph=resolved_depsgraph,
-            )
-            uniform_scale = calculate_uniform_scale(
-                settings.export.texture_width,
-                settings.export.texture_height,
-                settings.rig_scale_mode,
-            )
-            camera_projection = project_a1_mesh_snapshot_camera(
-                source_snapshot,
-                frame,
-                uniform_scale=uniform_scale,
-            )
-            source_snapshot = camera_projection.snapshot
-            geometry = project_a1_prepared_geometry_camera(
-                geometry,
-                frame,
-                uniform_scale=uniform_scale,
-            )
-            projected_origin = camera_projection.projected_origin
-            projection_statistics = {
-                "projection_kind": "ACTIVE_CAMERA",
-                "axis_projection_applied": 0,
-                "active_camera_projection_applied": 1,
-                "active_camera_name": frame.camera_id,
-                "active_camera_type": frame.kind.value,
-                "active_camera_clip_start": frame.clip_start,
-                "active_camera_clip_end": frame.clip_end,
-                "active_camera_preprojection_triangulation": 1,
-                "projection_canvas_width": frame.texture_width,
-                "projection_canvas_height": frame.texture_height,
-                "attachment_invert_y": 0,
-            }
-
-        depth_range = calculate_a1_projected_snapshot_depth_range(source_snapshot)
-        resolved_source_uv_boundary_layer = _resolve_source_uv_boundary_layer(
+        normalized = _normalize_source_geometry(
             source_snapshot,
             settings,
+            warnings,
+            object_id=request.object_id,
         )
-        statistics = freeze_statistics(
-            statistics,
-            {
-                "modifier_count": modifier_count,
-                "source_vertices": len(source_snapshot.vertices),
-                "source_edges": len(source_snapshot.edges),
-                "source_faces": len(source_snapshot.faces),
-                "source_uv_layer_count": len(uv_report.layers),
-                "source_uv_readable_layer_count": len(uv_report.readable_layer_names),
-                "source_uv_ignored_malformed_count": len(
-                    uv_report.ignored_malformed_layer_names
-                ),
-                "source_uv_required_layers": ",".join(uv_report.required_layer_names),
-                "object_linear_transform_baked": int(world_transform.changed),
-                "object_world_determinant": world_transform.determinant,
-                "object_world_mirrored": int(world_transform.mirrored),
-                "object_world_translation_x": world_transform.translation[0],
-                "object_world_translation_y": world_transform.translation[1],
-                "object_world_translation_z": world_transform.translation[2],
-                "projected_origin_u": projected_origin.u,
-                "projected_origin_v": projected_origin.v,
-                "projected_origin_depth": projected_origin.depth,
-                "projected_nearest_vertex_index": (
-                    depth_range.nearest_vertex_id.index
-                ),
-                "projected_nearest_vertex_depth": (
-                    depth_range.nearest_vertex_depth
-                ),
-                "projected_farthest_vertex_index": (
-                    depth_range.farthest_vertex_id.index
-                ),
-                "projected_farthest_vertex_depth": (
-                    depth_range.farthest_vertex_depth
-                ),
-                "source_uv_boundary_resolved_layer": (
-                    resolved_source_uv_boundary_layer or ""
-                ),
-            },
-            projection_statistics,
+        warnings = normalized.warnings
+        projection = _prepare_projection_route(
+            normalized.snapshot,
+            settings,
+            request.geometry_settings,
+            scene=request.scene,
+            depsgraph=request.depsgraph,
         )
 
         stage = A1SingleObjectStage.ASSIGN_Z_GROUPS
-        z_groups = build_a1_z_group_assignment(source_snapshot)
-        statistics = freeze_statistics(
-            statistics,
-            {"z_group_count": len(z_groups.groups)},
-        )
+        z_groups = build_a1_z_group_assignment(projection.snapshot)
 
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
-        if geometry is None:
-            geometry = prepare_a1_geometry_regions(
-                source_snapshot,
-                geometry_settings,
-            )
-        statistics = freeze_statistics(
-            statistics,
-            {
-                "segment_count": len(geometry.segmentation.segments),
-                "region_count": len(geometry.regions),
-                "decomposition_cut_count": len(geometry.decomposition.cuts),
-            },
+        geometry = _complete_projected_geometry(
+            projection,
+            request.geometry_settings,
         )
-        logger.debug(
-            "Prepared source geometry for %s: vertices=%d faces=%d regions=%d "
-            "world_transform_baked=%s determinant=%s mirrored=%s "
-            "projection_direction=%s projection_kind=%s "
-            "preprojection_triangulation=%s "
-            "projected_origin=(%s, %s, %s) nearest=(%s, %s) "
-            "source_uv_boundary_mode=%s source_uv_boundary_layer=%s "
-            "ignored_malformed_uv=%s",
-            object_id,
-            len(source_snapshot.vertices),
-            len(source_snapshot.faces),
-            len(geometry.regions),
-            world_transform.changed,
-            world_transform.determinant,
-            world_transform.mirrored,
-            settings.projection_direction.value,
-            projection_statistics["projection_kind"],
-            projection_statistics["active_camera_preprojection_triangulation"],
-            projected_origin.u,
-            projected_origin.v,
-            projected_origin.depth,
-            depth_range.nearest_vertex_id.index,
-            depth_range.nearest_vertex_depth,
-            settings.source_uv_boundary_mode.value,
-            resolved_source_uv_boundary_layer,
-            uv_report.ignored_malformed_layer_names,
+        statistics = _build_prepared_statistics(
+            statistics,
+            modifier_count=modifier_count,
+            uv_report=uv_report,
+            normalized=normalized,
+            projection=projection,
+            z_groups=z_groups,
+            geometry=geometry,
+        )
+        _log_prepared_source(
+            request,
+            settings,
+            normalized,
+            projection,
+            geometry,
+            uv_report,
         )
         return A1SourceGeometryPreparationResult(
             source_object=source_obj,
-            object_id=object_id,
-            prefix=prefix,
+            object_id=request.object_id,
+            prefix=request.prefix,
             settings=settings,
-            output_paths=output_paths,
-            renderer=renderer,
-            source_snapshot=source_snapshot,
+            output_paths=request.output_paths,
+            renderer=request.renderer,
+            source_snapshot=projection.snapshot,
             z_groups=z_groups,
             geometry=geometry,
             warnings=warnings,
