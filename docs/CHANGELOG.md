@@ -348,7 +348,7 @@ Version 0.55.9 is the current release candidate. It corrects the pure Active Cam
 - Generated material policies and deterministic diagnostic color patterns.
 - Single-object, standalone multi-object, connected, and mixed composition.
 - Static and per-object sequence texture output.
-- Readiness analysis with structured blockers, warnings, logs, stale work recovery, and interprocess ownership.
+- Readiness analysis with structured blockers, warnings, and statistics.
 - Atomic JSON and texture output with backups, rollback, stale work recovery, and interprocess ownership.
 - Per-file logging and failed-work-file preferences.
 - Real-bpy and Blender 5.2 headless regression layers.
