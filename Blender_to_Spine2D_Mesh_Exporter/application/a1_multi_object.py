@@ -7,6 +7,7 @@ from enum import Enum
 from pathlib import Path
 
 from ..domain.baking import sanitize_filename_stem
+from ..domain.projection import A1ProjectionDirection
 from ..domain.spine import UniformScaleMode
 from ..domain.spine.export_capabilities import (
     SpineJsonExportScope,
@@ -134,6 +135,11 @@ def resolve_a1_multi_object_preparation_settings(
     object's absolute Blender world translation; connected composition adds anchor-relative
     translation later. Standalone documents preserve the caller's settings unchanged.
     MIXED must be resolved into an explicit connected or standalone subgroup first.
+
+    Normal / UV Segments Active Camera is intentionally limited to single-object and
+    standalone preparation in Slice 4. Connected and mixed camera-relative hierarchy,
+    placement and draw-order normalization belong to Slice 5 and fail before Blender
+    geometry is read.
     """
 
     if not isinstance(settings, A1SingleObjectExportSettings):
@@ -144,6 +150,15 @@ def resolve_a1_multi_object_preparation_settings(
         settings.export.rig_profile,
         scope,
     )
+    if (
+        mode is A1MultiObjectMode.CONNECTED
+        and settings.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
+    ):
+        raise ValueError(
+            "Connected and mixed Normal / UV Segments Active Camera projection "
+            "requires the Slice 5 hierarchy and placement normalization; use "
+            "STANDALONE until that implementation is complete"
+        )
     if mode is A1MultiObjectMode.CONNECTED:
         if not settings.use_world_location_for_main_bone:
             return settings
