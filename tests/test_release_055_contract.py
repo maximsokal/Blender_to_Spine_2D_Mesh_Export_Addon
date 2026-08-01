@@ -48,6 +48,9 @@ ACTIVE_CAMERA_RELEASE_PATH = (
 ACTIVE_CAMERA_VALIDATION_CORRECTION_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.8.md"
 )
+ACTIVE_CAMERA_INDEX_CORRECTION_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.9.md"
+)
 
 
 def _normalized_prose(value: str) -> str:
@@ -58,11 +61,11 @@ def _normalized_prose(value: str) -> str:
     return " ".join(value.lower().replace("-", " ").split())
 
 
-def test_current_release_uses_version_0558() -> None:
+def test_current_release_uses_version_0559() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.8"
+    assert manifest["version"] == "0.55.9"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -169,5 +172,17 @@ def test_active_camera_validation_correction_has_release_note() -> None:
     assert "legacyzgroup" in normalized_release_note
     assert "raw floats" in normalized_release_note
     assert "export texture dimensions" in normalized_release_note
+    assert "production active camera projection" in normalized_release_note
+    assert "are unchanged" in normalized_release_note
+
+
+def test_active_camera_index_correction_has_release_note() -> None:
+    release_note = ACTIVE_CAMERA_INDEX_CORRECTION_PATH.read_text(encoding="utf-8")
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.9" in release_note
+    assert "profile owned z group indices" in normalized_release_note
+    assert "assuming a zero based index" in normalized_release_note
+    assert "z_value == 0.0" in release_note
     assert "production active camera projection" in normalized_release_note
     assert "are unchanged" in normalized_release_note
