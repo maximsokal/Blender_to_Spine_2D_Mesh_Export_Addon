@@ -4,7 +4,25 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.13 is the current release candidate. It keeps the production Active Camera implementation from 0.55.12 unchanged and corrects the Blender acceptance depth oracle so captured Blender matrix and vertex tuples are transformed with Python affine arithmetic rather than float32 `mathutils` matrix-vector intermediates.
+Version 0.55.14 is the current release candidate. It decomposes the A1 source-geometry stage into explicit typed owners, validates source UV boundary ownership immediately after world normalization, and replaces stale global-order and two-field suffix tests with route-aware and append-only contracts. Projection math and strict tolerances are unchanged.
+
+## [0.55.14] - 2026-08-01
+
+### Changed
+
+- `prepare_a1_source_geometry()` now delegates request resolution, world normalization, projection routing, geometry completion, statistics, and logging to explicit owners.
+- Source UV boundary validation occurs immediately after world-transform normalization for signed-axis and Active Camera routes.
+- The architecture gate verifies every source-stage owner remains below the monolith threshold and preserves deterministic call order.
+
+### Fixed
+
+- The world-transform source contract now distinguishes signed-axis post-Z geometry completion from Active Camera pre-projection triangulation.
+- The append-only `A1DocumentAssemblySettings` suffix contract now includes `compensate_depth_setup_y` after `uv_range_policy` and `uv_range_epsilon`.
+
+### Unchanged
+
+- Active Camera matrices, triangulation behavior, camera-depth arithmetic, screen placement, nearest-vertex order, rigs, attachments, and strict tolerances remain unchanged.
+- Existing rendered Camera Projection, connected and mixed assembly, Spine codecs, texture baking, and public UI remain unchanged.
 
 ## [0.55.13] - 2026-08-01
 
