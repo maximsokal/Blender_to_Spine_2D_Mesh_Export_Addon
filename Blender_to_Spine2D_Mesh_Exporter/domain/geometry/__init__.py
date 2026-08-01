@@ -4,6 +4,8 @@ from .a1_segmentation import A1AngularMode, A1SegmentationError, segment_mesh_a1
 from .axis_projection import (
     A1MeshAxisProjectionError,
     A1MeshAxisProjectionResult,
+    A1ProjectedSnapshotDepthRange,
+    calculate_a1_projected_snapshot_depth_range,
     project_a1_mesh_snapshot_axis,
 )
 from .correspondence import (
@@ -105,6 +107,7 @@ __all__ = [
     "A1AngularMode",
     "A1MeshAxisProjectionError",
     "A1MeshAxisProjectionResult",
+    "A1ProjectedSnapshotDepthRange",
     "A1SegmentationError",
     "ConflictingSourceLoopUVError",
     "CorrespondenceError",
@@ -170,6 +173,7 @@ __all__ = [
     "build_face_adjacency",
     "build_mesh_fingerprint",
     "build_uv_correspondence",
+    "calculate_a1_projected_snapshot_depth_range",
     "decompose_complex_segments",
     "extract_face_subset",
     "face_edge_ids",
