@@ -153,10 +153,10 @@ def _connected_placement_space(
     return ConnectedPlacementSpace.ANCHOR_RELATIVE_WORLD
 
 
-def _standalone_axis_projection_direction(
+def _shared_object_bake_projection_direction(
     prepared: Tuple[PreparedA1Object, ...],
 ) -> A1ProjectionDirection | None:
-    """Resolve one shared object-bake projection or preserve Camera Projection order."""
+    """Resolve one Normal/UV projection or preserve rendered Camera Projection behavior."""
 
     if not isinstance(prepared, tuple) or not prepared:
         raise ValueError("prepared must be a non-empty tuple")
@@ -164,8 +164,13 @@ def _standalone_axis_projection_direction(
         isinstance(item.bake_plan, CameraProjectionPlan) for item in prepared
     )
     if any(camera_flags):
+        if not all(camera_flags):
+            raise ValueError(
+                "One multi-object subgroup cannot mix rendered Camera Projection with "
+                "Normal / UV Segments object-bake documents"
+            )
         # Existing rendered Camera Projection setup order remains independent from the
-        # Normal / UV Segments Active Camera layout introduced by Slice 4.
+        # Normal / UV Segments projection layout.
         return None
 
     directions = tuple(item.settings.projection_direction for item in prepared)
@@ -174,17 +179,17 @@ def _standalone_axis_projection_direction(
     unique_directions = set(directions)
     if len(unique_directions) != 1:
         raise ValueError(
-            "Standalone Normal / UV Segments objects must use one shared "
+            "Normal / UV Segments objects in one subgroup must use one shared "
             "projection_direction"
         )
     return directions[0]
 
 
-def _standalone_object_block_depths(
+def _object_block_depths(
     sources: Tuple[A1MultiObjectSource, ...],
     prepared: Tuple[PreparedA1Object, ...],
 ) -> Tuple[SpineObjectBlockDepth, ...]:
-    """Build world-depth records from already projected immutable snapshots."""
+    """Build nearest/farthest records from projected immutable snapshots."""
 
     if len(sources) != len(prepared):
         raise ValueError("sources and prepared must correspond one-to-one")
@@ -209,14 +214,11 @@ def _standalone_object_block_depths(
     return tuple(result)
 
 
-def _compose_standalone_document(
+def _document_components(
     sources: Tuple[A1MultiObjectSource, ...],
     prepared: Tuple[PreparedA1Object, ...],
-    settings: A1MultiObjectExportSettings,
-) -> SpineDocumentCompositionResult:
-    """Compose source-order internals, then move complete setup slot blocks only."""
-
-    components = tuple(
+) -> Tuple[SpineDocumentComponent, ...]:
+    return tuple(
         SpineDocumentComponent(
             component_id=source.component_id,
             document=item.document,
@@ -226,6 +228,16 @@ def _compose_standalone_document(
         )
         for source, item in zip(sources, prepared, strict=True)
     )
+
+
+def _compose_standalone_document(
+    sources: Tuple[A1MultiObjectSource, ...],
+    prepared: Tuple[PreparedA1Object, ...],
+    settings: A1MultiObjectExportSettings,
+) -> SpineDocumentCompositionResult:
+    """Compose source-order internals, then move complete setup slot blocks only."""
+
+    components = _document_components(sources, prepared)
     composition = compose_spine_documents(
         components,
         SpineCompositionSettings(
@@ -236,11 +248,11 @@ def _compose_standalone_document(
         ),
     )
 
-    projection_direction = _standalone_axis_projection_direction(prepared)
+    projection_direction = _shared_object_bake_projection_direction(prepared)
     if projection_direction is None:
         return composition
 
-    depth_entries = _standalone_object_block_depths(sources, prepared)
+    depth_entries = _object_block_depths(sources, prepared)
     reordered_document = apply_object_block_setup_draw_order(
         composition.document,
         components,
@@ -276,11 +288,19 @@ def compose_a1_multi_object_document(
             "CONNECTED mode requires identical texture dimensions for every object"
         )
     texture_width, texture_height = next(iter(dimensions))
+    projection_direction = _shared_object_bake_projection_direction(prepared)
+    depth_entries = (
+        None
+        if projection_direction is None
+        else _object_block_depths(sources, prepared)
+    )
     connected_objects = tuple(
         ConnectedObjectDocument(
             component_id=source.component_id,
             prefix=item.prefix,
             document=item.document,
+            # source_snapshot.world_matrix translation is already the projected
+            # Object Origin in canonical U/V/depth space.
             world_position=item.world_position,
             animation_namespace=(
                 source.animation_namespace or source.component_id
@@ -303,6 +323,7 @@ def compose_a1_multi_object_document(
         ),
         profile=prepared[0].rig.profile,
         spine_target=prepared[0].settings.export.spine_target,
+        object_block_depths=depth_entries,
     )
 
 
