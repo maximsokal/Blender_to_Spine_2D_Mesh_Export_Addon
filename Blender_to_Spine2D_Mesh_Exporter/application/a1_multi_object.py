@@ -7,7 +7,6 @@ from enum import Enum
 from pathlib import Path
 
 from ..domain.baking import sanitize_filename_stem
-from ..domain.projection import A1ProjectionDirection
 from ..domain.spine import UniformScaleMode
 from ..domain.spine.export_capabilities import (
     SpineJsonExportScope,
@@ -132,14 +131,13 @@ def resolve_a1_multi_object_preparation_settings(
     """Return the exact per-object settings used by multi-object preparation.
 
     The target capability is checked before geometry work. Connected documents omit each
-    object's absolute Blender world translation; connected composition adds anchor-relative
-    translation later. Standalone documents preserve the caller's settings unchanged.
-    MIXED must be resolved into an explicit connected or standalone subgroup first.
+    object's absolute projected translation; connected composition adds anchor-relative
+    projected translation later. Standalone documents preserve the caller's settings.
+    MIXED must be resolved into explicit connected and standalone subgroups first.
 
-    Normal / UV Segments Active Camera is intentionally limited to single-object and
-    standalone preparation in Slice 4. Connected and mixed camera-relative hierarchy,
-    placement and draw-order normalization belong to Slice 5 and fail before Blender
-    geometry is read.
+    Normal / UV Segments signed-axis and Active Camera requests share this rule. The
+    projection stage has already converted evaluated Object Origins and vertices into the
+    canonical U/V/depth frame before connected composition owns hierarchy placement.
     """
 
     if not isinstance(settings, A1SingleObjectExportSettings):
@@ -150,15 +148,6 @@ def resolve_a1_multi_object_preparation_settings(
         settings.export.rig_profile,
         scope,
     )
-    if (
-        mode is A1MultiObjectMode.CONNECTED
-        and settings.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
-    ):
-        raise ValueError(
-            "Connected and mixed Normal / UV Segments Active Camera projection "
-            "requires the Slice 5 hierarchy and placement normalization; use "
-            "STANDALONE until that implementation is complete"
-        )
     if mode is A1MultiObjectMode.CONNECTED:
         if not settings.use_world_location_for_main_bone:
             return settings
