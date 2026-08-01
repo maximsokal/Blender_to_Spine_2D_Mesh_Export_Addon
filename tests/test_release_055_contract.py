@@ -66,6 +66,9 @@ ACTIVE_CAMERA_DEPTH_NUMERIC_CORRECTION_PATH = (
 SOURCE_STAGE_DECOMPOSITION_CORRECTION_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.14.md"
 )
+CONNECTED_MIXED_NORMALIZATION_RELEASE_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.15.md"
+)
 
 
 def _normalized_prose(value: str) -> str:
@@ -86,11 +89,11 @@ def _normalized_prose(value: str) -> str:
     )
 
 
-def test_current_release_uses_version_05514() -> None:
+def test_current_release_uses_version_05515() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.14"
+    assert manifest["version"] == "0.55.15"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -286,3 +289,21 @@ def test_source_stage_decomposition_correction_has_release_note() -> None:
     assert "route aware" in normalized_release_note
     assert "compensate_depth_setup_y" in release_note
     assert "tolerances remain unchanged" in normalized_release_note
+
+
+def test_connected_mixed_projection_normalization_has_release_note() -> None:
+    release_note = CONNECTED_MIXED_NORMALIZATION_RELEASE_PATH.read_text(
+        encoding="utf-8"
+    )
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.15" in release_note
+    assert "a1projectedobjectanalysis" in normalized_release_note
+    assert "selected anchor's absolute projected object origin" in normalized_release_note
+    assert "final setup world positions equal" in normalized_release_note
+    assert "projected object origin depth" in normalized_release_note
+    assert "nearest evaluated vertex depth" in normalized_release_note
+    assert "across connected and standalone subgroup boundaries" in normalized_release_note
+    assert "rendered camera projection" in normalized_release_note
+    assert "public standalone only ui routing" in normalized_release_note
+    assert "remain fail closed" in normalized_release_note
