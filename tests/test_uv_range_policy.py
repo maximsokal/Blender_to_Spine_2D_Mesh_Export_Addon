@@ -120,9 +120,14 @@ def test_document_assembly_range_fields_are_appended_and_strict_by_default():
     settings = build_assembly_settings()
     names = tuple(field.name for field in fields(A1DocumentAssemblySettings))
 
-    assert names[-2:] == ("uv_range_policy", "uv_range_epsilon")
+    assert names[-3:] == (
+        "uv_range_policy",
+        "uv_range_epsilon",
+        "compensate_depth_setup_y",
+    )
     assert settings.uv_range_policy is UvRangePolicy.REQUIRE_UNIT_SQUARE
     assert settings.uv_range_epsilon == pytest.approx(1.0e-6)
+    assert settings.compensate_depth_setup_y is False
 
 
 @pytest.mark.parametrize(
