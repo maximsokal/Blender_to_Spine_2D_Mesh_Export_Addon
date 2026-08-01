@@ -156,7 +156,7 @@ def _connected_placement_space(
 def _standalone_axis_projection_direction(
     prepared: Tuple[PreparedA1Object, ...],
 ) -> A1ProjectionDirection | None:
-    """Resolve one shared object-bake axis or preserve Camera Projection unchanged."""
+    """Resolve one shared object-bake projection or preserve Camera Projection order."""
 
     if not isinstance(prepared, tuple) or not prepared:
         raise ValueError("prepared must be a non-empty tuple")
@@ -164,7 +164,8 @@ def _standalone_axis_projection_direction(
         isinstance(item.bake_plan, CameraProjectionPlan) for item in prepared
     )
     if any(camera_flags):
-        # Existing Camera Projection setup order is intentionally untouched in Slice 3.
+        # Existing rendered Camera Projection setup order remains independent from the
+        # Normal / UV Segments Active Camera layout introduced by Slice 4.
         return None
 
     directions = tuple(item.settings.projection_direction for item in prepared)
@@ -176,12 +177,7 @@ def _standalone_axis_projection_direction(
             "Standalone Normal / UV Segments objects must use one shared "
             "projection_direction"
         )
-    direction = directions[0]
-    if not direction.axis_aligned:
-        raise ValueError(
-            "Standalone axis draw order requires one of +X, -X, +Y, -Y, +Z, or -Z"
-        )
-    return direction
+    return directions[0]
 
 
 def _standalone_object_block_depths(
