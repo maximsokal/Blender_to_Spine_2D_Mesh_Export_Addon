@@ -3,7 +3,10 @@
 The worker exercises production evaluated-geometry preparation and standalone composition
 for Perspective and Orthographic cameras. Expected screen points come from Blender's
 independent ``world_to_camera_view`` helper configured temporarily to the export-texture
-canvas. The production Scene render dimensions remain intentionally different.
+canvas. Expected camera depth is calculated from captured Blender matrix and vertex tuples
+using Python affine arithmetic, matching the numeric input model used by production while
+remaining independent from the production projection implementation. The production Scene
+render dimensions remain intentionally different.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass
 import json
+from math import isfinite
 from pathlib import Path
 import sys
 import traceback
@@ -78,6 +82,7 @@ _MATRIX_TOLERANCE = 1.0e-7
 _SCREEN_TOLERANCE = 1.0e-8
 _MAIN_BONE_TOLERANCE = 0.011
 _DEPTH_TOLERANCE = 1.0e-8
+_DEPTH_EXPECTATION_MODEL = "CAPTURED_TUPLE_AFFINE"
 
 
 @dataclass(frozen=True)
@@ -162,11 +167,65 @@ def _prepare_output_directory(value: Path) -> Path:
 
 
 def _matrix_tuple(matrix: object) -> tuple[float, ...]:
-    return tuple(
+    values = tuple(
         float(matrix[row][column])
         for row in range(4)
         for column in range(4)
     )
+    if len(values) != 16 or not all(isfinite(value) for value in values):
+        raise ValueError("matrix must contain sixteen finite values")
+    return values
+
+
+def _affine_transform_point(
+    matrix: tuple[float, ...],
+    point: tuple[float, float, float],
+    *,
+    field_name: str,
+) -> tuple[float, float, float]:
+    """Transform one captured point using Python float affine arithmetic."""
+
+    if not isinstance(matrix, tuple) or len(matrix) != 16:
+        raise TypeError(f"{field_name} matrix must be a 16-value tuple")
+    if not isinstance(point, tuple) or len(point) != 3:
+        raise TypeError(f"{field_name} point must be a 3-value tuple")
+    values = tuple(float(value) for value in matrix)
+    coordinates = tuple(float(value) for value in point)
+    if not all(isfinite(value) for value in values + coordinates):
+        raise ValueError(f"{field_name} contains non-finite values")
+    x, y, z = coordinates
+    transformed = (
+        values[0] * x + values[1] * y + values[2] * z + values[3],
+        values[4] * x + values[5] * y + values[6] * z + values[7],
+        values[8] * x + values[9] * y + values[10] * z + values[11],
+    )
+    if not all(isfinite(value) for value in transformed):
+        raise ValueError(f"{field_name} transform produced non-finite values")
+    return transformed
+
+
+def _matrix_translation(matrix: tuple[float, ...]) -> tuple[float, float, float]:
+    if not isinstance(matrix, tuple) or len(matrix) != 16:
+        raise TypeError("matrix must be a 16-value tuple")
+    translation = (float(matrix[3]), float(matrix[7]), float(matrix[11]))
+    if not all(isfinite(value) for value in translation):
+        raise ValueError("matrix translation contains non-finite values")
+    return translation
+
+
+def _rotation_only_camera_view_matrix(
+    camera: bpy.types.Object,
+) -> tuple[float, ...]:
+    """Capture the same scale-independent Blender camera frame as production."""
+
+    matrix_world = getattr(camera, "matrix_world", None)
+    if matrix_world is None:
+        raise ValueError("camera.matrix_world is missing")
+    location, rotation, _scale = matrix_world.decompose()
+    rotation.normalize()
+    camera_world = rotation.to_matrix().to_4x4()
+    camera_world.translation = location
+    return _matrix_tuple(camera_world.inverted())
 
 
 def _cuboid_vertices(
@@ -321,46 +380,54 @@ def _temporary_export_render_dimensions(
 def _expected_screen_point(
     scene: bpy.types.Scene,
     camera: bpy.types.Object,
-    world_point: Vector,
+    world_point: tuple[float, float, float],
 ) -> tuple[float, float]:
     with _temporary_export_render_dimensions(scene):
-        normalized = world_to_camera_view(scene, camera, world_point)
+        normalized = world_to_camera_view(scene, camera, Vector(world_point))
     return (
         (float(normalized.x) - 0.5) * float(_TEXTURE_WIDTH),
         (float(normalized.y) - 0.5) * float(_TEXTURE_HEIGHT),
     )
 
 
-def _camera_z(camera: bpy.types.Object, world_point: Vector) -> float:
-    view_point = camera.matrix_world.inverted_safe() @ world_point
-    return float(view_point.z)
+def _camera_z(
+    camera_view_matrix: tuple[float, ...],
+    world_point: tuple[float, float, float],
+) -> float:
+    return _affine_transform_point(
+        camera_view_matrix,
+        world_point,
+        field_name="camera depth",
+    )[2]
 
 
 def _expected_vertices(
     scene: bpy.types.Scene,
     camera: bpy.types.Object,
-    source_object: bpy.types.Object,
+    source_state: _SourceState,
+    camera_view_matrix: tuple[float, ...],
 ) -> tuple[_ExpectedVertex, ...]:
-    return tuple(
-        _ExpectedVertex(
-            index=vertex.index,
-            screen_x=_expected_screen_point(
-                scene,
-                camera,
-                source_object.matrix_world @ vertex.co,
-            )[0],
-            screen_y=_expected_screen_point(
-                scene,
-                camera,
-                source_object.matrix_world @ vertex.co,
-            )[1],
-            camera_z=_camera_z(
-                camera,
-                source_object.matrix_world @ vertex.co,
-            ),
+    expected: list[_ExpectedVertex] = []
+    for index, local_position in enumerate(source_state.vertices):
+        world_point = _affine_transform_point(
+            source_state.matrix_world,
+            local_position,
+            field_name=f"source vertex {index}",
         )
-        for vertex in source_object.data.vertices
-    )
+        screen_x, screen_y = _expected_screen_point(
+            scene,
+            camera,
+            world_point,
+        )
+        expected.append(
+            _ExpectedVertex(
+                index=index,
+                screen_x=screen_x,
+                screen_y=screen_y,
+                camera_z=_camera_z(camera_view_matrix, world_point),
+            )
+        )
+    return tuple(expected)
 
 
 def _settings(
@@ -422,6 +489,7 @@ def _run_camera_kind(
     camera = _create_camera(camera_kind)
     bpy.context.view_layer.update()
     camera_matrix_before = _matrix_tuple(camera.matrix_world)
+    camera_view_matrix = _rotation_only_camera_view_matrix(camera)
     camera_data_before = (
         camera.data.type,
         float(camera.data.clip_start),
@@ -450,7 +518,12 @@ def _run_camera_kind(
         _activate_only(source_object)
         bpy.context.view_layer.update()
         state = _capture_state(source_object)
-        expected = _expected_vertices(scene, camera, source_object)
+        expected = _expected_vertices(
+            scene,
+            camera,
+            state,
+            camera_view_matrix,
+        )
         sources.append(
             A1MultiObjectSource(
                 source_object=source_object,
@@ -487,11 +560,18 @@ def _run_camera_kind(
             key=lambda item: max(vertex.camera_z for vertex in item[1]),
         )
     )
+    origin_depth_by_component = {
+        component_id: _camera_z(
+            camera_view_matrix,
+            _matrix_translation(state.matrix_world),
+        )
+        for component_id, (_source_object, state) in state_by_component.items()
+    }
     origin_order = tuple(
-        specification.component_id
-        for specification in sorted(
-            _SPECIFICATIONS,
-            key=lambda item: _camera_z(camera, Vector(item.location)),
+        component_id
+        for component_id, _depth in sorted(
+            origin_depth_by_component.items(),
+            key=lambda item: item[1],
         )
     )
     _assert(
@@ -533,6 +613,10 @@ def _run_camera_kind(
             and int(item.statistics["projection_canvas_height"]) == _TEXTURE_HEIGHT,
             f"{source.component_id} did not use export texture canvas",
         )
+        _assert(
+            int(item.statistics["active_camera_preprojection_triangulation"]) == 1,
+            f"{source.component_id} did not triangulate before camera projection",
+        )
 
         slots = tuple(slot.name for slot in item.document.slots)
         _assert(slots, f"{source.component_id} produced no slots")
@@ -557,7 +641,7 @@ def _run_camera_kind(
         expected_origin = _expected_screen_point(
             scene,
             camera,
-            source_object.matrix_world.translation,
+            _matrix_translation(state.matrix_world),
         )
         origin_delta = max(
             abs(actual - expected)
@@ -607,7 +691,8 @@ def _run_camera_kind(
             _assert(
                 depth_delta <= _DEPTH_TOLERANCE,
                 f"{source.component_id} vertex {expected_vertex.index} depth mismatch: "
-                f"actual={depth}, expected={expected_vertex.camera_z}",
+                f"actual={depth}, expected={expected_vertex.camera_z}, "
+                f"delta={depth_delta}, model={_DEPTH_EXPECTATION_MODEL}",
             )
             if (
                 abs(expected_vertex.screen_x) > _TEXTURE_WIDTH / 2.0
@@ -713,6 +798,8 @@ def _run_camera_kind(
         "maximumOriginDelta": maximum_origin_delta,
         "maximumVertexScreenDelta": maximum_vertex_screen_delta,
         "maximumVertexDepthDelta": maximum_vertex_depth_delta,
+        "depthExpectationModel": _DEPTH_EXPECTATION_MODEL,
+        "depthTolerance": _DEPTH_TOLERANCE,
         "objects": objects_report,
         "sourceUnchanged": True,
         "cameraUnchanged": True,
