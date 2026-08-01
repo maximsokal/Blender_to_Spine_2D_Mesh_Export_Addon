@@ -75,6 +75,11 @@ from .parity import (
     A1ParitySeverity,
     compare_a1_exports,
 )
+from .projected_object_analysis import (
+    A1ProjectedBounds,
+    A1ProjectedObjectAnalysis,
+    analyse_projected_object,
+)
 from .rig_builder import build_rig
 from .rig_profiles import (
     A1RigProfile,
@@ -163,6 +168,8 @@ __all__ = [
     "A1ParityReport",
     "A1ParitySettings",
     "A1ParitySeverity",
+    "A1ProjectedBounds",
+    "A1ProjectedObjectAnalysis",
     "A1RigProfile",
     "A1RigSetupPoseMode",
     "AnimationNameAssignment",
@@ -220,6 +227,7 @@ __all__ = [
     "UniformScaleMode",
     "WeightedVertex",
     "WeightedVertexInfluence",
+    "analyse_projected_object",
     "apply_attachment_sequence_animations",
     "apply_legacy_visual_options",
     "apply_rig_visual_options",
