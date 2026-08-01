@@ -10,7 +10,6 @@ import sys
 import traceback
 
 import bpy
-from mathutils import Vector
 
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
@@ -48,7 +47,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import (  # no
 
 _TEXTURE_WIDTH = 64
 _TEXTURE_HEIGHT = 32
-_ABSOLUTE_TOLERANCE = 1.0e-7
+_PIPELINE_ABSOLUTE_TOLERANCE = 1.0e-10
 _LOCAL_VERTICES = (
     (0.0, 0.0, 0.0),
     (1.0, 0.0, 1.0),
@@ -102,6 +101,32 @@ def _matrix_tuple(matrix: object) -> tuple[float, ...]:
     )
 
 
+def _transform_local_vector(
+    matrix: tuple[float, ...],
+    local_position: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    """Apply only the Blender world linear transform using Python float arithmetic.
+
+    Blender Mesh coordinates and matrix elements are captured after dependency-graph
+    evaluation. The production normalizer reads those exact values and performs the
+    affine linear multiplication in Python. Repeating that numeric contract here avoids
+    comparing it against ``mathutils.Matrix @ Vector``, which rounds intermediate values
+    through Blender's float32 mathutils storage.
+    """
+
+    if not isinstance(matrix, tuple) or len(matrix) != 16:
+        raise TypeError("matrix must contain sixteen values")
+    if not isinstance(local_position, tuple) or len(local_position) != 3:
+        raise TypeError("local_position must contain three values")
+
+    x, y, z = (float(value) for value in local_position)
+    return (
+        matrix[0] * x + matrix[1] * y + matrix[2] * z,
+        matrix[4] * x + matrix[5] * y + matrix[6] * z,
+        matrix[8] * x + matrix[9] * y + matrix[10] * z,
+    )
+
+
 def _create_source_object() -> bpy.types.Object:
     mesh = bpy.data.meshes.new("AxisProjectionMesh")
     mesh.from_pydata(_LOCAL_VERTICES, (), ((0, 1, 2),))
@@ -144,13 +169,20 @@ def _assert_close_tuple(
     expected: tuple[float, ...],
     *,
     label: str,
-) -> None:
+) -> float:
+    """Validate one tuple and return its maximum absolute component delta."""
+
     if len(actual) != len(expected):
         raise AssertionError(
             f"{label} length mismatch: actual={len(actual)}, expected={len(expected)}"
         )
+
+    deltas = tuple(
+        abs(float(actual_value) - float(expected_value))
+        for actual_value, expected_value in zip(actual, expected, strict=True)
+    )
     mismatches = tuple(
-        (index, actual_value, expected_value)
+        (index, actual_value, expected_value, deltas[index])
         for index, (actual_value, expected_value) in enumerate(
             zip(actual, expected, strict=True)
         )
@@ -158,11 +190,15 @@ def _assert_close_tuple(
             actual_value,
             expected_value,
             rel_tol=0.0,
-            abs_tol=_ABSOLUTE_TOLERANCE,
+            abs_tol=_PIPELINE_ABSOLUTE_TOLERANCE,
         )
     )
     if mismatches:
-        raise AssertionError(f"{label} mismatch: {mismatches}")
+        raise AssertionError(
+            f"{label} mismatch: tolerance={_PIPELINE_ABSOLUTE_TOLERANCE}, "
+            f"components={mismatches}"
+        )
+    return max(deltas, default=0.0)
 
 
 def _canonical_depth_values(
@@ -181,21 +217,26 @@ def _run_direction(
     direction: A1ProjectionDirection,
 ) -> dict[str, object]:
     bpy.context.view_layer.update()
-    matrix_world = source_object.matrix_world.copy()
-    source_matrix_before = _matrix_tuple(matrix_world)
+    source_matrix_before = _matrix_tuple(source_object.matrix_world)
     source_vertices_before = tuple(
         tuple(float(component) for component in vertex.co)
         for vertex in source_object.data.vertices
     )
 
     basis = resolve_a1_axis_projection_basis(direction)
-    world_origin = tuple(float(value) for value in matrix_world.translation)
+    world_origin = (
+        source_matrix_before[3],
+        source_matrix_before[7],
+        source_matrix_before[11],
+    )
     projected_origin = basis.project_point(world_origin)
+    normalized_local_positions = tuple(
+        _transform_local_vector(source_matrix_before, local_position)
+        for local_position in source_vertices_before
+    )
     expected_positions = tuple(
-        basis.project_point(tuple(float(value) for value in (matrix_world @ Vector(point))))
-        .relative_to(projected_origin)
-        .canonical_position
-        for point in _LOCAL_VERTICES
+        basis.project_vector(position)
+        for position in normalized_local_positions
     )
 
     settings = _settings(output_directory, direction)
@@ -209,13 +250,17 @@ def _run_direction(
         tuple(float(value) for value in vertex.position)
         for vertex in prepared.source_snapshot.vertices
     )
+    maximum_vertex_delta = 0.0
     for index, (actual, expected) in enumerate(
         zip(actual_positions, expected_positions, strict=True)
     ):
-        _assert_close_tuple(
-            actual,
-            expected,
-            label=f"{direction.value} vertex[{index}]",
+        maximum_vertex_delta = max(
+            maximum_vertex_delta,
+            _assert_close_tuple(
+                actual,
+                expected,
+                label=f"{direction.value} vertex[{index}]",
+            ),
         )
 
     actual_origin = (
@@ -223,7 +268,7 @@ def _run_direction(
         float(prepared.source_snapshot.world_matrix[7]),
         float(prepared.source_snapshot.world_matrix[11]),
     )
-    _assert_close_tuple(
+    maximum_origin_delta = _assert_close_tuple(
         actual_origin,
         projected_origin.canonical_position,
         label=f"{direction.value} projected origin",
@@ -252,7 +297,7 @@ def _run_direction(
     )
     if actual_main is None:
         raise AssertionError(f"{direction.value} did not produce a main position")
-    _assert_close_tuple(
+    maximum_main_delta = _assert_close_tuple(
         actual_main,
         expected_main,
         label=f"{direction.value} main position",
@@ -277,6 +322,9 @@ def _run_direction(
         "vertexPositions": [list(position) for position in actual_positions],
         "sourceUnchanged": True,
         "projectionApplied": bool(prepared.statistics["axis_projection_applied"]),
+        "maximumVertexDelta": maximum_vertex_delta,
+        "maximumOriginDelta": maximum_origin_delta,
+        "maximumMainDelta": maximum_main_delta,
     }
 
 
@@ -306,7 +354,7 @@ def run(output_directory: Path) -> Path:
     report = {
         "status": "passed",
         "blenderVersion": bpy.app.version_string,
-        "absoluteTolerance": _ABSOLUTE_TOLERANCE,
+        "pipelineAbsoluteTolerance": _PIPELINE_ABSOLUTE_TOLERANCE,
         "directionCount": len(directions),
         "directions": list(directions),
     }
