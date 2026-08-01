@@ -51,6 +51,9 @@ ACTIVE_CAMERA_VALIDATION_CORRECTION_PATH = (
 ACTIVE_CAMERA_INDEX_CORRECTION_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.9.md"
 )
+ACTIVE_CAMERA_RELEASE_CONTRACT_CORRECTION_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.10.md"
+)
 
 
 def _normalized_prose(value: str) -> str:
@@ -61,11 +64,11 @@ def _normalized_prose(value: str) -> str:
     return " ".join(value.lower().replace("-", " ").split())
 
 
-def test_current_release_uses_version_0559() -> None:
+def test_current_release_uses_version_05510() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.9"
+    assert manifest["version"] == "0.55.10"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -181,8 +184,23 @@ def test_active_camera_index_correction_has_release_note() -> None:
     normalized_release_note = _normalized_prose(release_note)
 
     assert "0.55.9" in release_note
-    assert "profile owned z group indices" in normalized_release_note
+    assert "profile owned z_index_base" in normalized_release_note
+    assert "valid production bindings" in normalized_release_note
     assert "assuming a zero based index" in normalized_release_note
     assert "z_value == 0.0" in release_note
     assert "production active camera projection" in normalized_release_note
     assert "are unchanged" in normalized_release_note
+
+
+def test_active_camera_release_contract_correction_has_release_note() -> None:
+    release_note = ACTIVE_CAMERA_RELEASE_CONTRACT_CORRECTION_PATH.read_text(
+        encoding="utf-8"
+    )
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.10" in release_note
+    assert "semantic release contract" in normalized_release_note
+    assert "exact contiguous phrase" in normalized_release_note
+    assert "profile owned z_index_base" in normalized_release_note
+    assert "production code" in normalized_release_note
+    assert "unchanged" in normalized_release_note
