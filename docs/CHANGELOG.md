@@ -4,7 +4,21 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.12 is the current release candidate. It corrects the Active Camera production ordering so segmentation, decomposition, and strict triangulation finish in normalized world geometry before immutable triangle regions are projected into camera U/V/depth space. The general polygon planarity tolerance remains unchanged.
+Version 0.55.13 is the current release candidate. It keeps the production Active Camera implementation from 0.55.12 unchanged and corrects the Blender acceptance depth oracle so captured Blender matrix and vertex tuples are transformed with Python affine arithmetic rather than float32 `mathutils` matrix-vector intermediates.
+
+## [0.55.13] - 2026-08-01
+
+### Fixed
+
+- Active Camera expected camera-local depth now uses captured tuple affine arithmetic in the Blender headless worker.
+- The report records `depthExpectationModel = CAPTURED_TUPLE_AFFINE` and the retained `1e-8` depth tolerance.
+- A Blender-independent AST contract prevents the depth oracle from returning to `matrix @ Vector` arithmetic.
+
+### Preserved
+
+- Blender `world_to_camera_view` remains the independent screen X/Y oracle.
+- The depth tolerance was not weakened.
+- Production Active Camera projection, pre-projection triangulation, depth compensation, rig assembly, standalone draw order, signed-axis projection, rendered Camera Projection, connected and mixed assembly, Spine codecs, UV topology, texture baking, and public UI remain unchanged.
 
 ## [0.55.12] - 2026-08-01
 
@@ -306,7 +320,7 @@ Version 0.55.12 is the current release candidate. It corrects the Active Camera 
 
 ### Changed
 
-- Single-object two-axis control bones serialize with neutral setup rotations while reference angles remain constraint offsets.
+- Single-object two-axis control bones serialize with neutral setup rotations while reference angles remain in transform-constraint offsets.
 - Single-object attachments preserve Blender Object Origin as the exported rotation pivot instead of moving the pivot to the geometry bounds center.
 - Extension version advanced from the 0.41 development series to 0.47.0.
 
