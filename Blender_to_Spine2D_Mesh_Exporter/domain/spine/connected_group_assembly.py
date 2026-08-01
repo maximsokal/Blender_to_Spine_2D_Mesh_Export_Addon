@@ -25,7 +25,10 @@ from .connected_group_global_rig import (
     build_global_bones_document,
     build_global_constraints,
 )
-from .connected_group_layout import resolve_layers_and_placements
+from .connected_group_layout import (
+    resolve_anchor,
+    resolve_layers_and_placements,
+)
 from .connected_group_object_setup import normalize_connected_object_control_space
 from .connected_group_schedule import (
     apply_connected_constraint_schedule,
@@ -120,6 +123,42 @@ def apply_object_placements(
             f"{tuple(sorted(missing))}"
         )
     return replace(document, bones=tuple(updated_bones))
+
+
+def _place_projected_group_main_at_anchor(
+    document: SpineDocument,
+    objects: Tuple[ConnectedObjectDocument, ...],
+    settings: ConnectedGroupSettings,
+    profile: LegacyRigProfile,
+    uniform_scale: float,
+) -> SpineDocument:
+    """Place the connected wrapper at the anchor's absolute projected Object Origin.
+
+    Object mains remain anchor-relative children. Consequently the evaluated setup world
+    position of every object equals its standalone absolute projected origin.
+    """
+
+    if not isinstance(document, SpineDocument):
+        raise TypeError("document must be SpineDocument")
+    anchor = resolve_anchor(objects, settings)
+    main_name = profile.main_bone(settings.group_prefix)
+    expected_x = round(float(anchor.world_position[0]) * float(uniform_scale), 2)
+    expected_y = round(float(anchor.world_position[1]) * float(uniform_scale), 2)
+
+    found = 0
+    bones: list[Bone] = []
+    for bone in document.bones:
+        if bone.name != main_name:
+            bones.append(bone)
+            continue
+        found += 1
+        bones.append(replace(bone, x=expected_x, y=expected_y))
+    if found != 1:
+        raise ConnectedGroupBuildError(
+            f"Projected connected wrapper expected one main bone {main_name!r}; "
+            f"found={found}"
+        )
+    return replace(document, bones=tuple(bones))
 
 
 def _validate_connected_final(
@@ -275,7 +314,9 @@ def build_connected_group_document(
     """Compose A1 documents under one target-aware connected wrapper.
 
     ``world_position`` owns projected Object Origin placement and layer grouping.
-    ``object_block_depths`` independently owns nearest-vertex setup slot order.
+    ``object_block_depths`` independently owns nearest-vertex setup slot order. When the
+    latter is present, the wrapper main is placed at the anchor's absolute projected
+    origin so connected and standalone setup world positions match.
     """
 
     if not isinstance(settings, ConnectedGroupSettings):
@@ -333,6 +374,14 @@ def build_connected_group_document(
         resolved_profile,
         uniform_scale,
     )
+    if object_block_depths is not None:
+        global_document = _place_projected_group_main_at_anchor(
+            global_document,
+            objects,
+            settings,
+            resolved_profile,
+            uniform_scale,
+        )
 
     normalized_objects = _target_normalized_objects(
         objects,
