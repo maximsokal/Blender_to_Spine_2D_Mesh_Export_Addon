@@ -18,6 +18,9 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.model import (
     Slot,
     SpineDocument,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.object_block_draw_order import (
+    SpineObjectBlockDepth,
+)
 
 
 def _document(prefix, slot_suffixes):
@@ -51,6 +54,17 @@ def _placement(item, *, layer_index, relative_z):
         layer_index=layer_index,
         main_bone_name=f"{item.prefix}_main",
         parent_layer_bone_name=f"all_objects_layer_{layer_index}",
+    )
+
+
+def _depth(item, source_index, nearest, farthest):
+    return SpineObjectBlockDepth(
+        component_id=item.component_id,
+        source_input_index=source_index,
+        nearest_vertex_index=source_index,
+        nearest_vertex_depth=float(nearest),
+        farthest_vertex_index=source_index,
+        farthest_vertex_depth=float(farthest),
     )
 
 
@@ -91,6 +105,47 @@ def test_connected_component_draw_order_is_back_to_front_by_z_layer():
         "Middle_mesh",
         "Front_control",
         "Front_mesh",
+    )
+
+
+def test_projected_nearest_vertex_order_is_independent_from_origin_layers():
+    alpha = _object("alpha", "Alpha", ("control", "mesh"), 9.0)
+    beta = _object("beta", "Beta", ("mesh",), 0.0)
+    gamma = _object("gamma", "Gamma", ("mesh",), -9.0)
+    objects = (alpha, beta, gamma)
+    placements = (
+        _placement(alpha, layer_index=0, relative_z=9.0),
+        _placement(beta, layer_index=1, relative_z=0.0),
+        _placement(gamma, layer_index=2, relative_z=-9.0),
+    )
+    composed = SpineDocument(
+        skeleton={"spine": "4.2.43"},
+        bones=(Bone("root"),),
+        slots=tuple(slot for item in objects for slot in item.document.slots),
+        skins=(),
+        animations={},
+    )
+    depths = (
+        _depth(alpha, 0, nearest=1.0, farthest=-3.0),
+        _depth(beta, 1, nearest=5.0, farthest=0.0),
+        _depth(gamma, 2, nearest=3.0, farthest=-2.0),
+    )
+
+    reordered = apply_connected_setup_draw_order(
+        composed,
+        objects,
+        placements,
+        object_block_depths=depths,
+        depth_tolerance=1.0e-4,
+    )
+
+    # Origin-layer order would be gamma, beta, alpha. Nearest-vertex order is
+    # alpha, gamma, beta and each object's internal slots remain contiguous.
+    assert tuple(slot.name for slot in reordered.slots) == (
+        "Alpha_control",
+        "Alpha_mesh",
+        "Gamma_mesh",
+        "Beta_mesh",
     )
 
 
