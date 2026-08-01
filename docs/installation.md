@@ -37,7 +37,7 @@ Closing Blender prevents loaded Python modules and cached extension metadata fro
 
 ## Scene settings migration
 
-Version 0.55.18 continues to use Scene settings schema 6, introduced in 0.55.1. Raw persisted Scene ID-properties are captured before Rewrite RNA properties are registered, so Blender's newly bound defaults cannot hide the values stored in an older `.blend` file.
+Version 0.55.18 continues to use the current Scene settings schema 6. Raw persisted Scene ID-properties are captured before Rewrite RNA properties are registered, so Blender's newly bound defaults cannot hide the values stored in an older `.blend` file.
 
 Migration policy:
 
@@ -45,16 +45,19 @@ Migration policy:
 Genuinely fresh Scene:
     Seam Maker = Auto
     Rig = 2-Axis Rotation + Scale
-    Settings schema = 5
+    Spine target = 4.2
+    Settings schema = 6
 
 Saved Scene created before rig profiles:
     Seam Maker = Auto when required by its older schema
     Rig = 3-Axis Rotation compatibility profile
-    Settings schema = 5
+    Spine target = preserved valid value or 4.2
+    Settings schema = 6
 
 Saved schema-4 or newer Scene with an explicit rig choice:
     Preserve the selected rig profile
-    Settings schema = 5
+    Preserve a valid Spine target or use 4.2
+    Settings schema = 6
 ```
 
 The current values can be inspected in Blender's Python Console:
@@ -64,11 +67,12 @@ print(
     bpy.context.scene.spine2d_settings_schema_version,
     bpy.context.scene.spine2d_seam_maker_mode,
     bpy.context.scene.spine2d_rig_profile,
+    bpy.context.scene.spine2d_target_spine_version,
     bpy.context.scene.spine2d_projection_direction,
 )
 ```
 
-The 0.55.18 candidate preserves the Scene schema while adding the persisted `spine2d_projection_direction` Enum. New scenes and older files without that property use `POSITIVE_Z`; files saved with any of the seven approved identifiers retain that exact value. Normal - UV Segments active-object and selected-object plans consume the selected signed axis or Active Camera route. Active Camera keeps UV-segment meshes and projects evaluated geometry through the active Perspective or Orthographic camera using export texture dimensions. The separate rendered Camera Projection mode does not consume this selector and retains its existing render, crop, contour, and flattening pipeline. Public selected-object export remains standalone-only. Connected and mixed composition remain development-only, and Spine 4.1 connected/mixed capability checks remain fail-closed. No explicit Scene migration is required because no previous stored value needs transformation.
+The 0.55.18 candidate preserves the Scene schema while adding the persisted `spine2d_projection_direction` Enum. New scenes and older files without that property use `POSITIVE_Z`; files saved with any of the seven approved identifiers retain that exact value. Normal - UV Segments active-object and selected-object plans consume the selected signed axis or Active Camera route. Active Camera keeps UV-segment meshes and projects evaluated geometry through the active Perspective or Orthographic camera using export texture dimensions. The separate rendered Camera Projection mode does not consume this selector and retains its existing render, crop, contour, and flattening pipeline. Public selected-object export remains standalone-only. Connected and mixed composition remain development-only, and Spine 4.1 connected/mixed capability checks remain fail-closed. No explicit projection-direction migration is required because no previous stored value needs transformation.
 
 ## Build locally
 
