@@ -8,6 +8,10 @@ from .a1_attachment_projection_service import (
     A1VertexZBinding,
     project_triangulated_disk_attachment,
 )
+from .a1_camera_geometry_preparation import (
+    A1CameraGeometryPreparationError,
+    project_a1_prepared_geometry_camera,
+)
 from .a1_camera_projection import (
     assemble_a1_camera_projection_document,
     build_camera_projection_mesh_snapshot,
@@ -119,6 +123,7 @@ __all__ = [
     "A1AttachmentProjectionResult",
     "A1AttachmentProjectionSettings",
     "A1AttachmentVertexKey",
+    "A1CameraGeometryPreparationError",
     "A1DocumentAssemblyError",
     "A1DocumentAssemblyResult",
     "A1DocumentAssemblySettings",
@@ -185,6 +190,7 @@ __all__ = [
     "generated_palette_color",
     "preflight_a1_output_namespace",
     "prepare_a1_geometry_regions",
+    "project_a1_prepared_geometry_camera",
     "project_triangulated_disk_attachment",
     "propagate_texturing_uv_to_regions",
     "resolve_a1_multi_object_preparation_settings",
