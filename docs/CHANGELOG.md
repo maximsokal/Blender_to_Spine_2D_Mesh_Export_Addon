@@ -4,7 +4,27 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.17 is the current release candidate. It corrects the route-aware architecture contract around the shared connected/mixed Spine setup oracle. The 0.55.16 workers and affine evaluator, plus all production Slice 5 placement, hierarchy, depth layers, draw order, mixed interleaving, rigs, constraints, attachments, UV topology, texture baking, rendered Camera Projection, and public UI routing remain unchanged.
+Version 0.55.18 is the current release candidate. It exposes the validated signed-axis and Active Camera Normal - UV Segments projection routes through persisted Scene RNA, the public Rig foldout, immutable UI planning, Reset, readiness invalidation, and `.blend` persistence. Projection mathematics, the separate rendered Camera Projection pipeline, public standalone-only selected export, Slice 5 connected/mixed composition, Spine codecs, UV topology, texture baking, and Scene settings schema 6 remain unchanged.
+
+## [0.55.18] - 2026-08-01
+
+### Added
+
+- Persisted `Scene.spine2d_projection_direction` with exact `POSITIVE_X`, `NEGATIVE_X`, `POSITIVE_Y`, `NEGATIVE_Y`, `POSITIVE_Z`, `NEGATIVE_Z`, and `ACTIVE_CAMERA` identifiers.
+- A public projection direction selector in the Normal - UV Segments Rig foldout.
+- Immutable Scene-profile capture and typed routing into active-object and standalone selected-object plans.
+- Blender 5.2 headless route, Reset, rendered-mode isolation, and cross-process `.blend` persistence acceptance.
+
+### Behavior
+
+- New and older scenes without a stored direction use `POSITIVE_Z`; Reset restores the same value.
+- Active Camera keeps UV-segment object baking and uses the active Perspective or Orthographic camera with export texture dimensions.
+- The separate rendered Camera Projection mode does not consume the object-bake selector.
+- Public selected-object export remains standalone-only; connected and mixed routes remain development-only.
+
+### Unchanged
+
+- Signed-axis and Active Camera geometry, planarity tolerances, Object Origin placement, depth assignment, rigs, attachments, draw order, Slice 5 normalization, codecs, UV topology, baking, and Scene settings schema 6 are unchanged.
 
 ## [0.55.17] - 2026-08-01
 
