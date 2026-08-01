@@ -22,7 +22,7 @@ This directory contains the maintained public documentation for Blender to Spine
 
 ## Supported product baseline
 
-- Extension version: 0.55.15.
+- Extension version: 0.55.16.
 - Minimum Blender version: 5.2.0.
 - Primary full Spine target: 4.2.43.
 - Limited Spine target: 4.1.24 with `2-Axis Rotation + Scale` for single-object and standalone multi-object export only.
@@ -40,8 +40,9 @@ This directory contains the maintained public documentation for Blender to Spine
 - Connected object mains are anchor-relative while the global group main stores the anchor's absolute projected Object Origin, preserving the same setup world positions as standalone export.
 - Connected depth layers remain grouped by projected Object Origin depth, independently from visual slot ordering.
 - Mixed internal composition may interleave connected and standalone object blocks by nearest depth without changing subgroup bones, skins, constraints, attachments, or animation metadata.
+- Connected/mixed Blender acceptance evaluates the complete Spine setup hierarchy with translation, rotation, scale, and `onlyTranslation` inheritance instead of assuming a translation-only parent chain.
 - The existing rendered Camera Projection mode, crop, contour, flattening, grouped-camera behavior, and public standalone-only routing are unchanged.
-- Candidate 0.55.15 implements Slice 5 connected/mixed projection normalization. Spine 4.1 connected and mixed capability restrictions remain fail-closed.
+- Candidate 0.55.16 corrects the Slice 5 acceptance oracle; production Slice 5 placement, hierarchy, layers, draw order, mixed interleaving, rigs, and attachments are unchanged.
 - Saved pre-profile scenes migrate to the compatibility 3-Axis Rotation profile.
 - Spine 4.2 connected 3-Axis composition reproduces the dedicated wrapper, exact constraint payloads, source-order arrays, Z-layer order sharing, and unchanged scale-compensator orders from the historical `main` implementation.
 - Spine 4.2 connected 2-Axis composition uses the same Z-layer scheduling principle with explicit X, IK, Scale, depth-scale, and Y global targets.
