@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import fields
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
+from Blender_to_Spine2D_Mesh_Exporter import rig_ui, ui
 from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1GeometryPreparationSettings,
 )
@@ -149,6 +151,51 @@ def test_public_panel_draws_projection_only_for_normal_uv_and_reset_restores_z()
         "context.scene.spine2d_projection_direction = (" in source
         and "A1ProjectionDirection.POSITIVE_Z.value" in source
     )
+
+
+def test_projection_reset_delegates_base_reset_then_restores_positive_z(
+    monkeypatch,
+) -> None:
+    scene = SimpleNamespace(
+        spine2d_projection_direction=A1ProjectionDirection.NEGATIVE_X.value,
+    )
+    context = SimpleNamespace(scene=scene)
+    calls: list[object] = []
+
+    def execute_base(_self, resolved_context):
+        calls.append(resolved_context)
+        return {"FINISHED"}
+
+    monkeypatch.setattr(ui.SPINE2D_OT_ResetSettings, "execute", execute_base)
+    operator = rig_ui.SPINE2D_OT_ResetSettingsWithProjection()
+    operator.report = MagicMock()
+
+    result = operator.execute(context)
+
+    assert result == {"FINISHED"}
+    assert calls == [context]
+    assert scene.spine2d_projection_direction == A1ProjectionDirection.POSITIVE_Z.value
+    operator.report.assert_not_called()
+
+
+def test_projection_reset_preserves_base_cancellation(monkeypatch) -> None:
+    scene = SimpleNamespace(
+        spine2d_projection_direction=A1ProjectionDirection.NEGATIVE_X.value,
+    )
+    context = SimpleNamespace(scene=scene)
+    monkeypatch.setattr(
+        ui.SPINE2D_OT_ResetSettings,
+        "execute",
+        lambda _self, _context: {"CANCELLED"},
+    )
+    operator = rig_ui.SPINE2D_OT_ResetSettingsWithProjection()
+    operator.report = MagicMock()
+
+    result = operator.execute(context)
+
+    assert result == {"CANCELLED"}
+    assert scene.spine2d_projection_direction == A1ProjectionDirection.NEGATIVE_X.value
+    operator.report.assert_not_called()
 
 
 def test_slice_six_does_not_change_scene_schema_or_public_multi_mode() -> None:
