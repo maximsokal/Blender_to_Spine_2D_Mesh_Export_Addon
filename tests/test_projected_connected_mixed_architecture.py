@@ -76,9 +76,7 @@ def test_mixed_outer_composition_runs_one_cross_group_object_block_pass():
     assert "_apply_projected_mixed_draw_order" in compose_calls
     assert any(
         isinstance(node, ast.Compare)
-        and any(
-            isinstance(operator, ast.Is) for operator in node.ops
-        )
+        and any(isinstance(operator, ast.Is) for operator in node.ops)
         and any(
             isinstance(comparator, ast.Constant) and comparator.value is None
             for comparator in node.comparators
@@ -87,12 +85,9 @@ def test_mixed_outer_composition_runs_one_cross_group_object_block_pass():
     )
 
 
-def test_blender_acceptance_covers_connected_mixed_and_source_immutability():
+def _assert_worker_contract(worker_name: str, *, camera_state: bool) -> None:
     worker = (
-        ROOT
-        / "tests"
-        / "blender_headless"
-        / "run_projection_connected_mixed_acceptance.py"
+        ROOT / "tests" / "blender_headless" / worker_name
     ).read_text(encoding="utf-8")
 
     assert "prepare_a1_multi_object(" in worker
@@ -103,5 +98,17 @@ def test_blender_acceptance_covers_connected_mixed_and_source_immutability():
     assert "connectedLayerFrontOrder" in worker
     assert "mixedObjectOrder" in worker
     assert "sourceUnchanged" in worker
-    assert "cameraUnchanged" in worker
-    assert "sceneRenderUnchanged" in worker
+    if camera_state:
+        assert "cameraUnchanged" in worker
+        assert "sceneRenderUnchanged" in worker
+
+
+def test_blender_acceptance_covers_signed_axis_and_active_camera_routes():
+    _assert_worker_contract(
+        "run_axis_projection_connected_mixed_acceptance.py",
+        camera_state=False,
+    )
+    _assert_worker_contract(
+        "run_projection_connected_mixed_acceptance.py",
+        camera_state=True,
+    )
