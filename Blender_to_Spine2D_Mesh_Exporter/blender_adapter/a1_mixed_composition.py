@@ -24,6 +24,9 @@ from ..domain.spine import (
 from ..domain.spine.connected_group_serialization_validator import (
     ConnectedGroupSerializationValidator,
 )
+from ..domain.spine.object_block_draw_order import (
+    apply_object_block_setup_draw_order,
+)
 from ..domain.spine.validator import SpineValidator
 from .a1_composition_result import replace_a1_composition_document
 from .a1_grouped_output import apply_staged_grouped_camera_overlay
@@ -31,7 +34,12 @@ from .a1_mixed_settings import (
     build_connected_subgroup_settings,
     build_standalone_subgroup_settings,
 )
-from .a1_multi_object_composition import compose_a1_multi_object_document
+from .a1_multi_object_composition import (
+    _document_components,
+    _object_block_depths,
+    _shared_object_bake_projection_direction,
+    compose_a1_multi_object_document,
+)
 from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_object_preparation import PreparedA1Object
 from .grouped_camera_projection_executor import GroupedCameraProjectionStageResult
@@ -96,14 +104,7 @@ class A1MixedCompositionResult:
 
 @dataclass(frozen=True, slots=True)
 class _ConnectedOuterCompositionInput:
-    """Strict outer-composition view of one validated connected subgroup.
-
-    Spine 4.2 connected parity intentionally permits order ties for independent
-    same-layer constraints. The generic composition service validates strict component
-    documents before it rebases their orders, so MIXED composition needs a temporary
-    unique-order view. ``original_order_by_name`` keeps the connected schedule provenance
-    intact in the returned outer composition metadata.
-    """
+    """Strict outer-composition view of one validated connected subgroup."""
 
     document: SpineDocument
     original_order_by_name: Mapping[str, int]
@@ -158,12 +159,7 @@ def partition_mixed_prepared_objects(
 def _connected_constraint_records(
     document: SpineDocument,
 ) -> tuple[tuple[int, int, int, str, object], ...]:
-    """Return the exact stable order used by generic Spine composition.
-
-    Records are ordered by the current runtime order, then IK before transform, then
-    their original collection index. This mirrors the generic composer's deterministic
-    tie-break contract without modifying the connected rig schedule itself.
-    """
+    """Return the exact stable order used by generic Spine composition."""
 
     if not isinstance(document, SpineDocument):
         raise TypeError("document must be SpineDocument")
@@ -179,13 +175,7 @@ def _connected_constraint_records(
 def _prepare_connected_outer_component(
     document: SpineDocument,
 ) -> _ConnectedOuterCompositionInput:
-    """Validate connected semantics and create a strict temporary order view.
-
-    Only ``DUPLICATE_CONSTRAINT_ORDER`` is accepted by the connected validator. Every
-    other structural, reference, skin, attachment, and weighted-mesh issue remains a hard
-    error. The returned document is then checked by the normal strict validator so the
-    outer composer never receives an invalid component.
-    """
+    """Validate connected semantics and create a strict temporary order view."""
 
     if not isinstance(document, SpineDocument):
         raise TypeError("document must be SpineDocument")
@@ -305,16 +295,11 @@ def _compose_outer_document(
     standalone_document: SpineDocument,
     settings: A1MultiObjectExportSettings,
 ) -> SpineDocumentCompositionResult:
-    """Compose connected first and standalone second as two explicit visual blocks.
+    """Compose subgroup internals before optional projected object-level slot ordering.
 
-    Spine draws later slots on top. Mixed mode currently has no cross-group Z contract,
-    so the standalone subgroup intentionally remains above the connected subgroup while
-    each subgroup preserves its own deterministic internal ordering.
-
-    Spine 4.2 connected output may contain intentional same-layer order ties. The generic
-    composer will make all final MIXED orders unique, but its component validator runs
-    first. A strict temporary view bridges those contracts without changing the original
-    connected result or its diagnostic order metadata.
+    The generic outer composer still owns bone, skin, animation namespace and constraint
+    rebasing. A later slot-only pass may interleave original object blocks across subgroup
+    boundaries when every object uses one shared Normal / UV Segments projection.
     """
 
     connected_input = _prepare_connected_outer_component(connected_document)
@@ -343,6 +328,34 @@ def _compose_outer_document(
     )
 
 
+def _apply_projected_mixed_draw_order(
+    outer: SpineDocumentCompositionResult,
+    connected_sources: Tuple[A1MultiObjectSource, ...],
+    standalone_sources: Tuple[A1MultiObjectSource, ...],
+    partition: A1MixedObjectPartition,
+    settings: A1MultiObjectExportSettings,
+) -> SpineDocumentCompositionResult:
+    """Apply one nearest-vertex object-block order across both mixed subgroups."""
+
+    all_sources = connected_sources + standalone_sources
+    all_prepared = partition.connected + partition.standalone
+    projection_direction = _shared_object_bake_projection_direction(all_prepared)
+    if projection_direction is None:
+        return outer
+
+    components = _document_components(all_sources, all_prepared)
+    depths = _object_block_depths(all_sources, all_prepared)
+    reordered_document = apply_object_block_setup_draw_order(
+        outer.document,
+        components,
+        depths,
+        depth_tolerance=settings.z_tolerance,
+    )
+    if reordered_document is outer.document:
+        return outer
+    return replace(outer, document=reordered_document)
+
+
 def compose_a1_mixed_document(
     connected_sources: Tuple[A1MultiObjectSource, ...],
     standalone_sources: Tuple[A1MultiObjectSource, ...],
@@ -365,7 +378,9 @@ def compose_a1_mixed_document(
     if len(standalone_sources) != len(partition.standalone):
         raise ValueError("standalone sources do not match standalone prepared objects")
     if (grouped_request is None) != (grouped_stage is None):
-        raise ValueError("grouped request and stage must either both be present or both absent")
+        raise ValueError(
+            "grouped request and stage must either both be present or both absent"
+        )
 
     anchor = settings.anchor_component_id or connected_sources[0].component_id
     connected_settings = build_connected_subgroup_settings(settings, anchor)
@@ -375,7 +390,9 @@ def compose_a1_mixed_document(
         connected_settings,
     )
     if not isinstance(connected, ConnectedGroupBuildResult):
-        raise TypeError("connected subgroup composition returned an unexpected result type")
+        raise TypeError(
+            "connected subgroup composition returned an unexpected result type"
+        )
 
     overlay = None
     if grouped_request is not None and grouped_stage is not None:
@@ -397,13 +414,23 @@ def compose_a1_mixed_document(
         build_standalone_subgroup_settings(settings),
     )
     if not isinstance(standalone, SpineDocumentCompositionResult):
-        raise TypeError("standalone subgroup composition returned an unexpected result type")
+        raise TypeError(
+            "standalone subgroup composition returned an unexpected result type"
+        )
 
     outer = _compose_outer_document(
         connected.document,
         standalone.document,
         settings,
     )
+    if overlay is None:
+        outer = _apply_projected_mixed_draw_order(
+            outer,
+            connected_sources,
+            standalone_sources,
+            partition,
+            settings,
+        )
     return A1MixedCompositionResult(
         document=outer.document,
         connected_composition=connected,
