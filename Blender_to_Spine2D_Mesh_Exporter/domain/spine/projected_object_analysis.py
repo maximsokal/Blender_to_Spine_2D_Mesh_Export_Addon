@@ -62,6 +62,34 @@ def _projected_origin(snapshot: MeshSnapshot) -> Vector3:
     return values[3], values[7], values[11]
 
 
+def _projected_world_position(
+    origin: Vector3,
+    local_position: Vector3,
+    projection_direction: A1ProjectionDirection,
+) -> Vector3:
+    """Recover true projected U/V/depth from one internal canonical vertex.
+
+    Active Camera stores local Mesh Y reflected so the established attachment projector's
+    later Y inversion produces screen-up Spine coordinates. Diagnostics and bounds must
+    undo that storage reflection. Signed-axis snapshots store canonical V directly.
+    """
+
+    local_u, local_v, local_depth = tuple(
+        _finite_number(value, f"local_position[{index}]")
+        for index, value in enumerate(local_position)
+    )
+    world_v = (
+        origin[1] - local_v
+        if projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
+        else origin[1] + local_v
+    )
+    return (
+        origin[0] + local_u,
+        world_v,
+        origin[2] + local_depth,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class A1ProjectedBounds:
     minimum_u: float
@@ -188,7 +216,9 @@ def analyse_projected_object(
 
     if not isinstance(snapshot, MeshSnapshot):
         raise TypeError("snapshot must be MeshSnapshot")
-    origin_u, origin_v, origin_depth = _projected_origin(snapshot)
+    if type(projection_direction) is not A1ProjectionDirection:
+        raise TypeError("projection_direction must be A1ProjectionDirection")
+    origin = _projected_origin(snapshot)
     depth_range = calculate_a1_projected_snapshot_depth_range(snapshot)
     vertex_by_index = {vertex.id.index: vertex for vertex in snapshot.vertices}
     if len(vertex_by_index) != len(snapshot.vertices):
@@ -199,28 +229,28 @@ def analyse_projected_object(
         raise ValueError("nearest projected vertex is absent from snapshot") from exc
 
     world_positions = tuple(
-        (
-            origin_u + float(vertex.position[0]),
-            origin_v + float(vertex.position[1]),
-            origin_depth + float(vertex.position[2]),
+        _projected_world_position(
+            origin,
+            vertex.position,
+            projection_direction,
         )
         for vertex in snapshot.vertices
     )
     if not world_positions:
         raise ValueError("snapshot contains no vertices")
-    nearest_world = (
-        origin_u + float(nearest_vertex.position[0]),
-        origin_v + float(nearest_vertex.position[1]),
-        origin_depth + float(nearest_vertex.position[2]),
+    nearest_world = _projected_world_position(
+        origin,
+        nearest_vertex.position,
+        projection_direction,
     )
     return A1ProjectedObjectAnalysis(
         component_id=component_id,
         prefix=prefix,
         source_input_index=source_input_index,
         projection_direction=projection_direction,
-        projected_origin_u=origin_u,
-        projected_origin_v=origin_v,
-        projected_origin_depth=origin_depth,
+        projected_origin_u=origin[0],
+        projected_origin_v=origin[1],
+        projected_origin_depth=origin[2],
         nearest_vertex_index=depth_range.nearest_vertex_id.index,
         nearest_vertex_world_position=nearest_world,
         nearest_vertex_depth=depth_range.nearest_vertex_depth,
