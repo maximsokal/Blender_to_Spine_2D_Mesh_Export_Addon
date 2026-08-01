@@ -4,7 +4,20 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.10 is the current release candidate. It replaces one brittle exact-phrase release-note assertion with semantic checks for the already-documented profile-owned `z_index_base`, valid production bindings, and removed zero-based assumption. Production Active Camera projection, depth compensation, rig assembly, Blender acceptance, public UI, rendered Camera Projection, connected assembly, mixed assembly, and Spine codecs are unchanged.
+Version 0.55.11 is the current release candidate. It makes semantic release-note checks Markdown-aware by removing inline-code backtick delimiters before comparison. Production Active Camera projection, depth compensation, rig assembly, Blender acceptance, public UI, rendered Camera Projection, connected assembly, mixed assembly, Spine codecs, and the corrected fixture are unchanged.
+
+## [0.55.11] - 2026-08-01
+
+### Fixed
+
+- Semantic prose normalization now removes Markdown backtick delimiters in addition to casing, whitespace, and hyphenation differences.
+- Inline-code identifiers such as `z_index_base`, `LegacyZGroup`, and `projection_direction` are compared by semantic text instead of presentation markup.
+- The 0.55.9 release-note contract now accepts the existing correctly documented `profile-owned z_index_base` wording.
+
+### Unchanged
+
+- Production code and the corrected 0.55.9 fixture are unchanged.
+- Active Camera projection, depth-parent compensation, rig assembly, standalone draw order, Blender workers, signed-axis projection, rendered Camera Projection, connected and mixed assembly, Spine codecs, UV topology, and texture baking are unchanged.
 
 ## [0.55.10] - 2026-08-01
 
