@@ -42,6 +42,9 @@ PROJECTION_CONTRACT_CORRECTION_PATH = (
 STANDALONE_DRAW_ORDER_RELEASE_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.6.md"
 )
+ACTIVE_CAMERA_RELEASE_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.7.md"
+)
 
 
 def _normalized_prose(value: str) -> str:
@@ -52,11 +55,11 @@ def _normalized_prose(value: str) -> str:
     return " ".join(value.lower().replace("-", " ").split())
 
 
-def test_current_release_uses_version_0556() -> None:
+def test_current_release_uses_version_0557() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.6"
+    assert manifest["version"] == "0.55.7"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -138,3 +141,16 @@ def test_standalone_draw_order_slice_has_release_note() -> None:
     assert "internal segment slot order" in normalized_release_note
     assert "camera projection setup ordering is unchanged" in normalized_release_note
     assert "connected and mixed composition remain unchanged" in normalized_release_note
+
+
+def test_active_camera_slice_has_release_note() -> None:
+    release_note = ACTIVE_CAMERA_RELEASE_PATH.read_text(encoding="utf-8")
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.7" in release_note
+    assert "perspective and orthographic" in normalized_release_note
+    assert "export texture dimensions" in normalized_release_note
+    assert "camera local depth" in normalized_release_note
+    assert "connected and mixed active camera requests remain blocked" in normalized_release_note
+    assert "existing rendered camera projection" in normalized_release_note
+    assert "public ui does not yet expose" in normalized_release_note
