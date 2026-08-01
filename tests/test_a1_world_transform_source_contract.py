@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import ast
 from pathlib import Path
 
 
@@ -10,20 +13,79 @@ SOURCE = (
 )
 
 
-def _source_text():
+def _source_text() -> str:
     return SOURCE.read_text(encoding="utf-8")
 
 
-def test_a1_source_geometry_normalizes_world_transform_before_uv_z_and_segmentation():
+def _tree() -> ast.Module:
+    return ast.parse(_source_text(), filename=SOURCE.name)
+
+
+def _function(name: str) -> ast.FunctionDef:
+    return next(
+        node
+        for node in _tree().body
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    )
+
+
+def _ordered_call_names(node: ast.AST) -> tuple[str, ...]:
+    calls = [
+        item
+        for item in ast.walk(node)
+        if isinstance(item, ast.Call) and isinstance(item.func, ast.Name)
+    ]
+    calls.sort(key=lambda item: (item.lineno, item.col_offset))
+    return tuple(item.func.id for item in calls)
+
+
+def test_a1_source_geometry_normalizes_before_uv_projection_z_and_completion():
+    normalize = _function("_normalize_source_geometry")
+    normalize_calls = _ordered_call_names(normalize)
+    assert normalize_calls.index("normalize_mesh_snapshot_world_transform") < (
+        normalize_calls.index("_resolve_source_uv_boundary_layer")
+    )
+
+    public = _function("prepare_a1_source_geometry")
+    public_calls = _ordered_call_names(public)
+    required = (
+        "_read_source_snapshot",
+        "_normalize_source_geometry",
+        "_prepare_projection_route",
+        "build_a1_z_group_assignment",
+        "_complete_projected_geometry",
+    )
+    positions = tuple(public_calls.index(name) for name in required)
+    assert positions == tuple(sorted(positions))
+
     source = _source_text()
+    assert "source_snapshot = world_transform.snapshot" not in source
+    assert "normalized_snapshot = world_transform.snapshot" in source
 
-    normalize_index = source.index("normalize_mesh_snapshot_world_transform(")
-    uv_boundary_index = source.index("_resolve_source_uv_boundary_layer(", normalize_index)
-    z_group_index = source.index("build_a1_z_group_assignment(", normalize_index)
-    geometry_index = source.index("prepare_a1_geometry_regions(", normalize_index)
 
-    assert normalize_index < uv_boundary_index < z_group_index < geometry_index
-    assert "source_snapshot = world_transform.snapshot" in source
+def test_projection_routes_preserve_axis_and_active_camera_stage_order():
+    route = _function("_prepare_projection_route")
+    branch = next(
+        node
+        for node in route.body
+        if isinstance(node, ast.If) and "axis_aligned" in ast.unparse(node.test)
+    )
+
+    axis_calls = _ordered_call_names(ast.Module(body=branch.body, type_ignores=[]))
+    camera_calls = _ordered_call_names(ast.Module(body=branch.orelse, type_ignores=[]))
+
+    assert "project_a1_mesh_snapshot_axis" in axis_calls
+    assert "prepare_a1_geometry_regions" not in axis_calls
+
+    camera_required = (
+        "prepare_a1_geometry_regions",
+        "resolve_a1_active_camera_projection_frame",
+        "calculate_uniform_scale",
+        "project_a1_mesh_snapshot_camera",
+        "project_a1_prepared_geometry_camera",
+    )
+    camera_positions = tuple(camera_calls.index(name) for name in camera_required)
+    assert camera_positions == tuple(sorted(camera_positions))
 
 
 def test_a1_source_geometry_records_transform_diagnostics():
