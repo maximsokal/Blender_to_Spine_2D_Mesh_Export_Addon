@@ -1,6 +1,11 @@
 """Immutable mesh snapshots and exact source-lineage correspondence."""
 
 from .a1_segmentation import A1AngularMode, A1SegmentationError, segment_mesh_a1
+from .axis_projection import (
+    A1MeshAxisProjectionError,
+    A1MeshAxisProjectionResult,
+    project_a1_mesh_snapshot_axis,
+)
 from .correspondence import (
     ConflictingSourceLoopUVError,
     CorrespondenceError,
@@ -98,6 +103,8 @@ from .world_transform import (
 
 __all__ = [
     "A1AngularMode",
+    "A1MeshAxisProjectionError",
+    "A1MeshAxisProjectionResult",
     "A1SegmentationError",
     "ConflictingSourceLoopUVError",
     "CorrespondenceError",
@@ -171,6 +178,7 @@ __all__ = [
     "materialize_decomposed_snapshots",
     "materialize_segment_snapshots",
     "normalize_mesh_snapshot_world_transform",
+    "project_a1_mesh_snapshot_axis",
     "require_valid_evaluated_lineage",
     "segment_mesh",
     "segment_mesh_a1",
