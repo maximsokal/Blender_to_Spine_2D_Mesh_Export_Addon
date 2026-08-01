@@ -60,6 +60,9 @@ MARKDOWN_NORMALIZATION_CORRECTION_PATH = (
 ACTIVE_CAMERA_TRIANGULATION_CORRECTION_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.12.md"
 )
+ACTIVE_CAMERA_DEPTH_NUMERIC_CORRECTION_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.13.md"
+)
 
 
 def _normalized_prose(value: str) -> str:
@@ -80,11 +83,11 @@ def _normalized_prose(value: str) -> str:
     )
 
 
-def test_current_release_uses_version_05512() -> None:
+def test_current_release_uses_version_05513() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.12"
+    assert manifest["version"] == "0.55.13"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -247,3 +250,20 @@ def test_active_camera_triangulation_correction_has_release_note() -> None:
     assert "planarity tolerance remains" in normalized_release_note
     assert "signed axis projection" in normalized_release_note
     assert "remain unchanged" in normalized_release_note
+
+
+def test_active_camera_depth_numeric_correction_has_release_note() -> None:
+    release_note = ACTIVE_CAMERA_DEPTH_NUMERIC_CORRECTION_PATH.read_text(
+        encoding="utf-8"
+    )
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.13" in release_note
+    assert "captured blender matrix and vertex values" in normalized_release_note
+    assert "python affine arithmetic" in normalized_release_note
+    assert "2.23e 7" in normalized_release_note
+    assert "captured_tuple_affine" in release_note.lower()
+    assert "world_to_camera_view" in release_note
+    assert "depth_tolerance remains 1e 8" in normalized_release_note
+    assert "production active camera projection" in normalized_release_note
+    assert "are unchanged" in normalized_release_note
