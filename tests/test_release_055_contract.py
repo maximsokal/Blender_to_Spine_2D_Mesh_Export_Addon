@@ -72,6 +72,9 @@ CONNECTED_MIXED_NORMALIZATION_RELEASE_PATH = (
 CONNECTED_SETUP_AFFINE_CORRECTION_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.16.md"
 )
+CONNECTED_SETUP_MODEL_CONTRACT_CORRECTION_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.17.md"
+)
 
 
 def _normalized_prose(value: str) -> str:
@@ -92,11 +95,11 @@ def _normalized_prose(value: str) -> str:
     )
 
 
-def test_current_release_uses_version_05516() -> None:
+def test_current_release_uses_version_05517() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.16"
+    assert manifest["version"] == "0.55.17"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -326,3 +329,20 @@ def test_connected_setup_affine_acceptance_correction_has_release_note() -> None
     assert "spine_affine_normal_only_translation" in release_note.lower()
     assert "production slice 5" in normalized_release_note
     assert "are unchanged" in normalized_release_note
+
+
+def test_connected_setup_model_contract_correction_has_release_note() -> None:
+    release_note = CONNECTED_SETUP_MODEL_CONTRACT_CORRECTION_PATH.read_text(
+        encoding="utf-8"
+    )
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.17" in release_note
+    assert "shared owner" in normalized_release_note
+    assert "shared consumer" in normalized_release_note
+    assert "shared._setup_world_position" in release_note
+    assert "shared._setup_transform_model" in release_note.lower()
+    assert "without duplicating the string literal" in normalized_release_note
+    assert "blender acceptance workers" in normalized_release_note
+    assert "are unchanged" in normalized_release_note
+    assert "production slice 5" in normalized_release_note
