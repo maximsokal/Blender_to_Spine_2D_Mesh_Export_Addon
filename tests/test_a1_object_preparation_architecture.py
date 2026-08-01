@@ -20,6 +20,16 @@ def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
     )
 
 
+def _ordered_direct_call_names(function: ast.FunctionDef) -> tuple[str, ...]:
+    calls = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    ]
+    calls.sort(key=lambda node: (node.lineno, node.col_offset))
+    return tuple(node.func.id for node in calls)
+
+
 def test_public_orchestrator_is_short_and_calls_typed_stages_in_order():
     tree = _tree("a1_object_preparation.py")
     function = _function(tree, "prepare_a1_object")
@@ -84,6 +94,37 @@ def test_each_stage_function_stays_below_monolith_threshold():
     for filename, function_name in stages.items():
         function = _function(_tree(filename), function_name)
         assert function.end_lineno - function.lineno + 1 < 180, filename
+
+
+def test_source_geometry_decomposition_has_small_explicit_owners():
+    tree = _tree("a1_source_geometry_preparation.py")
+    helper_names = (
+        "_resolve_source_request",
+        "_normalize_source_geometry",
+        "_prepare_projection_route",
+        "_complete_projected_geometry",
+        "_build_prepared_statistics",
+        "_log_prepared_source",
+    )
+    for function_name in helper_names:
+        function = _function(tree, function_name)
+        assert function.end_lineno - function.lineno + 1 < 180, function_name
+
+    public_calls = _ordered_direct_call_names(
+        _function(tree, "prepare_a1_source_geometry")
+    )
+    required_order = (
+        "_resolve_source_request",
+        "_read_source_snapshot",
+        "_normalize_source_geometry",
+        "_prepare_projection_route",
+        "build_a1_z_group_assignment",
+        "_complete_projected_geometry",
+        "_build_prepared_statistics",
+        "_log_prepared_source",
+    )
+    positions = tuple(public_calls.index(name) for name in required_order)
+    assert positions == tuple(sorted(positions))
 
 
 def test_texture_planning_decomposition_has_small_explicit_owners():
