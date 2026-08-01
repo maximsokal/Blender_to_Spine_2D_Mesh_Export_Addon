@@ -1,9 +1,9 @@
 """Resolve and apply setup-pose slot draw order for connected A1 objects.
 
-Spine renders attachments by slot order, independently from bone hierarchy. Connected
-Z layers therefore need an explicit slot ordering step: lower Blender Z layers are
-serialized first and higher layers later, because higher-index Spine slots draw on
-top. Objects clustered into one tolerance layer retain source input order.
+Connected hierarchy layers are grouped by projected Object Origin depth. Setup slot order
+is a separate visual contract: when projected object-block depth analysis is available,
+whole object blocks are emitted from far to near by nearest evaluated vertex. Legacy
+callers without that analysis retain the historical origin-layer ordering.
 """
 
 from __future__ import annotations
@@ -12,18 +12,24 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Tuple
 
+from .composition import SpineDocumentComponent
 from .connected_group_contracts import (
     ConnectedObjectDocument,
     ConnectedObjectPlacement,
 )
 from .connected_group_error import ConnectedGroupBuildError
 from .model import Slot, SpineDocument
+from .object_block_draw_order import (
+    SpineObjectBlockDepth,
+    SpineObjectBlockDrawOrderError,
+    apply_object_block_setup_draw_order,
+)
 
 
 def connected_draw_order_component_ids(
     placements: Tuple[ConnectedObjectPlacement, ...],
 ) -> Tuple[str, ...]:
-    """Return back-to-front component IDs for the Spine setup slot order."""
+    """Return the historical origin-layer back-to-front component order."""
 
     if not isinstance(placements, tuple) or not placements:
         raise ValueError("placements must be a non-empty tuple")
@@ -43,8 +49,8 @@ def connected_draw_order_component_ids(
         placement.component_id
         for placement in sorted(
             placements,
-            # layer_index 0 is the highest/front Z cluster. Spine draws later
-            # slots on top, so larger (back) layer indices must be emitted first.
+            # layer_index 0 is the highest/front Object Origin cluster. Later Spine
+            # slots draw on top, therefore larger/back layer indices come first.
             key=lambda item: (
                 -item.layer_index,
                 input_order[item.component_id],
@@ -78,19 +84,42 @@ def _require_no_unrebased_draworder_timelines(
                     )
 
 
-def apply_connected_setup_draw_order(
+def _apply_nearest_vertex_draw_order(
+    document: SpineDocument,
+    objects: Tuple[ConnectedObjectDocument, ...],
+    object_block_depths: Tuple[SpineObjectBlockDepth, ...],
+    *,
+    depth_tolerance: float,
+) -> SpineDocument:
+    """Apply the common object-block planner to connected source documents."""
+
+    components = tuple(
+        SpineDocumentComponent(
+            component_id=item.component_id,
+            document=item.document,
+            animation_namespace=(item.animation_namespace or item.component_id),
+        )
+        for item in objects
+    )
+    try:
+        return apply_object_block_setup_draw_order(
+            document,
+            components,
+            object_block_depths,
+            depth_tolerance=depth_tolerance,
+        )
+    except SpineObjectBlockDrawOrderError as exc:
+        raise ConnectedGroupBuildError(
+            f"Connected nearest-vertex setup draw order failed: {exc}"
+        ) from exc
+
+
+def _apply_legacy_layer_draw_order(
     document: SpineDocument,
     objects: Tuple[ConnectedObjectDocument, ...],
     placements: Tuple[ConnectedObjectPlacement, ...],
 ) -> SpineDocument:
-    """Reorder composed slots by connected Z layer without changing slot contents."""
-
-    if not isinstance(document, SpineDocument):
-        raise TypeError("document must be SpineDocument")
-    if not isinstance(objects, tuple) or not objects:
-        raise ValueError("objects must be a non-empty tuple")
-    if not all(isinstance(item, ConnectedObjectDocument) for item in objects):
-        raise TypeError("objects must contain ConnectedObjectDocument values")
+    """Preserve historical Object Origin layer ordering for legacy direct callers."""
 
     _require_no_unrebased_draworder_timelines(objects)
     object_by_component = {item.component_id: item for item in objects}
@@ -149,6 +178,37 @@ def apply_connected_setup_draw_order(
     if reordered == document.slots:
         return document
     return replace(document, slots=reordered)
+
+
+def apply_connected_setup_draw_order(
+    document: SpineDocument,
+    objects: Tuple[ConnectedObjectDocument, ...],
+    placements: Tuple[ConnectedObjectPlacement, ...],
+    *,
+    object_block_depths: Tuple[SpineObjectBlockDepth, ...] | None = None,
+    depth_tolerance: float = 1.0e-4,
+) -> SpineDocument:
+    """Reorder complete connected slot blocks without changing slot payloads.
+
+    Production projected composition supplies ``object_block_depths`` and therefore uses
+    nearest evaluated vertex depth. ``None`` exists only for retained direct legacy tests
+    and callers that have not yet supplied projected depth analysis.
+    """
+
+    if not isinstance(document, SpineDocument):
+        raise TypeError("document must be SpineDocument")
+    if not isinstance(objects, tuple) or not objects:
+        raise ValueError("objects must be a non-empty tuple")
+    if not all(isinstance(item, ConnectedObjectDocument) for item in objects):
+        raise TypeError("objects must contain ConnectedObjectDocument values")
+    if object_block_depths is not None:
+        return _apply_nearest_vertex_draw_order(
+            document,
+            objects,
+            object_block_depths,
+            depth_tolerance=depth_tolerance,
+        )
+    return _apply_legacy_layer_draw_order(document, objects, placements)
 
 
 __all__ = [
