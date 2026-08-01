@@ -4,7 +4,21 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.7 is the current release candidate. It adds typed Active Camera projection for Normal - UV Segments single-object and standalone preparation while keeping the public UI, rendered Camera Projection, connected assembly, mixed assembly, and Spine codecs unchanged.
+Version 0.55.8 is the current release candidate. It corrects the typed Active Camera validation fixture and release wording exposed by the failed 0.55.7 focused gate. Production Active Camera projection, rig assembly, Blender acceptance, public UI, rendered Camera Projection, connected assembly, mixed assembly, and Spine codecs are unchanged.
+
+## [0.55.8] - 2026-08-01
+
+### Fixed
+
+- The Active Camera depth-parent compensation fixture now passes typed `LegacyZGroup` values to `LegacyRigBuildRequest` instead of raw floats.
+- The 0.55.7 release note now states explicitly that projection uses the export texture dimensions required by its semantic release contract.
+- Manifest, installation, testing, documentation index, changelog, and release contracts now identify candidate 0.55.8.
+
+### Unchanged
+
+- No production projection, rig, attachment, draw-order, Blender adapter, or headless acceptance function changed.
+- `+Z` remains the compatibility default and the public projection dropdown is not registered yet.
+- Connected and mixed Active Camera requests remain fail-closed until Slice 5.
 
 ## [0.55.7] - 2026-08-01
 
