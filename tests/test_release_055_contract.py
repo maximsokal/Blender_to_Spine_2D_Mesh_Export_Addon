@@ -69,6 +69,9 @@ SOURCE_STAGE_DECOMPOSITION_CORRECTION_PATH = (
 CONNECTED_MIXED_NORMALIZATION_RELEASE_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.15.md"
 )
+CONNECTED_SETUP_AFFINE_CORRECTION_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.16.md"
+)
 
 
 def _normalized_prose(value: str) -> str:
@@ -89,11 +92,11 @@ def _normalized_prose(value: str) -> str:
     )
 
 
-def test_current_release_uses_version_05515() -> None:
+def test_current_release_uses_version_05516() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.15"
+    assert manifest["version"] == "0.55.16"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -307,3 +310,19 @@ def test_connected_mixed_projection_normalization_has_release_note() -> None:
     assert "rendered camera projection" in normalized_release_note
     assert "public standalone only ui routing" in normalized_release_note
     assert "remain fail closed" in normalized_release_note
+
+
+def test_connected_setup_affine_acceptance_correction_has_release_note() -> None:
+    release_note = CONNECTED_SETUP_AFFINE_CORRECTION_PATH.read_text(
+        encoding="utf-8"
+    )
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.16" in release_note
+    assert "spine 2d affine setup evaluator" in normalized_release_note
+    assert "onlytranslation" in normalized_release_note
+    assert "+90" in release_note
+    assert "-90" in release_note
+    assert "spine_affine_normal_only_translation" in release_note.lower()
+    assert "production slice 5" in normalized_release_note
+    assert "are unchanged" in normalized_release_note
