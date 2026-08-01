@@ -131,16 +131,17 @@ def make_uv_only_snapshot(*, active_uv_layer: str | None) -> MeshSnapshot:
     )
 
 
-def test_appended_settings_preserve_uv_policy_and_rig_positional_order():
+def test_appended_settings_preserve_uv_policy_rig_and_projection_order():
     names = tuple(field.name for field in fields(A1SingleObjectExportSettings))
 
-    assert names[-6:] == (
+    assert names[-7:] == (
         "source_uv_boundary_mode",
         "source_uv_boundary_layer_name",
         "material_source_policy",
         "generated_material_pattern",
         "generated_gray_color",
         "rig_setup_pose_mode",
+        "projection_direction",
     )
 
 
