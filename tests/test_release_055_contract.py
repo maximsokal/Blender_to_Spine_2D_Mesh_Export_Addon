@@ -39,6 +39,9 @@ RELEASE_CONTRACT_CORRECTION_PATH = (
 PROJECTION_CONTRACT_CORRECTION_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.5.md"
 )
+STANDALONE_DRAW_ORDER_RELEASE_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.6.md"
+)
 
 
 def _normalized_prose(value: str) -> str:
@@ -49,11 +52,11 @@ def _normalized_prose(value: str) -> str:
     return " ".join(value.lower().replace("-", " ").split())
 
 
-def test_current_release_uses_version_0555() -> None:
+def test_current_release_uses_version_0556() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.5"
+    assert manifest["version"] == "0.55.6"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -123,3 +126,15 @@ def test_projection_contract_and_documentation_correction_has_release_note() -> 
     assert "final seven appended" in normalized_release_note
     assert "public documentation" in normalized_release_note
     assert "production code changed" in normalized_release_note
+
+
+def test_standalone_draw_order_slice_has_release_note() -> None:
+    release_note = STANDALONE_DRAW_ORDER_RELEASE_PATH.read_text(encoding="utf-8")
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.6" in release_note
+    assert "nearest projected vertex" in normalized_release_note
+    assert "one contiguous block" in normalized_release_note
+    assert "internal segment slot order" in normalized_release_note
+    assert "camera projection setup ordering is unchanged" in normalized_release_note
+    assert "connected and mixed composition remain unchanged" in normalized_release_note
