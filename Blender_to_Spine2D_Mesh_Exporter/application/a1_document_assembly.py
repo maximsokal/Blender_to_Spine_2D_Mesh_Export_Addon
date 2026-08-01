@@ -48,6 +48,10 @@ class A1DocumentAssemblySettings:
     # Appended to preserve positional compatibility with existing callers.
     uv_range_policy: UvRangePolicy = UvRangePolicy.REQUIRE_UNIT_SQUARE
     uv_range_epsilon: float = 1.0e-6
+    # Active Camera stores local projected depth for the 2.5D controls. The generated
+    # depth parent therefore contributes a setup Y translation that must be removed from
+    # the child vertex-bone local Y to preserve the exact camera-screen setup position.
+    compensate_depth_setup_y: bool = False
 
     def __post_init__(self) -> None:
         for field_name in ("prefix", "uv_layer_name", "image_path", "skin_name"):
@@ -79,7 +83,11 @@ class A1DocumentAssemblySettings:
             or self.segment_index_base < 0
         ):
             raise ValueError("segment_index_base must be a non-negative integer")
-        for field_name in ("include_control_icons", "include_preview_animation"):
+        for field_name in (
+            "include_control_icons",
+            "include_preview_animation",
+            "compensate_depth_setup_y",
+        ):
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be bool")
         if type(self.uv_range_policy) is not UvRangePolicy:
@@ -133,6 +141,54 @@ def _xy_visible_region_snapshots(
             "face has visible two-dimensional area."
         )
     return resolved
+
+
+def _compensate_projection_depth_setup_y(
+    projection: A1AttachmentProjectionResult,
+    rig: LegacyRigBuildResult,
+) -> A1AttachmentProjectionResult:
+    """Remove each generated depth parent's setup Y from its child vertex bone.
+
+    The adjustment is applied after geometric projection and hull construction. Therefore
+    physical screen-space topology remains based on the camera-projected Mesh X/Y, while
+    the final Spine hierarchy evaluates to the same screen Y after the depth parent is
+    applied. Axis projections keep their historical unadjusted request path.
+    """
+
+    if not isinstance(projection, A1AttachmentProjectionResult):
+        raise TypeError("projection must be A1AttachmentProjectionResult")
+    if not isinstance(rig, LegacyRigBuildResult):
+        raise TypeError("rig must be LegacyRigBuildResult")
+
+    offset_by_group_index = {
+        group.index: float(group.y_offset_pixels) for group in rig.info.z_groups
+    }
+    adjusted_vertices = []
+    for vertex in projection.request.vertices:
+        parent_offset = offset_by_group_index.get(vertex.z_group_index)
+        if parent_offset is None:
+            raise A1DocumentAssemblyError(
+                f"Attachment vertex {vertex.index} references unknown depth group "
+                f"{vertex.z_group_index} during Active Camera setup compensation"
+            )
+        local_x, local_y = vertex.bone_position_pixels
+        adjusted_y = round(float(local_y) - parent_offset, 2)
+        if adjusted_y == 0.0:
+            adjusted_y = 0.0
+        adjusted_vertices.append(
+            replace(
+                vertex,
+                bone_position_pixels=(float(local_x), adjusted_y),
+            )
+        )
+
+    return replace(
+        projection,
+        request=replace(
+            projection.request,
+            vertices=tuple(adjusted_vertices),
+        ),
+    )
 
 
 def assemble_a1_document(
@@ -200,6 +256,8 @@ def assemble_a1_document(
                 skin_name=settings.skin_name,
             ),
         )
+        if settings.compensate_depth_setup_y:
+            projection = _compensate_projection_depth_setup_y(projection, rig)
         projections.append(projection)
 
     resolved_projections = tuple(projections)
