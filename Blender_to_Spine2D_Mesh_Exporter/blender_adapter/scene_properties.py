@@ -9,6 +9,7 @@ import bpy
 
 from .. import config
 from ..domain.baking import A1TextureExportMode
+from ..domain.projection import A1ProjectionDirection
 from ..domain.spine.rig_profiles import A1RigProfile
 from ..domain.spine.version_target import (
     DEFAULT_SPINE_JSON_TARGET,
@@ -22,6 +23,39 @@ from .scene_settings_migration import (
 
 logger = logging.getLogger(__name__)
 _TEXTURE_SIZE_SYNCING = False
+
+
+def projection_direction_rna_enum_items() -> tuple[tuple[str, str, str], ...]:
+    """Return stable persisted projection choices for Normal - UV Segments."""
+
+    descriptions = {
+        A1ProjectionDirection.POSITIVE_X: (
+            "Project world +Y to Spine X, world +Z to Spine Y, and use world +X as depth"
+        ),
+        A1ProjectionDirection.NEGATIVE_X: (
+            "Project world -Y to Spine X, world +Z to Spine Y, and use world -X as depth"
+        ),
+        A1ProjectionDirection.POSITIVE_Y: (
+            "Project world -X to Spine X, world +Z to Spine Y, and use world +Y as depth"
+        ),
+        A1ProjectionDirection.NEGATIVE_Y: (
+            "Project world +X to Spine X, world +Z to Spine Y, and use world -Y as depth"
+        ),
+        A1ProjectionDirection.POSITIVE_Z: (
+            "Project world +X to Spine X, world +Y to Spine Y, and use world +Z as depth"
+        ),
+        A1ProjectionDirection.NEGATIVE_Z: (
+            "Project world -X to Spine X, world +Y to Spine Y, and use world -Z as depth"
+        ),
+        A1ProjectionDirection.ACTIVE_CAMERA: (
+            "Project evaluated geometry through the active Perspective or Orthographic "
+            "camera using the selected export texture dimensions"
+        ),
+    }
+    return tuple(
+        (direction.value, direction.label, descriptions[direction])
+        for direction in A1ProjectionDirection
+    )
 
 
 def rig_profile_rna_enum_items() -> tuple[tuple[str, str, str], ...]:
@@ -93,6 +127,16 @@ def _update_texture_export_mode(_self: Any, context: bpy.types.Context) -> None:
     _invalidate_readiness_for_setting(
         context,
         reason="texture export mode changed",
+    )
+    _update_ui_for_paths(_self, context)
+
+
+def _update_projection_direction(_self: Any, context: bpy.types.Context) -> None:
+    """Invalidate diagnostics after changing the Normal/UV projection frame."""
+
+    _invalidate_readiness_for_setting(
+        context,
+        reason="projection direction changed",
     )
     _update_ui_for_paths(_self, context)
 
@@ -188,6 +232,18 @@ PROPERTIES = (
             ),
             default=A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
             update=_update_texture_export_mode,
+        ),
+    ),
+    (
+        "spine2d_projection_direction",
+        bpy.props.EnumProperty(
+            name="Projection Direction",
+            description=(
+                "Choose the world axis or active camera used by Normal - UV Segments"
+            ),
+            items=projection_direction_rna_enum_items(),
+            default=A1ProjectionDirection.POSITIVE_Z.value,
+            update=_update_projection_direction,
         ),
     ),
     (
@@ -291,4 +347,8 @@ PROPERTIES = (
 )
 
 
-__all__ = ["PROPERTIES", "rig_profile_rna_enum_items"]
+__all__ = [
+    "PROPERTIES",
+    "projection_direction_rna_enum_items",
+    "rig_profile_rna_enum_items",
+]
