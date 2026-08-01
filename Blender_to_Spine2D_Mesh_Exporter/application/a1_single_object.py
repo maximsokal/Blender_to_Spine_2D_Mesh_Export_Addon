@@ -25,6 +25,7 @@ from ..domain.baking.generated_materials import (
     A1MaterialSourcePolicy,
 )
 from ..domain.geometry import MeshSnapshot, ModifierLineagePolicy
+from ..domain.projection import A1ProjectionDirection
 from ..domain.spine import LegacyAttachmentSequence
 from ..domain.spine.legacy_rig_contracts import UniformScaleMode
 from ..domain.spine.legacy_rig_scale import calculate_uniform_scale
@@ -137,6 +138,10 @@ class A1SingleObjectExportSettings:
     rig_setup_pose_mode: A1RigSetupPoseMode = (
         A1RigSetupPoseMode.PRESERVE_COMPOSITION
     )
+    # Appended for Slice 2. Existing callers remain on the exact +Z compatibility path.
+    projection_direction: A1ProjectionDirection = (
+        A1ProjectionDirection.POSITIVE_Z
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.export, ExportSettings):
@@ -196,6 +201,10 @@ class A1SingleObjectExportSettings:
             raise TypeError("rig_scale_mode must be UniformScaleMode")
         if not isinstance(self.rig_setup_pose_mode, A1RigSetupPoseMode):
             raise TypeError("rig_setup_pose_mode must be A1RigSetupPoseMode")
+        if not isinstance(self.projection_direction, A1ProjectionDirection):
+            raise TypeError(
+                "projection_direction must be A1ProjectionDirection"
+            )
         for field_name in (
             "use_world_location_for_main_bone",
             "include_control_icons",
