@@ -1,5 +1,5 @@
 # pylint: disable=import-error
-"""Rig-profile controls shared by the ordered Rewrite UI."""
+"""Rig-profile and projection controls shared by the ordered Rewrite UI."""
 
 from __future__ import annotations
 
@@ -8,8 +8,13 @@ from typing import Set
 
 import bpy
 
-from .domain.spine.rig_profiles import A1RigProfile
+from . import ui
 from .domain.baking import A1TextureExportMode
+from .domain.projection import (
+    A1ProjectionDirection,
+    resolve_a1_projection_direction,
+)
+from .domain.spine.rig_profiles import A1RigProfile
 from .infrastructure.blender_registration import (
     class_cleanup_actions,
     register_classes_transactionally,
@@ -18,13 +23,58 @@ from .infrastructure.blender_registration import (
 
 
 logger = logging.getLogger(__name__)
+_ORIGINAL_RESET_REMOVED = False
+_REGISTERED_CLASSES: tuple[type, ...] = ()
+
+
+def _draw_projection_direction(
+    layout: bpy.types.UILayout,
+    scene: bpy.types.Scene,
+) -> None:
+    """Draw the public Normal/UV projection selector and route explanation."""
+
+    layout.prop(
+        scene,
+        "spine2d_projection_direction",
+        text="Projection direction",
+    )
+    try:
+        direction = resolve_a1_projection_direction(
+            getattr(
+                scene,
+                "spine2d_projection_direction",
+                A1ProjectionDirection.POSITIVE_Z.value,
+            )
+        )
+    except (TypeError, ValueError):
+        layout.label(
+            text="Invalid projection direction; Reset restores +Z",
+            icon="ERROR",
+        )
+        return
+
+    if direction is A1ProjectionDirection.ACTIVE_CAMERA:
+        layout.label(
+            text="Projects UV-segment geometry through the active camera",
+            icon="CAMERA_DATA",
+        )
+        layout.label(
+            text="Perspective and Orthographic cameras are supported",
+            icon="INFO",
+        )
+        return
+
+    layout.label(
+        text=f"World-axis object-bake projection: {direction.label}",
+        icon="ORIENTATION_GLOBAL",
+    )
 
 
 def draw_rig_settings(
     layout: bpy.types.UILayout,
     context: bpy.types.Context,
 ) -> None:
-    """Draw the single public, runtime-validated rig profile."""
+    """Draw the single public rig and the approved projection controls."""
 
     scene = context.scene
     layout.label(text="Texture export", icon="TEXTURE")
@@ -51,6 +101,7 @@ def draw_rig_settings(
             text="Preserves cut regions and generated UV meshes",
             icon="UV",
         )
+        _draw_projection_direction(layout, scene)
 
     # Keep the historical RNA value loadable, but do not expose a profile selector
     # until Three Axis receives the same Object Origin implementation and validation.
@@ -66,8 +117,8 @@ def draw_rig_settings(
     if texture_mode == A1TextureExportMode.CAMERA_PROJECTION.value:
         description.label(text="Camera Projection keeps compatibility placement")
     else:
-        description.label(text="Main bone matches Blender Object Origin")
-        description.label(text="Depth layers use the object's local Z=0 pivot")
+        description.label(text="Main bone matches projected Blender Object Origin")
+        description.label(text="Depth uses the selected axis or active camera")
 
     layout.separator()
     row = layout.row(align=True)
@@ -76,6 +127,29 @@ def draw_rig_settings(
     row = layout.row(align=True)
     row.label(text="Preview animation")
     row.prop(scene, "spine2d_export_preview_animation", text="")
+
+
+class SPINE2D_OT_ResetSettingsWithProjection(bpy.types.Operator):
+    """Extend the main Reset operator with the Slice 6 projection default."""
+
+    bl_idname = ui.SPINE2D_OT_ResetSettings.bl_idname
+    bl_label = ui.SPINE2D_OT_ResetSettings.bl_label
+    bl_description = ui.SPINE2D_OT_ResetSettings.__doc__ or "Reset export settings"
+    bl_options = ui.SPINE2D_OT_ResetSettings.bl_options
+
+    def execute(self, context: bpy.types.Context) -> Set[str]:
+        result = ui.SPINE2D_OT_ResetSettings.execute(self, context)
+        if result != {"FINISHED"}:
+            return result
+        try:
+            context.scene.spine2d_projection_direction = (
+                A1ProjectionDirection.POSITIVE_Z.value
+            )
+            return result
+        except Exception as exc:
+            logger.exception("Unable to reset Spine2D projection direction")
+            self.report({"ERROR"}, f"Projection reset error: {exc}")
+            return {"CANCELLED"}
 
 
 class SPINE2D_OT_ResetRigProfile(bpy.types.Operator):
@@ -98,36 +172,85 @@ class SPINE2D_OT_ResetRigProfile(bpy.types.Operator):
             return {"CANCELLED"}
 
 
-CLASSES = (SPINE2D_OT_ResetRigProfile,)
+CLASSES = (
+    SPINE2D_OT_ResetSettingsWithProjection,
+    SPINE2D_OT_ResetRigProfile,
+)
+
+
+def _restore_original_reset_operator() -> None:
+    """Restore the base Reset class after removing our replacement."""
+
+    global _ORIGINAL_RESET_REMOVED
+    if not _ORIGINAL_RESET_REMOVED:
+        return
+    bpy.utils.register_class(ui.SPINE2D_OT_ResetSettings)
+    _ORIGINAL_RESET_REMOVED = False
 
 
 def register() -> None:
-    """Register the rig reset operator transactionally."""
+    """Replace Reset transactionally and register the Rig UI operators."""
 
-    register_classes_transactionally(
-        CLASSES,
-        register_class=bpy.utils.register_class,
-        unregister_class=bpy.utils.unregister_class,
-    )
+    global _ORIGINAL_RESET_REMOVED, _REGISTERED_CLASSES
+    if _REGISTERED_CLASSES:
+        return
+
+    original_registered = hasattr(ui.SPINE2D_OT_ResetSettings, "bl_rna")
+    if original_registered:
+        bpy.utils.unregister_class(ui.SPINE2D_OT_ResetSettings)
+        _ORIGINAL_RESET_REMOVED = True
+
+    try:
+        _REGISTERED_CLASSES = register_classes_transactionally(
+            CLASSES,
+            register_class=bpy.utils.register_class,
+            unregister_class=bpy.utils.unregister_class,
+        )
+    except Exception as exc:
+        logger.exception("Spine2D Rig UI registration failed")
+        try:
+            _restore_original_reset_operator()
+        except Exception:
+            logger.exception("Unable to restore base Reset operator during rollback")
+        raise RuntimeError("Spine2D Rig UI registration failed") from exc
     logger.debug("Spine2D Rig UI registered")
 
 
 def unregister() -> None:
-    """Unregister the rig reset operator best-effort."""
+    """Unregister Rig UI classes and restore the base Reset operator."""
 
-    unregister_all_best_effort(
-        class_cleanup_actions(
-            CLASSES,
-            unregister_class=bpy.utils.unregister_class,
-        ),
-        operation="Spine2D Rig UI unregistration",
-    )
+    global _REGISTERED_CLASSES
+    errors: list[BaseException] = []
+    if _REGISTERED_CLASSES:
+        try:
+            unregister_all_best_effort(
+                class_cleanup_actions(
+                    _REGISTERED_CLASSES,
+                    unregister_class=bpy.utils.unregister_class,
+                ),
+                operation="Spine2D Rig UI unregistration",
+            )
+        except Exception as exc:
+            logger.exception("Unable to unregister Spine2D Rig UI classes")
+            errors.append(exc)
+        finally:
+            _REGISTERED_CLASSES = ()
+
+    try:
+        _restore_original_reset_operator()
+    except Exception as exc:
+        logger.exception("Unable to restore the base Spine2D Reset operator")
+        errors.append(exc)
+
+    if errors:
+        raise RuntimeError("Spine2D Rig UI unregistration failed") from errors[0]
     logger.debug("Spine2D Rig UI unregistered")
 
 
 __all__ = [
     "CLASSES",
     "SPINE2D_OT_ResetRigProfile",
+    "SPINE2D_OT_ResetSettingsWithProjection",
     "draw_rig_settings",
     "register",
     "unregister",
