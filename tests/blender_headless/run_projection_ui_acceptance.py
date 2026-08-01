@@ -103,16 +103,13 @@ def _configure_scene(output_root: Path) -> tuple[object, object]:
     scene.spine2d_texture_export_mode = (
         A1TextureExportMode.NORMAL_UV_SEGMENTS.value
     )
-    scene.spine2d_projection_direction = (
-        A1ProjectionDirection.POSITIVE_Z.value
-    )
     alpha = _create_mesh_object(_OBJECT_NAMES[0], -1.0)
     beta = _create_mesh_object(_OBJECT_NAMES[1], 1.0)
     _activate((alpha, beta), alpha)
     return alpha, beta
 
 
-def _enum_contract() -> dict[str, object]:
+def _enum_contract(scene) -> dict[str, object]:
     property_definition = bpy.types.Scene.bl_rna.properties[
         "spine2d_projection_direction"
     ]
@@ -122,13 +119,14 @@ def _enum_contract() -> dict[str, object]:
         identifiers == expected,
         f"Projection enum identifiers mismatch: actual={identifiers}, expected={expected}",
     )
+    scene_default = str(scene.spine2d_projection_direction)
     _assert(
-        property_definition.default == A1ProjectionDirection.POSITIVE_Z.value,
-        "Projection enum default is not POSITIVE_Z",
+        scene_default == A1ProjectionDirection.POSITIVE_Z.value,
+        f"Projection Scene default is not POSITIVE_Z: {scene_default!r}",
     )
     return {
         "identifiers": list(identifiers),
-        "default": property_definition.default,
+        "default": scene_default,
     }
 
 
@@ -229,7 +227,7 @@ def _run_routes(output_root: Path) -> Path:
         "status": "passed",
         "phase": "routes",
         "blenderVersion": bpy.app.version_string,
-        "enum": _enum_contract(),
+        "enum": _enum_contract(scene),
         "routes": list(_route_contract(scene)),
         "renderedCameraIsolation": _rendered_camera_isolation(scene),
         "reset": _reset_contract(scene),
