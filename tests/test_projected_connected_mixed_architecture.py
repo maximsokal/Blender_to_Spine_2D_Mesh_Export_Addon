@@ -97,15 +97,22 @@ def _assert_worker_contract(worker_name: str, *, camera_state: bool) -> None:
     assert "connectedLayerFrontOrder" in worker
     assert "mixedObjectOrder" in worker
     assert "setupTransformModel" in worker
-    assert "SPINE_AFFINE_NORMAL_ONLY_TRANSLATION" in worker
     assert "_translation_only_setup_position" not in worker
     assert "sourceUnchanged" in worker
+
     if camera_state:
+        # The Active Camera worker owns the shared evaluator import and the canonical
+        # report-model constant. The signed-axis worker deliberately reuses both through
+        # its ``shared`` module instead of duplicating the oracle implementation or ID.
         assert "evaluate_spine_setup_bone_position" in worker
+        assert '_SETUP_TRANSFORM_MODEL = "SPINE_AFFINE_NORMAL_ONLY_TRANSLATION"' in worker
+        assert '"setupTransformModel": _SETUP_TRANSFORM_MODEL' in worker
         assert "cameraUnchanged" in worker
         assert "sceneRenderUnchanged" in worker
     else:
         assert "shared._setup_world_position" in worker
+        assert '"setupTransformModel": shared._SETUP_TRANSFORM_MODEL' in worker
+        assert "SPINE_AFFINE_NORMAL_ONLY_TRANSLATION" not in worker
 
 
 def test_blender_acceptance_covers_signed_axis_and_active_camera_routes():
