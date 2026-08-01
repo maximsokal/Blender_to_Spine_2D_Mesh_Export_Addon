@@ -16,6 +16,10 @@ from ..domain.baking.generated_materials import (
     ColorRGBA,
 )
 from ..domain.geometry import A1AngularMode
+from ..domain.projection import (
+    A1ProjectionDirection,
+    resolve_a1_projection_direction,
+)
 from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from ..domain.spine.version_target import (
     DEFAULT_SPINE_JSON_TARGET,
@@ -55,6 +59,10 @@ class _SceneExportProfile:
     generated_gray_color: ColorRGBA = _DEFAULT_GENERATED_GRAY
     texture_export_mode: A1TextureExportMode = (
         A1TextureExportMode.NORMAL_UV_SEGMENTS
+    )
+    # Appended for Slice 6 so earlier positional construction keeps its exact layout.
+    projection_direction: A1ProjectionDirection = (
+        A1ProjectionDirection.POSITIVE_Z
     )
 
     def __post_init__(self) -> None:
@@ -134,6 +142,10 @@ class _SceneExportProfile:
         if self.bake_execution.texture_export_mode is not self.texture_export_mode:
             raise ValueError(
                 "bake_execution.texture_export_mode must match texture_export_mode"
+            )
+        if not isinstance(self.projection_direction, A1ProjectionDirection):
+            raise TypeError(
+                "projection_direction must be A1ProjectionDirection"
             )
 
 
@@ -329,6 +341,17 @@ def _resolve_texture_export_mode(scene: Any) -> A1TextureExportMode:
         ) from exc
 
 
+def _resolve_projection_direction(scene: Any) -> A1ProjectionDirection:
+    """Resolve the exact persisted Normal/UV projection identifier fail-closed."""
+
+    raw = getattr(
+        scene,
+        "spine2d_projection_direction",
+        A1ProjectionDirection.POSITIVE_Z.value,
+    )
+    return resolve_a1_projection_direction(raw)
+
+
 def _resolve_spine_target(scene: Any) -> SpineJsonTarget:
     raw = getattr(
         scene,
@@ -411,6 +434,7 @@ def _capture_scene_profile(
         generated_material_pattern=_resolve_generated_material_pattern(scene),
         generated_gray_color=_resolve_generated_gray_color(scene),
         texture_export_mode=texture_export_mode,
+        projection_direction=_resolve_projection_direction(scene),
     )
 
 
@@ -424,6 +448,7 @@ __all__ = [
     "_resolve_images_relative_path",
     "_resolve_material_source_policy",
     "_resolve_output_directory",
+    "_resolve_projection_direction",
     "_resolve_rig_profile",
     "_resolve_spine_target",
     "_resolve_texture_export_mode",
