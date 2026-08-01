@@ -4,7 +4,19 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.9 is the current release candidate. It corrects the pure Active Camera setup-depth fixture so it uses profile-owned Z-group indices instead of assuming zero-based bindings. Production Active Camera projection, depth compensation, rig assembly, Blender acceptance, public UI, rendered Camera Projection, connected assembly, mixed assembly, and Spine codecs are unchanged.
+Version 0.55.10 is the current release candidate. It replaces one brittle exact-phrase release-note assertion with semantic checks for the already-documented profile-owned `z_index_base`, valid production bindings, and removed zero-based assumption. Production Active Camera projection, depth compensation, rig assembly, Blender acceptance, public UI, rendered Camera Projection, connected assembly, mixed assembly, and Spine codecs are unchanged.
+
+## [0.55.10] - 2026-08-01
+
+### Fixed
+
+- The 0.55.9 release-note contract now checks `profile-owned z_index_base`, valid production bindings, and the removed zero-based assumption independently.
+- The semantic contract no longer requires the artificial exact phrase `profile owned z group indices`.
+
+### Unchanged
+
+- Production code and the corrected 0.55.9 fixture are unchanged.
+- Active Camera projection, depth-parent compensation, rig assembly, standalone draw order, Blender workers, signed-axis projection, rendered Camera Projection, connected and mixed assembly, Spine codecs, UV topology, and texture baking are unchanged.
 
 ## [0.55.9] - 2026-08-01
 
