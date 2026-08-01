@@ -18,6 +18,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
     LegacyAttachmentVertex,
     LegacyMeshAttachmentRequest,
     LegacyRigBuildRequest,
+    LegacyZGroup,
     LegacyZGroupOriginMode,
     SpineJsonTarget,
     build_rig,
@@ -30,7 +31,10 @@ def _rig():
             prefix="CameraObject",
             texture_width=100,
             texture_height=100,
-            z_groups=(-1.0, 0.0, 2.0),
+            z_groups=tuple(
+                LegacyZGroup(z_value=z_value)
+                for z_value in (-1.0, 0.0, 2.0)
+            ),
             main_position_pixels=(0.0, 0.0),
             z_group_origin_mode=LegacyZGroupOriginMode.OBJECT_ORIGIN,
         ),
