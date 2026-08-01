@@ -4,7 +4,28 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.5 is the current release candidate. It preserves the validated signed-axis single-object projection behavior from 0.55.2/0.55.3 and corrects the appended-settings and public-documentation release contracts discovered by the complete Python suite.
+Version 0.55.6 is the current release candidate. It extends the validated signed-axis projection foundation to standalone multi-object setup draw order while keeping Camera Projection, connected, mixed, weighted-mesh, and rig behavior unchanged.
+
+## [0.55.6] - 2026-08-01
+
+### Added
+
+- Deterministic projected world-depth bounds for every prepared Normal - UV Segments object, including nearest and farthest stable vertex identities.
+- A reusable Spine object-block draw-order planner with depth-tolerance clustering and source-order tie breaking.
+- Pure regressions for nearest-vertex depth, deterministic ties, complete slot blocks, and fail-closed draw-order timelines.
+- A Blender 5.2 headless standalone acceptance covering all six signed axes with Object Origins intentionally different from nearest geometry depth.
+
+### Changed
+
+- Standalone Normal - UV Segments setup slots are emitted from far to near by each object's nearest projected vertex.
+- Every object's slots remain one contiguous block and preserve their internal segment order.
+- Bone, constraint, skin, attachment, weighted-index, and animation namespace composition remains in source component order.
+
+### Unchanged
+
+- `+Z` remains the compatibility default until the public projection-direction UI slice is implemented.
+- Camera Projection setup order is untouched.
+- Connected and mixed composition remain development-only and retain their existing behavior until their dedicated normalization slice.
 
 ## [0.55.5] - 2026-08-01
 
