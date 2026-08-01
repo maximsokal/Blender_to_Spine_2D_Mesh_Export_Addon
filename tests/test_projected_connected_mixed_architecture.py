@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "Blender_to_Spine2D_Mesh_Exporter"
+HEADLESS = ROOT / "tests" / "blender_headless"
 
 
 def _tree(path: Path) -> ast.Module:
@@ -86,9 +87,7 @@ def test_mixed_outer_composition_runs_one_cross_group_object_block_pass():
 
 
 def _assert_worker_contract(worker_name: str, *, camera_state: bool) -> None:
-    worker = (
-        ROOT / "tests" / "blender_headless" / worker_name
-    ).read_text(encoding="utf-8")
+    worker = (HEADLESS / worker_name).read_text(encoding="utf-8")
 
     assert "prepare_a1_multi_object(" in worker
     assert "prepare_a1_mixed_object(" in worker
@@ -97,10 +96,16 @@ def _assert_worker_contract(worker_name: str, *, camera_state: bool) -> None:
     assert "maximumConnectedPositionDelta" in worker
     assert "connectedLayerFrontOrder" in worker
     assert "mixedObjectOrder" in worker
+    assert "setupTransformModel" in worker
+    assert "SPINE_AFFINE_NORMAL_ONLY_TRANSLATION" in worker
+    assert "_translation_only_setup_position" not in worker
     assert "sourceUnchanged" in worker
     if camera_state:
+        assert "evaluate_spine_setup_bone_position" in worker
         assert "cameraUnchanged" in worker
         assert "sceneRenderUnchanged" in worker
+    else:
+        assert "shared._setup_world_position" in worker
 
 
 def test_blender_acceptance_covers_signed_axis_and_active_camera_routes():
@@ -111,4 +116,24 @@ def test_blender_acceptance_covers_signed_axis_and_active_camera_routes():
     _assert_worker_contract(
         "run_projection_connected_mixed_acceptance.py",
         camera_state=True,
+    )
+
+
+def test_setup_evaluator_is_blender_independent_and_fail_closed():
+    source = (HEADLESS / "spine_setup_transform.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    assert "import bpy" not in source
+    assert "onlyTranslation" in source
+    assert "unsupported inherit mode" in source
+    assert "parent cycle" in source
+    assert "Missing parent bone" in source
+    assert any(
+        isinstance(node, ast.ClassDef) and node.name == "SpineSetupAffine2D"
+        for node in tree.body
+    )
+    assert any(
+        isinstance(node, ast.FunctionDef)
+        and node.name == "evaluate_spine_setup_bone_position"
+        for node in tree.body
     )
