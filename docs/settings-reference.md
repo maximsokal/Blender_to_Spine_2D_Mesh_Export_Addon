@@ -15,7 +15,7 @@ Bake
 Analysis
 ```
 
-Analysis results are contained inside the final **Analysis** foldout, which is collapsed by default. The highlighted export action is below all foldouts; analysis is manual and diagnostic-only, so it never disables export. Export mode is grouped under **Rig**. Connected-object controls remain internal development-only functionality and are not shown in the production UI.
+Analysis results are contained inside the final **Analysis** foldout, which is collapsed by default. The highlighted export action is below all foldouts; analysis is manual and diagnostic-only, so it never disables export. Export mode and projection direction are grouped under **Rig**. Connected-object controls remain internal development-only functionality and are not shown in the production UI.
 
 ## Export
 
@@ -28,6 +28,28 @@ Analysis results are contained inside the final **Analysis** foldout, which is c
 
 Changing Export mode invalidates the cached readiness report; run Analyze manually when
 you want an updated diagnostic.
+
+### Projection direction
+
+Visible only when Export mode is **Normal - UV Segments**.
+
+| Label | Persisted ID | Default | U / V / depth contract |
+| --- | --- | --- | --- |
+| +X | `POSITIVE_X` | No | U = world +Y, V = world +Z, depth = world +X. |
+| -X | `NEGATIVE_X` | No | U = world -Y, V = world +Z, depth = world -X. |
+| +Y | `POSITIVE_Y` | No | U = world -X, V = world +Z, depth = world +Y. |
+| -Y | `NEGATIVE_Y` | No | U = world +X, V = world +Z, depth = world -Y. |
+| +Z | `POSITIVE_Z` | Yes | U = world +X, V = world +Y, depth = world +Z. |
+| -Z | `NEGATIVE_Z` | No | U = world -X, V = world +Y, depth = world -Z. |
+| Active Camera | `ACTIVE_CAMERA` | No | U/V come from the active camera frame and depth is camera-local Z. |
+
+The selected identifier is stored in `Scene.spine2d_projection_direction`. New Scenes and older files without a stored value use `POSITIVE_Z`. Changing the value invalidates cached readiness; analysis remains manual.
+
+Active Camera is an object-bake Normal - UV Segments route. It keeps segmented meshes, separate textures, Object Origin placement, and object controls while projecting evaluated geometry through the active Perspective or Orthographic camera using the selected export texture dimensions.
+
+This selector is not used by the separate **Camera Projection** export mode. That mode still renders a coverage image and applies its historical crop, contour, triangulation, and flattening pipeline.
+
+The main Reset operator restores `POSITIVE_Z` together with the other public defaults.
 
 ### Projection alpha threshold
 
@@ -93,18 +115,18 @@ The two-axis profile follows the complete Spine 4.2.43 reference stored in [Rig 
 
 ### Single-object setup pose
 
-A single-object export uses `NORMALIZED_SINGLE` setup policy:
+Normal - UV Segments with the public two-axis profile uses `PRESERVE_COMPOSITION`:
 
 ```text
-<prefix>_main.x = 0
-<prefix>_main.y = 0
+<prefix>_main.x = projected Blender Object Origin U
+<prefix>_main.y = projected Blender Object Origin V
 <prefix>_rotation_X.rotation = 0
 <prefix>_rotation_Y.rotation = 0
 ```
 
-The original object placement is transferred to the internal `<prefix>` base bone and to the control layout. This keeps the exported mesh in the same world-space position while giving the animator a neutral visible setup pose.
+The selected signed axis or Active Camera frame determines U, V, and depth. Geometry remains in the local projected plane around the Blender Object Origin, so the exported main bone is the visible rotation and scale pivot.
 
-The reference X/Y setup angles are retained as transform-constraint rotation offsets. They are not discarded.
+The separate rendered Camera Projection mode retains the historical `NORMALIZED_SINGLE` setup policy. The reference X/Y setup angles remain transform-constraint rotation offsets in both routes.
 
 ### Multi-object setup pose
 
@@ -186,6 +208,8 @@ Schema 5 changes the default only for genuinely fresh Scenes:
 - a saved pre-profile project is assigned `LEGACY_ROTATABLE_MESH` for compatibility;
 - a schema-4 Scene preserves whichever rig profile the user already selected;
 - current schema values are never overwritten on registration or file loading.
+
+The projection direction does not require a schema migration. It is a new persisted Enum with a `POSITIVE_Z` RNA default, and Blender preserves every valid stored identifier when saving and reopening a `.blend` file.
 
 ## Rewrite Generated Materials
 
