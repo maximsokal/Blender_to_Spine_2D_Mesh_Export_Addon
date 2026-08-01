@@ -30,13 +30,16 @@ OBJECT_ORIGIN_CORRECTION_RELEASE_PATH = (
 AXIS_PROJECTION_RELEASE_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.2.md"
 )
+AXIS_ACCEPTANCE_CORRECTION_RELEASE_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.3.md"
+)
 
 
-def test_current_release_uses_version_0552() -> None:
+def test_current_release_uses_version_0553() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.2"
+    assert manifest["version"] == "0.55.3"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -74,3 +77,12 @@ def test_axis_projection_slice_has_release_note() -> None:
     assert "six signed-axis" in release_note
     assert "POSITIVE_Z" in release_note
     assert "Active Camera" in release_note
+
+
+def test_axis_projection_acceptance_correction_has_release_note() -> None:
+    release_note = AXIS_ACCEPTANCE_CORRECTION_RELEASE_PATH.read_text(encoding="utf-8")
+
+    assert "0.55.3" in release_note
+    assert "mathutils.Matrix @ Vector" in release_note
+    assert "2.38418579e-7" in release_note
+    assert "Production axis projection" in release_note
