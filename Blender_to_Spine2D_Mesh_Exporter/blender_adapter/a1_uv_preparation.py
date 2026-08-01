@@ -14,6 +14,7 @@ from ..application import (
     build_a1_texturing_topology,
     propagate_texturing_uv_to_regions,
 )
+from ..domain.projection import A1ProjectionDirection
 from ..domain.uv import UvRangePolicy, UvUnwrapResult, inspect_uv_range
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
@@ -77,7 +78,20 @@ def prepare_a1_uv(
         raise TypeError("source must be A1SourceGeometryPreparationResult")
     stage = A1SingleObjectStage.BUILD_TEXTURING_TOPOLOGY
     warnings = source.warnings
-    statistics = source.statistics
+    # The object-bake attachment projector always converts internal Mesh Y to Spine Y
+    # by negating it. Active Camera retains that established projector and stores
+    # camera-projected local Y with the opposite sign beforehand. Override the early
+    # source-stage diagnostic so final pipeline statistics describe the complete route.
+    statistics = freeze_statistics(
+        source.statistics,
+        {
+            "attachment_invert_y": 1,
+            "camera_attachment_y_compensated": int(
+                source.settings.projection_direction
+                is A1ProjectionDirection.ACTIVE_CAMERA
+            ),
+        },
+    )
     try:
         # A temporary object linked to one Scene cannot be activated through a ViewLayer
         # owned by another Scene. Reject that ambiguity before allocating Blender data.
