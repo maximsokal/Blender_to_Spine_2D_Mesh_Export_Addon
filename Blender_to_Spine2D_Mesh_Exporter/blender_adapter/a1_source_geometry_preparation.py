@@ -24,6 +24,7 @@ from ..domain.geometry import (
     LineageSeverity,
     MeshSnapshot,
     normalize_mesh_snapshot_world_transform,
+    project_a1_mesh_snapshot_axis,
 )
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
@@ -323,6 +324,7 @@ def prepare_a1_source_geometry(
                 "source_uv_boundary_configured_layer": (
                     settings.source_uv_boundary_layer_name or ""
                 ),
+                "projection_direction": settings.projection_direction.value,
                 "include_control_icons": int(settings.include_control_icons),
                 "include_preview_animation": int(settings.include_preview_animation),
                 "render_engine": renderer.blender_engine,
@@ -358,6 +360,12 @@ def prepare_a1_source_geometry(
                 ),
             )
 
+        axis_projection = project_a1_mesh_snapshot_axis(
+            source_snapshot,
+            settings.projection_direction,
+        )
+        source_snapshot = axis_projection.snapshot
+
         resolved_source_uv_boundary_layer = _resolve_source_uv_boundary_layer(
             source_snapshot,
             settings,
@@ -381,6 +389,10 @@ def prepare_a1_source_geometry(
                 "object_world_translation_x": world_transform.translation[0],
                 "object_world_translation_y": world_transform.translation[1],
                 "object_world_translation_z": world_transform.translation[2],
+                "axis_projection_applied": int(axis_projection.changed),
+                "projected_origin_u": axis_projection.projected_origin.u,
+                "projected_origin_v": axis_projection.projected_origin.v,
+                "projected_origin_depth": axis_projection.projected_origin.depth,
                 "source_uv_boundary_resolved_layer": (
                     resolved_source_uv_boundary_layer or ""
                 ),
@@ -410,6 +422,7 @@ def prepare_a1_source_geometry(
         logger.debug(
             "Prepared source geometry for %s: vertices=%d faces=%d regions=%d "
             "world_transform_baked=%s determinant=%s mirrored=%s "
+            "projection_direction=%s projected_origin=(%s, %s, %s) "
             "source_uv_boundary_mode=%s source_uv_boundary_layer=%s "
             "ignored_malformed_uv=%s",
             object_id,
@@ -419,6 +432,10 @@ def prepare_a1_source_geometry(
             world_transform.changed,
             world_transform.determinant,
             world_transform.mirrored,
+            settings.projection_direction.value,
+            axis_projection.projected_origin.u,
+            axis_projection.projected_origin.v,
+            axis_projection.projected_origin.depth,
             settings.source_uv_boundary_mode.value,
             resolved_source_uv_boundary_layer,
             uv_report.ignored_malformed_layer_names,
