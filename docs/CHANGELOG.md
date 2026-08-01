@@ -4,7 +4,55 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.1 is the current release candidate. It keeps the validated Spine 4.1.24 scale topology and includes the Blender 5.2 headless acceptance correction documented in `releases/0.55.1.md`.
+Version 0.55.5 is the current release candidate. It preserves the validated signed-axis single-object projection behavior from 0.55.2/0.55.3 and corrects the appended-settings and public-documentation release contracts discovered by the complete Python suite.
+
+## [0.55.5] - 2026-08-01
+
+### Fixed
+
+- The positional-layout regression now includes the appended `projection_direction` field after `rig_setup_pose_mode` instead of treating the older six-field suffix as permanent.
+- Public documentation now uses the same current version as `blender_manifest.toml` across the documentation index, installation guide, testing guide, and changelog.
+- Release validation no longer stops after the signed-axis Blender acceptance because of stale version documentation.
+
+### Unchanged
+
+- Signed-axis geometry projection, Object Origin placement, depth groups, source-object immutability, UV processing, Spine rigs, Camera Projection, standalone composition, connected composition, and Spine codecs are unchanged.
+- `+Z` remains the compatibility default until the public projection-direction UI slice is implemented.
+
+## [0.55.4] - 2026-08-01
+
+### Fixed
+
+- The 0.55.3 release-note test normalizes case, whitespace, and hyphenation before checking semantic statements.
+- Release-contract wording no longer depends on one exact contiguous phrase.
+
+### Unchanged
+
+- Production axis projection and the Blender headless worker are unchanged.
+
+## [0.55.3] - 2026-08-01
+
+### Fixed
+
+- The signed-axis Blender acceptance calculates independent expected positions from captured Mesh and `matrix_world` values instead of mixing Python-float production math with `mathutils.Matrix @ Vector` float32 intermediates.
+- The report records maximum vertex, Object Origin, and main-bone deltas for all six directions.
+
+### Unchanged
+
+- Production signed-axis projection introduced in 0.55.2 is unchanged.
+
+## [0.55.2] - 2026-08-01
+
+### Added
+
+- Blender-independent signed-axis projection contracts for `+X`, `-X`, `+Y`, `-Y`, `+Z`, and `-Z`.
+- Single-object Normal - UV Segments projection of vertices, normals, face normals, depth groups, and Blender Object Origin into canonical `U/V/D` space.
+- Pure and Blender 5.2 headless regressions for all six directions.
+
+### Changed
+
+- `A1SingleObjectExportSettings` carries an appended typed `projection_direction` field.
+- `+Z` remains the exact default compatibility path.
 
 ## [0.55.1] - 2026-07-31
 
