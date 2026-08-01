@@ -36,6 +36,9 @@ AXIS_ACCEPTANCE_CORRECTION_RELEASE_PATH = (
 RELEASE_CONTRACT_CORRECTION_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.4.md"
 )
+PROJECTION_CONTRACT_CORRECTION_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.5.md"
+)
 
 
 def _normalized_prose(value: str) -> str:
@@ -46,11 +49,11 @@ def _normalized_prose(value: str) -> str:
     return " ".join(value.lower().replace("-", " ").split())
 
 
-def test_current_release_uses_version_0554() -> None:
+def test_current_release_uses_version_0555() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.4"
+    assert manifest["version"] == "0.55.5"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -109,3 +112,14 @@ def test_release_contract_correction_has_release_note() -> None:
     assert "exact contiguous phrase" in normalized_release_note
     assert "normalizes case and whitespace" in normalized_release_note
     assert "production code" in normalized_release_note
+
+
+def test_projection_contract_and_documentation_correction_has_release_note() -> None:
+    release_note = PROJECTION_CONTRACT_CORRECTION_PATH.read_text(encoding="utf-8")
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.5" in release_note
+    assert "projection_direction" in release_note
+    assert "final seven appended" in normalized_release_note
+    assert "public documentation" in normalized_release_note
+    assert "production code changed" in normalized_release_note
