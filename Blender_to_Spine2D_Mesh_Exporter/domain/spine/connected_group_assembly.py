@@ -40,6 +40,7 @@ from .connected_group_validation import (
 from .legacy_profile import LegacyRigProfile
 from .legacy_rig_scale import calculate_uniform_scale
 from .model import Bone, SpineDocument
+from .object_block_draw_order import SpineObjectBlockDepth
 from .rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from .spine41_setup_safety import (
     Spine41RigSafetyError,
@@ -63,13 +64,12 @@ def apply_object_placements(
     placements: Tuple[ConnectedObjectPlacement, ...],
     uniform_scale: float,
 ) -> SpineDocument:
-    """Reparent object mains and preserve the historical full XY offset.
+    """Reparent object mains and preserve the complete projected XY offset.
 
-    The Legacy connected wrapper stores no setup translation on its generated Z layers,
-    so ``<prefix>_main`` receives the complete anchor-relative Blender X/Y translation,
-    exactly as ``main._apply_offsets`` did. The two-axis wrapper still has profile-owned
-    layer setup translation; that profile alone is compensated after global constraints
-    are assembled.
+    The Legacy connected wrapper stores no setup translation on its generated depth
+    layers, so ``<prefix>_main`` receives the complete anchor-relative projected U/V
+    translation. The two-axis wrapper has profile-owned layer setup translation; that
+    profile is compensated after global constraints are assembled.
     """
 
     placement_by_main = {
@@ -270,11 +270,25 @@ def build_connected_group_document(
     profile: LegacyRigProfile | None = None,
     *,
     spine_target: object = DEFAULT_SPINE_JSON_TARGET,
+    object_block_depths: Tuple[SpineObjectBlockDepth, ...] | None = None,
 ) -> ConnectedGroupBuildResult:
-    """Compose A1 documents under one target-aware connected wrapper."""
+    """Compose A1 documents under one target-aware connected wrapper.
+
+    ``world_position`` owns projected Object Origin placement and layer grouping.
+    ``object_block_depths`` independently owns nearest-vertex setup slot order.
+    """
 
     if not isinstance(settings, ConnectedGroupSettings):
         raise TypeError("settings must be ConnectedGroupSettings")
+    if object_block_depths is not None:
+        if not isinstance(object_block_depths, tuple) or not object_block_depths:
+            raise ValueError("object_block_depths must be a non-empty tuple or None")
+        if not all(
+            isinstance(item, SpineObjectBlockDepth) for item in object_block_depths
+        ):
+            raise TypeError(
+                "object_block_depths must contain SpineObjectBlockDepth values"
+            )
     resolved_profile = LegacyRigProfile() if profile is None else profile
     if not isinstance(resolved_profile, LegacyRigProfile):
         raise TypeError("profile must be LegacyRigProfile")
@@ -355,6 +369,8 @@ def build_connected_group_document(
         composition.document,
         normalized_objects,
         placements,
+        object_block_depths=object_block_depths,
+        depth_tolerance=settings.z_tolerance,
     )
     placed_document = apply_object_placements(
         draw_order_document,
