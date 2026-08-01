@@ -113,7 +113,9 @@ def test_projected_object_analysis_keeps_origin_geometry_bounds_and_slots_separa
         analysis.projected_origin_depth,
     ) == (10.0, 20.0, 30.0)
     assert analysis.nearest_vertex_index == 1
-    assert analysis.nearest_vertex_world_position == (14.0, 17.0, 33.0)
+    # Active Camera stores local Mesh Y reflected for the downstream attachment
+    # projector. The analysis restores the true projected world V: 20 - (-3) = 23.
+    assert analysis.nearest_vertex_world_position == (14.0, 23.0, 33.0)
     assert analysis.nearest_vertex_depth == 33.0
     assert analysis.farthest_vertex_index == 0
     assert analysis.farthest_vertex_depth == 28.0
@@ -124,7 +126,7 @@ def test_projected_object_analysis_keeps_origin_geometry_bounds_and_slots_separa
         analysis.projected_bounds.maximum_v,
         analysis.projected_bounds.minimum_depth,
         analysis.projected_bounds.maximum_depth,
-    ) == (8.0, 14.0, 17.0, 25.0, 28.0, 33.0)
+    ) == (8.0, 14.0, 15.0, 23.0, 28.0, 33.0)
     assert analysis.owned_slot_names == ("Projected_0", "Projected_1")
     assert analysis.block_depth.component_id == "component"
     assert analysis.block_depth.source_input_index == 2
