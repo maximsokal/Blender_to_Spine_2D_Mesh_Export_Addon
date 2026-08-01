@@ -4,7 +4,28 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.6 is the current release candidate. It extends the validated signed-axis projection foundation to standalone multi-object setup draw order while keeping Camera Projection, connected, mixed, weighted-mesh, and rig behavior unchanged.
+Version 0.55.7 is the current release candidate. It adds typed Active Camera projection for Normal - UV Segments single-object and standalone preparation while keeping the public UI, rendered Camera Projection, connected assembly, mixed assembly, and Spine codecs unchanged.
+
+## [0.55.7] - 2026-08-01
+
+### Added
+
+- A Blender-independent Perspective/Orthographic active-camera frame using export texture dimensions.
+- Full evaluated world-geometry and Blender Object Origin projection into centred camera-screen pixels.
+- Camera-local nearest/farthest vertex depth for standalone object-block draw order.
+- Pure and Blender 5.2 headless regressions for camera placement, out-of-frame geometry, near-plane rejection, source immutability, and camera/render-state immutability.
+
+### Changed
+
+- Typed `ACTIVE_CAMERA` Normal - UV Segments requests retain ordinary UV segmentation, object baking, separate textures, independent rigs, and object controls.
+- Standalone Active Camera slots use the shared complete object-block draw-order planner.
+- The established object-bake attachment Y conversion is retained and explicitly compensated by the camera-projected snapshot.
+
+### Limitations
+
+- `+Z` remains the compatibility default and the public projection dropdown is not registered yet.
+- Connected and mixed Active Camera requests remain fail-closed until their hierarchy and placement normalization slice.
+- Existing rendered Camera Projection, crop/contour logic, grouped flattening, connected/mixed composition, and Spine codecs are unchanged.
 
 ## [0.55.6] - 2026-08-01
 
