@@ -17,6 +17,7 @@ from ..application import (
     ExportIssue,
     build_a1_z_group_assignment,
     prepare_a1_geometry_regions,
+    project_a1_prepared_geometry_camera,
     resolve_a1_names,
     resolve_a1_output_paths,
 )
@@ -356,6 +357,8 @@ def prepare_a1_source_geometry(
         prefix, _ = resolve_a1_names(object_id, settings)
         output_paths = resolve_a1_output_paths(object_id, settings)
         renderer = render_engine_contract_from_execution(settings.bake_execution)
+        geometry_settings = settings.resolved_geometry_settings()
+        geometry: A1GeometryPreparationResult | None = None
         statistics = freeze_statistics(
             {
                 "source_object": object_id,
@@ -427,6 +430,7 @@ def prepare_a1_source_geometry(
                 "active_camera_type": "",
                 "active_camera_clip_start": 0.0,
                 "active_camera_clip_end": 0.0,
+                "active_camera_preprojection_triangulation": 0,
                 "projection_canvas_width": settings.export.texture_width,
                 "projection_canvas_height": settings.export.texture_height,
                 "attachment_invert_y": 1,
@@ -436,6 +440,16 @@ def prepare_a1_source_geometry(
                 raise ValueError(
                     "ACTIVE_CAMERA projection lost its evaluated Scene context"
                 )
+
+            # Perspective U/V/depth projection is nonlinear. A valid planar source
+            # n-gon can become non-planar in retained projected 3D coordinates, so
+            # segmentation, decomposition and strict triangulation must finish while
+            # the geometry is still in normalized world space.
+            geometry = prepare_a1_geometry_regions(
+                source_snapshot,
+                geometry_settings,
+            )
+
             frame = resolve_a1_active_camera_projection_frame(
                 resolved_scene,
                 texture_width=settings.export.texture_width,
@@ -453,6 +467,11 @@ def prepare_a1_source_geometry(
                 uniform_scale=uniform_scale,
             )
             source_snapshot = camera_projection.snapshot
+            geometry = project_a1_prepared_geometry_camera(
+                geometry,
+                frame,
+                uniform_scale=uniform_scale,
+            )
             projected_origin = camera_projection.projected_origin
             projection_statistics = {
                 "projection_kind": "ACTIVE_CAMERA",
@@ -462,6 +481,7 @@ def prepare_a1_source_geometry(
                 "active_camera_type": frame.kind.value,
                 "active_camera_clip_start": frame.clip_start,
                 "active_camera_clip_end": frame.clip_end,
+                "active_camera_preprojection_triangulation": 1,
                 "projection_canvas_width": frame.texture_width,
                 "projection_canvas_height": frame.texture_height,
                 "attachment_invert_y": 0,
@@ -521,10 +541,11 @@ def prepare_a1_source_geometry(
         )
 
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
-        geometry = prepare_a1_geometry_regions(
-            source_snapshot,
-            settings.resolved_geometry_settings(),
-        )
+        if geometry is None:
+            geometry = prepare_a1_geometry_regions(
+                source_snapshot,
+                geometry_settings,
+            )
         statistics = freeze_statistics(
             statistics,
             {
@@ -537,6 +558,7 @@ def prepare_a1_source_geometry(
             "Prepared source geometry for %s: vertices=%d faces=%d regions=%d "
             "world_transform_baked=%s determinant=%s mirrored=%s "
             "projection_direction=%s projection_kind=%s "
+            "preprojection_triangulation=%s "
             "projected_origin=(%s, %s, %s) nearest=(%s, %s) "
             "source_uv_boundary_mode=%s source_uv_boundary_layer=%s "
             "ignored_malformed_uv=%s",
@@ -549,6 +571,7 @@ def prepare_a1_source_geometry(
             world_transform.mirrored,
             settings.projection_direction.value,
             projection_statistics["projection_kind"],
+            projection_statistics["active_camera_preprojection_triangulation"],
             projected_origin.u,
             projected_origin.v,
             projected_origin.depth,
