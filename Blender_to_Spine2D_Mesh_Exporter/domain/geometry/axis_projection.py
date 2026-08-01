@@ -1,10 +1,11 @@
-"""Project one normalized MeshSnapshot into canonical signed-axis space.
+"""Project normalized Mesh snapshots into canonical signed-axis space.
 
 The input snapshot must already have its object linear world transform baked into vertex
 positions and normals by ``normalize_mesh_snapshot_world_transform``. Consequently its
-``world_matrix`` owns translation only. This module then applies the approved right-handed
-``U/V/D`` basis to both local geometry and Object Origin translation without mutating the
-source snapshot or Blender data.
+``world_matrix`` owns translation only. This module applies the approved right-handed
+``U/V/D`` basis to local geometry and Blender Object Origin translation without mutating
+the source snapshot or Blender data. It also resolves deterministic world-space projected
+depth bounds for later object-block draw-order planning.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from ..projection import (
     A1ProjectionDirection,
     resolve_a1_axis_projection_basis,
 )
+from .ids import VertexId
 from .model import Matrix4x4, MeshSnapshot, Vector3
 from .validator import MeshSnapshotValidator
 
@@ -45,6 +47,52 @@ class A1MeshAxisProjectionResult:
             raise TypeError("projected_origin must be A1ProjectedPoint")
         if not isinstance(self.changed, bool):
             raise TypeError("changed must be bool")
+
+
+@dataclass(frozen=True, slots=True)
+class A1ProjectedSnapshotDepthRange:
+    """World-space canonical depth bounds of one projected immutable snapshot.
+
+    Canonical depth increases toward the selected observer. Therefore
+    ``nearest_vertex_depth`` is the maximum world depth and
+    ``farthest_vertex_depth`` is the minimum world depth. Vertex identities are retained
+    for deterministic diagnostics and later camera-projection parity.
+    """
+
+    origin_depth: float
+    nearest_vertex_id: VertexId
+    nearest_vertex_depth: float
+    farthest_vertex_id: VertexId
+    farthest_vertex_depth: float
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "origin_depth",
+            "nearest_vertex_depth",
+            "farthest_vertex_depth",
+        ):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{field_name} must be a finite number")
+            if not isfinite(float(value)):
+                raise ValueError(f"{field_name} must be finite")
+        if not isinstance(self.nearest_vertex_id, VertexId):
+            raise TypeError("nearest_vertex_id must be VertexId")
+        if not isinstance(self.farthest_vertex_id, VertexId):
+            raise TypeError("farthest_vertex_id must be VertexId")
+        if self.farthest_vertex_depth > self.nearest_vertex_depth:
+            raise ValueError(
+                "farthest_vertex_depth cannot exceed nearest_vertex_depth"
+            )
+
+    @property
+    def depth_span(self) -> float:
+        return float(self.nearest_vertex_depth - self.farthest_vertex_depth)
+
+
+def _normalized_zero(value: float) -> float:
+    resolved = float(value)
+    return 0.0 if resolved == 0.0 else resolved
 
 
 def _translation_only_origin(matrix: Matrix4x4) -> Vector3:
@@ -87,9 +135,9 @@ def _translation_only_origin(matrix: Matrix4x4) -> Vector3:
             f"mismatches={mismatches}"
         )
     return (
-        0.0 if values[3] == 0.0 else values[3],
-        0.0 if values[7] == 0.0 else values[7],
-        0.0 if values[11] == 0.0 else values[11],
+        _normalized_zero(values[3]),
+        _normalized_zero(values[7]),
+        _normalized_zero(values[11]),
     )
 
 
@@ -113,6 +161,55 @@ def _translation_matrix(origin: A1ProjectedPoint) -> Matrix4x4:
         0.0,
         0.0,
         1.0,
+    )
+
+
+def calculate_a1_projected_snapshot_depth_range(
+    snapshot: MeshSnapshot,
+) -> A1ProjectedSnapshotDepthRange:
+    """Resolve nearest and farthest world depths from canonical projected geometry.
+
+    The snapshot must already be normalized and projected. Its local vertex Z component
+    is canonical depth relative to Blender Object Origin, while ``world_matrix[11]`` is
+    projected Object Origin depth. Ties select the lowest stable ``VertexId`` so reports
+    remain byte-deterministic.
+    """
+
+    if not isinstance(snapshot, MeshSnapshot):
+        raise TypeError("snapshot must be MeshSnapshot")
+    MeshSnapshotValidator().validate_or_raise(snapshot)
+    if not snapshot.vertices:
+        raise A1MeshAxisProjectionError(
+            "projected snapshot must contain at least one vertex"
+        )
+
+    origin_depth = float(_translation_only_origin(snapshot.world_matrix)[2])
+    records = tuple(
+        (
+            _normalized_zero(origin_depth + float(vertex.position[2])),
+            vertex.id,
+        )
+        for vertex in snapshot.vertices
+    )
+    if not all(isfinite(depth) for depth, _ in records):
+        raise A1MeshAxisProjectionError(
+            "projected snapshot contains non-finite world depth"
+        )
+
+    nearest_depth, nearest_vertex_id = min(
+        records,
+        key=lambda item: (-item[0], item[1].index),
+    )
+    farthest_depth, farthest_vertex_id = min(
+        records,
+        key=lambda item: (item[0], item[1].index),
+    )
+    return A1ProjectedSnapshotDepthRange(
+        origin_depth=_normalized_zero(origin_depth),
+        nearest_vertex_id=nearest_vertex_id,
+        nearest_vertex_depth=_normalized_zero(nearest_depth),
+        farthest_vertex_id=farthest_vertex_id,
+        farthest_vertex_depth=_normalized_zero(farthest_depth),
     )
 
 
@@ -179,5 +276,7 @@ def project_a1_mesh_snapshot_axis(
 __all__ = [
     "A1MeshAxisProjectionError",
     "A1MeshAxisProjectionResult",
+    "A1ProjectedSnapshotDepthRange",
+    "calculate_a1_projected_snapshot_depth_range",
     "project_a1_mesh_snapshot_axis",
 ]
