@@ -4,7 +4,22 @@ This changelog records public product releases. Internal development milestones 
 
 ## Current candidate status
 
-Version 0.55.16 is the current release candidate. It corrects the connected/mixed Blender acceptance oracle so valid two-axis setup hierarchies are evaluated through complete Spine affine inheritance. Production Slice 5 placement, hierarchy, layers, draw order, mixed interleaving, rigs, constraints, attachments, UV topology, texture baking, rendered Camera Projection, and public UI routing are unchanged from 0.55.15.
+Version 0.55.17 is the current release candidate. It corrects the route-aware architecture contract around the shared connected/mixed Spine setup oracle. The 0.55.16 workers and affine evaluator, plus all production Slice 5 placement, hierarchy, depth layers, draw order, mixed interleaving, rigs, constraints, attachments, UV topology, texture baking, rendered Camera Projection, and public UI routing remain unchanged.
+
+## [0.55.17] - 2026-08-01
+
+### Fixed
+
+- The connected/mixed worker architecture contract now distinguishes the shared oracle owner from its shared consumer.
+- The Active Camera worker must own the affine evaluator import and canonical setup-model constant.
+- The signed-axis worker must reuse `shared._setup_world_position` and `shared._SETUP_TRANSFORM_MODEL` without duplicating the model literal.
+- The obsolete translation-only setup helper remains forbidden.
+
+### Unchanged
+
+- Both Blender connected/mixed workers and `spine_setup_transform.py` are unchanged from 0.55.16.
+- Production Slice 5 code and all existing public behavior are unchanged.
+- Spine 4.1 connected and mixed restrictions remain fail-closed.
 
 ## [0.55.16] - 2026-08-01
 
@@ -385,7 +400,7 @@ Version 0.55.16 is the current release candidate. It corrects the connected/mixe
 
 - Segmented objects no longer export one independent Spine bone for every repeated copy of the same physical boundary vertex.
 - Weighted mesh bone indices are rebuilt after vertex-bone compaction instead of relying on pre-compaction contiguous ranges.
-- Older saved Scenes retain the compatibility rig profile when Blender RNA defaults are rebound during extension registration.
+- Older saved Scenes retain the compatibility 3-Axis Rotation profile when Blender RNA defaults are rebound during extension registration.
 
 ## [0.41.3] - 2026-07-28
 
@@ -431,7 +446,7 @@ Version 0.55.16 is the current release candidate. It corrects the connected/mixe
 
 - Exact post-assembly correspondence validation for projected UVs, triangle corners, physical hull data, and weighted vertex-bone indices.
 - Pure regressions for polygon-order-independent material binding and weighted-stream corruption.
-- A Blender 5.2 asymmetric material fixture whose geometry order and source-material UV order intentionally differ.
+- A Blender 5.2 asymmetric material fixture whose geometry order and UV order intentionally differ.
 
 ### Changed
 
