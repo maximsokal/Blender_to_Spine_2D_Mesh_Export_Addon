@@ -63,6 +63,9 @@ ACTIVE_CAMERA_TRIANGULATION_CORRECTION_PATH = (
 ACTIVE_CAMERA_DEPTH_NUMERIC_CORRECTION_PATH = (
     REPOSITORY_ROOT / "docs" / "releases" / "0.55.13.md"
 )
+SOURCE_STAGE_DECOMPOSITION_CORRECTION_PATH = (
+    REPOSITORY_ROOT / "docs" / "releases" / "0.55.14.md"
+)
 
 
 def _normalized_prose(value: str) -> str:
@@ -83,11 +86,11 @@ def _normalized_prose(value: str) -> str:
     )
 
 
-def test_current_release_uses_version_05513() -> None:
+def test_current_release_uses_version_05514() -> None:
     manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.13"
+    assert manifest["version"] == "0.55.14"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
@@ -267,3 +270,19 @@ def test_active_camera_depth_numeric_correction_has_release_note() -> None:
     assert "depth_tolerance remains 1e 8" in normalized_release_note
     assert "production active camera projection" in normalized_release_note
     assert "are unchanged" in normalized_release_note
+
+
+def test_source_stage_decomposition_correction_has_release_note() -> None:
+    release_note = SOURCE_STAGE_DECOMPOSITION_CORRECTION_PATH.read_text(
+        encoding="utf-8"
+    )
+    normalized_release_note = _normalized_prose(release_note)
+
+    assert "0.55.14" in release_note
+    assert "decomposed into explicit request" in normalized_release_note
+    assert "source uv boundary ownership is validated immediately" in normalized_release_note
+    assert "signed axis geometry remains prepared after projected z group assignment" in normalized_release_note
+    assert "active camera segmentation" in normalized_release_note
+    assert "route aware" in normalized_release_note
+    assert "compensate_depth_setup_y" in release_note
+    assert "tolerances remain unchanged" in normalized_release_note
