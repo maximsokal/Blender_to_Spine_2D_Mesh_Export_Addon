@@ -14,6 +14,8 @@ from ..domain.spine import (
     apply_attachment_sequence_animations,
     build_legacy_mesh_document,
 )
+from ..domain.spine.preprojected_setup import ensure_preprojected_screen_rig
+from ..domain.spine.rig_profiles import A1RigSetupPoseMode
 from ..domain.spine.rig_visuals import apply_rig_visual_options
 from ..domain.spine.vertex_bone_optimizer import optimize_shared_vertex_bones
 from ..domain.uv import UvRangePolicy, enforce_uv_range
@@ -147,18 +149,23 @@ def _compensate_projection_depth_setup_y(
     projection: A1AttachmentProjectionResult,
     rig: LegacyRigBuildResult,
 ) -> A1AttachmentProjectionResult:
-    """Remove each generated depth parent's setup Y from its child vertex bone.
+    """Remove each neutral screen rig depth-parent Y from its child vertex bone.
 
-    The adjustment is applied after geometric projection and hull construction. Therefore
-    physical screen-space topology remains based on the camera-projected Mesh X/Y, while
-    the final Spine hierarchy evaluates to the same screen Y after the depth parent is
-    applied. Axis projections keep their historical unadjusted request path.
+    Camera-projected X/Y already represent final screen-space coordinates. The dedicated
+    ``PREPROJECTED_SCREEN`` rig keeps every setup transform constraint neutral, so the
+    only remaining setup translation contributed by a depth parent is its explicit Y.
+    Subtracting that value from the child preserves the exact camera-screen setup pose
+    while retaining depth data for later interactive controls.
     """
 
     if not isinstance(projection, A1AttachmentProjectionResult):
         raise TypeError("projection must be A1AttachmentProjectionResult")
     if not isinstance(rig, LegacyRigBuildResult):
         raise TypeError("rig must be LegacyRigBuildResult")
+    if rig.request.setup_pose_mode is not A1RigSetupPoseMode.PREPROJECTED_SCREEN:
+        raise A1DocumentAssemblyError(
+            "Active Camera depth compensation requires PREPROJECTED_SCREEN setup"
+        )
 
     offset_by_group_index = {
         group.index: float(group.y_offset_pixels) for group in rig.info.z_groups
@@ -211,18 +218,24 @@ def assemble_a1_document(
         raise TypeError("region_snapshots must contain MeshSnapshot values")
     if not isinstance(settings, A1DocumentAssemblySettings):
         raise TypeError("settings must be A1DocumentAssemblySettings")
-    if settings.prefix.strip() != rig.request.prefix.strip():
+
+    resolved_rig = (
+        ensure_preprojected_screen_rig(rig)
+        if settings.compensate_depth_setup_y
+        else rig
+    )
+    if settings.prefix.strip() != resolved_rig.request.prefix.strip():
         raise A1DocumentAssemblyError(
             f"Assembly prefix '{settings.prefix}' does not match rig prefix "
-            f"'{rig.request.prefix}'"
+            f"'{resolved_rig.request.prefix}'"
         )
-    if tuple(rig.request.z_groups) != tuple(z_groups.groups):
+    if tuple(resolved_rig.request.z_groups) != tuple(z_groups.groups):
         raise A1DocumentAssemblyError(
             "Rig Z groups do not match the source-lineage Z assignment plan"
         )
 
     visible_region_snapshots = _xy_visible_region_snapshots(
-        rig,
+        resolved_rig,
         region_snapshots,
         settings,
     )
@@ -237,10 +250,13 @@ def assemble_a1_document(
             epsilon=settings.uv_range_epsilon,
         )
         segment_index = settings.segment_index_base + region_offset
-        segment_name = rig.profile.segment_slot(settings.prefix, segment_index)
+        segment_name = resolved_rig.profile.segment_slot(
+            settings.prefix,
+            segment_index,
+        )
         projection = project_triangulated_disk_attachment(
             snapshot,
-            rig,
+            resolved_rig,
             A1AttachmentProjectionSettings(
                 slot_name=segment_name,
                 attachment_name=segment_name,
@@ -257,13 +273,16 @@ def assemble_a1_document(
             ),
         )
         if settings.compensate_depth_setup_y:
-            projection = _compensate_projection_depth_setup_y(projection, rig)
+            projection = _compensate_projection_depth_setup_y(
+                projection,
+                resolved_rig,
+            )
         projections.append(projection)
 
     resolved_projections = tuple(projections)
     try:
         document_build = build_legacy_mesh_document(
-            rig,
+            resolved_rig,
             tuple(projection.request for projection in resolved_projections),
             skeleton_metadata=skeleton_metadata,
         )
@@ -278,7 +297,7 @@ def assemble_a1_document(
         document = apply_rig_visual_options(
             document_build.document,
             prefix=settings.prefix,
-            rig_profile=rig.profile.profile_id,
+            rig_profile=resolved_rig.profile.profile_id,
             include_control_icons=settings.include_control_icons,
             include_preview_animation=settings.include_preview_animation,
         )
@@ -290,7 +309,7 @@ def assemble_a1_document(
         ) from exc
     return A1DocumentAssemblyResult(
         settings=settings,
-        rig=rig,
+        rig=resolved_rig,
         z_groups=z_groups,
         projections=resolved_projections,
         document_build=document_build,
