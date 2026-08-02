@@ -103,6 +103,50 @@ def _source_uv_integrity_guard(
             raise wrapped from mutation_error
 
 
+def _build_prepared_object(
+    source: Any,
+    uv: Any,
+    texture: Any,
+    document: Any,
+    *,
+    context: Any | None,
+    scene: Any | None,
+    warnings: Tuple[ExportIssue, ...],
+    statistics: Mapping[str, StatisticsValue],
+) -> PreparedA1Object:
+    """Build the immutable stage product while preserving opaque unit-test doubles."""
+
+    assembly = document.document_assembly
+    prepared_rig = (
+        assembly.rig
+        if isinstance(assembly, A1DocumentAssemblyResult)
+        else document.rig
+    )
+    return PreparedA1Object(
+        source_object=source.source_object,
+        object_id=source.object_id,
+        prefix=source.prefix,
+        settings=source.settings,
+        output_paths=source.output_paths,
+        source_snapshot=source.source_snapshot,
+        z_groups=source.z_groups,
+        geometry=source.geometry,
+        texturing_topology=uv.texturing_topology,
+        unwrap_result=uv.unwrap_result,
+        uv_regions=uv.uv_regions,
+        material_analysis=texture.material_analysis,
+        bake_plan=texture.bake_plan,
+        rig=prepared_rig,
+        document_assembly=assembly,
+        warnings=warnings,
+        statistics=statistics,
+        finalization_context=A1BlenderFinalizationContext(
+            context=context,
+            scene=scene,
+        ),
+    )
+
+
 def prepare_a1_object(
     source_obj: Any,
     settings: A1SingleObjectExportSettings,
@@ -120,8 +164,6 @@ def prepare_a1_object(
     try:
         if not isinstance(settings, A1SingleObjectExportSettings):
             raise TypeError("settings must be A1SingleObjectExportSettings")
-        # A registered codec is only the schema boundary. The selected target must also
-        # accept this rig profile for a single-object topology before Blender data is read.
         require_spine_json_export_capability(
             settings.export.spine_target,
             settings.export.rig_profile,
@@ -153,37 +195,16 @@ def prepare_a1_object(
             document = prepare_a1_document(texture)
             statistics, warnings = document.statistics, document.warnings
 
-            # Production returns a typed assembly whose rig may have been rebuilt into
-            # PREPROJECTED_SCREEN setup. Unit stage doubles intentionally keep the
-            # assembly opaque, so the documented stage-level ``document.rig`` remains
-            # the compatibility fallback for those tests.
-            prepared_rig = document.rig
-            if isinstance(document.document_assembly, A1DocumentAssemblyResult):
-                prepared_rig = document.document_assembly.rig
-
             stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
-            prepared = PreparedA1Object(
-                source_object=source.source_object,
-                object_id=source.object_id,
-                prefix=source.prefix,
-                settings=source.settings,
-                output_paths=source.output_paths,
-                source_snapshot=source.source_snapshot,
-                z_groups=source.z_groups,
-                geometry=source.geometry,
-                texturing_topology=uv.texturing_topology,
-                unwrap_result=uv.unwrap_result,
-                uv_regions=uv.uv_regions,
-                material_analysis=texture.material_analysis,
-                bake_plan=texture.bake_plan,
-                rig=prepared_rig,
-                document_assembly=document.document_assembly,
+            prepared = _build_prepared_object(
+                source,
+                uv,
+                texture,
+                document,
+                context=context,
+                scene=scene,
                 warnings=warnings,
                 statistics=statistics,
-                finalization_context=A1BlenderFinalizationContext(
-                    context=context,
-                    scene=scene,
-                ),
             )
             _progress(progress_callback, 100, stage, object_id)
             return prepared
