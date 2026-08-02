@@ -338,6 +338,7 @@ def apply_grouped_camera_overlay(
     result_document = apply_attachment_sequence_animations(
         result_document,
         slot_names=(slot_name,),
+        legacy_per_frame=True,
     )
     return GroupedCameraOverlayResult(
         document=result_document,
