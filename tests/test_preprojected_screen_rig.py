@@ -70,7 +70,16 @@ def _bone_by_name(rig, name: str):
     return next(bone for bone in rig.bones if bone.name == name)
 
 
-def test_preprojected_setup_places_object_under_camera_zero() -> None:
+def _camera_base_world_position(rig) -> tuple[float, float]:
+    base = _bone_by_name(rig, rig.info.base_bone_name)
+    group = rig.info.z_groups[0]
+    return (
+        float(base.x or 0.0),
+        float(group.y_offset_pixels) + float(base.y or 0.0),
+    )
+
+
+def test_preprojected_setup_places_object_below_camera_orbital_layers() -> None:
     historical = _two_axis(A1RigSetupPoseMode.PRESERVE_COMPOSITION)
     screen = _two_axis(A1RigSetupPoseMode.PREPROJECTED_SCREEN)
 
@@ -81,59 +90,61 @@ def test_preprojected_setup_places_object_under_camera_zero() -> None:
     historical_base = _bone_by_name(historical, historical.info.base_bone_name)
     screen_main = _bone_by_name(screen, screen.info.main_bone_name)
     screen_base = _bone_by_name(screen, screen.info.base_bone_name)
+    screen_group = screen.info.z_groups[0]
 
     assert historical_main.x == 13.0
     assert historical_main.y == -7.0
     assert historical_base.x is None
     assert historical_base.y is None
 
-    assert screen_main.x == 0.0
-    assert screen_main.y == 0.0
-    assert screen_base.x == 13.0
-    assert screen_base.y == -7.0
+    assert (screen_main.x, screen_main.y) == (0.0, 0.0)
+    assert screen_base.parent == screen_group.bone_name
+    assert _camera_base_world_position(screen) == (13.0, -7.0)
     assert len(screen.info.z_groups) == 1
 
 
-def test_preprojected_setup_preserves_live_constraint_topology() -> None:
+def test_preprojected_setup_preserves_constraint_schedule_but_localizes_scale() -> None:
     historical = _two_axis(A1RigSetupPoseMode.PRESERVE_COMPOSITION)
     screen = _two_axis(A1RigSetupPoseMode.PREPROJECTED_SCREEN)
 
     assert historical.ik == screen.ik
     assert tuple(item.order for item in screen.transform) == (0, 4, 2, 3)
-    for historical_constraint, screen_constraint in zip(
-        historical.transform,
-        screen.transform,
-        strict=True,
-    ):
-        assert historical_constraint.name == screen_constraint.name
-        assert historical_constraint.order == screen_constraint.order
-        assert historical_constraint.bones == screen_constraint.bones
-        assert historical_constraint.target == screen_constraint.target
+
+    historical_by_order = _constraint_by_order(historical)
+    screen_by_order = _constraint_by_order(screen)
+    for order in (0, 4, 3):
+        assert screen_by_order[order].name == historical_by_order[order].name
+        assert screen_by_order[order].target == historical_by_order[order].target
+        assert screen_by_order[order].bones == historical_by_order[order].bones
+
+    assert screen_by_order[2].target == historical_by_order[2].target
+    assert screen_by_order[2].bones == (screen.info.base_bone_name,)
+    assert historical_by_order[2].bones != screen_by_order[2].bones
 
 
 def test_perspective_layer_keeps_whole_object_depth_scale() -> None:
-    screen = _constraint_by_order(
-        _two_axis(
-            A1RigSetupPoseMode.PREPROJECTED_SCREEN,
-            camera_kind=A1CameraLayerProjectionKind.PERSPECTIVE,
-        )
+    rig = _two_axis(
+        A1RigSetupPoseMode.PREPROJECTED_SCREEN,
+        camera_kind=A1CameraLayerProjectionKind.PERSPECTIVE,
     )
+    screen = _constraint_by_order(rig)
 
     assert screen[0].extras["rotation"] == 0.0
     assert screen[4].extras["rotation"] == 0.0
+    assert screen[2].bones == (rig.info.base_bone_name,)
     assert screen[3].extras["x"] == 0.0
     assert screen[3].extras["scaleX"] == 0.0
     assert "mixScaleX" not in screen[3].extras
 
 
 def test_orthographic_layer_disables_automatic_depth_scale() -> None:
-    screen = _constraint_by_order(
-        _two_axis(
-            A1RigSetupPoseMode.PREPROJECTED_SCREEN,
-            camera_kind=A1CameraLayerProjectionKind.ORTHOGRAPHIC,
-        )
+    rig = _two_axis(
+        A1RigSetupPoseMode.PREPROJECTED_SCREEN,
+        camera_kind=A1CameraLayerProjectionKind.ORTHOGRAPHIC,
     )
+    screen = _constraint_by_order(rig)
 
+    assert screen[2].bones == (rig.info.base_bone_name,)
     assert screen[3].extras["x"] == 0.0
     assert screen[3].extras["scaleX"] == 0.0
     assert screen[3].extras["mixScaleX"] == 0
@@ -180,6 +191,7 @@ def test_helper_can_collapse_rendered_source_depths_to_camera_origin() -> None:
     )
     assert len(result.info.z_groups) == 1
     assert result.info.z_groups[0].z_value == -6.5
+    assert _camera_base_world_position(result) == (21.0, 9.0)
     result.validate()
 
 
