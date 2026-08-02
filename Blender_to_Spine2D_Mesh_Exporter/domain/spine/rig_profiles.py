@@ -29,19 +29,24 @@ class A1RigProfile(str, Enum):
 
 
 class A1RigSetupPoseMode(str, Enum):
-    """Control whether exported setup pose may be normalized for authoring.
+    """Control how generated controls and internal depth layers evaluate at setup.
 
     ``NORMALIZED_SINGLE`` is safe only when one object owns the whole Spine document.
     It keeps the visible main and X/Y controls neutral while moving the existing object
     placement into internal rig coordinates.
 
-    ``PRESERVE_COMPOSITION`` retains the historical object placement used by standalone
-    and connected multi-object composition so authored scene placement is never
-    flattened. Two-axis X/Y controls remain neutral in either setup-pose mode.
+    ``PRESERVE_COMPOSITION`` retains the historical model-space setup used by ordinary
+    Normal / UV Segments exports and connected composition.
+
+    ``PREPROJECTED_SCREEN`` is reserved for geometry that has already been projected to
+    final camera-screen X/Y. Its default transform-constraint offsets evaluate to an
+    identity screen-space pose while retaining the same live X/Y/Scale controls for later
+    authoring. It must not be selected for ordinary model-space geometry.
     """
 
     NORMALIZED_SINGLE = "NORMALIZED_SINGLE"
     PRESERVE_COMPOSITION = "PRESERVE_COMPOSITION"
+    PREPROJECTED_SCREEN = "PREPROJECTED_SCREEN"
 
 
 def resolve_a1_rig_profile(value: object) -> A1RigProfile:
