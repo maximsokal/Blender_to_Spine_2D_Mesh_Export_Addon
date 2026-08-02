@@ -93,6 +93,10 @@ from .rig_visuals import (
     build_two_axis_scale_preview_animation,
 )
 from .serializer import SpineSerializer
+from .texture_sequence_animation import (
+    TextureSequenceFinalizationError,
+    finalize_texture_sequence_animation,
+)
 from .two_axis_scale_profile import TwoAxisScaleRigProfile
 from .two_axis_scale_rig import (
     TwoAxisScaleRigLayout,
@@ -107,6 +111,7 @@ from .version_target import (
     SpineJsonTarget,
     SpineJsonTargetUnavailableError,
     SpineJsonVersionDescriptor,
+    SpineTextureAnimationEncoding,
     require_spine_json_target_serializable,
     resolve_spine_json_exact_version,
     resolve_spine_json_target,
@@ -220,9 +225,11 @@ __all__ = [
     "SpineJsonTargetUnavailableError",
     "SpineJsonVersionDescriptor",
     "SpineSerializer",
+    "SpineTextureAnimationEncoding",
     "SpineValidationError",
     "SpineValidationIssue",
     "SpineValidator",
+    "TextureSequenceFinalizationError",
     "TransformConstraint",
     "TwoAxisScaleRigLayout",
     "TwoAxisScaleRigProfile",
@@ -251,6 +258,7 @@ __all__ = [
     "compose_spine_documents",
     "decode_weighted_vertices",
     "encode_weighted_vertices",
+    "finalize_texture_sequence_animation",
     "require_spine_json_target_serializable",
     "resolve_a1_rig_profile",
     "resolve_spine_json_exact_version",
