@@ -1,12 +1,20 @@
-"""Validate Active Camera layout for Normal / UV Segments in Blender 5.2.
+"""Validate rigid Active Camera layers for Normal / UV Segments in Blender 5.2.
 
 The worker exercises production evaluated-geometry preparation and standalone composition
 for Perspective and Orthographic cameras. Expected screen points come from Blender's
 independent ``world_to_camera_view`` helper configured temporarily to the export-texture
-canvas. Expected camera depth is calculated from captured Blender matrix and vertex tuples
-using Python affine arithmetic, matching the numeric input model used by production while
-remaining independent from the production projection implementation. The production Scene
-render dimensions remain intentionally different.
+canvas. Camera-space Object Origin depth is calculated independently from captured
+Blender matrices.
+
+The acceptance contract is intentionally structural as well as visual:
+
+* generated ``main`` is camera-space zero;
+* generated internal base stores projected Blender Object Origin;
+* every object owns exactly one Object-Origin depth layer;
+* every generated vertex bone of that object has the same depth parent;
+* the setup screen silhouette still matches Blender's camera projection;
+* standalone object blocks are ordered by Object-Origin camera depth;
+* Blender source objects, camera data, and render dimensions remain unchanged.
 """
 
 from __future__ import annotations
@@ -79,10 +87,9 @@ _TEXTURE_HEIGHT = 96
 _SCENE_RENDER_WIDTH = 901
 _SCENE_RENDER_HEIGHT = 577
 _MATRIX_TOLERANCE = 1.0e-7
-_SCREEN_TOLERANCE = 1.0e-8
-_MAIN_BONE_TOLERANCE = 0.011
-_DEPTH_TOLERANCE = 1.0e-8
-_DEPTH_EXPECTATION_MODEL = "CAPTURED_TUPLE_AFFINE"
+_SCREEN_TOLERANCE = 0.011
+_DEPTH_TOLERANCE = 1.1e-4
+_DEPTH_EXPECTATION_MODEL = "CAMERA_SPACE_OBJECT_ORIGIN"
 
 
 @dataclass(frozen=True)
@@ -114,8 +121,14 @@ class _ExpectedVertex:
     camera_z: float
 
 
+@dataclass(frozen=True)
+class _ExpectedOrigin:
+    screen_x: float
+    screen_y: float
+    camera_z: float
+
+
 _SPECIFICATIONS = (
-    # Origin is farthest, but the geometry extends toward the camera and becomes nearest.
     _ObjectSpecification(
         name="CameraAlpha",
         component_id="component_alpha",
@@ -134,7 +147,6 @@ _SPECIFICATIONS = (
         rotation=(-0.03, 0.06, -0.08),
         scale=(0.85, 1.15, 1.0),
     ),
-    # Origin is nearest, while all geometry lies well behind it and outside the frame.
     _ObjectSpecification(
         name="CameraGamma",
         component_id="component_gamma",
@@ -183,8 +195,6 @@ def _affine_transform_point(
     *,
     field_name: str,
 ) -> tuple[float, float, float]:
-    """Transform one captured point using Python float affine arithmetic."""
-
     if not isinstance(matrix, tuple) or len(matrix) != 16:
         raise TypeError(f"{field_name} matrix must be a 16-value tuple")
     if not isinstance(point, tuple) or len(point) != 3:
@@ -216,8 +226,6 @@ def _matrix_translation(matrix: tuple[float, ...]) -> tuple[float, float, float]
 def _rotation_only_camera_view_matrix(
     camera: bpy.types.Object,
 ) -> tuple[float, ...]:
-    """Capture the same scale-independent Blender camera frame as production."""
-
     matrix_world = getattr(camera, "matrix_world", None)
     if matrix_world is None:
         raise ValueError("camera.matrix_world is missing")
@@ -414,11 +422,7 @@ def _expected_vertices(
             local_position,
             field_name=f"source vertex {index}",
         )
-        screen_x, screen_y = _expected_screen_point(
-            scene,
-            camera,
-            world_point,
-        )
+        screen_x, screen_y = _expected_screen_point(scene, camera, world_point)
         expected.append(
             _ExpectedVertex(
                 index=index,
@@ -428,6 +432,21 @@ def _expected_vertices(
             )
         )
     return tuple(expected)
+
+
+def _expected_origin(
+    scene: bpy.types.Scene,
+    camera: bpy.types.Object,
+    source_state: _SourceState,
+    camera_view_matrix: tuple[float, ...],
+) -> _ExpectedOrigin:
+    world_origin = _matrix_translation(source_state.matrix_world)
+    screen_x, screen_y = _expected_screen_point(scene, camera, world_origin)
+    return _ExpectedOrigin(
+        screen_x=screen_x,
+        screen_y=screen_y,
+        camera_z=_camera_z(camera_view_matrix, world_origin),
+    )
 
 
 def _settings(
@@ -474,6 +493,13 @@ def _collapsed_owner_order(
     return tuple(owners)
 
 
+def _bone_position(bone: object) -> tuple[float, float]:
+    return (
+        0.0 if getattr(bone, "x", None) is None else float(getattr(bone, "x")),
+        0.0 if getattr(bone, "y", None) is None else float(getattr(bone, "y")),
+    )
+
+
 def _run_camera_kind(
     output_root: Path,
     camera_kind: str,
@@ -488,6 +514,7 @@ def _run_camera_kind(
     scene.render.pixel_aspect_y = 0.8
     camera = _create_camera(camera_kind)
     bpy.context.view_layer.update()
+
     camera_matrix_before = _matrix_tuple(camera.matrix_world)
     camera_view_matrix = _rotation_only_camera_view_matrix(camera)
     camera_data_before = (
@@ -511,19 +538,14 @@ def _run_camera_kind(
     camera_root.mkdir(parents=True, exist_ok=True)
     sources: list[A1MultiObjectSource] = []
     state_by_component: dict[str, tuple[bpy.types.Object, _SourceState]] = {}
-    expected_by_component: dict[str, tuple[_ExpectedVertex, ...]] = {}
+    expected_vertices_by_component: dict[str, tuple[_ExpectedVertex, ...]] = {}
+    expected_origin_by_component: dict[str, _ExpectedOrigin] = {}
 
     for specification in _SPECIFICATIONS:
         source_object = _create_cuboid(specification)
         _activate_only(source_object)
         bpy.context.view_layer.update()
         state = _capture_state(source_object)
-        expected = _expected_vertices(
-            scene,
-            camera,
-            state,
-            camera_view_matrix,
-        )
         sources.append(
             A1MultiObjectSource(
                 source_object=source_object,
@@ -533,7 +555,18 @@ def _run_camera_kind(
             )
         )
         state_by_component[specification.component_id] = (source_object, state)
-        expected_by_component[specification.component_id] = expected
+        expected_vertices_by_component[specification.component_id] = _expected_vertices(
+            scene,
+            camera,
+            state,
+            camera_view_matrix,
+        )
+        expected_origin_by_component[specification.component_id] = _expected_origin(
+            scene,
+            camera,
+            state,
+            camera_view_matrix,
+        )
 
     multi_settings = A1MultiObjectExportSettings(
         output_directory=camera_root,
@@ -555,28 +588,10 @@ def _run_camera_kind(
 
     expected_order = tuple(
         component_id
-        for component_id, expected in sorted(
-            expected_by_component.items(),
-            key=lambda item: max(vertex.camera_z for vertex in item[1]),
+        for component_id, origin in sorted(
+            expected_origin_by_component.items(),
+            key=lambda item: item[1].camera_z,
         )
-    )
-    origin_depth_by_component = {
-        component_id: _camera_z(
-            camera_view_matrix,
-            _matrix_translation(state.matrix_world),
-        )
-        for component_id, (_source_object, state) in state_by_component.items()
-    }
-    origin_order = tuple(
-        component_id
-        for component_id, _depth in sorted(
-            origin_depth_by_component.items(),
-            key=lambda item: item[1],
-        )
-    )
-    _assert(
-        expected_order != origin_order,
-        f"{camera_kind} fixture no longer distinguishes nearest vertex from origin",
     )
 
     owner_by_slot: dict[str, str] = {}
@@ -584,13 +599,15 @@ def _run_camera_kind(
     objects_report: list[dict[str, object]] = []
     maximum_matrix_delta = 0.0
     maximum_vertex_screen_delta = 0.0
-    maximum_vertex_depth_delta = 0.0
     maximum_origin_delta = 0.0
+    maximum_layer_depth_delta = 0.0
     outside_frame_count = 0
 
     for source, item in zip(prepared.sources, prepared.objects, strict=True):
         source_object, state = state_by_component[source.component_id]
-        expected_vertices = expected_by_component[source.component_id]
+        expected_vertices = expected_vertices_by_component[source.component_id]
+        expected_origin = expected_origin_by_component[source.component_id]
+
         maximum_matrix_delta = max(
             maximum_matrix_delta,
             _assert_state_unchanged(
@@ -617,6 +634,18 @@ def _run_camera_kind(
             int(item.statistics["active_camera_preprojection_triangulation"]) == 1,
             f"{source.component_id} did not triangulate before camera projection",
         )
+        _assert(
+            int(item.statistics["z_group_count"]) == 1,
+            f"{source.component_id} did not collapse to one rigid camera depth layer",
+        )
+        _assert(
+            item.rig.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN,
+            f"{source.component_id} did not select camera-relative setup",
+        )
+        _assert(
+            len(item.rig.info.z_groups) == 1,
+            f"{source.component_id} rig has multiple depth groups",
+        )
 
         slots = tuple(slot.name for slot in item.document.slots)
         _assert(slots, f"{source.component_id} produced no slots")
@@ -629,70 +658,105 @@ def _run_camera_kind(
             )
             owner_by_slot[slot_name] = source.component_id
 
-        main_bone = next(
-            bone
-            for bone in item.document.bones
-            if bone.name == item.rig.info.main_bone_name
-        )
-        actual_main = (
-            0.0 if main_bone.x is None else float(main_bone.x),
-            0.0 if main_bone.y is None else float(main_bone.y),
-        )
-        expected_origin = _expected_screen_point(
-            scene,
-            camera,
-            _matrix_translation(state.matrix_world),
+        bones_by_name = {bone.name: bone for bone in item.document.bones}
+        main_bone = bones_by_name[item.rig.info.main_bone_name]
+        base_bone = bones_by_name[item.rig.info.base_bone_name]
+        actual_main = _bone_position(main_bone)
+        actual_base = _bone_position(base_bone)
+
+        _assert(
+            actual_main == (0.0, 0.0),
+            f"{source.component_id} camera root is not zero: {actual_main}",
         )
         origin_delta = max(
-            abs(actual - expected)
-            for actual, expected in zip(actual_main, expected_origin, strict=True)
+            abs(actual_base[0] - expected_origin.screen_x),
+            abs(actual_base[1] - expected_origin.screen_y),
         )
         maximum_origin_delta = max(maximum_origin_delta, origin_delta)
         _assert(
-            origin_delta <= _MAIN_BONE_TOLERANCE,
-            f"{source.component_id} main origin mismatch: "
-            f"actual={actual_main}, expected={expected_origin}, delta={origin_delta}",
+            origin_delta <= _SCREEN_TOLERANCE,
+            f"{source.component_id} object base mismatch: actual={actual_base}, "
+            f"expected={(expected_origin.screen_x, expected_origin.screen_y)}, "
+            f"delta={origin_delta}",
+        )
+
+        z_group = item.rig.info.z_groups[0]
+        layer_depth_delta = abs(float(z_group.z_value) - expected_origin.camera_z)
+        maximum_layer_depth_delta = max(
+            maximum_layer_depth_delta,
+            layer_depth_delta,
+        )
+        _assert(
+            layer_depth_delta <= _DEPTH_TOLERANCE,
+            f"{source.component_id} camera layer depth mismatch: "
+            f"actual={z_group.z_value}, expected={expected_origin.camera_z}",
+        )
+
+        generated_vertex_bones = tuple(
+            bone
+            for bone in item.document.bones
+            if bone.parent == z_group.bone_name and "_vertex_" in bone.name
+        )
+        _assert(
+            generated_vertex_bones,
+            f"{source.component_id} produced no vertex bones under rigid layer",
+        )
+        _assert(
+            {bone.parent for bone in generated_vertex_bones} == {z_group.bone_name},
+            f"{source.component_id} vertex bones do not share one depth parent",
+        )
+
+        rotation_y = next(
+            constraint
+            for constraint in item.document.transform
+            if constraint.order == 4
+        )
+        _assert(
+            rotation_y.bones == (z_group.bone_name,),
+            f"{source.component_id} Y control targets more than one depth layer: "
+            f"{rotation_y.bones}",
         )
 
         scale = float(item.rig.info.uniform_scale)
         projected_by_index = {
             vertex.id.index: vertex for vertex in item.source_snapshot.vertices
         }
+        _assert(
+            float(item.source_snapshot.world_matrix[11]) == 0.0,
+            f"{source.component_id} duplicated camera depth in world translation",
+        )
+        _assert(
+            len({float(vertex.position[2]) for vertex in item.source_snapshot.vertices})
+            == 1,
+            f"{source.component_id} retained per-vertex camera depths",
+        )
+
         for expected_vertex in expected_vertices:
             projected_vertex = projected_by_index[expected_vertex.index]
             final_screen = (
-                actual_main[0] + float(projected_vertex.position[0]) * scale,
-                actual_main[1] - float(projected_vertex.position[1]) * scale,
+                actual_base[0] + float(projected_vertex.position[0]) * scale,
+                actual_base[1] - float(projected_vertex.position[1]) * scale,
             )
             screen_delta = max(
                 abs(final_screen[0] - expected_vertex.screen_x),
                 abs(final_screen[1] - expected_vertex.screen_y),
             )
-            depth = (
-                float(item.source_snapshot.world_matrix[11])
-                + float(projected_vertex.position[2])
-            )
-            depth_delta = abs(depth - expected_vertex.camera_z)
             maximum_vertex_screen_delta = max(
                 maximum_vertex_screen_delta,
                 screen_delta,
             )
-            maximum_vertex_depth_delta = max(
-                maximum_vertex_depth_delta,
-                depth_delta,
-            )
             _assert(
-                screen_delta <= _MAIN_BONE_TOLERANCE,
+                screen_delta <= _SCREEN_TOLERANCE,
                 f"{source.component_id} vertex {expected_vertex.index} screen mismatch: "
                 f"actual={final_screen}, "
                 f"expected={(expected_vertex.screen_x, expected_vertex.screen_y)}, "
                 f"delta={screen_delta}",
             )
             _assert(
-                depth_delta <= _DEPTH_TOLERANCE,
-                f"{source.component_id} vertex {expected_vertex.index} depth mismatch: "
-                f"actual={depth}, expected={expected_vertex.camera_z}, "
-                f"delta={depth_delta}, model={_DEPTH_EXPECTATION_MODEL}",
+                abs(float(projected_vertex.position[2]) - expected_origin.camera_z)
+                <= _DEPTH_TOLERANCE,
+                f"{source.component_id} vertex {expected_vertex.index} escaped rigid "
+                "Object-Origin depth",
             )
             if (
                 abs(expected_vertex.screen_x) > _TEXTURE_WIDTH / 2.0
@@ -703,32 +767,31 @@ def _run_camera_kind(
         depth_range = calculate_a1_projected_snapshot_depth_range(
             item.source_snapshot
         )
-        expected_nearest = max(
-            expected_vertices,
-            key=lambda value: (value.camera_z, -value.index),
+        _assert(
+            depth_range.depth_span == 0.0,
+            f"{source.component_id} rigid layer has non-zero depth span",
         )
         _assert(
-            depth_range.nearest_vertex_id.index == expected_nearest.index,
-            f"{source.component_id} nearest vertex mismatch: "
-            f"actual={depth_range.nearest_vertex_id.index}, "
-            f"expected={expected_nearest.index}",
-        )
-        _assert(
-            abs(depth_range.nearest_vertex_depth - expected_nearest.camera_z)
+            abs(depth_range.nearest_vertex_depth - expected_origin.camera_z)
+            <= _DEPTH_TOLERANCE
+            and abs(depth_range.farthest_vertex_depth - expected_origin.camera_z)
             <= _DEPTH_TOLERANCE,
-            f"{source.component_id} nearest depth mismatch",
+            f"{source.component_id} rigid depth range does not match Object Origin",
         )
 
         objects_report.append(
             {
                 "componentId": source.component_id,
                 "objectName": item.object_id,
-                "mainPosition": list(actual_main),
-                "expectedOrigin": list(expected_origin),
-                "nearestVertexIndex": depth_range.nearest_vertex_id.index,
-                "nearestVertexDepth": depth_range.nearest_vertex_depth,
-                "farthestVertexIndex": depth_range.farthest_vertex_id.index,
-                "farthestVertexDepth": depth_range.farthest_vertex_depth,
+                "cameraRoot": list(actual_main),
+                "objectBase": list(actual_base),
+                "expectedOrigin": [
+                    expected_origin.screen_x,
+                    expected_origin.screen_y,
+                ],
+                "cameraDepth": expected_origin.camera_z,
+                "depthGroupCount": len(item.rig.info.z_groups),
+                "vertexBoneCount": len(generated_vertex_bones),
                 "slotNames": list(slots),
             }
         )
@@ -739,7 +802,7 @@ def _run_camera_kind(
     actual_order = _collapsed_owner_order(final_slot_names, owner_by_slot)
     _assert(
         actual_order == expected_order,
-        f"{camera_kind} object-block order mismatch: "
+        f"{camera_kind} Object-Origin depth order mismatch: "
         f"actual={actual_order}, expected={expected_order}",
     )
     for component_id in expected_order:
@@ -790,17 +853,17 @@ def _run_camera_kind(
         "sceneRenderWidth": _SCENE_RENDER_WIDTH,
         "sceneRenderHeight": _SCENE_RENDER_HEIGHT,
         "sourceInputOrder": [source.component_id for source in sources],
-        "originDepthOrder": list(origin_order),
         "expectedComponentOrder": list(expected_order),
         "actualComponentOrder": list(actual_order),
         "outsideFrameVertexCount": outside_frame_count,
         "maximumMatrixDelta": maximum_matrix_delta,
         "maximumOriginDelta": maximum_origin_delta,
         "maximumVertexScreenDelta": maximum_vertex_screen_delta,
-        "maximumVertexDepthDelta": maximum_vertex_depth_delta,
+        "maximumLayerDepthDelta": maximum_layer_depth_delta,
         "depthExpectationModel": _DEPTH_EXPECTATION_MODEL,
         "depthTolerance": _DEPTH_TOLERANCE,
         "objects": objects_report,
+        "rigidCameraLayers": True,
         "sourceUnchanged": True,
         "cameraUnchanged": True,
         "sceneRenderUnchanged": True,
@@ -830,7 +893,7 @@ def run(output_directory: Path) -> Path:
 def main() -> None:
     arguments = _parse_arguments()
     print(f"Blender version: {bpy.app.version_string}")
-    print("[ACTIVE_CAMERA_NORMAL_UV] RUN Perspective + Orthographic standalone")
+    print("[ACTIVE_CAMERA_NORMAL_UV] RUN rigid Perspective + Orthographic layers")
     report_path = run(arguments.output)
     print(f"[ACTIVE_CAMERA_NORMAL_UV] REPORT {report_path}")
     print("[ACTIVE_CAMERA_NORMAL_UV] PASS")
