@@ -1,4 +1,4 @@
-"""Blender 4.4 production tests for cropped B4 multi-object composition."""
+"""Blender 5.2 production tests for cropped camera-projection multi-object composition."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
 from Blender_to_Spine2D_Mesh_Exporter.application import (  # noqa: E402
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
-    ConnectedB4RenderPolicy,
+    ConnectedCameraRenderPolicy,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     A1MultiObjectSource,
@@ -162,8 +162,8 @@ def test_connected_multi_recomposes_cropped_projection_documents() -> None:
                 output_stem="ProjectionConnectedGroup",
                 mode=A1MultiObjectMode.CONNECTED,
                 anchor_component_id="connected_a",
-                connected_b4_render_policy=(
-                    ConnectedB4RenderPolicy.INDIVIDUAL_LAYERS
+                connected_camera_render_policy=(
+                    ConnectedCameraRenderPolicy.INDIVIDUAL_LAYERS
                 ),
             ),
         )
@@ -215,8 +215,8 @@ def test_mixed_export_recomposes_all_cropped_projection_documents() -> None:
                 output_stem="ProjectionMixedGroup",
                 mode=A1MultiObjectMode.MIXED,
                 anchor_component_id="mixed_connected_a",
-                connected_b4_render_policy=(
-                    ConnectedB4RenderPolicy.INDIVIDUAL_LAYERS
+                connected_camera_render_policy=(
+                    ConnectedCameraRenderPolicy.INDIVIDUAL_LAYERS
                 ),
             ),
         )
