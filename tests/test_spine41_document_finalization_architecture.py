@@ -28,8 +28,7 @@ def _tree(path: Path) -> ast.Module:
 
 def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
     return next(
-        node
-        for node in tree.body
+        node for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name == name
     )
 
@@ -43,8 +42,19 @@ def _direct_name_calls(function: ast.FunctionDef) -> tuple[tuple[str, int], ...]
 
 
 def test_document_target_finalization_runs_after_both_assembly_paths() -> None:
-    function = _function(_tree(ADAPTER), "prepare_a1_document")
-    calls = _direct_name_calls(function)
+    tree = _tree(ADAPTER)
+    orchestrator = _function(tree, "prepare_a1_document")
+    orchestrator_calls = _direct_name_calls(orchestrator)
+    helper_lines = tuple(
+        line
+        for name, line in orchestrator_calls
+        if name == "_assemble_document_for_texture"
+    )
+    assert len(helper_lines) == 1
+
+    assembly_owner = _function(tree, "_assemble_document_for_texture")
+    assert assembly_owner.end_lineno - assembly_owner.lineno + 1 < 140
+    calls = _direct_name_calls(assembly_owner)
 
     normal_lines = tuple(
         line for name, line in calls if name == "assemble_a1_document"
