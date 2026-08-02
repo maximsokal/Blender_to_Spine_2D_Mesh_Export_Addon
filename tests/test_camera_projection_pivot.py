@@ -189,7 +189,7 @@ def test_recentered_projection_preserves_mesh_and_texture_contracts() -> None:
     assert after.image_path == before.image_path
 
 
-def test_recentered_document_uses_camera_zero_and_object_base() -> None:
+def test_recentered_document_uses_camera_orbit_then_object_base() -> None:
     main_position = (23.0, -11.0)
     source = _assembly(main_position)
     result = recenter_a1_camera_projection_document(
@@ -202,8 +202,15 @@ def test_recentered_document_uses_camera_zero_and_object_base() -> None:
 
     main = bones[result.rig.info.main_bone_name]
     base = bones[result.rig.info.base_bone_name]
+    group = result.rig.info.z_groups[0]
     assert (main.x, main.y) == (0.0, 0.0)
-    assert (base.x, base.y) == main_position
+    assert base.parent == group.bone_name
+
+    base_world = (
+        float(base.x or 0.0),
+        float(group.y_offset_pixels) + float(base.y or 0.0),
+    )
+    assert base_world == main_position
 
     for index, source_vertex in enumerate(
         source.projections[0].request.vertices
@@ -213,8 +220,8 @@ def test_recentered_document_uses_camera_zero_and_object_base() -> None:
             index,
         )
         vertex_bone = bones[vertex_bone_name]
-        assert vertex_bone.parent == result.rig.info.z_groups[0].bone_name
+        assert vertex_bone.parent == result.rig.info.base_bone_name
         assert (
-            round(float(base.x) + float(vertex_bone.x), 2),
-            round(float(base.y) + float(vertex_bone.y), 2),
+            round(base_world[0] + float(vertex_bone.x), 2),
+            round(base_world[1] + float(vertex_bone.y), 2),
         ) == source_vertex.bone_position_pixels
