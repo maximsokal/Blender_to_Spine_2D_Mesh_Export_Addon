@@ -19,6 +19,7 @@ from ..domain.spine.export_capabilities import (
 )
 from .a1_document_preparation import prepare_a1_document
 from .a1_preparation_contracts import (
+    A1BlenderFinalizationContext,
     A1ObjectPreparationError,
     PreparedA1Object,
     StatisticsValue,
@@ -166,10 +167,14 @@ def prepare_a1_object(
                 uv_regions=uv.uv_regions,
                 material_analysis=texture.material_analysis,
                 bake_plan=texture.bake_plan,
-                rig=document.document_assembly.rig,
+                rig=document.rig,
                 document_assembly=document.document_assembly,
                 warnings=warnings,
                 statistics=statistics,
+                finalization_context=A1BlenderFinalizationContext(
+                    context=context,
+                    scene=scene,
+                ),
             )
             _progress(progress_callback, 100, stage, object_id)
             return prepared
