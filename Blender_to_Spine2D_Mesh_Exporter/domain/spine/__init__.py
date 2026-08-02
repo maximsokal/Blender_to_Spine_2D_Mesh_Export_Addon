@@ -82,6 +82,7 @@ from .projected_object_analysis import (
 )
 from .rig_builder import build_rig
 from .rig_profiles import (
+    A1CameraLayerProjectionKind,
     A1RigProfile,
     A1RigSetupPoseMode,
     resolve_a1_rig_profile,
@@ -163,6 +164,7 @@ def apply_legacy_visual_options(
 
 
 __all__ = [
+    "A1CameraLayerProjectionKind",
     "A1ParityError",
     "A1ParityIssue",
     "A1ParityReport",
