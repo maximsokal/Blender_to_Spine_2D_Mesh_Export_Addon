@@ -10,6 +10,7 @@ from typing import Any, Iterator, Tuple
 
 from ..domain.baking import (
     BakeExecutionSettings,
+    CameraProjectionInfluencePolicy,
     CameraProjectionPlan,
     resolve_projection_output_policy,
 )
@@ -34,11 +35,14 @@ class _ObjectVisibility:
     obj: Any
     hide_render: bool
     visible_camera: bool
+    visible_shadow: bool | None
+    visible_glossy: bool | None
+    visible_transmission: bool | None
 
 
 @dataclass(frozen=True, slots=True)
 class ProjectionRuntimeState:
-    """Scene, frame, and visibility values restored after one render scope."""
+    """Scene, frame, world, and ray-visibility values restored after rendering."""
 
     scene_values: Tuple[_SceneValue, ...]
     frame_current: int
@@ -78,6 +82,18 @@ class ProjectionRuntimeState:
                     obj=obj,
                     hide_render=hide_render,
                     visible_camera=visible_camera,
+                    visible_shadow=_read_optional_object_bool(
+                        obj,
+                        "visible_shadow",
+                    ),
+                    visible_glossy=_read_optional_object_bool(
+                        obj,
+                        "visible_glossy",
+                    ),
+                    visible_transmission=_read_optional_object_bool(
+                        obj,
+                        "visible_transmission",
+                    ),
                 )
             )
 
@@ -112,6 +128,17 @@ class ProjectionRuntimeState:
                 entry.obj.visible_camera = entry.visible_camera
             except Exception as exc:
                 failures.append(f"{object_name}.visible_camera: {exc}")
+            for field_name, value in (
+                ("visible_shadow", entry.visible_shadow),
+                ("visible_glossy", entry.visible_glossy),
+                ("visible_transmission", entry.visible_transmission),
+            ):
+                if value is None:
+                    continue
+                try:
+                    setattr(entry.obj, field_name, value)
+                except Exception as exc:
+                    failures.append(f"{object_name}.{field_name}: {exc}")
 
         try:
             scene.frame_set(self.frame_current)
@@ -125,6 +152,7 @@ class ProjectionRuntimeState:
 
 
 _SCENE_PATHS = (
+    "world",
     "render.engine",
     "render.resolution_x",
     "render.resolution_y",
@@ -171,6 +199,43 @@ def _set_if_available(root: Any, path: str, value: Any) -> None:
         )
 
 
+def _read_optional_object_bool(obj: Any, field_name: str) -> bool | None:
+    """Capture optional Cycles ray visibility without weakening Blender 5.2 use."""
+
+    if not isinstance(field_name, str) or not field_name:
+        raise ValueError("field_name must be a non-empty string")
+    try:
+        return bool(getattr(obj, field_name))
+    except (AttributeError, ReferenceError, RuntimeError):
+        return None
+
+
+def _set_optional_object_bool(
+    obj: Any,
+    field_name: str,
+    value: bool,
+    *,
+    object_name: str,
+) -> None:
+    """Set one Blender 5.2 ray flag and tolerate minimal test doubles only."""
+
+    if not isinstance(value, bool):
+        raise TypeError("value must be bool")
+    if _read_optional_object_bool(obj, field_name) is None:
+        logger.debug(
+            "Optional object ray visibility '%s.%s' is unavailable",
+            object_name,
+            field_name,
+        )
+        return
+    try:
+        setattr(obj, field_name, value)
+    except Exception as exc:
+        raise CameraProjectionExecutionError(
+            f"Unable to set {object_name}.{field_name}={value}"
+        ) from exc
+
+
 @contextmanager
 def preserve_camera_projection_state(
     scene: Any,
@@ -200,11 +265,16 @@ def configure_camera_visibility(
     scene: Any,
     *,
     isolate: bool,
+    influence_policy: CameraProjectionInfluencePolicy,
 ) -> None:
-    """Expose the source to the camera while retaining dependency-ray participation."""
+    """Apply direct-camera isolation and independent scene dependency-ray controls."""
 
     if not isinstance(isolate, bool):
         raise TypeError("isolate must be bool")
+    if not isinstance(influence_policy, CameraProjectionInfluencePolicy):
+        raise TypeError(
+            "influence_policy must be CameraProjectionInfluencePolicy"
+        )
 
     try:
         objects = tuple(scene.objects)
@@ -230,13 +300,36 @@ def configure_camera_visibility(
                 ) from exc
             continue
 
-        if isolate and str(getattr(obj, "type", "") or "") in _RENDERABLE_TYPES:
+        if str(getattr(obj, "type", "") or "") not in _RENDERABLE_TYPES:
+            continue
+
+        if isolate:
             try:
                 obj.visible_camera = False
             except Exception as exc:
                 raise CameraProjectionExecutionError(
                     f"Unable to isolate camera visibility for '{object_name}'"
                 ) from exc
+        if not influence_policy.include_scene_shadows:
+            _set_optional_object_bool(
+                obj,
+                "visible_shadow",
+                False,
+                object_name=object_name,
+            )
+        if not influence_policy.include_scene_reflection_transmission:
+            _set_optional_object_bool(
+                obj,
+                "visible_glossy",
+                False,
+                object_name=object_name,
+            )
+            _set_optional_object_bool(
+                obj,
+                "visible_transmission",
+                False,
+                object_name=object_name,
+            )
 
 
 def configure_scene_for_camera_projection(
@@ -245,7 +338,7 @@ def configure_scene_for_camera_projection(
     execution_settings: BakeExecutionSettings,
     staged_path: Path,
 ) -> None:
-    """Apply one frame's validated Blender 5.2 render settings."""
+    """Apply one frame's validated Blender 5.2 render and World policy."""
 
     if scene is None:
         raise CameraProjectionExecutionError("scene cannot be None")
@@ -273,6 +366,7 @@ def configure_scene_for_camera_projection(
         execution_settings.projection_output_policy,
         plan.settings.texture_format,
     )
+    influence_policy = execution_settings.camera_influence_policy
 
     scene.render.engine = renderer.blender_engine
     scene.render.resolution_x = plan.settings.width
@@ -286,6 +380,13 @@ def configure_scene_for_camera_projection(
     scene.render.image_settings.file_format = plan.settings.texture_format.value
     scene.render.image_settings.color_mode = "RGBA"
     scene.render.image_settings.color_depth = output_policy.color_depth
+    if not influence_policy.world_affects_lighting_reflections:
+        try:
+            scene.world = None
+        except Exception as exc:
+            raise CameraProjectionExecutionError(
+                "Unable to disable Scene World for Camera Projection"
+            ) from exc
     _set_if_available(scene, "cycles.samples", execution_settings.samples)
     _set_if_available(scene, "cycles.film_transparent_glass", False)
 
