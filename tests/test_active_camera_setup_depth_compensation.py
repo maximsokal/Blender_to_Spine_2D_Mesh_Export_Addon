@@ -1,4 +1,4 @@
-"""Pure setup-pose contract for Active Camera depth-parent compensation."""
+"""Pure setup-pose contract for one rigid Active Camera depth parent."""
 
 from __future__ import annotations
 
@@ -32,18 +32,15 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.legacy_rig_contracts import (
 def _rig(
     setup_pose_mode: A1RigSetupPoseMode = A1RigSetupPoseMode.PREPROJECTED_SCREEN,
 ) -> LegacyRigBuildResult:
-    """Build one real two-axis rig with three Object-Origin-relative depth groups."""
+    """Build one real two-axis rig with one camera-space Object Origin depth."""
 
     return build_rig(
         LegacyRigBuildRequest(
             prefix="CameraObject",
             texture_width=100,
             texture_height=100,
-            z_groups=tuple(
-                LegacyZGroup(z_value=value)
-                for value in (-1.0, 0.0, 2.0)
-            ),
-            main_position_pixels=(0.0, 0.0),
+            z_groups=(LegacyZGroup(z_value=-5.0),),
+            main_position_pixels=(17.0, -9.0),
             setup_pose_mode=setup_pose_mode,
             z_group_origin_mode=LegacyZGroupOriginMode.OBJECT_ORIGIN,
         ),
@@ -52,23 +49,15 @@ def _rig(
     )
 
 
-def _group_indices(rig: LegacyRigBuildResult) -> tuple[int, int, int]:
-    """Read the profile-owned dense group indices instead of assuming index base 0."""
-
+def _group_index(rig: LegacyRigBuildResult) -> int:
     if not isinstance(rig, LegacyRigBuildResult):
         raise TypeError("rig must be LegacyRigBuildResult")
-    indices = tuple(group.index for group in rig.info.z_groups)
-    if len(indices) != 3:
-        raise AssertionError(f"Expected three fixture depth groups, found {indices}")
-    return indices
+    if len(rig.info.z_groups) != 1:
+        raise AssertionError("fixture must contain exactly one rigid depth group")
+    return rig.info.z_groups[0].index
 
 
-def _projection(
-    z_group_indices: tuple[int, int, int],
-) -> A1AttachmentProjectionResult:
-    if not isinstance(z_group_indices, tuple) or len(z_group_indices) != 3:
-        raise ValueError("z_group_indices must contain exactly three values")
-
+def _projection(z_group_index: int) -> A1AttachmentProjectionResult:
     keys = tuple(
         A1AttachmentVertexKey(
             vertex_id=VertexId(index),
@@ -89,7 +78,7 @@ def _projection(
                 index=index,
                 uv=keys[index].uv,
                 bone_position_pixels=(float(index * 10), screen_y[index]),
-                z_group_index=z_group_indices[index],
+                z_group_index=z_group_index,
             )
             for index in range(3)
         ),
@@ -106,9 +95,9 @@ def _projection(
     )
 
 
-def test_depth_parent_plus_compensated_vertex_y_equals_camera_screen_y() -> None:
+def test_one_parent_plus_compensated_vertex_y_preserves_screen_y() -> None:
     rig = _rig()
-    source = _projection(_group_indices(rig))
+    source = _projection(_group_index(rig))
     source_positions = tuple(
         vertex.bone_position_pixels for vertex in source.request.vertices
     )
@@ -120,40 +109,20 @@ def test_depth_parent_plus_compensated_vertex_y_equals_camera_screen_y() -> None
         vertex.bone_position_pixels for vertex in source.request.vertices
     ) == source_positions
 
-    offset_by_index = {
-        group.index: group.y_offset_pixels for group in rig.info.z_groups
+    parent_y = rig.info.z_groups[0].y_offset_pixels
+    assert {vertex.z_group_index for vertex in result.request.vertices} == {
+        _group_index(rig)
     }
     for original, adjusted in zip(
         source.request.vertices,
         result.request.vertices,
         strict=True,
     ):
-        parent_y = offset_by_index[adjusted.z_group_index]
-        final_relative_y = parent_y + adjusted.bone_position_pixels[1]
-
-        assert final_relative_y == original.bone_position_pixels[1]
+        assert parent_y + adjusted.bone_position_pixels[1] == (
+            original.bone_position_pixels[1]
+        )
         assert adjusted.bone_position_pixels[0] == original.bone_position_pixels[0]
         assert adjusted.uv == original.uv
-        assert adjusted.z_group_index == original.z_group_index
-
-
-def test_zero_depth_group_keeps_original_vertex_y() -> None:
-    rig = _rig()
-    group_indices = _group_indices(rig)
-    source = _projection(group_indices)
-
-    result = _compensate_projection_depth_setup_y(source, rig)
-
-    zero_depth_group = next(
-        group for group in rig.info.z_groups if group.z_value == 0.0
-    )
-    zero_group_vertex_index = group_indices.index(zero_depth_group.index)
-    assert result.request.vertices[zero_group_vertex_index].z_group_index == (
-        zero_depth_group.index
-    )
-    assert result.request.vertices[zero_group_vertex_index].bone_position_pixels[1] == (
-        source.request.vertices[zero_group_vertex_index].bone_position_pixels[1]
-    )
 
 
 def test_non_screen_setup_rig_fails_before_partial_compensation() -> None:
@@ -164,21 +133,20 @@ def test_non_screen_setup_rig_fails_before_partial_compensation() -> None:
         match="requires PREPROJECTED_SCREEN setup",
     ):
         _compensate_projection_depth_setup_y(
-            _projection(_group_indices(rig)),
+            _projection(_group_index(rig)),
             rig,
         )
 
 
 def test_unknown_depth_group_fails_closed() -> None:
     rig = _rig()
-    valid_indices = _group_indices(rig)
-    unknown_index = max(valid_indices) + 97
+    unknown_index = _group_index(rig) + 97
 
     with pytest.raises(
         A1DocumentAssemblyError,
         match=rf"unknown depth group {unknown_index}",
     ):
         _compensate_projection_depth_setup_y(
-            _projection((valid_indices[0], valid_indices[1], unknown_index)),
+            _projection(unknown_index),
             rig,
         )
