@@ -30,6 +30,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
 )
 import Blender_to_Spine2D_Mesh_Exporter.blender_adapter.camera_projection_execution as render_module  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
+    A1TextureExportMode,
     BakeExecutionSettings,
     CameraProjectionPlan,
 )
@@ -210,7 +211,10 @@ def _settings(
         json_output_stem=stem,
         source_geometry_mode=A1SourceGeometryMode.EVALUATED,
         uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
-        bake_execution=BakeExecutionSettings(samples=2),
+        bake_execution=BakeExecutionSettings(
+            samples=2,
+            texture_export_mode=A1TextureExportMode.CAMERA_PROJECTION,
+        ),
     )
 
 
