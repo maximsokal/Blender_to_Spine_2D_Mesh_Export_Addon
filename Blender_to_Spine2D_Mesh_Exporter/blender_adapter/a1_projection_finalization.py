@@ -13,9 +13,14 @@ from ..application import (
 )
 from ..domain.baking import CameraProjectionPlan, resolve_projection_output_policy
 from ..domain.baking.projection_layout import CameraProjectionLayout
+from ..domain.camera_projection import A1CameraProjectionKind
 from ..domain.spine import LegacyRigBuildResult, build_legacy_rig
 from ..domain.spine.preprojected_setup import ensure_preprojected_screen_rig
-from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
+from ..domain.spine.rig_profiles import (
+    A1CameraLayerProjectionKind,
+    A1RigProfile,
+    resolve_a1_rig_profile,
+)
 from .a1_document_preparation import finalize_a1_document_assembly_for_target
 from .a1_preparation_contracts import (
     A1BlenderFinalizationContext,
@@ -126,14 +131,28 @@ def _evaluated_object_origin(
     return origin[0], origin[1], origin[2]
 
 
+def _camera_layer_kind(
+    value: A1CameraProjectionKind,
+) -> A1CameraLayerProjectionKind:
+    """Map projection-domain camera kind to rig-domain layer semantics."""
+
+    if not isinstance(value, A1CameraProjectionKind):
+        raise TypeError("value must be A1CameraProjectionKind")
+    if value is A1CameraProjectionKind.PERSPECTIVE:
+        return A1CameraLayerProjectionKind.PERSPECTIVE
+    if value is A1CameraProjectionKind.ORTHOGRAPHIC:
+        return A1CameraLayerProjectionKind.ORTHOGRAPHIC
+    raise AssertionError(f"Unhandled camera projection kind: {value}")
+
+
 def _rendered_camera_main_position(
     prepared: PreparedA1Object,
     plan: CameraProjectionPlan,
     *,
     context: Any | None,
     scene: Any | None,
-) -> tuple[tuple[float, float], float]:
-    """Project Blender Object Origin into the rendered attachment coordinate system."""
+) -> tuple[tuple[float, float], float, A1CameraLayerProjectionKind]:
+    """Project Object Origin and capture exact Perspective/Orthographic semantics."""
 
     resolved_scene, depsgraph = _resolved_scene_and_depsgraph(context, scene)
     frame = resolve_a1_active_camera_projection_frame(
@@ -154,13 +173,18 @@ def _rendered_camera_main_position(
 
     # Render contour pixels use image-row Y and are negated by the established
     # attachment projector. Match that final Spine convention for the base placement.
-    return (float(projected.u), -float(projected.v)), float(projected.depth)
+    return (
+        (float(projected.u), -float(projected.v)),
+        float(projected.depth),
+        _camera_layer_kind(frame.kind),
+    )
 
 
 def _positioned_projection_rig(
     rig: LegacyRigBuildResult,
     main_position: tuple[float, float],
     camera_depth: float,
+    camera_projection_kind: A1CameraLayerProjectionKind,
 ) -> LegacyRigBuildResult:
     """Rebuild the selected profile around camera zero and Blender Object Origin."""
 
@@ -170,6 +194,10 @@ def _positioned_projection_rig(
         raise TypeError("camera_depth must be a finite number")
     if not isfinite(float(camera_depth)):
         raise ValueError("camera_depth must be finite")
+    if not isinstance(camera_projection_kind, A1CameraLayerProjectionKind):
+        raise TypeError(
+            "camera_projection_kind must be A1CameraLayerProjectionKind"
+        )
 
     resolved_profile = resolve_a1_rig_profile(rig.profile.profile_id)
 
@@ -178,6 +206,7 @@ def _positioned_projection_rig(
             rig,
             main_position_pixels=main_position,
             camera_depth=float(camera_depth),
+            camera_projection_kind=camera_projection_kind,
         )
     elif resolved_profile is A1RigProfile.THREE_AXIS_ROTATION:
         # Preserve the historical three-axis payload. Camera-relative rigid layering is
@@ -255,7 +284,11 @@ def finalize_prepared_camera_projection(
         prepared.settings.bake_execution.projection_output_policy,
         plan.settings.texture_format,
     )
-    main_position, projected_depth = _rendered_camera_main_position(
+    (
+        main_position,
+        projected_depth,
+        camera_projection_kind,
+    ) = _rendered_camera_main_position(
         prepared,
         plan,
         context=prepared.finalization_context.context,
@@ -265,6 +298,7 @@ def finalize_prepared_camera_projection(
         prepared.rig,
         main_position,
         projected_depth,
+        camera_projection_kind,
     )
     resolved_profile = resolve_a1_rig_profile(positioned_rig.profile.profile_id)
     positioned_z_groups = (
@@ -340,6 +374,7 @@ def finalize_prepared_camera_projection(
             "projection_object_origin_main_x": main_position[0],
             "projection_object_origin_main_y": main_position[1],
             "projection_object_origin_depth": projected_depth,
+            "projection_camera_layer_kind": camera_projection_kind.value,
             "projection_camera_relative_depth_group_count": len(
                 positioned_rig.info.z_groups
             ),
