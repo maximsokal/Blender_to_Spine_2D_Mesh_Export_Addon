@@ -2,9 +2,14 @@
 
 The source snapshot must already have object rotation, scale, mirror and shear baked into
 its local geometry, leaving only world translation in ``world_matrix``. Every world vertex
-is projected independently, so perspective foreshortening is retained. The returned local
-X/Y coordinates are stored in rig units around the projected Blender Object Origin, while
-local Z remains camera-local depth relative to that origin.
+is projected independently, so the current Perspective or Orthographic camera view is
+retained in X/Y.
+
+The returned local X/Y coordinates are stored in rig units around the projected Blender
+Object Origin. Local Z deliberately stores the same camera-local Object Origin depth for
+every vertex. Active Camera is therefore represented as one rigid camera-relative layer:
+X/Y controls can move and depth-scale the complete object without applying a different
+transform to every source-vertex depth.
 
 The existing object-bake attachment projector converts internal Mesh Y to Spine Y by
 negating it. Camera-projected local Y is therefore stored with the opposite sign so the
@@ -117,6 +122,12 @@ def _projected_translation_matrix(
     origin: A1ProjectedPoint,
     uniform_scale: float,
 ) -> Matrix4x4:
+    """Store projected Object Origin X/Y without duplicating depth translation.
+
+    Camera depth is carried by the one rigid local Z group. Keeping matrix Z neutral
+    prevents downstream composition from adding Object Origin depth a second time.
+    """
+
     return (
         1.0,
         0.0,
@@ -129,7 +140,7 @@ def _projected_translation_matrix(
         0.0,
         0.0,
         1.0,
-        origin.depth,
+        0.0,
         0.0,
         0.0,
         0.0,
@@ -162,13 +173,16 @@ def project_a1_mesh_snapshot_camera(
     *,
     uniform_scale: float,
 ) -> A1MeshCameraProjectionResult:
-    """Project all world vertices into centred export-texture pixel space.
+    """Project all world vertices into one rigid camera-relative object layer.
 
     X/Y are divided by the rig uniform scale because the downstream attachment builder
     multiplies object-bake coordinates by that scale exactly once. Internal local Y is
-    negated to compensate the established attachment projection convention. Camera-local
-    Z is not converted to pixels; it remains the canonical depth channel used by depth
-    groups and object-block draw-order planning. Geometry outside the frame is retained.
+    negated to compensate the established attachment projection convention.
+
+    Every local Z is the camera-local depth of Blender Object Origin. Perspective shape
+    for the current camera view remains baked into X/Y, while live Spine controls operate
+    on one depth layer for the complete object instead of deforming individual vertices.
+    Geometry outside the frame is retained.
     """
 
     if not isinstance(snapshot, MeshSnapshot):
@@ -207,7 +221,7 @@ def project_a1_mesh_snapshot_camera(
                 position=(
                     (projected_world.u - projected_origin.u) / resolved_scale,
                     -(projected_world.v - projected_origin.v) / resolved_scale,
-                    projected_world.depth - projected_origin.depth,
+                    float(projected_origin.depth),
                 ),
                 projected_world=projected_world,
             )
