@@ -18,6 +18,7 @@ from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from ..domain.spine.two_axis_scale_rig import build_two_axis_scale_rig
 from .a1_document_preparation import finalize_a1_document_assembly_for_target
 from .a1_preparation_contracts import (
+    A1BlenderFinalizationContext,
     PreparedA1Object,
     build_skeleton_metadata,
     freeze_statistics,
@@ -194,14 +195,22 @@ def _positioned_projection_rig(
 def finalize_prepared_camera_projection(
     prepared: PreparedA1Object,
     layout: CameraProjectionLayout | None,
-    *,
-    context: Any | None = None,
-    scene: Any | None = None,
 ) -> PreparedA1Object:
-    """Return a prepared object whose document matches render, crop, and Blender pivot."""
+    """Return a prepared object whose document matches render, crop, and Blender pivot.
+
+    The historical two-argument call contract is preserved. Blender runtime references
+    captured by ``prepare_a1_object`` travel inside ``PreparedA1Object`` so fault-matrix,
+    rollback, and monkeypatch contracts remain stable while real exports still use the
+    caller-selected Scene and dependency graph.
+    """
 
     if not isinstance(prepared, PreparedA1Object):
         raise TypeError("prepared must be PreparedA1Object")
+    if not isinstance(prepared.finalization_context, A1BlenderFinalizationContext):
+        raise TypeError(
+            "prepared.finalization_context must be A1BlenderFinalizationContext"
+        )
+
     camera_projection = isinstance(prepared.bake_plan, CameraProjectionPlan)
     if not camera_projection:
         if layout is not None:
@@ -219,8 +228,8 @@ def finalize_prepared_camera_projection(
     main_position, projected_depth = _rendered_camera_main_position(
         prepared,
         plan,
-        context=context,
-        scene=scene,
+        context=prepared.finalization_context.context,
+        scene=prepared.finalization_context.scene,
     )
     positioned_rig = _positioned_projection_rig(
         prepared.rig,
