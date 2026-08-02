@@ -41,12 +41,15 @@ def test_rig_content_is_drawn_by_the_ordered_main_foldout_not_a_child_panel():
     assert 'row.label(text="Rig profile")' in source
     assert 'row.label(text="2-Axis Rotation + Scale"' in source
     assert "Controls: Rotation X / Y + Scale" in source
-    assert "Main bone matches Blender Object Origin" in source
-    assert "Depth layers use the object's local Z=0 pivot" in source
+    assert "Main bone matches projected Blender Object Origin" in source
+    assert "Depth uses the selected axis or active camera" in source
     assert "spine2d_control_icons" in source
     assert "spine2d_export_preview_animation" in source
     assert "Connect objects:" not in source
-    assert rig_ui.CLASSES == (rig_ui.SPINE2D_OT_ResetRigProfile,)
+    assert rig_ui.CLASSES == (
+        rig_ui.SPINE2D_OT_ResetSettingsWithProjection,
+        rig_ui.SPINE2D_OT_ResetRigProfile,
+    )
 
 
 def test_rig_scene_property_default_is_two_axis():
