@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from ..application import A1GeometryPreparationSettings
-from ..domain.baking import A1TextureExportMode, BakeExecutionSettings
+from ..domain.baking import (
+    A1TextureExportMode,
+    BakeExecutionSettings,
+    CameraProjectionInfluencePolicy,
+    TextureSequenceTiming,
+)
 from ..domain.baking.generated_materials import (
     A1GeneratedMaterialPattern,
     A1MaterialSourcePolicy,
@@ -64,6 +69,8 @@ class _SceneExportProfile:
     projection_direction: A1ProjectionDirection = (
         A1ProjectionDirection.POSITIVE_Z
     )
+    # Appended for animated texture sequence export.
+    sequence_timing: TextureSequenceTiming = TextureSequenceTiming()
 
     def __post_init__(self) -> None:
         if not isinstance(self.output_directory, Path):
@@ -147,6 +154,8 @@ class _SceneExportProfile:
             raise TypeError(
                 "projection_direction must be A1ProjectionDirection"
             )
+        if not isinstance(self.sequence_timing, TextureSequenceTiming):
+            raise TypeError("sequence_timing must be TextureSequenceTiming")
 
 
 def _load_bpy() -> Any:
@@ -380,6 +389,50 @@ def _resolve_rig_profile(scene: Any) -> A1RigProfile:
     return resolved
 
 
+def _resolve_sequence_timing(scene: Any) -> TextureSequenceTiming:
+    render = getattr(scene, "render", None)
+    try:
+        scene_fps = max(0, int(getattr(render, "fps", 30)))
+    except (TypeError, ValueError, OverflowError):
+        scene_fps = 0
+    try:
+        scene_fps_base = max(0.0, float(getattr(render, "fps_base", 1.0)))
+    except (TypeError, ValueError, OverflowError):
+        scene_fps_base = 0.0
+    try:
+        override_fps = max(
+            0.0,
+            float(getattr(scene, "spine2d_sequence_fps_override", 0.0)),
+        )
+    except (TypeError, ValueError, OverflowError):
+        override_fps = 0.0
+    return TextureSequenceTiming(
+        scene_fps=scene_fps,
+        scene_fps_base=scene_fps_base,
+        override_fps=override_fps,
+    )
+
+
+def _resolve_camera_influence_policy(
+    scene: Any,
+) -> CameraProjectionInfluencePolicy:
+    return CameraProjectionInfluencePolicy(
+        include_scene_shadows=bool(
+            getattr(scene, "spine2d_include_scene_shadows", True)
+        ),
+        include_scene_reflection_transmission=bool(
+            getattr(
+                scene,
+                "spine2d_include_scene_reflection_transmission",
+                True,
+            )
+        ),
+        world_affects_lighting_reflections=bool(
+            getattr(scene, "spine2d_world_affects_lighting_reflections", True)
+        ),
+    )
+
+
 def _capture_scene_profile(
     scene: Any,
     *,
@@ -398,10 +451,12 @@ def _capture_scene_profile(
         or "CYCLES"
     )
     texture_export_mode = _resolve_texture_export_mode(scene)
+    sequence_timing = _resolve_sequence_timing(scene)
     bake_execution = BakeExecutionSettings(
         render_engine=render_engine,
         projection_alpha_threshold=_projection_alpha_threshold(scene),
         texture_export_mode=texture_export_mode,
+        camera_influence_policy=_resolve_camera_influence_policy(scene),
     )
     return _SceneExportProfile(
         output_directory=(
@@ -424,9 +479,7 @@ def _capture_scene_profile(
         include_control_icons=bool(
             getattr(scene, "spine2d_control_icons", False)
         ),
-        # Keep the persisted RNA value for old .blend compatibility, but do not let
-        # it create version-specific timelines while target-version JSON support is
-        # setup-pose only.
+        # Preview rig animation remains independent from texture sequence animation.
         include_preview_animation=_PREVIEW_ANIMATION_EXPORT_ENABLED,
         spine_target=_resolve_spine_target(scene),
         rig_profile=_resolve_rig_profile(scene),
@@ -435,6 +488,7 @@ def _capture_scene_profile(
         generated_gray_color=_resolve_generated_gray_color(scene),
         texture_export_mode=texture_export_mode,
         projection_direction=_resolve_projection_direction(scene),
+        sequence_timing=sequence_timing,
     )
 
 
@@ -442,6 +496,7 @@ __all__ = [
     "_SceneExportProfile",
     "_capture_scene_profile",
     "_projection_alpha_threshold",
+    "_resolve_camera_influence_policy",
     "_resolve_generated_gray_color",
     "_resolve_generated_material_pattern",
     "_resolve_geometry_settings",
@@ -450,6 +505,7 @@ __all__ = [
     "_resolve_output_directory",
     "_resolve_projection_direction",
     "_resolve_rig_profile",
+    "_resolve_sequence_timing",
     "_resolve_spine_target",
     "_resolve_texture_export_mode",
     "_texture_size",
