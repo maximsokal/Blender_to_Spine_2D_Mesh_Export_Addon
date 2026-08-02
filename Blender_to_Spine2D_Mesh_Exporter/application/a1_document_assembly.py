@@ -12,6 +12,7 @@ from ..domain.spine import (
     LegacyAttachmentSequence,
     LegacyMeshDocumentBuildResult,
     LegacyRigBuildResult,
+    apply_attachment_sequence_animations,
     build_legacy_mesh_document,
 )
 from ..domain.spine.preprojected_setup import ensure_preprojected_screen_rig
@@ -51,6 +52,8 @@ class A1DocumentAssemblySettings:
     segment_index_base: int = 0
     include_control_icons: bool = False
     include_preview_animation: bool = False
+    # Sequence timing is new and therefore precedes the previously appended UV fields.
+    sequence_timing: TextureSequenceTiming = TextureSequenceTiming()
     # Appended to preserve positional compatibility with existing callers.
     uv_range_policy: UvRangePolicy = UvRangePolicy.REQUIRE_UNIT_SQUARE
     uv_range_epsilon: float = 1.0e-6
@@ -58,8 +61,6 @@ class A1DocumentAssemblySettings:
     # projected Object Origin base cancel their setup offset exactly. The historical
     # field name is retained for positional/API compatibility.
     compensate_depth_setup_y: bool = False
-    # Appended so canonical assembly can defer target encoding without reading Scene.
-    sequence_timing: TextureSequenceTiming = TextureSequenceTiming()
 
     def __post_init__(self) -> None:
         for field_name in ("prefix", "uv_layer_name", "image_path", "skin_name"):
@@ -98,6 +99,8 @@ class A1DocumentAssemblySettings:
         ):
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be bool")
+        if not isinstance(self.sequence_timing, TextureSequenceTiming):
+            raise TypeError("sequence_timing must be TextureSequenceTiming")
         if type(self.uv_range_policy) is not UvRangePolicy:
             raise TypeError("uv_range_policy must be UvRangePolicy")
         if (
@@ -108,8 +111,6 @@ class A1DocumentAssemblySettings:
             raise TypeError("uv_range_epsilon must be a finite number")
         if float(self.uv_range_epsilon) < 0.0:
             raise ValueError("uv_range_epsilon cannot be negative")
-        if not isinstance(self.sequence_timing, TextureSequenceTiming):
-            raise TypeError("sequence_timing must be TextureSequenceTiming")
 
 
 @dataclass(frozen=True, slots=True)
@@ -338,9 +339,14 @@ def assemble_a1_document(
             include_control_icons=settings.include_control_icons,
             include_preview_animation=settings.include_preview_animation,
         )
-        # Texture animation is target-specific. Keep only canonical setup sequence data
-        # here so Spine 3.8/4.0 can expand it into attachment swaps and 4.1+ can use the
-        # native sequence timeline at the finalization boundary.
+        # Preserve the historical canonical assembly contract. The target finalizer
+        # removes this compatibility timeline before emitting compact 4.1+ output or
+        # attachment-swap 3.8/4.0 output.
+        document = apply_attachment_sequence_animations(
+            document,
+            frame_delay=settings.sequence_timing.frame_duration,
+            legacy_per_frame=True,
+        )
         document_build = replace(document_build, document=document)
     except Exception as exc:
         raise A1DocumentAssemblyError(
