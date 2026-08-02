@@ -23,6 +23,7 @@ from ..application import (
     resolve_a1_output_paths,
 )
 from ..domain.baking import A1TextureExportMode
+from ..domain.camera_projection import A1CameraProjectionKind
 from ..domain.geometry import (
     A1ProjectedSnapshotDepthRange,
     LineageSeverity,
@@ -76,6 +77,8 @@ class A1SourceGeometryPreparationResult:
     geometry: A1GeometryPreparationResult
     warnings: Tuple[ExportIssue, ...]
     statistics: Mapping[str, StatisticsValue]
+    # Appended to preserve positional compatibility with existing test doubles.
+    camera_projection_kind: A1CameraProjectionKind | None = None
 
     def __post_init__(self) -> None:
         if self.source_object is None:
@@ -103,6 +106,23 @@ class A1SourceGeometryPreparationResult:
             raise TypeError("warnings must be a tuple of ExportIssue values")
         if not isinstance(self.statistics, Mapping):
             raise TypeError("statistics must be a mapping")
+        active_camera = (
+            self.settings.projection_direction
+            is A1ProjectionDirection.ACTIVE_CAMERA
+        )
+        if active_camera:
+            if not isinstance(
+                self.camera_projection_kind,
+                A1CameraProjectionKind,
+            ):
+                raise TypeError(
+                    "Active Camera source preparation requires "
+                    "camera_projection_kind"
+                )
+        elif self.camera_projection_kind is not None:
+            raise ValueError(
+                "camera_projection_kind is valid only for Active Camera preparation"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,8 +157,32 @@ class _ProjectionPreparation:
     geometry: A1GeometryPreparationResult | None
     projected_origin: A1ProjectedPoint
     depth_range: A1ProjectedSnapshotDepthRange
+    camera_projection_kind: A1CameraProjectionKind | None
     statistics: Mapping[str, StatisticsValue]
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.snapshot, MeshSnapshot):
+            raise TypeError("snapshot must be MeshSnapshot")
+        if self.geometry is not None and not isinstance(
+            self.geometry,
+            A1GeometryPreparationResult,
+        ):
+            raise TypeError(
+                "geometry must be A1GeometryPreparationResult or None"
+            )
+        if not isinstance(self.projected_origin, A1ProjectedPoint):
+            raise TypeError("projected_origin must be A1ProjectedPoint")
+        if not isinstance(self.depth_range, A1ProjectedSnapshotDepthRange):
+            raise TypeError("depth_range must be A1ProjectedSnapshotDepthRange")
+        if self.camera_projection_kind is not None and not isinstance(
+            self.camera_projection_kind,
+            A1CameraProjectionKind,
+        ):
+            raise TypeError(
+                "camera_projection_kind must be A1CameraProjectionKind or None"
+            )
+        if not isinstance(self.statistics, Mapping):
+            raise TypeError("statistics must be a mapping")
 
 
 def object_name(source_obj: Any) -> str:
@@ -156,7 +200,6 @@ def object_name(source_obj: Any) -> str:
     if getattr(source_obj, "data", None) is None:
         raise ValueError("source_obj.data is missing")
     return value
-
 
 
 def _resolved_evaluation_owners(
@@ -194,7 +237,6 @@ def _resolved_evaluation_owners(
     return resolved_scene, resolved_depsgraph
 
 
-
 def _evaluated_source_world_matrix(
     source_obj: Any,
     depsgraph: Any,
@@ -214,7 +256,6 @@ def _evaluated_source_world_matrix(
     if matrix_world is None:
         raise ValueError("Evaluated source object has no matrix_world")
     return _matrix_tuple(matrix_world)
-
 
 
 def _ignored_uv_warnings(
@@ -241,7 +282,6 @@ def _ignored_uv_warnings(
         for layer in report.layers
         if layer.name in report.ignored_malformed_layer_names
     )
-
 
 
 def _read_source_snapshot(
@@ -325,7 +365,6 @@ def _read_source_snapshot(
     return snapshot, 0, uv_warnings, uv_report
 
 
-
 def _resolve_source_uv_boundary_layer(
     snapshot: MeshSnapshot,
     settings: A1SingleObjectExportSettings,
@@ -362,7 +401,6 @@ def _resolve_source_uv_boundary_layer(
     raise TypeError(f"Unsupported source UV boundary mode: {mode!r}")
 
 
-
 def _validate_projection_route(settings: A1SingleObjectExportSettings) -> None:
     if not isinstance(settings, A1SingleObjectExportSettings):
         raise TypeError("settings must be A1SingleObjectExportSettings")
@@ -376,7 +414,6 @@ def _validate_projection_route(settings: A1SingleObjectExportSettings) -> None:
             "Normal / UV Segments. Existing Camera Projection mode owns its own "
             "rendered flattening pipeline."
         )
-
 
 
 def _resolve_source_request(
@@ -431,7 +468,6 @@ def _resolve_source_request(
     )
 
 
-
 def _normalize_source_geometry(
     source_snapshot: MeshSnapshot,
     settings: A1SingleObjectExportSettings,
@@ -470,7 +506,6 @@ def _normalize_source_geometry(
     )
 
 
-
 def _prepare_projection_route(
     source_snapshot: MeshSnapshot,
     settings: A1SingleObjectExportSettings,
@@ -482,6 +517,7 @@ def _prepare_projection_route(
     """Execute the signed-axis or nonlinear Active Camera geometry route."""
 
     geometry: A1GeometryPreparationResult | None = None
+    camera_projection_kind: A1CameraProjectionKind | None = None
     if settings.projection_direction.axis_aligned:
         axis_projection = project_a1_mesh_snapshot_axis(
             source_snapshot,
@@ -539,6 +575,7 @@ def _prepare_projection_route(
             uniform_scale=uniform_scale,
         )
         projected_origin = camera_projection.projected_origin
+        camera_projection_kind = frame.kind
         projection_statistics = {
             "projection_kind": "ACTIVE_CAMERA",
             "axis_projection_applied": 0,
@@ -558,9 +595,9 @@ def _prepare_projection_route(
         geometry=geometry,
         projected_origin=projected_origin,
         depth_range=calculate_a1_projected_snapshot_depth_range(projected_snapshot),
+        camera_projection_kind=camera_projection_kind,
         statistics=freeze_statistics(projection_statistics),
     )
-
 
 
 def _complete_projected_geometry(
@@ -575,7 +612,6 @@ def _complete_projected_geometry(
         projection.snapshot,
         geometry_settings,
     )
-
 
 
 def _build_prepared_statistics(
@@ -632,7 +668,6 @@ def _build_prepared_statistics(
     )
 
 
-
 def _log_prepared_source(
     request: _ResolvedSourceRequest,
     settings: A1SingleObjectExportSettings,
@@ -670,7 +705,6 @@ def _log_prepared_source(
         normalized.resolved_uv_boundary_layer,
         uv_report.ignored_malformed_layer_names,
     )
-
 
 
 def prepare_a1_source_geometry(
@@ -752,6 +786,7 @@ def prepare_a1_source_geometry(
             geometry=geometry,
             warnings=warnings,
             statistics=statistics,
+            camera_projection_kind=projection.camera_projection_kind,
         )
     except A1ObjectPreparationError:
         raise
