@@ -70,7 +70,12 @@ def _build_legacy_per_frame_timeline(
     count: int,
     frame_delay: float,
 ) -> tuple[dict[str, object], ...]:
-    """Return the historical one-key-per-frame Loop representation."""
+    """Return the historical one-key-per-frame Loop representation.
+
+    Legacy callers first quantized the frame delay to four decimals and then advanced
+    every key by that quantized value. Preserve that exact contract here; production
+    target finalization uses ``TextureSequenceTiming`` and never relies on this branch.
+    """
 
     delay = round(frame_delay, _LEGACY_SEQUENCE_TIME_DECIMALS)
     if delay <= 0.0:
@@ -86,7 +91,7 @@ def _build_legacy_per_frame_timeline(
         keyframes.append(
             {
                 "time": round(
-                    frame_delay * frame_index,
+                    delay * frame_index,
                     _LEGACY_SEQUENCE_TIME_DECIMALS,
                 ),
                 "mode": "loop",
