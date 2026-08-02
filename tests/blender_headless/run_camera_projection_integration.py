@@ -288,13 +288,35 @@ def _projection_attachment(document: dict) -> dict:
 
 
 def _assert_cropped_attachment(attachment: dict, image_size: tuple[int, int]) -> None:
-    hull = int(attachment["hull"])
     _assert(attachment["type"] == "mesh", "projection attachment is not mesh")
-    _assert(hull >= 3, f"projection hull is degenerate: {hull}")
-    _assert(len(attachment["uvs"]) == hull * 2, "UV count does not match hull")
+
+    uvs = tuple(attachment["uvs"])
+    triangles = tuple(int(value) for value in attachment["triangles"])
+    hull = int(attachment["hull"])
+
+    _assert(len(uvs) % 2 == 0, "UV stream must contain coordinate pairs")
+    vertex_count = len(uvs) // 2
+    _assert(vertex_count >= 3, f"projection vertex count is degenerate: {vertex_count}")
     _assert(
-        len(attachment["triangles"]) == (hull - 2) * 3,
-        "triangle count does not match convex fan",
+        3 <= hull <= vertex_count,
+        f"physical hull count {hull} is outside vertex count {vertex_count}",
+    )
+    _assert(
+        len(triangles) == (vertex_count - 2) * 3,
+        "triangle count does not match the triangulated contour vertex count",
+    )
+    _assert(
+        all(0 <= index < vertex_count for index in triangles),
+        "triangle stream references a missing attachment vertex",
+    )
+    for offset in range(0, len(triangles), 3):
+        _assert(
+            len(set(triangles[offset : offset + 3])) == 3,
+            f"triangle {offset // 3} is degenerate",
+        )
+    _assert(
+        set(triangles) == set(range(vertex_count)),
+        "one or more attachment vertices are not referenced by triangulation",
     )
     _assert(
         float(attachment["width"]) == float(image_size[0]),
@@ -304,7 +326,23 @@ def _assert_cropped_attachment(attachment: dict, image_size: tuple[int, int]) ->
         float(attachment["height"]) == float(image_size[1]),
         "attachment height does not match cropped image",
     )
-    _assert(all(0.0 <= float(value) <= 1.0 for value in attachment["uvs"]), "UV outside 0..1")
+    _assert(
+        all(0.0 <= float(value) <= 1.0 for value in uvs),
+        "UV outside 0..1",
+    )
+
+
+def test_physical_hull_prefix_can_be_smaller_than_contour_vertex_count() -> None:
+    attachment = {
+        "type": "mesh",
+        "hull": 4,
+        "uvs": (0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.5, 0.5),
+        "triangles": (0, 1, 4, 1, 2, 3, 1, 3, 4),
+        "width": 32.0,
+        "height": 24.0,
+    }
+
+    _assert_cropped_attachment(attachment, (32, 24))
 
 
 def test_production_fresnel_projection_exports_union_crop_and_screen_hull() -> None:
@@ -458,6 +496,7 @@ def test_forced_render_failure_rolls_back_json_texture_and_visibility() -> None:
 def main() -> None:
     print(f"Blender version: {bpy.app.version_string}")
     tests = (
+        test_physical_hull_prefix_can_be_smaller_than_contour_vertex_count,
         test_production_fresnel_projection_exports_union_crop_and_screen_hull,
         test_glass_and_volume_are_rendered_by_camera_projection,
         test_camera_projection_sequence_uses_one_union_crop_and_hull,
