@@ -62,6 +62,8 @@ class _SceneExportProfile:
         A1GeneratedMaterialPattern.SOLID_GRAY
     )
     generated_gray_color: ColorRGBA = _DEFAULT_GENERATED_GRAY
+    # New sequence timing precedes the previously appended public mode fields.
+    sequence_timing: TextureSequenceTiming = TextureSequenceTiming()
     texture_export_mode: A1TextureExportMode = (
         A1TextureExportMode.NORMAL_UV_SEGMENTS
     )
@@ -69,8 +71,6 @@ class _SceneExportProfile:
     projection_direction: A1ProjectionDirection = (
         A1ProjectionDirection.POSITIVE_Z
     )
-    # Appended for animated texture sequence export.
-    sequence_timing: TextureSequenceTiming = TextureSequenceTiming()
 
     def __post_init__(self) -> None:
         if not isinstance(self.output_directory, Path):
@@ -144,6 +144,8 @@ class _SceneExportProfile:
             raise ValueError(
                 "generated_gray_color[3] must be 1.0 for opaque generated textures"
             )
+        if not isinstance(self.sequence_timing, TextureSequenceTiming):
+            raise TypeError("sequence_timing must be TextureSequenceTiming")
         if not isinstance(self.texture_export_mode, A1TextureExportMode):
             raise TypeError("texture_export_mode must be A1TextureExportMode")
         if self.bake_execution.texture_export_mode is not self.texture_export_mode:
@@ -154,8 +156,6 @@ class _SceneExportProfile:
             raise TypeError(
                 "projection_direction must be A1ProjectionDirection"
             )
-        if not isinstance(self.sequence_timing, TextureSequenceTiming):
-            raise TypeError("sequence_timing must be TextureSequenceTiming")
 
 
 def _load_bpy() -> Any:
@@ -486,9 +486,9 @@ def _capture_scene_profile(
         material_source_policy=_resolve_material_source_policy(scene),
         generated_material_pattern=_resolve_generated_material_pattern(scene),
         generated_gray_color=_resolve_generated_gray_color(scene),
+        sequence_timing=sequence_timing,
         texture_export_mode=texture_export_mode,
         projection_direction=_resolve_projection_direction(scene),
-        sequence_timing=sequence_timing,
     )
 
 
