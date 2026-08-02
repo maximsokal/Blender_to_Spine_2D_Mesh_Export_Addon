@@ -12,6 +12,13 @@ class SpineJsonTargetUnavailableError(ValueError):
     """Raised before geometry work when a selected target has no production codec."""
 
 
+class SpineTextureAnimationEncoding(str, Enum):
+    """How one baked image sequence is represented by a target Spine schema."""
+
+    ATTACHMENT_SWAP = "ATTACHMENT_SWAP"
+    NATIVE_SEQUENCE = "NATIVE_SEQUENCE"
+
+
 @dataclass(frozen=True, slots=True)
 class SpineJsonVersionDescriptor:
     family: str
@@ -24,6 +31,9 @@ class SpineJsonVersionDescriptor:
     supports_attachment_sequences: bool
     serializer_ready: bool
     supports_preview_animation: bool = False
+    texture_animation_encoding: SpineTextureAnimationEncoding = (
+        SpineTextureAnimationEncoding.NATIVE_SEQUENCE
+    )
 
     def __post_init__(self) -> None:
         for field_name in ("family", "exact_version", "label", "description"):
@@ -44,6 +54,21 @@ class SpineJsonVersionDescriptor:
         ):
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be bool")
+        if not isinstance(
+            self.texture_animation_encoding,
+            SpineTextureAnimationEncoding,
+        ):
+            raise TypeError(
+                "texture_animation_encoding must be SpineTextureAnimationEncoding"
+            )
+        expected_native_support = (
+            self.texture_animation_encoding
+            is SpineTextureAnimationEncoding.NATIVE_SEQUENCE
+        )
+        if self.supports_attachment_sequences is not expected_native_support:
+            raise ValueError(
+                "supports_attachment_sequences must match texture_animation_encoding"
+            )
 
 
 class SpineJsonTarget(str, Enum):
@@ -73,6 +98,10 @@ class SpineJsonTarget(str, Enum):
     def description(self) -> str:
         return self.descriptor.description
 
+    @property
+    def texture_animation_encoding(self) -> SpineTextureAnimationEncoding:
+        return self.descriptor.texture_animation_encoding
+
 
 _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProxyType(
     {
@@ -82,58 +111,77 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             label="Spine 3.8",
             description=(
                 "Limited Spine 3.8.99 export: single-object and standalone "
-                "multi-object for 2-Axis and 3-Axis rigs without texture sequences"
+                "multi-object for 2-Axis and 3-Axis rigs; texture animation uses "
+                "one keyed attachment per baked frame"
             ),
             uses_legacy_bone_transform_field=True,
             uses_legacy_constraint_mix_fields=True,
             uses_unified_constraints=False,
             supports_attachment_sequences=False,
             serializer_ready=True,
+            texture_animation_encoding=(
+                SpineTextureAnimationEncoding.ATTACHMENT_SWAP
+            ),
         ),
         SpineJsonTarget.SPINE_4_0: SpineJsonVersionDescriptor(
             family="4.0", exact_version="4.0.64", label="Spine 4.0",
             description=(
                 "Limited Spine 4.0.64 export: 2-Axis single-object and standalone "
-                "multi-object without texture sequences"
+                "multi-object; texture animation uses one keyed attachment per frame"
             ),
             uses_legacy_bone_transform_field=True,
             uses_legacy_constraint_mix_fields=False,
             uses_unified_constraints=False,
             supports_attachment_sequences=False,
             serializer_ready=True,
+            texture_animation_encoding=(
+                SpineTextureAnimationEncoding.ATTACHMENT_SWAP
+            ),
         ),
         SpineJsonTarget.SPINE_4_1: SpineJsonVersionDescriptor(
             family="4.1", exact_version="4.1.24", label="Spine 4.1",
             description=(
                 "Limited Spine 4.1.24 export: 2-Axis single-object and standalone "
-                "multi-object only; connected, mixed, and 3-Axis remain blocked"
+                "multi-object only; native loop texture sequences are supported"
             ),
             uses_legacy_bone_transform_field=True,
             uses_legacy_constraint_mix_fields=False,
             uses_unified_constraints=False,
             supports_attachment_sequences=True,
             serializer_ready=True,
+            texture_animation_encoding=(
+                SpineTextureAnimationEncoding.NATIVE_SEQUENCE
+            ),
         ),
         SpineJsonTarget.SPINE_4_2: SpineJsonVersionDescriptor(
             family="4.2", exact_version="4.2.43", label="Spine 4.2",
-            description="Export setup-pose JSON for Spine 4.2.43",
+            description=(
+                "Export setup-pose JSON and native loop texture sequences for "
+                "Spine 4.2.43"
+            ),
             uses_legacy_bone_transform_field=False,
             uses_legacy_constraint_mix_fields=False,
             uses_unified_constraints=False,
             supports_attachment_sequences=True,
             serializer_ready=True,
+            texture_animation_encoding=(
+                SpineTextureAnimationEncoding.NATIVE_SEQUENCE
+            ),
         ),
         SpineJsonTarget.SPINE_4_3: SpineJsonVersionDescriptor(
             family="4.3", exact_version="4.3.23", label="Spine 4.3",
             description=(
                 "Limited Spine 4.3.23 unified-constraint export: single-object and "
-                "standalone multi-object for 2-Axis and 3-Axis rigs"
+                "standalone multi-object with native loop texture sequences"
             ),
             uses_legacy_bone_transform_field=False,
             uses_legacy_constraint_mix_fields=False,
             uses_unified_constraints=True,
             supports_attachment_sequences=True,
             serializer_ready=True,
+            texture_animation_encoding=(
+                SpineTextureAnimationEncoding.NATIVE_SEQUENCE
+            ),
         ),
     }
 )
@@ -219,6 +267,7 @@ __all__ = [
     "SpineJsonTarget",
     "SpineJsonTargetUnavailableError",
     "SpineJsonVersionDescriptor",
+    "SpineTextureAnimationEncoding",
     "require_spine_json_target_serializable",
     "resolve_spine_json_exact_version",
     "resolve_spine_json_target",
