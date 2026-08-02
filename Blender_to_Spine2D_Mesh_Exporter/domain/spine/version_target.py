@@ -31,9 +31,9 @@ class SpineJsonVersionDescriptor:
     supports_attachment_sequences: bool
     serializer_ready: bool
     supports_preview_animation: bool = False
-    texture_animation_encoding: SpineTextureAnimationEncoding = (
-        SpineTextureAnimationEncoding.NATIVE_SEQUENCE
-    )
+    # ``None`` preserves every pre-sequence constructor. The encoding is inferred from
+    # the established native-sequence capability unless a target states it explicitly.
+    texture_animation_encoding: SpineTextureAnimationEncoding | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("family", "exact_version", "label", "description"):
@@ -54,16 +54,23 @@ class SpineJsonVersionDescriptor:
         ):
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be bool")
-        if not isinstance(
-            self.texture_animation_encoding,
-            SpineTextureAnimationEncoding,
-        ):
-            raise TypeError(
-                "texture_animation_encoding must be SpineTextureAnimationEncoding"
+
+        encoding = self.texture_animation_encoding
+        if encoding is None:
+            encoding = (
+                SpineTextureAnimationEncoding.NATIVE_SEQUENCE
+                if self.supports_attachment_sequences
+                else SpineTextureAnimationEncoding.ATTACHMENT_SWAP
             )
+            object.__setattr__(self, "texture_animation_encoding", encoding)
+        elif not isinstance(encoding, SpineTextureAnimationEncoding):
+            raise TypeError(
+                "texture_animation_encoding must be "
+                "SpineTextureAnimationEncoding or None"
+            )
+
         expected_native_support = (
-            self.texture_animation_encoding
-            is SpineTextureAnimationEncoding.NATIVE_SEQUENCE
+            encoding is SpineTextureAnimationEncoding.NATIVE_SEQUENCE
         )
         if self.supports_attachment_sequences is not expected_native_support:
             raise ValueError(
@@ -100,7 +107,12 @@ class SpineJsonTarget(str, Enum):
 
     @property
     def texture_animation_encoding(self) -> SpineTextureAnimationEncoding:
-        return self.descriptor.texture_animation_encoding
+        encoding = self.descriptor.texture_animation_encoding
+        if not isinstance(encoding, SpineTextureAnimationEncoding):
+            raise RuntimeError(
+                f"Texture animation encoding was not resolved for {self.value}"
+            )
+        return encoding
 
 
 _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProxyType(
@@ -124,7 +136,9 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             ),
         ),
         SpineJsonTarget.SPINE_4_0: SpineJsonVersionDescriptor(
-            family="4.0", exact_version="4.0.64", label="Spine 4.0",
+            family="4.0",
+            exact_version="4.0.64",
+            label="Spine 4.0",
             description=(
                 "Limited Spine 4.0.64 export: 2-Axis single-object and standalone "
                 "multi-object; texture animation uses one keyed attachment per frame"
@@ -139,7 +153,9 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             ),
         ),
         SpineJsonTarget.SPINE_4_1: SpineJsonVersionDescriptor(
-            family="4.1", exact_version="4.1.24", label="Spine 4.1",
+            family="4.1",
+            exact_version="4.1.24",
+            label="Spine 4.1",
             description=(
                 "Limited Spine 4.1.24 export: 2-Axis single-object and standalone "
                 "multi-object only; native loop texture sequences are supported"
@@ -154,7 +170,9 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             ),
         ),
         SpineJsonTarget.SPINE_4_2: SpineJsonVersionDescriptor(
-            family="4.2", exact_version="4.2.43", label="Spine 4.2",
+            family="4.2",
+            exact_version="4.2.43",
+            label="Spine 4.2",
             description=(
                 "Export setup-pose JSON and native loop texture sequences for "
                 "Spine 4.2.43"
@@ -169,7 +187,9 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             ),
         ),
         SpineJsonTarget.SPINE_4_3: SpineJsonVersionDescriptor(
-            family="4.3", exact_version="4.3.23", label="Spine 4.3",
+            family="4.3",
+            exact_version="4.3.23",
+            label="Spine 4.3",
             description=(
                 "Limited Spine 4.3.23 unified-constraint export: single-object and "
                 "standalone multi-object with native loop texture sequences"
