@@ -28,6 +28,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
 )
 from run_bake_integration import _assert, _temporary_datablock_names  # noqa: E402
 from run_camera_projection_integration import (  # noqa: E402
+    _assert_cropped_attachment,
     _create_layer_weight_material,
     _create_quad,
     _prepare_scene_with_sentinel,
@@ -88,15 +89,7 @@ def _assert_attachment_matches_image(
     _assert(any(pixels[index] > 0.08 for index in range(3, len(pixels), 4)), f"{stem} is empty")
 
     attachment = _attachment_for_stem(document, stem)
-    hull = int(attachment["hull"])
-    _assert(hull >= 3, f"{stem} hull is degenerate")
-    _assert(len(attachment["uvs"]) == hull * 2, f"{stem} UV/hull mismatch")
-    _assert(
-        len(attachment["triangles"]) == (hull - 2) * 3,
-        f"{stem} triangle count mismatch",
-    )
-    _assert(float(attachment["width"]) == float(image_size[0]), f"{stem} width mismatch")
-    _assert(float(attachment["height"]) == float(image_size[1]), f"{stem} height mismatch")
+    _assert_cropped_attachment(attachment, image_size)
     return image_size
 
 
