@@ -29,7 +29,12 @@ from ..domain.spine.legacy_rig_contracts import (
 )
 from ..domain.spine.model import MeshAttachment, Skin, SpineDocument
 from ..domain.spine.rig_builder import build_rig
-from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
+from ..domain.spine.rig_profiles import (
+    A1CameraLayerProjectionKind,
+    A1RigProfile,
+    A1RigSetupPoseMode,
+    resolve_a1_rig_profile,
+)
 from ..domain.spine.two_axis_scale_profile import TwoAxisScaleRigProfile
 from ..domain.spine.two_axis_scale_spine38 import (
     Spine38TwoAxisDocumentAdaptation,
@@ -226,11 +231,7 @@ def _resolve_z_group_origin_mode(
     camera_projection: bool,
     rig_profile: A1RigProfile,
 ) -> LegacyZGroupOriginMode:
-    """Select the approved depth-reference policy for one preparation route.
-
-    Only public object-bake two-axis documents use Blender Object Origin. Camera
-    Projection and every unapproved/internal profile preserve minimum-Z compatibility.
-    """
+    """Select the approved depth-reference policy for one preparation route."""
 
     if not isinstance(camera_projection, bool):
         raise TypeError("camera_projection must be bool")
@@ -244,21 +245,34 @@ def _resolve_z_group_origin_mode(
     return LegacyZGroupOriginMode.MINIMUM_Z
 
 
+def _active_camera_layer_kind(
+    statistics: Mapping[str, StatisticsValue],
+) -> A1CameraLayerProjectionKind:
+    """Resolve the evaluated Blender camera kind captured by source preparation."""
+
+    if not isinstance(statistics, Mapping):
+        raise TypeError("statistics must be a mapping")
+    value = statistics.get("active_camera_type")
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            "Active Camera preparation did not provide active_camera_type"
+        )
+    try:
+        return A1CameraLayerProjectionKind(value.strip().upper())
+    except ValueError as exc:
+        supported = tuple(item.value for item in A1CameraLayerProjectionKind)
+        raise ValueError(
+            f"Unsupported Active Camera type {value!r}; supported={supported}"
+        ) from exc
+
+
 def finalize_a1_document_assembly_for_target(
     document_assembly: A1DocumentAssemblyResult,
     *,
     spine_target: object,
     prefix: str,
 ) -> A1DocumentAssemblyResult:
-    """Apply target-specific rig semantics only after canonical document assembly.
-
-    Projection and attachment builders validate the canonical rig against its exact
-    deterministic plan. Spine 4.0 and 4.1 receive the immutable bridge safety topology.
-    Spine 3.8 two-axis export receives the same bridges plus its cache-safe
-    X/IK/Depth/Scale/Y schedule and wrapper-owned uniform scale. Spine 3.8 3-Axis,
-    Spine 4.2, and Spine 4.3 retain the canonical assembled topology; their schema
-    differences are serializer-owned.
-    """
+    """Apply target-specific rig semantics only after canonical document assembly."""
 
     if not isinstance(document_assembly, A1DocumentAssemblyResult):
         raise TypeError("document_assembly must be A1DocumentAssemblyResult")
@@ -345,6 +359,24 @@ def prepare_a1_document(
         resolved_rig_profile = resolve_a1_rig_profile(
             source.settings.export.rig_profile
         )
+        if (
+            active_camera_layout
+            and resolved_rig_profile is not A1RigProfile.TWO_AXIS_ROTATION_SCALE
+        ):
+            raise ValueError(
+                "Active Camera rigid layers require TWO_AXIS_ROTATION_SCALE"
+            )
+
+        camera_layer_kind = (
+            _active_camera_layer_kind(source.statistics)
+            if active_camera_layout
+            else None
+        )
+        resolved_setup_pose_mode = (
+            A1RigSetupPoseMode.PREPROJECTED_SCREEN
+            if active_camera_layout
+            else source.settings.rig_setup_pose_mode
+        )
         z_group_origin_mode = _resolve_z_group_origin_mode(
             camera_projection=camera_projection,
             rig_profile=resolved_rig_profile,
@@ -366,8 +398,9 @@ def prepare_a1_document(
                 z_groups=source.z_groups.groups,
                 main_position_pixels=main_position_pixels,
                 scale_mode=source.settings.rig_scale_mode,
-                setup_pose_mode=source.settings.rig_setup_pose_mode,
+                setup_pose_mode=resolved_setup_pose_mode,
                 z_group_origin_mode=z_group_origin_mode,
+                camera_layer_projection_kind=camera_layer_kind,
             ),
             resolved_rig_profile,
             spine_target=source.settings.export.spine_target,
@@ -379,6 +412,12 @@ def prepare_a1_document(
                 "rig_profile": rig.profile.profile_id,
                 "rig_setup_pose_mode": rig.request.setup_pose_mode.value,
                 "z_group_origin_mode": rig.request.z_group_origin_mode.value,
+                "camera_layer_projection_kind": (
+                    "" if camera_layer_kind is None else camera_layer_kind.value
+                ),
+                "camera_relative_depth_group_count": (
+                    len(rig.info.z_groups) if active_camera_layout else 0
+                ),
                 "depth_setup_y_compensated": int(active_camera_layout),
             },
         )
@@ -427,6 +466,7 @@ def prepare_a1_document(
             spine_target=source.settings.export.spine_target,
             prefix=source.prefix,
         )
+        final_rig = document_assembly.rig
         document = document_assembly.document
         statistics = freeze_statistics(
             statistics,
@@ -438,16 +478,23 @@ def prepare_a1_document(
                     for skin in document.skins
                     for attachments in skin.attachments.values()
                 ),
+                "final_rig_setup_pose_mode": final_rig.request.setup_pose_mode.value,
             },
         )
         logger.debug(
             "Prepared Spine document for %s: target=%s profile=%s setup=%s "
-            "z_origin=%s depth_y_compensation=%s bones=%d slots=%d attachments=%d",
+            "camera_layer=%s z_origin=%s depth_y_compensation=%s "
+            "bones=%d slots=%d attachments=%d",
             source.object_id,
             source.settings.export.spine_version,
-            rig.profile.profile_id,
-            rig.request.setup_pose_mode.value,
-            rig.request.z_group_origin_mode.value,
+            final_rig.profile.profile_id,
+            final_rig.request.setup_pose_mode.value,
+            (
+                ""
+                if final_rig.request.camera_layer_projection_kind is None
+                else final_rig.request.camera_layer_projection_kind.value
+            ),
+            final_rig.request.z_group_origin_mode.value,
             active_camera_layout,
             len(document.bones),
             len(document.slots),
@@ -455,7 +502,7 @@ def prepare_a1_document(
         )
         return A1DocumentPreparationResult(
             texture=texture,
-            rig=rig,
+            rig=final_rig,
             document_assembly=document_assembly,
             warnings=texture.warnings,
             statistics=statistics,
