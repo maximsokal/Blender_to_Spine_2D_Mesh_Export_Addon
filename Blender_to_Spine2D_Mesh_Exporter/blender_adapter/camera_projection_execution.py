@@ -40,7 +40,7 @@ def _call_render_operator(bpy_module: Any) -> None:
             available = bool(poll())
         except Exception as exc:
             raise CameraProjectionExecutionError(
-                "bpy.ops.object.bake.poll() failed"
+                "bpy.ops.render.render.poll() failed"
             ) from exc
         if not available:
             raise CameraProjectionExecutionError(
