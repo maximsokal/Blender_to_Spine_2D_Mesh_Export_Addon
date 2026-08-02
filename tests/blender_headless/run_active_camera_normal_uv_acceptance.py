@@ -9,9 +9,11 @@ Blender matrices.
 The acceptance contract is intentionally structural as well as visual:
 
 * generated ``main`` is camera-space zero;
-* generated internal base stores projected Blender Object Origin;
+* X and Y orbital layers are above the projected Object Origin;
+* generated internal base reconstructs projected Blender Object Origin;
 * every object owns exactly one Object-Origin depth layer;
-* every generated vertex bone of that object has the same depth parent;
+* every generated vertex bone is object-local below ``base``;
+* independent Scale targets only ``base`` and cannot change camera distance;
 * the setup screen silhouette still matches Blender's camera projection;
 * standalone object blocks are ordered by Object-Origin camera depth;
 * Blender source objects, camera data, and render dimensions remain unchanged.
@@ -66,6 +68,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.projection import (  # noqa: E402
     A1ProjectionDirection,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import (  # noqa: E402
+    A1CameraLayerProjectionKind,
     A1RigProfile,
     A1RigSetupPoseMode,
 )
@@ -617,9 +620,18 @@ def _run_camera_kind(
             ),
         )
 
+        expected_layer_kind = (
+            A1CameraLayerProjectionKind.PERSPECTIVE
+            if camera_kind == "PERSP"
+            else A1CameraLayerProjectionKind.ORTHOGRAPHIC
+        )
         _assert(
             item.statistics["projection_kind"] == "ACTIVE_CAMERA",
             f"{source.component_id} did not use Active Camera projection",
+        )
+        _assert(
+            item.rig.request.camera_layer_projection_kind is expected_layer_kind,
+            f"{source.component_id} camera kind was not carried into the rig",
         )
         _assert(
             item.statistics["texture_pipeline"] == "OBJECT_BAKE",
@@ -662,11 +674,20 @@ def _run_camera_kind(
         main_bone = bones_by_name[item.rig.info.main_bone_name]
         base_bone = bones_by_name[item.rig.info.base_bone_name]
         actual_main = _bone_position(main_bone)
-        actual_base = _bone_position(base_bone)
+        local_base = _bone_position(base_bone)
+        z_group = item.rig.info.z_groups[0]
+        actual_base = (
+            local_base[0],
+            float(z_group.y_offset_pixels) + local_base[1],
+        )
 
         _assert(
             actual_main == (0.0, 0.0),
             f"{source.component_id} camera root is not zero: {actual_main}",
+        )
+        _assert(
+            base_bone.parent == z_group.bone_name,
+            f"{source.component_id} Object Origin is not below orbital Y layer",
         )
         origin_delta = max(
             abs(actual_base[0] - expected_origin.screen_x),
@@ -680,7 +701,6 @@ def _run_camera_kind(
             f"delta={origin_delta}",
         )
 
-        z_group = item.rig.info.z_groups[0]
         layer_depth_delta = abs(float(z_group.z_value) - expected_origin.camera_z)
         maximum_layer_depth_delta = max(
             maximum_layer_depth_delta,
@@ -695,15 +715,16 @@ def _run_camera_kind(
         generated_vertex_bones = tuple(
             bone
             for bone in item.document.bones
-            if bone.parent == z_group.bone_name and "_vertex_" in bone.name
+            if bone.parent == item.rig.info.base_bone_name and "_vertex_" in bone.name
         )
         _assert(
             generated_vertex_bones,
-            f"{source.component_id} produced no vertex bones under rigid layer",
+            f"{source.component_id} produced no object-local vertex bones",
         )
         _assert(
-            {bone.parent for bone in generated_vertex_bones} == {z_group.bone_name},
-            f"{source.component_id} vertex bones do not share one depth parent",
+            {bone.parent for bone in generated_vertex_bones}
+            == {item.rig.info.base_bone_name},
+            f"{source.component_id} vertex bones are not below Object Origin base",
         )
 
         rotation_y = next(
@@ -713,9 +734,33 @@ def _run_camera_kind(
         )
         _assert(
             rotation_y.bones == (z_group.bone_name,),
-            f"{source.component_id} Y control targets more than one depth layer: "
+            f"{source.component_id} Y control targets more than one orbital layer: "
             f"{rotation_y.bones}",
         )
+        local_scale = next(
+            constraint
+            for constraint in item.document.transform
+            if constraint.order == 2
+        )
+        _assert(
+            local_scale.bones == (item.rig.info.base_bone_name,),
+            f"{source.component_id} Scale changes camera placement: {local_scale.bones}",
+        )
+        depth_scale = next(
+            constraint
+            for constraint in item.document.transform
+            if constraint.order == 3
+        )
+        if camera_kind == "ORTHO":
+            _assert(
+                depth_scale.extras.get("mixScaleX") == 0,
+                f"{source.component_id} Orthographic layer still auto-scales by depth",
+            )
+        else:
+            _assert(
+                "mixScaleX" not in depth_scale.extras,
+                f"{source.component_id} Perspective layer disabled depth scale",
+            )
 
         scale = float(item.rig.info.uniform_scale)
         projected_by_index = {
@@ -784,7 +829,8 @@ def _run_camera_kind(
                 "componentId": source.component_id,
                 "objectName": item.object_id,
                 "cameraRoot": list(actual_main),
-                "objectBase": list(actual_base),
+                "objectBaseLocal": list(local_base),
+                "objectBaseWorld": list(actual_base),
                 "expectedOrigin": [
                     expected_origin.screen_x,
                     expected_origin.screen_y,
@@ -863,6 +909,7 @@ def _run_camera_kind(
         "depthExpectationModel": _DEPTH_EXPECTATION_MODEL,
         "depthTolerance": _DEPTH_TOLERANCE,
         "objects": objects_report,
+        "cameraOrbitalHierarchy": True,
         "rigidCameraLayers": True,
         "sourceUnchanged": True,
         "cameraUnchanged": True,
