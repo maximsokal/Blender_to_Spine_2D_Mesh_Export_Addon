@@ -54,9 +54,9 @@ class A1DocumentAssemblySettings:
     # Appended to preserve positional compatibility with existing callers.
     uv_range_policy: UvRangePolicy = UvRangePolicy.REQUIRE_UNIT_SQUARE
     uv_range_epsilon: float = 1.0e-6
-    # Active Camera stores local projected depth for the 2.5D controls. The generated
-    # depth parent therefore contributes a setup Y translation that must be removed from
-    # the child vertex-bone local Y to preserve the exact camera-screen setup position.
+    # Camera-relative documents validate that the rigid orbital depth layer and the
+    # projected Object Origin base cancel their setup offset exactly. The historical
+    # field name is retained for positional/API compatibility.
     compensate_depth_setup_y: bool = False
 
     def __post_init__(self) -> None:
@@ -153,12 +153,16 @@ def _compensate_projection_depth_setup_y(
     projection: A1AttachmentProjectionResult,
     rig: LegacyRigBuildResult,
 ) -> A1AttachmentProjectionResult:
-    """Remove each generated depth-parent setup Y from its child vertex bone.
+    """Validate the rigid camera-layer setup without changing vertex coordinates.
 
-    Two-axis camera-screen geometry must use ``PREPROJECTED_SCREEN`` so its default
-    transform constraints remain neutral and the explicit depth-parent Y is the only
-    setup displacement to remove. The historical three-axis route retains its existing
-    compatibility contract and is not silently rewritten by this two-axis fix.
+    In the camera-relative hierarchy the depth helper is above ``base``. ``base.y`` is
+    already authored as ``projected_origin_y - depth_helper_y``, so its world setup
+    position is the exact projected Blender Object Origin. Vertex bones are children of
+    ``base`` and remain object-local; subtracting depth from every vertex here would move
+    the mesh twice and move the local scale pivot away from Object Origin.
+
+    The historical function name is kept because callers and fault-matrix tests already
+    use it. It now owns fail-closed validation rather than coordinate mutation.
     """
 
     if not isinstance(projection, A1AttachmentProjectionResult):
@@ -167,43 +171,60 @@ def _compensate_projection_depth_setup_y(
         raise TypeError("rig must be LegacyRigBuildResult")
 
     resolved_profile = resolve_a1_rig_profile(rig.profile.profile_id)
-    if (
-        resolved_profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE
-        and rig.request.setup_pose_mode is not A1RigSetupPoseMode.PREPROJECTED_SCREEN
-    ):
+    if resolved_profile is not A1RigProfile.TWO_AXIS_ROTATION_SCALE:
+        raise A1DocumentAssemblyError(
+            "Camera-layer setup validation requires TWO_AXIS_ROTATION_SCALE"
+        )
+    if rig.request.setup_pose_mode is not A1RigSetupPoseMode.PREPROJECTED_SCREEN:
         raise A1DocumentAssemblyError(
             "Active Camera depth compensation requires PREPROJECTED_SCREEN setup"
         )
-
-    offset_by_group_index = {
-        group.index: float(group.y_offset_pixels) for group in rig.info.z_groups
-    }
-    adjusted_vertices = []
-    for vertex in projection.request.vertices:
-        parent_offset = offset_by_group_index.get(vertex.z_group_index)
-        if parent_offset is None:
-            raise A1DocumentAssemblyError(
-                f"Attachment vertex {vertex.index} references unknown depth group "
-                f"{vertex.z_group_index} during Active Camera setup compensation"
-            )
-        local_x, local_y = vertex.bone_position_pixels
-        adjusted_y = round(float(local_y) - parent_offset, 2)
-        if adjusted_y == 0.0:
-            adjusted_y = 0.0
-        adjusted_vertices.append(
-            replace(
-                vertex,
-                bone_position_pixels=(float(local_x), adjusted_y),
-            )
+    if len(rig.info.z_groups) != 1:
+        raise A1DocumentAssemblyError(
+            "Camera-relative setup requires exactly one depth group"
         )
 
-    return replace(
-        projection,
-        request=replace(
-            projection.request,
-            vertices=tuple(adjusted_vertices),
-        ),
+    target_group = rig.info.z_groups[0]
+    invalid_indices = tuple(
+        sorted(
+            {
+                vertex.z_group_index
+                for vertex in projection.request.vertices
+                if vertex.z_group_index != target_group.index
+            }
+        )
     )
+    if invalid_indices:
+        raise A1DocumentAssemblyError(
+            "Attachment vertices reference depth groups outside the rigid camera layer: "
+            f"{invalid_indices}"
+        )
+
+    bones_by_name = {bone.name: bone for bone in rig.bones}
+    base = bones_by_name.get(rig.info.base_bone_name)
+    if base is None:
+        raise A1DocumentAssemblyError("Camera-relative rig is missing object base bone")
+    if base.parent != target_group.bone_name:
+        raise A1DocumentAssemblyError(
+            "Camera-relative object base must be parented to the orbital depth bone"
+        )
+
+    expected_world_x = float(rig.request.main_position_pixels[0])
+    expected_world_y = float(rig.request.main_position_pixels[1])
+    actual_world_x = float(base.x or 0.0)
+    actual_world_y = float(target_group.y_offset_pixels) + float(base.y or 0.0)
+    tolerance = 0.011
+    if (
+        abs(actual_world_x - expected_world_x) > tolerance
+        or abs(actual_world_y - expected_world_y) > tolerance
+    ):
+        raise A1DocumentAssemblyError(
+            "Camera-relative base setup does not reconstruct projected Object Origin; "
+            f"actual={(actual_world_x, actual_world_y)}, "
+            f"expected={(expected_world_x, expected_world_y)}"
+        )
+
+    return projection
 
 
 def assemble_a1_document(
