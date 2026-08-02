@@ -1,9 +1,8 @@
-"""Build deterministic Spine 4.1+ animation timelines for sequence attachments.
+"""Build deterministic Spine animation timelines for sequence attachments.
 
-A setup ``sequence`` mapping tells Spine how image files are named, but it does not by
-itself animate the displayed sequence index. Rewrite emits a compact looping sequence
-key plus one boundary key that establishes the complete animation duration. It never
-creates one native sequence key per baked image.
+Canonical assembly and a few compatibility callers still require the historical
+per-frame timeline. Target finalization for Spine 4.1+ uses a compact looping timeline
+with one duration boundary. Both modes share the same validation and merge pipeline.
 """
 
 from __future__ import annotations
@@ -21,6 +20,7 @@ from .validator import SpineValidator
 
 DEFAULT_SEQUENCE_FRAME_DELAY = 1.0 / 30.0
 _SEQUENCE_TIME_DECIMALS = 6
+_LEGACY_SEQUENCE_TIME_DECIMALS = 4
 
 
 class AttachmentSequenceAnimationError(ValueError):
@@ -55,17 +55,7 @@ def _sequence_count(sequence: Mapping[str, Any], *, path: str) -> int:
     return value
 
 
-def build_attachment_sequence_timeline(
-    count: int,
-    *,
-    frame_delay: float = DEFAULT_SEQUENCE_FRAME_DELAY,
-) -> tuple[dict[str, object], ...]:
-    """Return one Loop key and one duration boundary key for a native sequence."""
-
-    if isinstance(count, bool) or not isinstance(count, int):
-        raise TypeError("count must be int")
-    if count < 1:
-        raise ValueError("count must be greater than or equal to 1")
+def _validated_frame_delay(frame_delay: float) -> float:
     if (
         isinstance(frame_delay, bool)
         or not isinstance(frame_delay, (int, float))
@@ -73,11 +63,62 @@ def build_attachment_sequence_timeline(
         or float(frame_delay) <= 0.0
     ):
         raise ValueError("frame_delay must be a finite number greater than zero")
+    return float(frame_delay)
 
-    delay = round(float(frame_delay), _SEQUENCE_TIME_DECIMALS)
+
+def _build_legacy_per_frame_timeline(
+    count: int,
+    frame_delay: float,
+) -> tuple[dict[str, object], ...]:
+    """Return the historical one-key-per-frame Loop representation."""
+
+    delay = round(frame_delay, _LEGACY_SEQUENCE_TIME_DECIMALS)
+    if delay <= 0.0:
+        raise ValueError("frame_delay rounds to zero at legacy timeline precision")
+
+    keyframes: list[dict[str, object]] = [
+        {
+            "mode": "loop",
+            "delay": delay,
+        }
+    ]
+    for frame_index in range(1, count):
+        keyframes.append(
+            {
+                "time": round(
+                    frame_delay * frame_index,
+                    _LEGACY_SEQUENCE_TIME_DECIMALS,
+                ),
+                "mode": "loop",
+                "index": frame_index,
+            }
+        )
+    return tuple(keyframes)
+
+
+def build_attachment_sequence_timeline(
+    count: int,
+    *,
+    frame_delay: float = DEFAULT_SEQUENCE_FRAME_DELAY,
+    legacy_per_frame: bool = False,
+) -> tuple[dict[str, object], ...]:
+    """Build either compact target output or the historical compatibility timeline."""
+
+    if isinstance(count, bool) or not isinstance(count, int):
+        raise TypeError("count must be int")
+    if count < 1:
+        raise ValueError("count must be greater than or equal to 1")
+    if not isinstance(legacy_per_frame, bool):
+        raise TypeError("legacy_per_frame must be bool")
+
+    resolved_delay = _validated_frame_delay(frame_delay)
+    if legacy_per_frame:
+        return _build_legacy_per_frame_timeline(count, resolved_delay)
+
+    delay = round(resolved_delay, _SEQUENCE_TIME_DECIMALS)
     if delay <= 0.0:
         raise ValueError("frame_delay rounds to zero at Spine timeline precision")
-    duration = round(float(frame_delay) * count, _SEQUENCE_TIME_DECIMALS)
+    duration = round(resolved_delay * count, _SEQUENCE_TIME_DECIMALS)
     if duration <= 0.0:
         raise ValueError("sequence duration rounds to zero")
 
@@ -170,19 +211,22 @@ def apply_attachment_sequence_animations(
     animation_name: str = "animation",
     frame_delay: float = DEFAULT_SEQUENCE_FRAME_DELAY,
     slot_names: tuple[str, ...] | None = None,
+    legacy_per_frame: bool = False,
 ) -> SpineDocument:
-    """Add compact native Loop timelines for selected sequence attachments.
+    """Add validated Loop timelines for selected sequence attachments.
 
     Existing equal timelines are retained, different timelines fail explicitly, and
-    documents without matching sequence attachments are returned unchanged. ``slot_names``
-    limits generation to an explicitly owned visual subset, which is required when a
-    static grouped overlay keeps hidden source attachments for diagnostics.
+    documents without matching sequence attachments are returned unchanged.
+    ``legacy_per_frame`` is reserved for canonical compatibility boundaries; production
+    target finalization uses the compact timeline.
     """
 
     if not isinstance(document, SpineDocument):
         raise TypeError("document must be SpineDocument")
     if not isinstance(animation_name, str) or not animation_name.strip():
         raise ValueError("animation_name must be a non-empty string")
+    if not isinstance(legacy_per_frame, bool):
+        raise TypeError("legacy_per_frame must be bool")
     slot_filter = _resolved_slot_filter(slot_names)
     if slot_filter is not None:
         setup_slot_names = {slot.name for slot in document.slots}
@@ -229,6 +273,7 @@ def apply_attachment_sequence_animations(
             timeline=build_attachment_sequence_timeline(
                 count,
                 frame_delay=frame_delay,
+                legacy_per_frame=legacy_per_frame,
             ),
         )
 
