@@ -185,8 +185,18 @@ class PreparedA1Object:
             raise ValueError("bake_plan.source_object_id must match object_id")
         if self.rig.request.prefix != self.prefix:
             raise ValueError("rig prefix must match prepared prefix")
-        if self.document_assembly.rig.request.prefix != self.prefix:
-            raise ValueError("document_assembly rig prefix must match prepared prefix")
+
+        assembly_rig = getattr(self.document_assembly, "rig", None)
+        if assembly_rig is not None:
+            if not isinstance(assembly_rig, LegacyRigBuildResult):
+                raise TypeError(
+                    "document_assembly.rig must be LegacyRigBuildResult when present"
+                )
+            if assembly_rig.request.prefix != self.prefix:
+                raise ValueError(
+                    "document_assembly rig prefix must match prepared prefix"
+                )
+
         object.__setattr__(self, "statistics", freeze_statistics(self.statistics))
 
     @property
