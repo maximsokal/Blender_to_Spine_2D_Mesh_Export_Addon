@@ -21,6 +21,10 @@ from ..domain.baking import CameraProjectionPlan
 from ..domain.camera_projection import A1CameraProjectionKind
 from ..domain.projection import A1ProjectionDirection
 from ..domain.spine import finalize_texture_sequence_animation
+from ..domain.spine.camera_relative_legacy_targets import (
+    adapt_camera_relative_two_axis_document_for_spine38_with_report,
+    adapt_camera_relative_two_axis_document_for_spine41_with_report,
+)
 from ..domain.spine.legacy_attachment_builder import (
     LegacyMeshDocumentBuildResult,
 )
@@ -431,18 +435,26 @@ def finalize_a1_document_assembly_for_target(
             f"{rig.request.prefix!r}"
         )
 
+    camera_relative = (
+        rig.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
+    )
     if resolved_target is SpineJsonTarget.SPINE_3_8:
-        adaptation = adapt_two_axis_document_for_spine38_with_report(
-            document_assembly.document,
-            profile=rig.profile,
-            prefix=prefix,
+        adapter = (
+            adapt_camera_relative_two_axis_document_for_spine38_with_report
+            if camera_relative
+            else adapt_two_axis_document_for_spine38_with_report
         )
     else:
-        adaptation = adapt_two_axis_document_for_spine41_with_report(
-            document_assembly.document,
-            profile=rig.profile,
-            prefix=prefix,
+        adapter = (
+            adapt_camera_relative_two_axis_document_for_spine41_with_report
+            if camera_relative
+            else adapt_two_axis_document_for_spine41_with_report
         )
+    adaptation = adapter(
+        document_assembly.document,
+        profile=rig.profile,
+        prefix=prefix,
+    )
     adapted_build = _synchronize_document_build_for_spine41(
         document_assembly.document_build,
         adaptation,
