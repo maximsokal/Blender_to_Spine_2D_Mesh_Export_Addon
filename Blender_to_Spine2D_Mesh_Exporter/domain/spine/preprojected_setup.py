@@ -11,6 +11,7 @@ from .legacy_rig_contracts import (
     LegacyZGroupOriginMode,
 )
 from .rig_profiles import (
+    A1CameraLayerProjectionKind,
     A1RigProfile,
     A1RigSetupPoseMode,
     resolve_a1_rig_profile,
@@ -32,6 +33,7 @@ def ensure_preprojected_screen_rig(
     *,
     main_position_pixels: tuple[float, float] | None = None,
     camera_depth: float | None = None,
+    camera_projection_kind: A1CameraLayerProjectionKind | None = None,
 ) -> LegacyRigBuildResult:
     """Return one validated rigid layer positioned relative to camera-space zero.
 
@@ -46,7 +48,9 @@ def ensure_preprojected_screen_rig(
     * ``main`` at camera-space zero;
     * projected Blender Object Origin stored on the internal base layer;
     * vertex bones local to that rigid object layer;
-    * live X/Y/Scale constraints retained.
+    * live X/Y/Scale constraints retained;
+    * Perspective permits whole-layer depth scale;
+    * Orthographic disables automatic depth scale.
 
     ``camera_depth`` is required when an existing non-camera rig must be collapsed during
     rendered Camera Projection finalization. Active Camera preparation already supplies a
@@ -63,6 +67,16 @@ def ensure_preprojected_screen_rig(
         )
 
     request = rig.request
+    resolved_camera_kind = (
+        request.camera_layer_projection_kind
+        if camera_projection_kind is None
+        else camera_projection_kind
+    )
+    if not isinstance(resolved_camera_kind, A1CameraLayerProjectionKind):
+        raise TypeError(
+            "camera_projection_kind must be A1CameraLayerProjectionKind"
+        )
+
     if camera_depth is None:
         if len(request.z_groups) != 1:
             raise ValueError(
@@ -86,6 +100,7 @@ def ensure_preprojected_screen_rig(
         main_position_pixels=resolved_main_position,
         setup_pose_mode=A1RigSetupPoseMode.PREPROJECTED_SCREEN,
         z_group_origin_mode=LegacyZGroupOriginMode.OBJECT_ORIGIN,
+        camera_layer_projection_kind=resolved_camera_kind,
     )
 
     if resolved_request == request:
