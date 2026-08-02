@@ -15,7 +15,11 @@ from ..domain.spine import (
     build_legacy_mesh_document,
 )
 from ..domain.spine.preprojected_setup import ensure_preprojected_screen_rig
-from ..domain.spine.rig_profiles import A1RigSetupPoseMode
+from ..domain.spine.rig_profiles import (
+    A1RigProfile,
+    A1RigSetupPoseMode,
+    resolve_a1_rig_profile,
+)
 from ..domain.spine.rig_visuals import apply_rig_visual_options
 from ..domain.spine.vertex_bone_optimizer import optimize_shared_vertex_bones
 from ..domain.uv import UvRangePolicy, enforce_uv_range
@@ -149,20 +153,24 @@ def _compensate_projection_depth_setup_y(
     projection: A1AttachmentProjectionResult,
     rig: LegacyRigBuildResult,
 ) -> A1AttachmentProjectionResult:
-    """Remove each neutral screen rig depth-parent Y from its child vertex bone.
+    """Remove each generated depth-parent setup Y from its child vertex bone.
 
-    Camera-projected X/Y already represent final screen-space coordinates. The dedicated
-    ``PREPROJECTED_SCREEN`` rig keeps every setup transform constraint neutral, so the
-    only remaining setup translation contributed by a depth parent is its explicit Y.
-    Subtracting that value from the child preserves the exact camera-screen setup pose
-    while retaining depth data for later interactive controls.
+    Two-axis camera-screen geometry must use ``PREPROJECTED_SCREEN`` so its default
+    transform constraints remain neutral and the explicit depth-parent Y is the only
+    setup displacement to remove. The historical three-axis route retains its existing
+    compatibility contract and is not silently rewritten by this two-axis fix.
     """
 
     if not isinstance(projection, A1AttachmentProjectionResult):
         raise TypeError("projection must be A1AttachmentProjectionResult")
     if not isinstance(rig, LegacyRigBuildResult):
         raise TypeError("rig must be LegacyRigBuildResult")
-    if rig.request.setup_pose_mode is not A1RigSetupPoseMode.PREPROJECTED_SCREEN:
+
+    resolved_profile = resolve_a1_rig_profile(rig.profile.profile_id)
+    if (
+        resolved_profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE
+        and rig.request.setup_pose_mode is not A1RigSetupPoseMode.PREPROJECTED_SCREEN
+    ):
         raise A1DocumentAssemblyError(
             "Active Camera depth compensation requires PREPROJECTED_SCREEN setup"
         )
@@ -219,9 +227,13 @@ def assemble_a1_document(
     if not isinstance(settings, A1DocumentAssemblySettings):
         raise TypeError("settings must be A1DocumentAssemblySettings")
 
+    resolved_profile = resolve_a1_rig_profile(rig.profile.profile_id)
     resolved_rig = (
         ensure_preprojected_screen_rig(rig)
-        if settings.compensate_depth_setup_y
+        if (
+            settings.compensate_depth_setup_y
+            and resolved_profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE
+        )
         else rig
     )
     if settings.prefix.strip() != resolved_rig.request.prefix.strip():
