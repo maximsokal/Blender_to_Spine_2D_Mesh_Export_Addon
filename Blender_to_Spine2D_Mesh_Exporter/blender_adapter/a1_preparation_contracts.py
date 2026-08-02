@@ -52,11 +52,11 @@ def freeze_statistics(
 def build_skeleton_metadata(
     settings: A1SingleObjectExportSettings,
 ) -> dict[str, object]:
-    """Build the shared Spine skeleton metadata used before and after render finalization."""
+    """Build shared Spine skeleton metadata before and after render finalization."""
 
     if not isinstance(settings, A1SingleObjectExportSettings):
         raise TypeError("settings must be A1SingleObjectExportSettings")
-    return {
+    metadata: dict[str, object] = {
         "hash": "hash_value_placeholder",
         "spine": settings.export.spine_version,
         "x": 0,
@@ -66,6 +66,12 @@ def build_skeleton_metadata(
         "images": "",
         "audio": "./audio",
     }
+    if settings.export.sequence_frame_count > 0:
+        metadata["fps"] = round(
+            settings.export.sequence_timing.resolved_fps,
+            6,
+        )
+    return metadata
 
 
 class A1ObjectPreparationError(RuntimeError):
