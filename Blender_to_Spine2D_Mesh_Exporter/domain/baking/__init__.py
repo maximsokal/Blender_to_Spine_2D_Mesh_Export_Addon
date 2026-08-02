@@ -107,6 +107,11 @@ from .projection_output import (
     convert_rgba_alpha_representation,
     resolve_projection_output_policy,
 )
+from .sequence_timing import (
+    DEFAULT_SEQUENCE_FPS,
+    SEQUENCE_TIME_DECIMALS,
+    TextureSequenceTiming,
+)
 from .strategies import (
     AlphaBakeStrategy,
     BakeStrategyRegistry,
@@ -146,6 +151,7 @@ __all__ = [
     "CameraProjectionPlan",
     "ColorManagementSnapshot",
     "ColorRGBA",
+    "DEFAULT_SEQUENCE_FPS",
     "EmissionBakeStrategy",
     "GeneratedBakePlan",
     "GeneratedMaterialPlan",
@@ -178,6 +184,7 @@ __all__ = [
     "ProjectionToneMapping",
     "ProjectionTriangle",
     "ResolvedProjectionOutputPolicy",
+    "SEQUENCE_TIME_DECIMALS",
     "SceneBakeContext",
     "SceneCombinedBakeStrategy",
     "ShaderBakeCapability",
@@ -187,6 +194,7 @@ __all__ = [
     "SurfaceColorBakeStrategy",
     "TextureFormat",
     "TexturePlan",
+    "TextureSequenceTiming",
     "WorldBakeSnapshot",
     "build_bake_plan",
     "build_camera_projection_plan",
