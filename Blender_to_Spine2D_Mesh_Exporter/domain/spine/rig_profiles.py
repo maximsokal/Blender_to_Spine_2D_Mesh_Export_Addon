@@ -28,6 +28,18 @@ class A1RigProfile(str, Enum):
         return "X/Y pseudo-rotation with an independent uniform scale control"
 
 
+class A1CameraLayerProjectionKind(str, Enum):
+    """Projection semantics for one rigid camera-relative object layer.
+
+    Perspective layers retain depth-dependent whole-object foreshortening. Orthographic
+    layers retain camera-relative translation/parallax but explicitly disable automatic
+    depth scale so object size remains independent of camera distance.
+    """
+
+    PERSPECTIVE = "PERSPECTIVE"
+    ORTHOGRAPHIC = "ORTHOGRAPHIC"
+
+
 class A1RigSetupPoseMode(str, Enum):
     """Control how generated controls and internal depth layers evaluate at setup.
 
@@ -41,8 +53,9 @@ class A1RigSetupPoseMode(str, Enum):
     ``PREPROJECTED_SCREEN`` is reserved for camera-projected geometry. It represents one
     complete object as a rigid camera-relative layer: camera space is zero, projected
     Blender Object Origin is stored on the internal base, and one Object-Origin depth
-    group drives parallax/foreshortening for the complete object. It must never be used
-    with per-vertex depth groups or ordinary model-space geometry.
+    group drives layer motion. ``A1CameraLayerProjectionKind`` determines whether
+    depth-dependent whole-layer scaling is Perspective or disabled for Orthographic.
+    It must never be used with per-vertex depth groups or ordinary model-space geometry.
     """
 
     NORMALIZED_SINGLE = "NORMALIZED_SINGLE"
@@ -70,6 +83,7 @@ def resolve_a1_rig_profile(value: object) -> A1RigProfile:
 
 
 __all__ = [
+    "A1CameraLayerProjectionKind",
     "A1RigProfile",
     "A1RigSetupPoseMode",
     "resolve_a1_rig_profile",
