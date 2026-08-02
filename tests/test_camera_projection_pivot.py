@@ -23,6 +23,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
     LegacyMeshAttachmentRequest,
     LegacyRigBuildRequest,
     LegacyZGroup,
+    LegacyZGroupOriginMode,
     SpineJsonTarget,
     build_legacy_mesh_document,
     build_rig,
@@ -38,6 +39,7 @@ def _rig(main_position: tuple[float, float]):
             z_groups=(LegacyZGroup(0.0),),
             main_position_pixels=main_position,
             setup_pose_mode=A1RigSetupPoseMode.PREPROJECTED_SCREEN,
+            z_group_origin_mode=LegacyZGroupOriginMode.OBJECT_ORIGIN,
         ),
         A1RigProfile.TWO_AXIS_ROTATION_SCALE,
         spine_target=SpineJsonTarget.SPINE_4_2,
@@ -183,7 +185,7 @@ def test_recentered_projection_preserves_mesh_and_texture_contracts() -> None:
     assert after.image_path == before.image_path
 
 
-def test_recentered_document_serializes_main_and_relative_vertex_bones() -> None:
+def test_recentered_document_uses_camera_zero_and_object_base() -> None:
     main_position = (23.0, -11.0)
     source = _assembly(main_position)
     result = recenter_a1_camera_projection_document(
@@ -195,7 +197,9 @@ def test_recentered_document_serializes_main_and_relative_vertex_bones() -> None
     bones = _bone_by_name(result.document)
 
     main = bones[result.rig.info.main_bone_name]
-    assert (main.x, main.y) == main_position
+    base = bones[result.rig.info.base_bone_name]
+    assert (main.x, main.y) == (0.0, 0.0)
+    assert (base.x, base.y) == main_position
 
     for index, source_vertex in enumerate(
         source.projections[0].request.vertices
@@ -207,6 +211,6 @@ def test_recentered_document_serializes_main_and_relative_vertex_bones() -> None
         vertex_bone = bones[vertex_bone_name]
         assert vertex_bone.parent == result.rig.info.z_groups[0].bone_name
         assert (
-            round(float(main.x) + float(vertex_bone.x), 2),
-            round(float(main.y) + float(vertex_bone.y), 2),
+            round(float(base.x) + float(vertex_bone.x), 2),
+            round(float(base.y) + float(vertex_bone.y), 2),
         ) == source_vertex.bone_position_pixels
