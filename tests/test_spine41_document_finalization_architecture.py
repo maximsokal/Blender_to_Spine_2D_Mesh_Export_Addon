@@ -97,15 +97,27 @@ def test_rig_builder_does_not_apply_target_constraint_mutations() -> None:
     assert "adapt_two_axis_scale_rig_for_spine41" not in imported_names
 
 
-def test_target_finalizer_uses_reported_typed_adapters_and_synchronizer() -> None:
+def test_target_finalizer_routes_model_and_camera_adapters_before_synchronization() -> None:
     function = _function(
         _tree(ADAPTER),
         "finalize_a1_document_assembly_for_target",
     )
     calls = {name for name, _line in _direct_name_calls(function)}
+    loaded_names = {
+        node.id
+        for node in ast.walk(function)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
 
-    assert "adapt_two_axis_document_for_spine38_with_report" in calls
-    assert "adapt_two_axis_document_for_spine41_with_report" in calls
+    required_adapters = {
+        "adapt_two_axis_document_for_spine38_with_report",
+        "adapt_two_axis_document_for_spine41_with_report",
+        "adapt_camera_relative_two_axis_document_for_spine38_with_report",
+        "adapt_camera_relative_two_axis_document_for_spine41_with_report",
+    }
+    assert required_adapters <= loaded_names
+    assert "A1RigSetupPoseMode" in loaded_names
+    assert "adapter" in calls
     assert "_synchronize_document_build_for_spine41" in calls
     assert "replace" in calls
 
@@ -119,11 +131,11 @@ def test_spine42_and_spine43_remain_on_the_canonical_document_path() -> None:
     assert "SpineJsonTarget.SPINE_4_2" in function_source
     assert "SpineJsonTarget.SPINE_4_3" in function_source
     identity_return = function_source.index("return document_assembly")
-    spine38_adapter_call = function_source.index(
+    spine38_adapter_reference = function_source.index(
         "adapt_two_axis_document_for_spine38_with_report"
     )
-    spine41_adapter_call = function_source.index(
+    spine41_adapter_reference = function_source.index(
         "adapt_two_axis_document_for_spine41_with_report"
     )
-    assert identity_return < spine38_adapter_call
-    assert identity_return < spine41_adapter_call
+    assert identity_return < spine38_adapter_reference
+    assert identity_return < spine41_adapter_reference
