@@ -158,26 +158,40 @@ def _settings() -> BakeSettings:
     )
 
 
-def _camera_audit(*extra_codes: str) -> tuple[MaterialCapabilityAudit, ...]:
-    codes = (
-        "GRAPH_CAMERA_DEPENDENCY",
-        "SOURCE_OR_CAMERA_CONTEXT",
-        "TEXTURE_COORD_SOURCE_CONTEXT",
-        *extra_codes,
+def _finding(
+    code: str,
+    *,
+    node_type: str | None = None,
+    output_socket: str | None = None,
+) -> ShaderCapabilityFinding:
+    return ShaderCapabilityFinding(
+        capability=ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
+        code=code,
+        reason=f"test finding: {code}",
+        node_type=node_type,
+        output_socket=output_socket,
+    )
+
+
+def _camera_audit(
+    *extra_findings: ShaderCapabilityFinding,
+) -> tuple[MaterialCapabilityAudit, ...]:
+    findings = (
+        _finding("GRAPH_CAMERA_DEPENDENCY"),
+        _finding("SOURCE_OR_CAMERA_CONTEXT", node_type="FRESNEL"),
+        _finding(
+            "TEXTURE_COORD_SOURCE_CONTEXT",
+            node_type="TEX_COORD",
+            output_socket="Normal",
+        ),
+        *extra_findings,
     )
     return (
         MaterialCapabilityAudit(
             material_name="Crystal",
             render_target="CYCLES",
             required_capability=ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
-            findings=tuple(
-                ShaderCapabilityFinding(
-                    capability=ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
-                    code=code,
-                    reason=f"test finding: {code}",
-                )
-                for code in codes
-            ),
+            findings=findings,
         ),
     )
 
@@ -200,7 +214,7 @@ def _build(
     )
 
 
-def test_normal_uv_mode_keeps_camera_context_material_on_object_bake() -> None:
+def test_normal_uv_mode_keeps_supported_camera_context_on_object_bake() -> None:
     plan = _build()
 
     assert type(plan) is BakePlan
@@ -221,19 +235,37 @@ def test_explicit_camera_projection_mode_still_builds_projection_plan() -> None:
 
 
 @pytest.mark.parametrize(
-    "blocking_code",
+    "blocking_finding",
     (
-        "DISPLACEMENT_RENDER_REQUIRED",
-        "EEVEE_SHADER_TO_RGB",
-        "SOURCE_ATTRIBUTE_NOT_MATERIALIZED",
-        "VOLUME_RENDER_REQUIRED",
+        _finding("DISPLACEMENT_RENDER_REQUIRED"),
+        _finding("EEVEE_SHADER_TO_RGB", node_type="SHADER_TO_RGB"),
+        _finding("SOURCE_ATTRIBUTE_NOT_MATERIALIZED", node_type="ATTRIBUTE"),
+        _finding("VOLUME_RENDER_REQUIRED"),
+        _finding(
+            "TEXTURE_COORD_SOURCE_CONTEXT",
+            node_type="TEX_COORD",
+            output_socket="Camera",
+        ),
+        _finding("SOURCE_OR_CAMERA_CONTEXT", node_type="OBJECT_INFO"),
+        _finding("SOURCE_OR_CAMERA_CONTEXT", node_type="LIGHT_PATH"),
     ),
 )
-def test_normal_uv_mode_rejects_only_unrepresentable_camera_findings(
-    blocking_code: str,
+def test_normal_uv_mode_rejects_unrepresentable_camera_findings(
+    blocking_finding: ShaderCapabilityFinding,
 ) -> None:
-    with pytest.raises(BakePlanError, match="Normal — UV Segments can bake"):
-        _build(audits=_camera_audit(blocking_code))
+    with pytest.raises(BakePlanError, match="Select Export Mode: Camera Projection"):
+        _build(audits=_camera_audit(blocking_finding))
+
+
+def test_aggregate_camera_finding_without_concrete_evidence_fails_closed() -> None:
+    audit = MaterialCapabilityAudit(
+        material_name="Crystal",
+        render_target="CYCLES",
+        required_capability=ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
+        findings=(_finding("GRAPH_CAMERA_DEPENDENCY"),),
+    )
+    with pytest.raises(BakePlanError, match="Select Export Mode: Camera Projection"):
+        _build(audits=(audit,))
 
 
 def test_normal_uv_camera_context_requires_active_camera_snapshot() -> None:
