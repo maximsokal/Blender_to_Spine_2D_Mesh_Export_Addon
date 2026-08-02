@@ -12,6 +12,7 @@ from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping, Tuple
 
+from ..domain.baking import TextureSequenceTiming
 from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from ..domain.spine.version_target import (
     DEFAULT_SPINE_JSON_VERSION,
@@ -64,6 +65,8 @@ class ExportSettings:
     sequence_start_frame: int = 0
     sequence_frame_count: int = 0
     preserve_debug_artifacts: bool = False
+    # Appended to preserve existing positional construction.
+    sequence_timing: TextureSequenceTiming = TextureSequenceTiming()
 
     def __post_init__(self) -> None:
         require_integer(self.texture_width, "texture_width", minimum=1)
@@ -103,6 +106,8 @@ class ExportSettings:
         )
         if not isinstance(self.preserve_debug_artifacts, bool):
             raise TypeError("preserve_debug_artifacts must be bool")
+        if not isinstance(self.sequence_timing, TextureSequenceTiming):
+            raise TypeError("sequence_timing must be TextureSequenceTiming")
 
     @property
     def spine_target(self) -> SpineJsonTarget:
