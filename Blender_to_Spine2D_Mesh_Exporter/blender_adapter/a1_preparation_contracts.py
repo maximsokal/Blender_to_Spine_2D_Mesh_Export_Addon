@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Mapping, Tuple
 
@@ -109,6 +109,21 @@ class A1ObjectPreparationError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class A1BlenderFinalizationContext:
+    """Immutable Blender runtime references required only after texture staging.
+
+    Camera Projection derives its final pivot after render/crop analysis. Carrying the
+    caller-selected context and Scene with the prepared object preserves the historical
+    two-argument finalizer API while still using the exact Blender runtime selected by
+    the public export entry point. ``None`` values deliberately fall back to
+    ``bpy.context`` during real Blender execution.
+    """
+
+    context: Any | None = None
+    scene: Any | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class PreparedA1Object:
     """Complete immutable in-memory product of one A1 object preparation pipeline."""
 
@@ -129,6 +144,9 @@ class PreparedA1Object:
     document_assembly: A1DocumentAssemblyResult
     warnings: Tuple[ExportIssue, ...]
     statistics: Mapping[str, StatisticsValue]
+    finalization_context: A1BlenderFinalizationContext = field(
+        default_factory=A1BlenderFinalizationContext
+    )
 
     def __post_init__(self) -> None:
         if self.source_object is None:
@@ -150,6 +168,7 @@ class PreparedA1Object:
             ("bake_plan", BakePlan),
             ("rig", LegacyRigBuildResult),
             ("document_assembly", A1DocumentAssemblyResult),
+            ("finalization_context", A1BlenderFinalizationContext),
         )
         for field_name, expected_type in expected_types:
             if not isinstance(getattr(self, field_name), expected_type):
@@ -166,6 +185,8 @@ class PreparedA1Object:
             raise ValueError("bake_plan.source_object_id must match object_id")
         if self.rig.request.prefix != self.prefix:
             raise ValueError("rig prefix must match prepared prefix")
+        if self.document_assembly.rig.request.prefix != self.prefix:
+            raise ValueError("document_assembly rig prefix must match prepared prefix")
         object.__setattr__(self, "statistics", freeze_statistics(self.statistics))
 
     @property
@@ -218,6 +239,7 @@ def warning_issue(
 
 
 __all__ = [
+    "A1BlenderFinalizationContext",
     "A1ObjectPreparationError",
     "PreparedA1Object",
     "StatisticsValue",
