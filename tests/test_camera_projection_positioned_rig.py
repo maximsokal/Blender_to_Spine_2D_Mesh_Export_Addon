@@ -36,6 +36,15 @@ def _bone_by_name(rig, name: str):
     return next(bone for bone in rig.bones if bone.name == name)
 
 
+def _camera_base_world_position(rig) -> tuple[float, float]:
+    base = _bone_by_name(rig, rig.info.base_bone_name)
+    group = rig.info.z_groups[0]
+    return (
+        float(base.x or 0.0),
+        float(group.y_offset_pixels) + float(base.y or 0.0),
+    )
+
+
 def test_two_axis_rendered_projection_uses_camera_relative_rigid_setup() -> None:
     source = _rig(A1RigProfile.TWO_AXIS_ROTATION_SCALE)
 
@@ -59,7 +68,13 @@ def test_two_axis_rendered_projection_uses_camera_relative_rigid_setup() -> None
     main = _bone_by_name(result, result.info.main_bone_name)
     base = _bone_by_name(result, result.info.base_bone_name)
     assert (main.x, main.y) == (0.0, 0.0)
-    assert (base.x, base.y) == (14.5, -6.25)
+    assert base.parent == result.info.z_groups[0].bone_name
+    assert _camera_base_world_position(result) == (14.5, -6.25)
+
+    scale_constraint = next(
+        constraint for constraint in result.transform if constraint.order == 2
+    )
+    assert scale_constraint.bones == (result.info.base_bone_name,)
 
     assert source.request.main_position_pixels is None
     assert source.request.setup_pose_mode is A1RigSetupPoseMode.PRESERVE_COMPOSITION
@@ -82,6 +97,7 @@ def test_orthographic_rendered_projection_disables_depth_scale() -> None:
     assert result.request.camera_layer_projection_kind is (
         A1CameraLayerProjectionKind.ORTHOGRAPHIC
     )
+    assert _camera_base_world_position(result) == (-3.0, 5.0)
     assert depth_constraint.extras["mixScaleX"] == 0
     result.validate()
 
