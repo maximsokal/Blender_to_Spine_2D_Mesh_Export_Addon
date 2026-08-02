@@ -1,4 +1,4 @@
-"""Pure setup-pose contract for one rigid Active Camera depth parent."""
+"""Pure setup-pose contract for one rigid Active Camera object layer."""
 
 from __future__ import annotations
 
@@ -101,7 +101,7 @@ def _projection(z_group_index: int) -> A1AttachmentProjectionResult:
     )
 
 
-def test_one_parent_plus_compensated_vertex_y_preserves_screen_y() -> None:
+def test_valid_camera_layer_keeps_object_local_vertex_positions() -> None:
     rig = _rig()
     source = _projection(_group_index(rig))
     source_positions = tuple(
@@ -110,28 +110,24 @@ def test_one_parent_plus_compensated_vertex_y_preserves_screen_y() -> None:
 
     result = _compensate_projection_depth_setup_y(source, rig)
 
-    assert result is not source
+    assert result is source
     assert tuple(
-        vertex.bone_position_pixels for vertex in source.request.vertices
+        vertex.bone_position_pixels for vertex in result.request.vertices
     ) == source_positions
 
-    parent_y = rig.info.z_groups[0].y_offset_pixels
+    group = rig.info.z_groups[0]
+    base = next(
+        bone for bone in rig.bones if bone.name == rig.info.base_bone_name
+    )
+    assert base.parent == group.bone_name
+    assert float(base.x or 0.0) == 17.0
+    assert float(group.y_offset_pixels) + float(base.y or 0.0) == -9.0
     assert {vertex.z_group_index for vertex in result.request.vertices} == {
-        _group_index(rig)
+        group.index
     }
-    for original, adjusted in zip(
-        source.request.vertices,
-        result.request.vertices,
-        strict=True,
-    ):
-        assert parent_y + adjusted.bone_position_pixels[1] == (
-            original.bone_position_pixels[1]
-        )
-        assert adjusted.bone_position_pixels[0] == original.bone_position_pixels[0]
-        assert adjusted.uv == original.uv
 
 
-def test_non_screen_setup_rig_fails_before_partial_compensation() -> None:
+def test_non_screen_setup_rig_fails_before_validation() -> None:
     rig = _rig(A1RigSetupPoseMode.PRESERVE_COMPOSITION)
 
     with pytest.raises(
@@ -150,7 +146,7 @@ def test_unknown_depth_group_fails_closed() -> None:
 
     with pytest.raises(
         A1DocumentAssemblyError,
-        match=rf"unknown depth group {unknown_index}",
+        match="outside the rigid camera layer",
     ):
         _compensate_projection_depth_setup_y(
             _projection(unknown_index),
