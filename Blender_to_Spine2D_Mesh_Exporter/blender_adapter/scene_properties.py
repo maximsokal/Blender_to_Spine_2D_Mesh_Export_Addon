@@ -141,6 +141,16 @@ def _update_projection_direction(_self: Any, context: bpy.types.Context) -> None
     _update_ui_for_paths(_self, context)
 
 
+def _update_bake_settings(_self: Any, context: bpy.types.Context) -> None:
+    """Invalidate diagnostics after sequence timing or scene influence changes."""
+
+    _invalidate_readiness_for_setting(
+        context,
+        reason="Bake settings changed",
+    )
+    _update_ui_for_paths(_self, context)
+
+
 def _update_spine_target_version(_self: Any, context: bpy.types.Context) -> None:
     """Invalidate diagnostics because the final JSON schema has changed."""
 
@@ -296,9 +306,55 @@ PROPERTIES = (
         "spine2d_frames_for_render",
         bpy.props.IntProperty(
             name="Frames for render",
-            description="0 for current frame; >0 for a sequence from playback",
+            description="0 for current frame; >0 for a texture sequence",
             default=0,
             min=0,
+            update=_update_bake_settings,
+        ),
+    ),
+    (
+        "spine2d_sequence_fps_override",
+        bpy.props.FloatProperty(
+            name="Sequence FPS Override",
+            description="0 uses Scene FPS; a positive value overrides sequence playback FPS",
+            default=0.0,
+            min=0.0,
+            max=1000.0,
+            precision=3,
+            update=_update_bake_settings,
+        ),
+    ),
+    (
+        "spine2d_include_scene_shadows",
+        bpy.props.BoolProperty(
+            name="Include shadows from scene objects",
+            description=(
+                "Allow non-exported scene objects to cast shadows into Camera Projection"
+            ),
+            default=True,
+            update=_update_bake_settings,
+        ),
+    ),
+    (
+        "spine2d_include_scene_reflection_transmission",
+        bpy.props.BoolProperty(
+            name="Include reflection/transmission objects",
+            description=(
+                "Allow non-exported scene objects to appear in reflection and transmission rays"
+            ),
+            default=True,
+            update=_update_bake_settings,
+        ),
+    ),
+    (
+        "spine2d_world_affects_lighting_reflections",
+        bpy.props.BoolProperty(
+            name="World affects lighting/reflections",
+            description=(
+                "Keep the Scene World active for lighting, reflections, and transmission"
+            ),
+            default=True,
+            update=_update_bake_settings,
         ),
     ),
     (
