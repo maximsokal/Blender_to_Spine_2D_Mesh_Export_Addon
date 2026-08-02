@@ -1,10 +1,15 @@
-"""Rebuild canonical two-axis rigs for already-projected screen geometry."""
+"""Rebuild canonical two-axis rigs for already-projected camera geometry."""
 
 from __future__ import annotations
 
 from dataclasses import replace
+from math import isfinite
 
-from .legacy_rig_contracts import LegacyRigBuildResult
+from .legacy_rig_contracts import (
+    LegacyRigBuildResult,
+    LegacyZGroup,
+    LegacyZGroupOriginMode,
+)
 from .rig_profiles import (
     A1RigProfile,
     A1RigSetupPoseMode,
@@ -13,16 +18,39 @@ from .rig_profiles import (
 from .two_axis_scale_rig import build_two_axis_scale_rig
 
 
+def _finite_camera_depth(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError("camera_depth must be a finite number")
+    resolved = float(value)
+    if not isfinite(resolved):
+        raise ValueError("camera_depth must be finite")
+    return 0.0 if resolved == 0.0 else resolved
+
+
 def ensure_preprojected_screen_rig(
     rig: LegacyRigBuildResult,
+    *,
+    main_position_pixels: tuple[float, float] | None = None,
+    camera_depth: float | None = None,
 ) -> LegacyRigBuildResult:
-    """Return a validated two-axis rig with an identity screen-space setup pose.
+    """Return one validated rigid layer positioned relative to camera-space zero.
 
-    Active Camera Normal / UV Segments and rendered Camera Projection have already
-    converted source geometry into final camera-screen X/Y. Reapplying the historical
-    model-space setup offsets would project that geometry a second time. This helper
-    preserves the complete two-axis hierarchy and constraint topology while selecting
-    the dedicated setup-pose policy that neutralizes only those initial offsets.
+    Active Camera Normal / UV Segments and rendered Camera Projection already converted
+    source geometry into final camera-screen X/Y. They must not keep per-vertex depth
+    groups: doing so applies different X/Y transforms to vertices of the same object and
+    visibly deforms the mesh.
+
+    The camera-relative contract is therefore:
+
+    * one depth group for the complete object;
+    * ``main`` at camera-space zero;
+    * projected Blender Object Origin stored on the internal base layer;
+    * vertex bones local to that rigid object layer;
+    * live X/Y/Scale constraints retained.
+
+    ``camera_depth`` is required when an existing non-camera rig must be collapsed during
+    rendered Camera Projection finalization. Active Camera preparation already supplies a
+    single Object-Origin-depth group and can omit it.
     """
 
     if not isinstance(rig, LegacyRigBuildResult):
@@ -34,16 +62,37 @@ def ensure_preprojected_screen_rig(
             "Preprojected screen setup requires TWO_AXIS_ROTATION_SCALE"
         )
 
-    if rig.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN:
+    request = rig.request
+    if camera_depth is None:
+        if len(request.z_groups) != 1:
+            raise ValueError(
+                "Camera-relative preprojected setup requires exactly one Object-Origin "
+                f"depth group; received {len(request.z_groups)}"
+            )
+        resolved_z_groups = request.z_groups
+    else:
+        resolved_z_groups = (
+            LegacyZGroup(z_value=_finite_camera_depth(camera_depth)),
+        )
+
+    resolved_main_position = (
+        request.main_position_pixels
+        if main_position_pixels is None
+        else main_position_pixels
+    )
+    resolved_request = replace(
+        request,
+        z_groups=resolved_z_groups,
+        main_position_pixels=resolved_main_position,
+        setup_pose_mode=A1RigSetupPoseMode.PREPROJECTED_SCREEN,
+        z_group_origin_mode=LegacyZGroupOriginMode.OBJECT_ORIGIN,
+    )
+
+    if resolved_request == request:
         rig.validate()
         return rig
 
-    rebuilt = build_two_axis_scale_rig(
-        replace(
-            rig.request,
-            setup_pose_mode=A1RigSetupPoseMode.PREPROJECTED_SCREEN,
-        )
-    )
+    rebuilt = build_two_axis_scale_rig(resolved_request)
     rebuilt.validate()
     return rebuilt
 
