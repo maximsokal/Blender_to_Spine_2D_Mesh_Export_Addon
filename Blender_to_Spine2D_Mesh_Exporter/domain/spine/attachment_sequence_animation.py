@@ -1,9 +1,9 @@
-"""Build deterministic Spine 4.2 animation timelines for sequence attachments.
+"""Build deterministic Spine 4.1+ animation timelines for sequence attachments.
 
 A setup ``sequence`` mapping tells Spine how image files are named, but it does not by
-itself animate the displayed sequence index. The legacy exporter generated one
-``animations.attachments`` timeline for every sequence mesh. Rewrite keeps that visible
-contract while making ownership and conflict handling explicit and Blender-independent.
+itself animate the displayed sequence index. Rewrite emits a compact looping sequence
+key plus one boundary key that establishes the complete animation duration. It never
+creates one native sequence key per baked image.
 """
 
 from __future__ import annotations
@@ -19,7 +19,8 @@ from .sequence_timeline_contract import validate_animation_sequence_timelines
 from .validator import SpineValidator
 
 
-DEFAULT_SEQUENCE_FRAME_DELAY = 0.0333
+DEFAULT_SEQUENCE_FRAME_DELAY = 1.0 / 30.0
+_SEQUENCE_TIME_DECIMALS = 6
 
 
 class AttachmentSequenceAnimationError(ValueError):
@@ -59,7 +60,7 @@ def build_attachment_sequence_timeline(
     *,
     frame_delay: float = DEFAULT_SEQUENCE_FRAME_DELAY,
 ) -> tuple[dict[str, object], ...]:
-    """Return the deterministic v0.23 loop timeline for one sequence attachment."""
+    """Return one Loop key and one duration boundary key for a native sequence."""
 
     if isinstance(count, bool) or not isinstance(count, int):
         raise TypeError("count must be int")
@@ -73,21 +74,27 @@ def build_attachment_sequence_timeline(
     ):
         raise ValueError("frame_delay must be a finite number greater than zero")
 
-    delay = round(float(frame_delay), 4)
+    delay = round(float(frame_delay), _SEQUENCE_TIME_DECIMALS)
     if delay <= 0.0:
         raise ValueError("frame_delay rounds to zero at Spine timeline precision")
-    keyframes: list[dict[str, object]] = [
-        {"mode": "loop", "delay": delay},
-    ]
-    keyframes.extend(
+    duration = round(float(frame_delay) * count, _SEQUENCE_TIME_DECIMALS)
+    if duration <= 0.0:
+        raise ValueError("sequence duration rounds to zero")
+
+    return (
         {
-            "time": round(delay * frame_index, 4),
+            "time": 0.0,
             "mode": "loop",
-            "index": frame_index,
-        }
-        for frame_index in range(1, count)
+            "index": 0,
+            "delay": delay,
+        },
+        {
+            "time": duration,
+            "mode": "loop",
+            "index": 0,
+            "delay": delay,
+        },
     )
-    return tuple(keyframes)
 
 
 def _merge_sequence_timeline(
@@ -164,7 +171,7 @@ def apply_attachment_sequence_animations(
     frame_delay: float = DEFAULT_SEQUENCE_FRAME_DELAY,
     slot_names: tuple[str, ...] | None = None,
 ) -> SpineDocument:
-    """Add missing sequence timelines for selected setup sequence attachments.
+    """Add compact native Loop timelines for selected sequence attachments.
 
     Existing equal timelines are retained, different timelines fail explicitly, and
     documents without matching sequence attachments are returned unchanged. ``slot_names``
