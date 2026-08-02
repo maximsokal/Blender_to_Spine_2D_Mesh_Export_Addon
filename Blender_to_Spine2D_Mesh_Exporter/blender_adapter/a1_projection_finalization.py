@@ -7,6 +7,7 @@ from math import isfinite
 from typing import Any
 
 from ..application import (
+    A1ZGroupAssignmentPlan,
     assemble_a1_camera_projection_document,
     recenter_a1_camera_projection_document,
 )
@@ -15,7 +16,6 @@ from ..domain.baking.projection_layout import CameraProjectionLayout
 from ..domain.spine import LegacyRigBuildResult, build_legacy_rig
 from ..domain.spine.preprojected_setup import ensure_preprojected_screen_rig
 from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
-from ..domain.spine.two_axis_scale_rig import build_two_axis_scale_rig
 from .a1_document_preparation import finalize_a1_document_assembly_for_target
 from .a1_preparation_contracts import (
     A1BlenderFinalizationContext,
@@ -153,32 +153,35 @@ def _rendered_camera_main_position(
     )
 
     # Render contour pixels use image-row Y and are negated by the established
-    # attachment projector. Match that final Spine convention for the main bone.
+    # attachment projector. Match that final Spine convention for the base placement.
     return (float(projected.u), -float(projected.v)), float(projected.depth)
 
 
 def _positioned_projection_rig(
     rig: LegacyRigBuildResult,
     main_position: tuple[float, float],
+    camera_depth: float,
 ) -> LegacyRigBuildResult:
-    """Rebuild the selected profile around the projected Blender Object Origin."""
+    """Rebuild the selected profile around camera zero and Blender Object Origin."""
 
     if not isinstance(rig, LegacyRigBuildResult):
         raise TypeError("rig must be LegacyRigBuildResult")
+    if not isinstance(camera_depth, (int, float)) or isinstance(camera_depth, bool):
+        raise TypeError("camera_depth must be a finite number")
+    if not isfinite(float(camera_depth)):
+        raise ValueError("camera_depth must be finite")
+
     resolved_profile = resolve_a1_rig_profile(rig.profile.profile_id)
 
     if resolved_profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
-        neutral_screen_rig = ensure_preprojected_screen_rig(rig)
-        positioned = build_two_axis_scale_rig(
-            replace(
-                neutral_screen_rig.request,
-                main_position_pixels=main_position,
-            )
+        positioned = ensure_preprojected_screen_rig(
+            rig,
+            main_position_pixels=main_position,
+            camera_depth=float(camera_depth),
         )
     elif resolved_profile is A1RigProfile.THREE_AXIS_ROTATION:
-        # Preserve the already supported historical three-axis setup payload. This fix
-        # adds the missing Blender Object Origin without silently changing that profile's
-        # animation/control contract.
+        # Preserve the historical three-axis payload. Camera-relative rigid layering is
+        # a two-axis contract and must not silently rewrite Legacy 3-Axis semantics.
         positioned = build_legacy_rig(
             replace(
                 rig.request,
@@ -192,11 +195,38 @@ def _positioned_projection_rig(
     return positioned
 
 
+def _camera_relative_z_groups(
+    source: A1ZGroupAssignmentPlan,
+    rig: LegacyRigBuildResult,
+) -> A1ZGroupAssignmentPlan:
+    """Bind every source vertex to the one rigid Object-Origin depth layer."""
+
+    if not isinstance(source, A1ZGroupAssignmentPlan):
+        raise TypeError("source must be A1ZGroupAssignmentPlan")
+    if not isinstance(rig, LegacyRigBuildResult):
+        raise TypeError("rig must be LegacyRigBuildResult")
+    if len(rig.request.z_groups) != 1 or len(rig.info.z_groups) != 1:
+        raise ValueError(
+            "camera-relative rendered projection requires exactly one rig depth group"
+        )
+
+    target_index = rig.info.z_groups[0].index
+    return replace(
+        source,
+        z_index_base=target_index,
+        groups=rig.request.z_groups,
+        source_bindings=tuple(
+            replace(binding, z_group_index=target_index)
+            for binding in source.source_bindings
+        ),
+    )
+
+
 def finalize_prepared_camera_projection(
     prepared: PreparedA1Object,
     layout: CameraProjectionLayout | None,
 ) -> PreparedA1Object:
-    """Return a prepared object whose document matches render, crop, and Blender pivot.
+    """Return a prepared object whose document matches render, crop, and camera origin.
 
     The historical two-argument call contract is preserved. Blender runtime references
     captured by ``prepare_a1_object`` travel inside ``PreparedA1Object`` so fault-matrix,
@@ -234,12 +264,19 @@ def finalize_prepared_camera_projection(
     positioned_rig = _positioned_projection_rig(
         prepared.rig,
         main_position,
+        projected_depth,
+    )
+    resolved_profile = resolve_a1_rig_profile(positioned_rig.profile.profile_id)
+    positioned_z_groups = (
+        _camera_relative_z_groups(prepared.z_groups, positioned_rig)
+        if resolved_profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE
+        else prepared.z_groups
     )
 
     skeleton_metadata = build_skeleton_metadata(prepared.settings)
     document_assembly = assemble_a1_camera_projection_document(
         positioned_rig,
-        prepared.z_groups,
+        positioned_z_groups,
         plan,
         prepared.document_assembly.settings,
         layout=layout,
@@ -303,6 +340,9 @@ def finalize_prepared_camera_projection(
             "projection_object_origin_main_x": main_position[0],
             "projection_object_origin_main_y": main_position[1],
             "projection_object_origin_depth": projected_depth,
+            "projection_camera_relative_depth_group_count": len(
+                positioned_rig.info.z_groups
+            ),
             "projection_setup_pose_mode": positioned_rig.request.setup_pose_mode.value,
             "final_bone_count": len(document.bones),
             "slot_count": len(document.slots),
@@ -315,6 +355,7 @@ def finalize_prepared_camera_projection(
     )
     return replace(
         prepared,
+        z_groups=positioned_z_groups,
         rig=document_assembly.rig,
         document_assembly=document_assembly,
         statistics=statistics,
