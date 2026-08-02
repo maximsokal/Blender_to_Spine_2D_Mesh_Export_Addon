@@ -2,7 +2,8 @@
 
 Spine 4.1+ uses one native sequence attachment and a compact looping sequence timeline.
 Spine 3.8/4.0 receive one ordinary mesh attachment per baked image plus a stepped slot
-attachment timeline. The canonical document is never patched after JSON serialization.
+attachment timeline. Canonical compatibility timelines are removed before either target
+representation is authored, so no target inherits another version's animation schema.
 """
 
 from __future__ import annotations
@@ -70,6 +71,68 @@ def _frame_token(frame_number: int, digits: int) -> str:
     if digits < 0:
         raise ValueError("digits must be non-negative")
     return str(frame_number) if digits == 0 else f"{frame_number:0{digits}d}"
+
+
+def _without_native_sequence_timelines(document: SpineDocument) -> SpineDocument:
+    """Remove only attachment ``sequence`` timelines from canonical animations.
+
+    Canonical assembly keeps the historical per-frame timeline for direct callers. The
+    production target boundary must own the final representation, so this function
+    strips those sequence entries while preserving every unrelated animation timeline.
+    Empty attachment containers are pruned deterministically.
+    """
+
+    if not isinstance(document, SpineDocument):
+        raise TypeError("document must be SpineDocument")
+
+    animations = deepcopy(dict(document.animations))
+    changed = False
+    for animation_name, animation_payload in tuple(animations.items()):
+        if not isinstance(animation_payload, Mapping):
+            continue
+        mutable_animation = dict(animation_payload)
+        attachments_payload = mutable_animation.get("attachments")
+        if not isinstance(attachments_payload, Mapping):
+            animations[animation_name] = mutable_animation
+            continue
+
+        mutable_skins: dict[str, Any] = {}
+        for skin_name, skin_payload in attachments_payload.items():
+            if not isinstance(skin_payload, Mapping):
+                mutable_skins[str(skin_name)] = skin_payload
+                continue
+
+            mutable_slots: dict[str, Any] = {}
+            for slot_name, slot_payload in skin_payload.items():
+                if not isinstance(slot_payload, Mapping):
+                    mutable_slots[str(slot_name)] = slot_payload
+                    continue
+
+                mutable_attachments: dict[str, Any] = {}
+                for attachment_name, attachment_payload in slot_payload.items():
+                    if not isinstance(attachment_payload, Mapping):
+                        mutable_attachments[str(attachment_name)] = attachment_payload
+                        continue
+                    mutable_timeline = dict(attachment_payload)
+                    if "sequence" in mutable_timeline:
+                        mutable_timeline.pop("sequence", None)
+                        changed = True
+                    if mutable_timeline:
+                        mutable_attachments[str(attachment_name)] = mutable_timeline
+                if mutable_attachments:
+                    mutable_slots[str(slot_name)] = mutable_attachments
+            if mutable_slots:
+                mutable_skins[str(skin_name)] = mutable_slots
+
+        if mutable_skins:
+            mutable_animation["attachments"] = mutable_skins
+        else:
+            mutable_animation.pop("attachments", None)
+        animations[animation_name] = mutable_animation
+
+    if not changed:
+        return document
+    return replace(document, animations=animations)
 
 
 def _merge_legacy_slot_timeline(
@@ -298,10 +361,11 @@ def finalize_texture_sequence_animation(
     if not has_sequence:
         return document
 
+    canonical_document = _without_native_sequence_timelines(document)
     encoding = resolved_target.texture_animation_encoding
     if encoding is SpineTextureAnimationEncoding.NATIVE_SEQUENCE:
         result = apply_attachment_sequence_animations(
-            document,
+            canonical_document,
             animation_name=animation_name.strip(),
             frame_delay=timing.frame_duration,
         )
@@ -310,7 +374,7 @@ def finalize_texture_sequence_animation(
         return result
     if encoding is SpineTextureAnimationEncoding.ATTACHMENT_SWAP:
         return _finalize_attachment_swap_sequences(
-            document,
+            canonical_document,
             timing,
             animation_name=animation_name.strip(),
         )
