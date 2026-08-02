@@ -1,4 +1,4 @@
-"""Regression contracts for already-projected camera-screen rig setup."""
+"""Regression contracts for camera-relative preprojected rig setup."""
 
 from __future__ import annotations
 
@@ -20,25 +20,27 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.preprojected_setup import (
 
 def _request(
     setup_pose_mode: A1RigSetupPoseMode,
+    *,
+    z_groups: tuple[LegacyZGroup, ...] = (LegacyZGroup(-4.0),),
 ) -> LegacyRigBuildRequest:
     return LegacyRigBuildRequest(
         prefix="Projected",
         texture_width=160,
         texture_height=96,
-        z_groups=(
-            LegacyZGroup(-1.0),
-            LegacyZGroup(0.0),
-            LegacyZGroup(2.0),
-        ),
+        z_groups=z_groups,
         main_position_pixels=(13.0, -7.0),
         setup_pose_mode=setup_pose_mode,
         z_group_origin_mode=LegacyZGroupOriginMode.OBJECT_ORIGIN,
     )
 
 
-def _two_axis(setup_pose_mode: A1RigSetupPoseMode):
+def _two_axis(
+    setup_pose_mode: A1RigSetupPoseMode,
+    *,
+    z_groups: tuple[LegacyZGroup, ...] = (LegacyZGroup(-4.0),),
+):
     return build_rig(
-        _request(setup_pose_mode),
+        _request(setup_pose_mode, z_groups=z_groups),
         A1RigProfile.TWO_AXIS_ROTATION_SCALE,
         spine_target=SpineJsonTarget.SPINE_4_2,
     )
@@ -48,16 +50,40 @@ def _constraint_by_order(rig) -> dict[int, object]:
     return {constraint.order: constraint for constraint in rig.transform}
 
 
-def test_preprojected_setup_preserves_hierarchy_and_constraint_ownership() -> None:
+def _bone_by_name(rig, name: str):
+    return next(bone for bone in rig.bones if bone.name == name)
+
+
+def test_preprojected_setup_places_object_under_camera_zero() -> None:
     historical = _two_axis(A1RigSetupPoseMode.PRESERVE_COMPOSITION)
     screen = _two_axis(A1RigSetupPoseMode.PREPROJECTED_SCREEN)
 
     historical.validate()
     screen.validate()
-    assert historical.bones == screen.bones
+
+    historical_main = _bone_by_name(historical, historical.info.main_bone_name)
+    historical_base = _bone_by_name(historical, historical.info.base_bone_name)
+    screen_main = _bone_by_name(screen, screen.info.main_bone_name)
+    screen_base = _bone_by_name(screen, screen.info.base_bone_name)
+
+    assert historical_main.x == 13.0
+    assert historical_main.y == -7.0
+    assert historical_base.x is None
+    assert historical_base.y is None
+
+    assert screen_main.x == 0.0
+    assert screen_main.y == 0.0
+    assert screen_base.x == 13.0
+    assert screen_base.y == -7.0
+    assert len(screen.info.z_groups) == 1
+
+
+def test_preprojected_setup_preserves_live_constraint_topology() -> None:
+    historical = _two_axis(A1RigSetupPoseMode.PRESERVE_COMPOSITION)
+    screen = _two_axis(A1RigSetupPoseMode.PREPROJECTED_SCREEN)
+
     assert historical.ik == screen.ik
     assert tuple(item.order for item in screen.transform) == (0, 4, 2, 3)
-
     for historical_constraint, screen_constraint in zip(
         historical.transform,
         screen.transform,
@@ -86,7 +112,6 @@ def test_preprojected_setup_neutralizes_only_initial_projection_offsets() -> Non
     assert screen[3].extras["x"] == 0.0
     assert screen[3].extras["scaleX"] == 0.0
 
-    # Constraint mixes and target ownership stay live; only setup offsets are neutral.
     assert screen[0].extras["scaleX"] == -1
     assert screen[0].extras["mixX"] == 0
     assert screen[0].extras["mixScaleX"] == 0
@@ -105,7 +130,37 @@ def test_ensure_preprojected_screen_rig_is_idempotent_and_immutable() -> None:
     assert source.request is source_request
     assert source.request.setup_pose_mode is A1RigSetupPoseMode.PRESERVE_COMPOSITION
     assert result.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
+    assert result.request.z_group_origin_mode is LegacyZGroupOriginMode.OBJECT_ORIGIN
     assert ensure_preprojected_screen_rig(result) is result
+
+
+def test_helper_can_collapse_rendered_source_depths_to_camera_origin() -> None:
+    source = _two_axis(
+        A1RigSetupPoseMode.PRESERVE_COMPOSITION,
+        z_groups=(LegacyZGroup(-1.0), LegacyZGroup(0.0), LegacyZGroup(2.0)),
+    )
+
+    result = ensure_preprojected_screen_rig(
+        source,
+        main_position_pixels=(21.0, 9.0),
+        camera_depth=-6.5,
+    )
+
+    assert result.request.z_groups == (LegacyZGroup(-6.5),)
+    assert result.request.main_position_pixels == (21.0, 9.0)
+    assert len(result.info.z_groups) == 1
+    assert result.info.z_groups[0].z_value == -6.5
+    result.validate()
+
+
+def test_helper_rejects_uncollapsed_vertex_depth_groups() -> None:
+    source = _two_axis(
+        A1RigSetupPoseMode.PRESERVE_COMPOSITION,
+        z_groups=(LegacyZGroup(-1.0), LegacyZGroup(1.0)),
+    )
+
+    with pytest.raises(ValueError, match="exactly one Object-Origin depth group"):
+        ensure_preprojected_screen_rig(source)
 
 
 def test_preprojected_screen_rejects_unsupported_three_axis_profile() -> None:
