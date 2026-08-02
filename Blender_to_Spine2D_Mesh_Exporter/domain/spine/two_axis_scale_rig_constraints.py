@@ -6,7 +6,10 @@ from typing import Tuple
 
 from .legacy_rig_plan import LegacyRigBuildPlan
 from .model import IKConstraint, TransformConstraint
-from .rig_profiles import A1RigSetupPoseMode
+from .rig_profiles import (
+    A1CameraLayerProjectionKind,
+    A1RigSetupPoseMode,
+)
 from .two_axis_scale_profile import TwoAxisScaleRigProfile
 from .two_axis_scale_rig_contracts import TwoAxisScaleRigLayout
 
@@ -18,10 +21,13 @@ def build_two_axis_scale_constraints(
     """Build the exact five-phase schedule generalized from the reference rig.
 
     Ordinary model-space documents retain the historical setup offsets. Camera-screen
-    geometry has already undergone the complete 3D projection, so applying those offsets
-    a second time would displace it in Spine. ``PREPROJECTED_SCREEN`` therefore emits
-    identity setup offsets while preserving the same constraint topology and non-zero
-    mixes, allowing the X/Y/Scale controls to remain live after import.
+    geometry has already undergone complete 3D projection, so ``PREPROJECTED_SCREEN``
+    emits identity setup offsets while preserving live X/Y/Scale controls.
+
+    One camera-relative depth group moves the complete object rigidly. Perspective keeps
+    the historical depth-scale channel as whole-object foreshortening. Orthographic sets
+    ``mixScaleX`` to zero on that channel so depth changes translation only and object
+    size remains camera-distance independent.
     """
 
     if not isinstance(plan, LegacyRigBuildPlan):
@@ -34,6 +40,11 @@ def build_two_axis_scale_constraints(
     profile = plan.profile
     preprojected_screen = (
         plan.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
+    )
+    orthographic_camera_layer = (
+        preprojected_screen
+        and plan.request.camera_layer_projection_kind
+        is A1CameraLayerProjectionKind.ORTHOGRAPHIC
     )
     control_x, control_y, scale_control = plan.control_bone_names
     constraint_bone, _scale_ik, rotate_ik, ik_target = plan.ik_chain_bone_names
@@ -78,6 +89,16 @@ def build_two_axis_scale_constraints(
             else profile.rotation_y_setup_degrees
         ),
     }
+    depth_extras = {
+        "rotation": -90,
+        "x": 0.0 if preprojected_screen else layout.minimum_depth_y,
+        "scaleX": 0.0 if preprojected_screen else -1,
+        "mixRotate": 0,
+        "mixX": 0,
+        "mixShearY": 0,
+    }
+    if orthographic_camera_layer:
+        depth_extras["mixScaleX"] = 0
 
     transform = (
         TransformConstraint(
@@ -111,18 +132,7 @@ def build_two_axis_scale_constraints(
             order=3,
             bones=plan.info.sub_bone_scale_names,
             target=constraint_bone,
-            extras={
-                "rotation": -90,
-                "x": (
-                    0.0
-                    if preprojected_screen
-                    else layout.minimum_depth_y
-                ),
-                "scaleX": 0.0 if preprojected_screen else -1,
-                "mixRotate": 0,
-                "mixX": 0,
-                "mixShearY": 0,
-            },
+            extras=depth_extras,
         ),
     )
     return ik, transform
