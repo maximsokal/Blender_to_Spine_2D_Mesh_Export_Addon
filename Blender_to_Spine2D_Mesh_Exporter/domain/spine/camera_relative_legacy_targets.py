@@ -346,6 +346,7 @@ def adapt_camera_relative_two_axis_document_for_spine38_with_report(
     )
 
     position_name = f"{prefix}_scale_spine38_position"
+    position = _named_transform(adapted.document, position_name)
     rotation_x = _named_transform(
         adapted.document,
         profile.rotation_x_constraint(prefix),
@@ -366,13 +367,7 @@ def adapt_camera_relative_two_axis_document_for_spine38_with_report(
         adapted.document,
         profile.scale_ik_constraint(prefix),
     )
-    base_order = min(
-        rotation_x.order,
-        ik.order,
-        depth.order,
-        rotation_y.order,
-        scale.order,
-    )
+    base_order = position.order
 
     transform_replacements = {
         rotation_x.name: replace(rotation_x, order=base_order),
