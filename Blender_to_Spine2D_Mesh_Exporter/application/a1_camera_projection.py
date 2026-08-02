@@ -32,7 +32,6 @@ from ..domain.geometry import (
 from ..domain.spine import (
     A1RigSetupPoseMode,
     LegacyRigBuildResult,
-    apply_attachment_sequence_animations,
     apply_legacy_visual_options,
     build_legacy_mesh_document,
 )
@@ -287,7 +286,7 @@ def assemble_a1_camera_projection_document(
     layout: CameraProjectionLayout | None = None,
     skeleton_metadata: Mapping[str, object] | None = None,
 ) -> A1DocumentAssemblyResult:
-    """Compose one cropped camera projection attachment for a rendered texture."""
+    """Compose one canonical cropped camera projection attachment."""
 
     if not isinstance(rig, LegacyRigBuildResult):
         raise TypeError("rig must be LegacyRigBuildResult")
@@ -368,7 +367,8 @@ def assemble_a1_camera_projection_document(
             include_control_icons=resolved_settings.include_control_icons,
             include_preview_animation=resolved_settings.include_preview_animation,
         )
-        document = apply_attachment_sequence_animations(document)
+        # Target-specific texture animation is applied only after render-derived crop
+        # finalization, because legacy targets must expand this one canonical attachment.
         document_build = replace(document_build, document=document)
     except Exception as exc:
         raise A1DocumentAssemblyError(
