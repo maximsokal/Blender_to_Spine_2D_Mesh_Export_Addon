@@ -14,6 +14,9 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_projection_finalization
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.active_camera_projection import (
     resolve_a1_active_camera_projection_frame,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import (
+    A1CameraLayerProjectionKind,
+)
 
 
 def test_rendered_projection_uses_evaluated_blender_object_origin() -> None:
@@ -49,7 +52,11 @@ def test_rendered_projection_uses_evaluated_blender_object_origin() -> None:
 
     prepared = SimpleNamespace(source_object=source)
     plan = SimpleNamespace(settings=SimpleNamespace(width=128, height=128))
-    main_position, projected_depth = _rendered_camera_main_position(
+    (
+        main_position,
+        projected_depth,
+        camera_layer_kind,
+    ) = _rendered_camera_main_position(
         prepared,
         plan,
         context=bpy.context,
@@ -75,4 +82,5 @@ def test_rendered_projection_uses_evaluated_blender_object_origin() -> None:
         abs=1.0e-6,
     )
     assert projected_depth == pytest.approx(expected.depth, abs=1.0e-6)
+    assert camera_layer_kind is A1CameraLayerProjectionKind.PERSPECTIVE
     assert abs(main_position[0]) > 1.0e-3 or abs(main_position[1]) > 1.0e-3
