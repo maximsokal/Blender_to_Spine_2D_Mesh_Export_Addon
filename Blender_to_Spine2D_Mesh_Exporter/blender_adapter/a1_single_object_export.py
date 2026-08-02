@@ -168,8 +168,6 @@ def export_a1_single_object(
             finalized = finalize_prepared_camera_projection(
                 prepared,
                 texture_stage.projection_layout,
-                context=context,
-                scene=scene,
             )
             statistics.update(finalized.statistics)
             statistics["bake_uv_coverage_sample_count"] = len(coverage_samples)
