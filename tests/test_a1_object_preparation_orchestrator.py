@@ -12,6 +12,7 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import a1_object_preparation
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_preparation_contracts import (
+    A1BlenderFinalizationContext,
     A1ObjectPreparationError,
 )
 
@@ -130,8 +131,15 @@ def test_orchestrator_passes_each_typed_stage_result_to_the_next(monkeypatch):
         A1SingleObjectStage.ASSEMBLE_DOCUMENT.value,
     ]
     assert captured["object_id"] == "Hero"
+    assert captured["rig"] is document.rig
     assert captured["warnings"] == document.warnings
     assert captured["statistics"] == document.statistics
+    assert isinstance(
+        captured["finalization_context"],
+        A1BlenderFinalizationContext,
+    )
+    assert captured["finalization_context"].context is context
+    assert captured["finalization_context"].scene is scene
 
 
 def test_typed_stage_error_is_not_rewrapped(monkeypatch):
