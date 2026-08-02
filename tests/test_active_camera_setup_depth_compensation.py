@@ -14,6 +14,7 @@ from Blender_to_Spine2D_Mesh_Exporter.application.a1_document_assembly import (
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import LoopId, VertexId
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
+    A1CameraLayerProjectionKind,
     A1RigProfile,
     A1RigSetupPoseMode,
     LegacyAttachmentVertex,
@@ -43,6 +44,11 @@ def _rig(
             main_position_pixels=(17.0, -9.0),
             setup_pose_mode=setup_pose_mode,
             z_group_origin_mode=LegacyZGroupOriginMode.OBJECT_ORIGIN,
+            camera_layer_projection_kind=(
+                A1CameraLayerProjectionKind.PERSPECTIVE
+                if setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
+                else None
+            ),
         ),
         A1RigProfile.TWO_AXIS_ROTATION_SCALE,
         spine_target=SpineJsonTarget.SPINE_4_2,
