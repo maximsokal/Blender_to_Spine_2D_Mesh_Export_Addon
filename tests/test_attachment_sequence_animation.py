@@ -50,11 +50,10 @@ def _document():
     )
 
 
-def test_sequence_timeline_matches_legacy_v023_frame_schedule():
+def test_sequence_timeline_uses_compact_loop_and_duration_boundary():
     assert build_attachment_sequence_timeline(3) == (
-        {"mode": "loop", "delay": 0.0333},
-        {"time": 0.0333, "mode": "loop", "index": 1},
-        {"time": 0.0666, "mode": "loop", "index": 2},
+        {"time": 0.0, "mode": "loop", "index": 0, "delay": 0.033333},
+        {"time": 0.1, "mode": "loop", "index": 0, "delay": 0.033333},
     )
 
 
@@ -64,11 +63,13 @@ def test_sequence_builder_adds_typed_attachment_timelines_and_is_idempotent():
 
     attachments = first.animations["animation"]["attachments"]["default"]
     assert attachments["Animated_slot"]["Animated"]["sequence"] == [
-        {"mode": "loop", "delay": 0.0333},
-        {"time": 0.0333, "mode": "loop", "index": 1},
-        {"time": 0.0666, "mode": "loop", "index": 2},
+        {"time": 0.0, "mode": "loop", "index": 0, "delay": 0.033333},
+        {"time": 0.1, "mode": "loop", "index": 0, "delay": 0.033333},
     ]
-    assert attachments["Hidden_slot"]["Hidden"]["sequence"][-1]["index"] == 1
+    assert attachments["Hidden_slot"]["Hidden"]["sequence"] == [
+        {"time": 0.0, "mode": "loop", "index": 0, "delay": 0.033333},
+        {"time": 0.066667, "mode": "loop", "index": 0, "delay": 0.033333},
+    ]
     assert second == first
 
 
