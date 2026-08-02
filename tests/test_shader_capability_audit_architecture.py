@@ -15,6 +15,10 @@ def test_capability_gate_remains_at_the_blender_adapter_boundary():
     camera_projection = _source(
         "Blender_to_Spine2D_Mesh_Exporter/domain/baking/camera_projection.py"
     )
+    normal_uv_camera_context = _source(
+        "Blender_to_Spine2D_Mesh_Exporter/domain/baking/"
+        "normal_uv_camera_context.py"
+    )
     texture_planning = _source(
         "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/a1_texture_planning.py"
     )
@@ -35,6 +39,8 @@ def test_capability_gate_remains_at_the_blender_adapter_boundary():
     assert "production_shader_capabil" not in strategies
     assert "shader_capability_audit" not in camera_projection
     assert "production_shader_capabil" not in camera_projection
+    assert "shader_capability_audit" not in normal_uv_camera_context
+    assert "production_shader_capabil" not in normal_uv_camera_context
 
     assert "production_shader_capability_object_audit" in texture_planning
     assert "production_shader_capability_routing" in texture_planning
@@ -44,10 +50,12 @@ def test_capability_gate_remains_at_the_blender_adapter_boundary():
     assert "audit_material_graph_capabilities" in object_audit
     assert "build_texture_plan" not in object_audit
     assert "build_camera_projection_plan" not in object_audit
+    assert "build_normal_uv_camera_context_plan" not in object_audit
 
     assert "GROUP_RENDER_REQUIRED" in routing
     assert "UNSUPPORTED" in routing
-    assert "build_texture_plan" in routing
+    assert "build_bake_plan" in routing
+    assert "build_normal_uv_camera_context_plan" in routing
     assert "build_camera_projection_plan" in routing
 
     assert "def " not in facade
