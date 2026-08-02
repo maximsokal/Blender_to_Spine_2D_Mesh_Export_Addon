@@ -6,6 +6,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_projection_finalization
     _positioned_projection_rig,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
+    A1CameraLayerProjectionKind,
     A1RigProfile,
     A1RigSetupPoseMode,
     LegacyRigBuildRequest,
@@ -38,13 +39,21 @@ def _bone_by_name(rig, name: str):
 def test_two_axis_rendered_projection_uses_camera_relative_rigid_setup() -> None:
     source = _rig(A1RigProfile.TWO_AXIS_ROTATION_SCALE)
 
-    result = _positioned_projection_rig(source, (14.5, -6.25), -8.0)
+    result = _positioned_projection_rig(
+        source,
+        (14.5, -6.25),
+        -8.0,
+        A1CameraLayerProjectionKind.PERSPECTIVE,
+    )
 
     assert result is not source
     assert result.request.main_position_pixels == (14.5, -6.25)
     assert result.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
     assert result.request.z_group_origin_mode is LegacyZGroupOriginMode.OBJECT_ORIGIN
     assert result.request.z_groups == (LegacyZGroup(-8.0),)
+    assert result.request.camera_layer_projection_kind is (
+        A1CameraLayerProjectionKind.PERSPECTIVE
+    )
     assert len(result.info.z_groups) == 1
 
     main = _bone_by_name(result, result.info.main_bone_name)
@@ -57,14 +66,40 @@ def test_two_axis_rendered_projection_uses_camera_relative_rigid_setup() -> None
     result.validate()
 
 
+def test_orthographic_rendered_projection_disables_depth_scale() -> None:
+    source = _rig(A1RigProfile.TWO_AXIS_ROTATION_SCALE)
+
+    result = _positioned_projection_rig(
+        source,
+        (-3.0, 5.0),
+        -4.5,
+        A1CameraLayerProjectionKind.ORTHOGRAPHIC,
+    )
+
+    depth_constraint = next(
+        constraint for constraint in result.transform if constraint.order == 3
+    )
+    assert result.request.camera_layer_projection_kind is (
+        A1CameraLayerProjectionKind.ORTHOGRAPHIC
+    )
+    assert depth_constraint.extras["mixScaleX"] == 0
+    result.validate()
+
+
 def test_three_axis_rendered_projection_preserves_historical_setup_contract() -> None:
     source = _rig(A1RigProfile.THREE_AXIS_ROTATION)
 
-    result = _positioned_projection_rig(source, (-9.0, 4.0), -5.0)
+    result = _positioned_projection_rig(
+        source,
+        (-9.0, 4.0),
+        -5.0,
+        A1CameraLayerProjectionKind.PERSPECTIVE,
+    )
 
     assert result is not source
     assert result.request.main_position_pixels == (-9.0, 4.0)
     assert result.request.setup_pose_mode is A1RigSetupPoseMode.PRESERVE_COMPOSITION
     assert result.request.z_groups == source.request.z_groups
+    assert result.request.camera_layer_projection_kind is None
     assert result.profile.profile_id == source.profile.profile_id
     result.validate()
