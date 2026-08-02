@@ -166,7 +166,7 @@ def prepare_a1_object(
                 uv_regions=uv.uv_regions,
                 material_analysis=texture.material_analysis,
                 bake_plan=texture.bake_plan,
-                rig=document.rig,
+                rig=document.document_assembly.rig,
                 document_assembly=document.document_assembly,
                 warnings=warnings,
                 statistics=statistics,
