@@ -30,6 +30,7 @@ from ..domain.geometry import (
     VertexId,
 )
 from ..domain.spine import (
+    A1RigSetupPoseMode,
     LegacyRigBuildResult,
     apply_attachment_sequence_animations,
     apply_legacy_visual_options,
@@ -45,6 +46,7 @@ from .a1_document_assembly import (
     A1DocumentAssemblyError,
     A1DocumentAssemblyResult,
     A1DocumentAssemblySettings,
+    _compensate_projection_depth_setup_y,
 )
 from .a1_z_groups import A1ZGroupAssignmentPlan
 
@@ -314,6 +316,14 @@ def assemble_a1_camera_projection_document(
     )
     if not rig.info.z_groups:
         raise A1DocumentAssemblyError("camera projection rig has no Z groups")
+    if (
+        rig.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
+        and len(rig.info.z_groups) != 1
+    ):
+        raise A1DocumentAssemblyError(
+            "camera-relative rendered projection requires exactly one depth group"
+        )
+
     target_z_group = rig.info.z_groups[0].index
     segment_name = rig.profile.segment_slot(
         resolved_settings.prefix,
@@ -343,6 +353,9 @@ def assemble_a1_camera_projection_document(
             skin_name=resolved_settings.skin_name,
         ),
     )
+    if rig.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN:
+        projection = _compensate_projection_depth_setup_y(projection, rig)
+
     try:
         document_build = build_legacy_mesh_document(
             rig,
