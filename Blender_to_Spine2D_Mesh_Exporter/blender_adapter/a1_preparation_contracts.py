@@ -18,7 +18,7 @@ from ..application import (
     ExportIssue,
     IssueSeverity,
 )
-from ..domain.baking import BakePlan, ObjectMaterialAnalysis
+from ..domain.baking import BakePlan, ObjectMaterialAnalysis, TextureSequenceTiming
 from ..domain.baking.generated_materials import GeneratedBakePlan
 from ..domain.geometry import MeshSnapshot
 from ..domain.spine import LegacyRigBuildResult, SpineDocument
@@ -39,7 +39,7 @@ def freeze_statistics(
             raise TypeError("statistics values must be mappings")
         for key, item in value.items():
             if not isinstance(key, str) or not key.strip():
-                raise ValueError("statistics keys must be non-empty strings")
+                raise ValueError(f"statistics keys must be non-empty strings")
             if isinstance(item, bool) or not isinstance(item, (int, float, str)):
                 raise TypeError(
                     "statistics values must be int, float, or str; "
@@ -66,11 +66,16 @@ def build_skeleton_metadata(
         "images": "",
         "audio": "./audio",
     }
-    if settings.export.sequence_frame_count > 0:
-        metadata["fps"] = round(
-            settings.export.sequence_timing.resolved_fps,
-            6,
+    sequence_frame_count = getattr(settings.export, "sequence_frame_count", 0)
+    if sequence_frame_count > 0:
+        sequence_timing = getattr(
+            settings.export,
+            "sequence_timing",
+            TextureSequenceTiming(),
         )
+        if not isinstance(sequence_timing, TextureSequenceTiming):
+            raise TypeError("settings.export.sequence_timing must be TextureSequenceTiming")
+        metadata["fps"] = round(sequence_timing.resolved_fps, 6)
     return metadata
 
 
