@@ -7,6 +7,7 @@ import logging
 from typing import Any, Iterator, Mapping, Tuple
 
 from ..application import (
+    A1DocumentAssemblyResult,
     A1ExportProgressCallback,
     A1SingleObjectExportSettings,
     A1SingleObjectStage,
@@ -152,6 +153,14 @@ def prepare_a1_object(
             document = prepare_a1_document(texture)
             statistics, warnings = document.statistics, document.warnings
 
+            # Production returns a typed assembly whose rig may have been rebuilt into
+            # PREPROJECTED_SCREEN setup. Unit stage doubles intentionally keep the
+            # assembly opaque, so the documented stage-level ``document.rig`` remains
+            # the compatibility fallback for those tests.
+            prepared_rig = document.rig
+            if isinstance(document.document_assembly, A1DocumentAssemblyResult):
+                prepared_rig = document.document_assembly.rig
+
             stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
             prepared = PreparedA1Object(
                 source_object=source.source_object,
@@ -167,7 +176,7 @@ def prepare_a1_object(
                 uv_regions=uv.uv_regions,
                 material_analysis=texture.material_analysis,
                 bake_plan=texture.bake_plan,
-                rig=document.rig,
+                rig=prepared_rig,
                 document_assembly=document.document_assembly,
                 warnings=warnings,
                 statistics=statistics,
