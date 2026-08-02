@@ -109,13 +109,22 @@ def _normalized(vector: Vector3, field_name: str) -> Vector3:
     return (float(result[0]), float(result[1]), float(result[2]))
 
 
+_VIEW_MATRIX_AFFINE_TOLERANCE = 1.0e-8
+
+# Blender Matrix and Quaternion components use float32 storage. A valid rotated
+# camera therefore commonly returns row-length, orthogonality, and handedness
+# residuals in the 1e-8 to 1e-7 range after decomposition and inversion.
+# The rotation tolerance remains far below meaningful scale or shear while
+# accepting Blender's real numeric representation.
+_VIEW_MATRIX_ROTATION_TOLERANCE = 1.0e-6
+
+
 def _validate_view_matrix(matrix: Matrix4x4) -> None:
-    tolerance = 1.0e-8
     if (
-        abs(matrix[12]) > tolerance
-        or abs(matrix[13]) > tolerance
-        or abs(matrix[14]) > tolerance
-        or abs(matrix[15] - 1.0) > tolerance
+        abs(matrix[12]) > _VIEW_MATRIX_AFFINE_TOLERANCE
+        or abs(matrix[13]) > _VIEW_MATRIX_AFFINE_TOLERANCE
+        or abs(matrix[14]) > _VIEW_MATRIX_AFFINE_TOLERANCE
+        or abs(matrix[15] - 1.0) > _VIEW_MATRIX_AFFINE_TOLERANCE
     ):
         raise ValueError("view_matrix must be affine with final row (0, 0, 0, 1)")
 
@@ -125,16 +134,16 @@ def _validate_view_matrix(matrix: Matrix4x4) -> None:
         (matrix[8], matrix[9], matrix[10]),
     )
     for index, row in enumerate(rows):
-        if abs(_dot(row, row) - 1.0) > tolerance:
+        if abs(_dot(row, row) - 1.0) > _VIEW_MATRIX_ROTATION_TOLERANCE:
             raise ValueError(f"view_matrix rotation row {index} must be unit length")
     if any(
-        abs(_dot(rows[first], rows[second])) > tolerance
+        abs(_dot(rows[first], rows[second])) > _VIEW_MATRIX_ROTATION_TOLERANCE
         for first in range(3)
         for second in range(first + 1, 3)
     ):
         raise ValueError("view_matrix rotation rows must be orthogonal")
     if any(
-        abs(actual - expected) > tolerance
+        abs(actual - expected) > _VIEW_MATRIX_ROTATION_TOLERANCE
         for actual, expected in zip(_cross(rows[0], rows[1]), rows[2], strict=True)
     ):
         raise ValueError("view_matrix rotation must be right-handed")
