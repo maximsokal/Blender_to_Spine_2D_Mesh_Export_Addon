@@ -18,6 +18,7 @@ from ..application import (
     calculate_a1_object_bake_main_position_pixels,
 )
 from ..domain.baking import CameraProjectionPlan
+from ..domain.camera_projection import A1CameraProjectionKind
 from ..domain.projection import A1ProjectionDirection
 from ..domain.spine.legacy_attachment_builder import (
     LegacyMeshDocumentBuildResult,
@@ -246,24 +247,21 @@ def _resolve_z_group_origin_mode(
 
 
 def _active_camera_layer_kind(
-    statistics: Mapping[str, StatisticsValue],
+    value: A1CameraProjectionKind | None,
 ) -> A1CameraLayerProjectionKind:
-    """Resolve the evaluated Blender camera kind captured by source preparation."""
+    """Map typed projection-domain camera kind to rig-domain semantics."""
 
-    if not isinstance(statistics, Mapping):
-        raise TypeError("statistics must be a mapping")
-    value = statistics.get("active_camera_type")
-    if not isinstance(value, str) or not value.strip():
+    if value is None:
         raise ValueError(
-            "Active Camera preparation did not provide active_camera_type"
+            "Active Camera preparation did not provide camera_projection_kind"
         )
-    try:
-        return A1CameraLayerProjectionKind(value.strip().upper())
-    except ValueError as exc:
-        supported = tuple(item.value for item in A1CameraLayerProjectionKind)
-        raise ValueError(
-            f"Unsupported Active Camera type {value!r}; supported={supported}"
-        ) from exc
+    if not isinstance(value, A1CameraProjectionKind):
+        raise TypeError("value must be A1CameraProjectionKind or None")
+    if value is A1CameraProjectionKind.PERSPECTIVE:
+        return A1CameraLayerProjectionKind.PERSPECTIVE
+    if value is A1CameraProjectionKind.ORTHOGRAPHIC:
+        return A1CameraLayerProjectionKind.ORTHOGRAPHIC
+    raise AssertionError(f"Unhandled Active Camera projection kind: {value}")
 
 
 def finalize_a1_document_assembly_for_target(
@@ -368,7 +366,7 @@ def prepare_a1_document(
             )
 
         camera_layer_kind = (
-            _active_camera_layer_kind(source.statistics)
+            _active_camera_layer_kind(source.camera_projection_kind)
             if active_camera_layout
             else None
         )
