@@ -9,7 +9,10 @@ from typing import Tuple
 
 from .legacy_profile import LegacyRigProfile
 from .model import Bone, IKConstraint, TransformConstraint
-from .rig_profiles import A1RigSetupPoseMode
+from .rig_profiles import (
+    A1CameraLayerProjectionKind,
+    A1RigSetupPoseMode,
+)
 
 
 def _require_canonical_string(value: object, field_name: str) -> str:
@@ -86,6 +89,10 @@ class LegacyRigBuildRequest:
     # UV Segments two-axis export opts into OBJECT_ORIGIN explicitly; every legacy and
     # camera path keeps MINIMUM_Z unless its route owner selects otherwise.
     z_group_origin_mode: LegacyZGroupOriginMode = LegacyZGroupOriginMode.MINIMUM_Z
+    # Appended so historical positional construction remains stable. This value exists
+    # only for PREPROJECTED_SCREEN. Perspective keeps whole-layer depth scale;
+    # Orthographic disables automatic depth scale while preserving rigid translation.
+    camera_layer_projection_kind: A1CameraLayerProjectionKind | None = None
 
     def __post_init__(self) -> None:
         _require_canonical_string(self.prefix, "prefix")
@@ -118,6 +125,18 @@ class LegacyRigBuildRequest:
         if not isinstance(self.z_group_origin_mode, LegacyZGroupOriginMode):
             raise TypeError(
                 "z_group_origin_mode must be LegacyZGroupOriginMode"
+            )
+        if self.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN:
+            if not isinstance(
+                self.camera_layer_projection_kind,
+                A1CameraLayerProjectionKind,
+            ):
+                raise TypeError(
+                    "PREPROJECTED_SCREEN requires camera_layer_projection_kind"
+                )
+        elif self.camera_layer_projection_kind is not None:
+            raise ValueError(
+                "camera_layer_projection_kind is valid only for PREPROJECTED_SCREEN"
             )
 
 
