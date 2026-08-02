@@ -8,6 +8,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import (
     DEFAULT_SPINE_JSON_VERSION,
     SpineJsonTarget,
     SpineJsonTargetUnavailableError,
+    SpineTextureAnimationEncoding,
     require_spine_json_target_serializable,
     resolve_spine_json_exact_version,
     resolve_spine_json_target,
@@ -97,7 +98,7 @@ def test_all_registered_targets_are_codec_serializable() -> None:
         assert require_spine_json_target_serializable(target) is target
 
 
-def test_spine_three_eight_is_selectable_with_legacy_mix_description() -> None:
+def test_spine_three_eight_uses_keyed_attachment_swaps() -> None:
     target = resolve_spine_json_target("3.8.99")
 
     assert target is SpineJsonTarget.SPINE_3_8
@@ -105,29 +106,42 @@ def test_spine_three_eight_is_selectable_with_legacy_mix_description() -> None:
     assert target.descriptor.uses_legacy_bone_transform_field is True
     assert target.descriptor.uses_legacy_constraint_mix_fields is True
     assert target.descriptor.supports_attachment_sequences is False
+    assert (
+        target.texture_animation_encoding
+        is SpineTextureAnimationEncoding.ATTACHMENT_SWAP
+    )
     assert "limited" in target.description.lower()
     assert "standalone" in target.description.lower()
+    assert "keyed attachment" in target.description.lower()
 
 
-def test_spine_four_zero_is_selectable_with_limited_scope_description() -> None:
+def test_spine_four_zero_uses_keyed_attachment_swaps() -> None:
     target = resolve_spine_json_target("4.0.64")
 
     assert target is SpineJsonTarget.SPINE_4_0
     assert target.descriptor.serializer_ready is True
     assert target.descriptor.supports_attachment_sequences is False
+    assert (
+        target.texture_animation_encoding
+        is SpineTextureAnimationEncoding.ATTACHMENT_SWAP
+    )
     assert "limited" in target.description.lower()
     assert "standalone" in target.description.lower()
     assert require_spine_json_target_serializable(target) is target
 
 
-def test_spine_four_one_is_selectable_with_limited_scope_description() -> None:
+def test_spine_four_one_uses_native_sequences() -> None:
     target = resolve_spine_json_target("4.1.24")
 
     assert target is SpineJsonTarget.SPINE_4_1
     assert target.descriptor.serializer_ready is True
+    assert target.descriptor.supports_attachment_sequences is True
+    assert (
+        target.texture_animation_encoding
+        is SpineTextureAnimationEncoding.NATIVE_SEQUENCE
+    )
     assert "limited" in target.description.lower()
     assert "standalone" in target.description.lower()
-    assert "connected" in target.description.lower()
     assert require_spine_json_target_serializable(target) is target
 
 
@@ -138,6 +152,10 @@ def test_spine_four_three_is_selectable_with_unified_constraint_description() ->
     assert target.descriptor.serializer_ready is True
     assert target.descriptor.uses_unified_constraints is True
     assert target.descriptor.supports_attachment_sequences is True
+    assert (
+        target.texture_animation_encoding
+        is SpineTextureAnimationEncoding.NATIVE_SEQUENCE
+    )
     assert "limited" in target.description.lower()
     assert "unified-constraint" in target.description.lower()
     assert "standalone" in target.description.lower()
