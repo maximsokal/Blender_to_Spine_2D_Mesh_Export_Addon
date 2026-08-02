@@ -347,6 +347,26 @@ def _active_camera_layer_kind(
     raise AssertionError(f"Unhandled Active Camera projection kind: {value}")
 
 
+def _finalize_unadapted_target(
+    document_assembly: A1DocumentAssemblyResult,
+    resolved_target: SpineJsonTarget,
+) -> A1DocumentAssemblyResult:
+    """Finalize texture animation without changing canonical rig topology."""
+
+    finalized_document = finalize_texture_sequence_animation(
+        document_assembly.document,
+        target=resolved_target,
+        timing=document_assembly.settings.sequence_timing,
+    )
+    if finalized_document is document_assembly.document:
+        return document_assembly
+    finalized_build = _synchronize_document_build_with_final_document(
+        document_assembly.document_build,
+        finalized_document,
+    )
+    return replace(document_assembly, document_build=finalized_build)
+
+
 def finalize_a1_document_assembly_for_target(
     document_assembly: A1DocumentAssemblyResult,
     *,
@@ -363,62 +383,70 @@ def finalize_a1_document_assembly_for_target(
     resolved_target = resolve_spine_json_target(spine_target)
     rig = document_assembly.rig
     resolved_profile = resolve_a1_rig_profile(rig.profile.profile_id)
-    supported_targets = {
+
+    if resolved_target in {
+        SpineJsonTarget.SPINE_4_2,
+        SpineJsonTarget.SPINE_4_3,
+    }:
+        finalized_document = finalize_texture_sequence_animation(
+            document_assembly.document,
+            target=resolved_target,
+            timing=document_assembly.settings.sequence_timing,
+        )
+        if finalized_document is document_assembly.document:
+            return document_assembly
+        finalized_build = _synchronize_document_build_with_final_document(
+            document_assembly.document_build,
+            finalized_document,
+        )
+        return replace(document_assembly, document_build=finalized_build)
+
+    if (
+        resolved_target is SpineJsonTarget.SPINE_3_8
+        and resolved_profile is A1RigProfile.THREE_AXIS_ROTATION
+    ):
+        return _finalize_unadapted_target(document_assembly, resolved_target)
+
+    if resolved_target not in {
         SpineJsonTarget.SPINE_3_8,
         SpineJsonTarget.SPINE_4_0,
         SpineJsonTarget.SPINE_4_1,
-        SpineJsonTarget.SPINE_4_2,
-        SpineJsonTarget.SPINE_4_3,
-    }
-    if resolved_target not in supported_targets:
+    }:
         raise ValueError(
             "A1 document finalization is not implemented for "
             f"{resolved_target.label} ({resolved_target.exact_version})"
         )
 
-    adaptation_required = resolved_target in {
-        SpineJsonTarget.SPINE_3_8,
-        SpineJsonTarget.SPINE_4_0,
-        SpineJsonTarget.SPINE_4_1,
-    } and not (
-        resolved_target is SpineJsonTarget.SPINE_3_8
-        and resolved_profile is A1RigProfile.THREE_AXIS_ROTATION
-    )
+    if (
+        resolved_profile is not A1RigProfile.TWO_AXIS_ROTATION_SCALE
+        or not isinstance(rig.profile, TwoAxisScaleRigProfile)
+    ):
+        raise ValueError(
+            f"{resolved_target.label} legacy safety finalization requires "
+            "TWO_AXIS_ROTATION_SCALE"
+        )
+    if rig.request.prefix.strip() != prefix.strip():
+        raise ValueError(
+            f"Document finalization prefix {prefix!r} does not match rig prefix "
+            f"{rig.request.prefix!r}"
+        )
 
-    if adaptation_required:
-        if (
-            resolved_profile is not A1RigProfile.TWO_AXIS_ROTATION_SCALE
-            or not isinstance(rig.profile, TwoAxisScaleRigProfile)
-        ):
-            raise ValueError(
-                f"{resolved_target.label} legacy safety finalization requires "
-                "TWO_AXIS_ROTATION_SCALE"
-            )
-        if rig.request.prefix.strip() != prefix.strip():
-            raise ValueError(
-                f"Document finalization prefix {prefix!r} does not match rig prefix "
-                f"{rig.request.prefix!r}"
-            )
-
-        if resolved_target is SpineJsonTarget.SPINE_3_8:
-            adaptation = adapt_two_axis_document_for_spine38_with_report(
-                document_assembly.document,
-                profile=rig.profile,
-                prefix=prefix,
-            )
-        else:
-            adaptation = adapt_two_axis_document_for_spine41_with_report(
-                document_assembly.document,
-                profile=rig.profile,
-                prefix=prefix,
-            )
-        adapted_build = _synchronize_document_build_for_spine41(
-            document_assembly.document_build,
-            adaptation,
+    if resolved_target is SpineJsonTarget.SPINE_3_8:
+        adaptation = adapt_two_axis_document_for_spine38_with_report(
+            document_assembly.document,
+            profile=rig.profile,
+            prefix=prefix,
         )
     else:
-        adapted_build = document_assembly.document_build
-
+        adaptation = adapt_two_axis_document_for_spine41_with_report(
+            document_assembly.document,
+            profile=rig.profile,
+            prefix=prefix,
+        )
+    adapted_build = _synchronize_document_build_for_spine41(
+        document_assembly.document_build,
+        adaptation,
+    )
     finalized_document = finalize_texture_sequence_animation(
         adapted_build.document,
         target=resolved_target,
@@ -428,9 +456,71 @@ def finalize_a1_document_assembly_for_target(
         adapted_build,
         finalized_document,
     )
-    return replace(
+    return replace(document_assembly, document_build=finalized_build)
+
+
+def _assemble_document_for_texture(
+    texture: A1TexturePlanningResult,
+    rig: LegacyRigBuildResult,
+    *,
+    camera_projection: bool,
+    active_camera_layout: bool,
+) -> A1DocumentAssemblyResult:
+    """Assemble and target-finalize one prepared texture plan."""
+
+    if not isinstance(texture, A1TexturePlanningResult):
+        raise TypeError("texture must be A1TexturePlanningResult")
+    if not isinstance(rig, LegacyRigBuildResult):
+        raise TypeError("rig must be LegacyRigBuildResult")
+    if not isinstance(camera_projection, bool):
+        raise TypeError("camera_projection must be bool")
+    if not isinstance(active_camera_layout, bool):
+        raise TypeError("active_camera_layout must be bool")
+
+    uv = texture.uv
+    source = uv.source
+    assembly_settings = A1DocumentAssemblySettings(
+        prefix=source.prefix,
+        uv_layer_name=source.settings.uv.layer_name,
+        image_path=build_a1_attachment_path(
+            texture.bake_plan,
+            source.output_paths,
+        ),
+        attachment_width=source.settings.export.texture_width,
+        attachment_height=source.settings.export.texture_height,
+        center_x=0.0,
+        center_y=0.0,
+        sequence=build_a1_attachment_sequence(texture.bake_plan),
+        include_control_icons=source.settings.include_control_icons,
+        include_preview_animation=source.settings.include_preview_animation,
+        sequence_timing=source.settings.export.sequence_timing,
+        uv_range_policy=source.settings.uv.range_policy,
+        uv_range_epsilon=source.settings.uv.range_epsilon,
+        compensate_depth_setup_y=active_camera_layout,
+    )
+    skeleton_metadata = build_skeleton_metadata(source.settings)
+    if camera_projection:
+        if not isinstance(texture.bake_plan, CameraProjectionPlan):
+            raise TypeError("camera projection plan type was lost")
+        document_assembly = assemble_a1_camera_projection_document(
+            rig,
+            source.z_groups,
+            texture.bake_plan,
+            assembly_settings,
+            skeleton_metadata=skeleton_metadata,
+        )
+    else:
+        document_assembly = assemble_a1_document(
+            rig,
+            source.z_groups,
+            uv.uv_regions.snapshots,
+            assembly_settings,
+            skeleton_metadata=skeleton_metadata,
+        )
+    return finalize_a1_document_assembly_for_target(
         document_assembly,
-        document_build=finalized_build,
+        spine_target=source.settings.export.spine_target,
+        prefix=source.prefix,
     )
 
 
@@ -519,49 +609,11 @@ def prepare_a1_document(
         )
 
         stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
-        assembly_settings = A1DocumentAssemblySettings(
-            prefix=source.prefix,
-            uv_layer_name=source.settings.uv.layer_name,
-            image_path=build_a1_attachment_path(
-                texture.bake_plan,
-                source.output_paths,
-            ),
-            attachment_width=source.settings.export.texture_width,
-            attachment_height=source.settings.export.texture_height,
-            center_x=0.0,
-            center_y=0.0,
-            sequence=build_a1_attachment_sequence(texture.bake_plan),
-            include_control_icons=source.settings.include_control_icons,
-            include_preview_animation=source.settings.include_preview_animation,
-            uv_range_policy=source.settings.uv.range_policy,
-            uv_range_epsilon=source.settings.uv.range_epsilon,
-            compensate_depth_setup_y=active_camera_layout,
-            sequence_timing=source.settings.export.sequence_timing,
-        )
-        skeleton_metadata = build_skeleton_metadata(source.settings)
-        if camera_projection:
-            if not isinstance(texture.bake_plan, CameraProjectionPlan):
-                raise TypeError("camera projection plan type was lost")
-            document_assembly = assemble_a1_camera_projection_document(
-                rig,
-                source.z_groups,
-                texture.bake_plan,
-                assembly_settings,
-                skeleton_metadata=skeleton_metadata,
-            )
-        else:
-            document_assembly = assemble_a1_document(
-                rig,
-                source.z_groups,
-                uv.uv_regions.snapshots,
-                assembly_settings,
-                skeleton_metadata=skeleton_metadata,
-            )
-
-        document_assembly = finalize_a1_document_assembly_for_target(
-            document_assembly,
-            spine_target=source.settings.export.spine_target,
-            prefix=source.prefix,
+        document_assembly = _assemble_document_for_texture(
+            texture,
+            rig,
+            camera_projection=camera_projection,
+            active_camera_layout=active_camera_layout,
         )
         final_rig = document_assembly.rig
         document = document_assembly.document
