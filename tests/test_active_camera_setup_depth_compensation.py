@@ -15,6 +15,7 @@ from Blender_to_Spine2D_Mesh_Exporter.application.a1_document_assembly import (
 from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import LoopId, VertexId
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
     A1RigProfile,
+    A1RigSetupPoseMode,
     LegacyAttachmentVertex,
     LegacyMeshAttachmentRequest,
     LegacyRigBuildRequest,
@@ -28,7 +29,9 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine.legacy_rig_contracts import (
 )
 
 
-def _rig() -> LegacyRigBuildResult:
+def _rig(
+    setup_pose_mode: A1RigSetupPoseMode = A1RigSetupPoseMode.PREPROJECTED_SCREEN,
+) -> LegacyRigBuildResult:
     """Build one real two-axis rig with three Object-Origin-relative depth groups."""
 
     return build_rig(
@@ -41,6 +44,7 @@ def _rig() -> LegacyRigBuildResult:
                 for value in (-1.0, 0.0, 2.0)
             ),
             main_position_pixels=(0.0, 0.0),
+            setup_pose_mode=setup_pose_mode,
             z_group_origin_mode=LegacyZGroupOriginMode.OBJECT_ORIGIN,
         ),
         A1RigProfile.TWO_AXIS_ROTATION_SCALE,
@@ -150,6 +154,19 @@ def test_zero_depth_group_keeps_original_vertex_y() -> None:
     assert result.request.vertices[zero_group_vertex_index].bone_position_pixels[1] == (
         source.request.vertices[zero_group_vertex_index].bone_position_pixels[1]
     )
+
+
+def test_non_screen_setup_rig_fails_before_partial_compensation() -> None:
+    rig = _rig(A1RigSetupPoseMode.PRESERVE_COMPOSITION)
+
+    with pytest.raises(
+        A1DocumentAssemblyError,
+        match="requires PREPROJECTED_SCREEN setup",
+    ):
+        _compensate_projection_depth_setup_y(
+            _projection(_group_indices(rig)),
+            rig,
+        )
 
 
 def test_unknown_depth_group_fails_closed() -> None:
