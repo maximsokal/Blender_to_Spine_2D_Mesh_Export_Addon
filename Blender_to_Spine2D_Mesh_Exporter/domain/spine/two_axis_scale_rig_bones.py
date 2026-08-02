@@ -22,11 +22,15 @@ def build_two_axis_scale_bones(
 ) -> Tuple[Bone, ...]:
     """Build the namespaced reference hierarchy in deterministic JSON order.
 
-    Single-object documents expose a neutral ``main`` and neutral X/Y controls. The
-    original object placement is moved into the internal base bone and into the control
-    coordinates, preserving the same final world-space geometry. Multi-object documents
-    keep their calculated main placement, while X/Y controls remain neutral so the
-    animator always receives the same zeroed control defaults.
+    ``NORMALIZED_SINGLE`` keeps the visible main neutral and moves object placement into
+    the internal base layer.
+
+    ``PREPROJECTED_SCREEN`` now uses the same placement split for a different reason:
+    ``main`` is the camera-space origin and ``base`` is the projected Blender Object
+    Origin. With one Object-Origin depth group, X/Y constraints therefore transform one
+    complete camera-relative object layer instead of deforming separate vertex depths.
+
+    Ordinary composed model-space documents retain their calculated main placement.
     """
 
     if not isinstance(plan, LegacyRigBuildPlan):
@@ -39,20 +43,25 @@ def build_two_axis_scale_bones(
     normalized_single = (
         plan.request.setup_pose_mode is A1RigSetupPoseMode.NORMALIZED_SINGLE
     )
+    camera_relative = (
+        plan.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
+    )
+    placement_in_base = normalized_single or camera_relative
+
     control_x, control_y, scale_control = plan.control_bone_names
     constraint_bone, scale_ik, rotate_ik, ik_target = plan.ik_chain_bone_names
 
-    # In a single-object document main is the user-facing neutral origin. The existing
-    # placement moves to the internal base layer so mesh output remains unchanged.
-    main_x = 0.0 if normalized_single else plan.main_x
-    main_y = 0.0 if normalized_single else plan.main_y
-    base_x = plan.main_x if normalized_single else None
-    base_y = plan.main_y if normalized_single else None
-    control_origin_x = plan.main_x if normalized_single else 0.0
-    control_origin_y = plan.main_y if normalized_single else 0.0
-    # The visible controls are authoring handles, not part of the baked setup pose.
-    # Keep their defaults neutral in both single-object and composed documents. The
-    # reference setup angles are applied by the matching transform-constraint offsets.
+    # Camera-relative and normalized standalone documents keep root/main at zero. The
+    # projected/authored Object Origin is stored on base, before local scale/deformation,
+    # so the full object orbits the camera origin while local Scale stays object-centred.
+    main_x = 0.0 if placement_in_base else plan.main_x
+    main_y = 0.0 if placement_in_base else plan.main_y
+    base_x = plan.main_x if placement_in_base else None
+    base_y = plan.main_y if placement_in_base else None
+    control_origin_x = plan.main_x if placement_in_base else 0.0
+    control_origin_y = plan.main_y if placement_in_base else 0.0
+
+    # Visible controls are authoring handles. Setup angles remain constraint-owned.
     control_x_rotation = 0.0
     control_y_rotation = 0.0
 
