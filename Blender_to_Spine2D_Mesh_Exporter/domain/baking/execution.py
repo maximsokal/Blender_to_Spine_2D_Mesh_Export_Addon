@@ -26,6 +26,24 @@ class A1TextureExportMode(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class CameraProjectionInfluencePolicy:
+    """Scene-ray participation retained while the source is camera-isolated."""
+
+    include_scene_shadows: bool = True
+    include_scene_reflection_transmission: bool = True
+    world_affects_lighting_reflections: bool = True
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "include_scene_shadows",
+            "include_scene_reflection_transmission",
+            "world_affects_lighting_reflections",
+        ):
+            if not isinstance(getattr(self, field_name), bool):
+                raise TypeError(f"{field_name} must be bool")
+
+
+@dataclass(frozen=True, slots=True)
 class BakeExecutionSettings:
     render_engine: str = "CYCLES"
     samples: int = 256
@@ -41,6 +59,10 @@ class BakeExecutionSettings:
     projection_output_policy: ProjectionOutputPolicy = ProjectionOutputPolicy()
     texture_export_mode: A1TextureExportMode = (
         A1TextureExportMode.NORMAL_UV_SEGMENTS
+    )
+    # Appended to preserve the positional layout of the established settings contract.
+    camera_influence_policy: CameraProjectionInfluencePolicy = (
+        CameraProjectionInfluencePolicy()
     )
 
     def __post_init__(self) -> None:
@@ -82,6 +104,13 @@ class BakeExecutionSettings:
             )
         if not isinstance(self.texture_export_mode, A1TextureExportMode):
             raise TypeError("texture_export_mode must be A1TextureExportMode")
+        if not isinstance(
+            self.camera_influence_policy,
+            CameraProjectionInfluencePolicy,
+        ):
+            raise TypeError(
+                "camera_influence_policy must be CameraProjectionInfluencePolicy"
+            )
 
 
 @dataclass(frozen=True, slots=True)
