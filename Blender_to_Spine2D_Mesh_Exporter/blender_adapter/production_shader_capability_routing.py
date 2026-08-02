@@ -13,6 +13,7 @@ from ..domain.baking import (
     ObjectMaterialAnalysis,
     SceneBakeContext,
     ShaderBakeCapability,
+    ShaderCapabilityFinding,
     TexturePlan,
     build_camera_projection_plan,
     build_bake_plan,
@@ -24,14 +25,37 @@ from ..domain.baking.normal_uv_camera_context import (
 from .render_engine_contract import RenderEngineContract
 
 
-_NORMAL_UV_BLOCKING_CAMERA_CODES = frozenset(
+# These nodes use source-object surface context that Cycles object baking can evaluate
+# on the owned temporary mesh because geometry and world transform are preserved.
+_NORMAL_UV_SOURCE_CONTEXT_NODE_TYPES = frozenset(
     {
-        "DISPLACEMENT_RENDER_REQUIRED",
-        "EEVEE_SHADER_TO_RGB",
-        "SOURCE_ATTRIBUTE_NOT_MATERIALIZED",
-        "VOLUME_RENDER_REQUIRED",
+        "FRESNEL",
+        "LAYER_WEIGHT",
+        "VECT_TRANSFORM",
+        "VECTOR_TRANSFORM",
     }
 )
+
+# These Texture Coordinate outputs are stable on the reconstructed temporary target.
+# Camera, Window and Reflection remain render-ray dependent and therefore fail closed.
+_NORMAL_UV_TEXTURE_COORD_OUTPUTS = frozenset(
+    {
+        "generated",
+        "normal",
+        "object",
+    }
+)
+
+# Pointiness and Random Per Island are properties of the preserved source topology.
+# Incoming and Backfacing depend on the bake ray and remain blocked.
+_NORMAL_UV_GEOMETRY_OUTPUTS = frozenset(
+    {
+        "pointiness",
+        "random per island",
+    }
+)
+
+_GRAPH_CAMERA_AGGREGATE_CODE = "GRAPH_CAMERA_DEPENDENCY"
 
 
 def strongest_object_capability(
@@ -69,10 +93,40 @@ def capability_failure_message(
     return f"shader capability {capability.value} prevents safe export: {tuple(details)}"
 
 
+def _supports_normal_uv_object_bake(
+    finding: ShaderCapabilityFinding,
+) -> bool:
+    """Return whether one camera-capability finding is reproducible by object bake."""
+
+    if not isinstance(finding, ShaderCapabilityFinding):
+        raise TypeError("finding must be ShaderCapabilityFinding")
+    if finding.capability is not ShaderBakeCapability.CAMERA_RENDER_REQUIRED:
+        raise ValueError("finding must use CAMERA_RENDER_REQUIRED capability")
+
+    if finding.code == "SOURCE_OR_CAMERA_CONTEXT":
+        return (finding.node_type or "").strip().upper() in (
+            _NORMAL_UV_SOURCE_CONTEXT_NODE_TYPES
+        )
+    if finding.code == "TEXTURE_COORD_SOURCE_CONTEXT":
+        return (finding.output_socket or "").strip().casefold() in (
+            _NORMAL_UV_TEXTURE_COORD_OUTPUTS
+        )
+    if finding.code == "GEOMETRY_SOURCE_CONTEXT":
+        return (finding.output_socket or "").strip().casefold() in (
+            _NORMAL_UV_GEOMETRY_OUTPUTS
+        )
+    return False
+
+
 def _normal_uv_blocking_camera_findings(
     audits: Tuple[MaterialCapabilityAudit, ...],
-) -> tuple[tuple[str, tuple[str, ...]], ...]:
-    """Return only camera-capability findings object UV baking cannot represent."""
+) -> tuple[tuple[str, tuple[tuple[str, str | None, str | None], ...]], ...]:
+    """Return camera findings that cannot be reproduced by Normal object UV bake.
+
+    ``GRAPH_CAMERA_DEPENDENCY`` is only an aggregate marker.  It is accepted when at
+    least one concrete camera finding exists and every concrete finding is explicitly
+    supported.  An aggregate without concrete evidence fails closed.
+    """
 
     if not isinstance(audits, tuple) or not all(
         isinstance(audit, MaterialCapabilityAudit) for audit in audits
@@ -81,29 +135,56 @@ def _normal_uv_blocking_camera_findings(
 
     details = []
     for audit in audits:
-        codes = tuple(
-            finding.code
+        camera_findings = tuple(
+            finding
             for finding in audit.findings
             if finding.capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED
-            and finding.code in _NORMAL_UV_BLOCKING_CAMERA_CODES
         )
-        if codes:
-            details.append((audit.material_name, codes))
+        if not camera_findings:
+            continue
+
+        concrete = tuple(
+            finding
+            for finding in camera_findings
+            if finding.code != _GRAPH_CAMERA_AGGREGATE_CODE
+        )
+        blocked = tuple(
+            finding
+            for finding in concrete
+            if not _supports_normal_uv_object_bake(finding)
+        )
+        if not concrete:
+            blocked = camera_findings
+        if not blocked:
+            continue
+
+        details.append(
+            (
+                audit.material_name,
+                tuple(
+                    (
+                        finding.code,
+                        finding.node_type,
+                        finding.output_socket,
+                    )
+                    for finding in blocked
+                ),
+            )
+        )
     return tuple(details)
 
 
 def normal_mode_camera_requirement_message(
     audits: Tuple[MaterialCapabilityAudit, ...],
 ) -> str:
-    """Explain the narrow cases that still require Camera Projection topology."""
+    """Explain why specific render-ray findings still require Camera Projection."""
 
     details = _normal_uv_blocking_camera_findings(audits)
     return (
-        "Normal — UV Segments can bake source/object/camera-context surface "
-        "appearance, but cannot represent volume, render displacement, Eevee "
-        "Shader-to-RGB, or unavailable source attributes without changing the "
-        "export boundary. Select Export Mode: Camera Projection only for these "
-        f"findings: {details}"
+        "Normal — UV Segments can bake audited source-object surface context, but "
+        "cannot reproduce these render-ray, volume, displacement, unsupported source "
+        "attribute, or unclassified camera findings. Select Export Mode: Camera "
+        f"Projection. Blocking findings: {details}"
     )
 
 
