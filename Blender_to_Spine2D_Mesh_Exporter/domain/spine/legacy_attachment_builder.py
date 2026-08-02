@@ -18,6 +18,7 @@ from typing import Mapping, Tuple
 
 from .legacy_rig_contracts import LegacyRigBuildResult
 from .model import Bone, MeshAttachment, Skin, Slot, SpineDocument
+from .rig_profiles import A1RigSetupPoseMode
 from .validator import SpineValidator
 from .weighted_vertices import (
     WeightedVertex,
@@ -309,6 +310,18 @@ def _resolved_image_path(request: LegacyMeshAttachmentRequest) -> str:
 
 
 def _z_parent_by_index(rig: LegacyRigBuildResult) -> dict[int, str]:
+    """Resolve vertex parents for model-space or rigid camera-layer documents."""
+
+    if not isinstance(rig, LegacyRigBuildResult):
+        raise TypeError("rig must be LegacyRigBuildResult")
+    if rig.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN:
+        if len(rig.info.z_groups) != 1:
+            raise LegacyMeshAttachmentBuildError(
+                "PREPROJECTED_SCREEN requires exactly one camera depth group"
+            )
+        return {
+            rig.info.z_groups[0].index: rig.info.base_bone_name,
+        }
     return {group.index: group.bone_name for group in rig.info.z_groups}
 
 
