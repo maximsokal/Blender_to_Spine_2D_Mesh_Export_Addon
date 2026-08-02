@@ -16,6 +16,7 @@ from .a1_document_assembly import (
     A1DocumentAssemblyError,
     A1DocumentAssemblyResult,
 )
+from .a1_material_correspondence import validate_document_material_correspondence
 
 
 def _finite_pair(value: object, field_name: str) -> tuple[float, float]:
@@ -97,6 +98,10 @@ def recenter_a1_camera_projection_document(
             rig,
             (adjusted_projection.request,),
             skeleton_metadata=skeleton_metadata,
+        )
+        validate_document_material_correspondence(
+            (adjusted_projection,),
+            document_build,
         )
         document = apply_legacy_visual_options(
             document_build.document,
