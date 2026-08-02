@@ -40,7 +40,7 @@ def _call_render_operator(bpy_module: Any) -> None:
             available = bool(poll())
         except Exception as exc:
             raise CameraProjectionExecutionError(
-                "bpy.ops.render.render.poll() failed"
+                "bpy.ops.object.bake.poll() failed"
             ) from exc
         if not available:
             raise CameraProjectionExecutionError(
@@ -103,6 +103,7 @@ def render_camera_projection_frames(
             runtime.source_object,
             runtime.scene,
             isolate=runtime.plan.isolate_source_to_camera,
+            influence_policy=runtime.execution_settings.camera_influence_policy,
         )
 
         for frame_index, (task, reservation) in enumerate(
@@ -129,9 +130,11 @@ def render_camera_projection_frames(
                 runtime.execution_settings,
                 reservation.staged_path,
             )
+            policy = runtime.execution_settings.camera_influence_policy
             logger.info(
                 "Rendering camera projection '%s' frame %d/%d camera='%s' "
-                "dynamic_range=%s tone_mapping=%s alpha=%s",
+                "dynamic_range=%s tone_mapping=%s alpha=%s shadows=%s "
+                "reflection_transmission=%s world=%s",
                 runtime.plan.source_object_id,
                 frame_index,
                 frame_count,
@@ -139,6 +142,9 @@ def render_camera_projection_frames(
                 runtime.output_policy.dynamic_range.value,
                 runtime.output_policy.tone_mapping.value,
                 runtime.output_policy.alpha_representation.value,
+                policy.include_scene_shadows,
+                policy.include_scene_reflection_transmission,
+                policy.world_affects_lighting_reflections,
             )
             _call_render_operator(runtime.bpy_module)
             _require_nonempty_staged_output(reservation)
