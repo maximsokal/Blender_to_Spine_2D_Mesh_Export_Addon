@@ -183,8 +183,9 @@ def normal_mode_camera_requirement_message(
     return (
         "Normal — UV Segments can bake audited source-object surface context, but "
         "cannot reproduce these render-ray, volume, displacement, unsupported source "
-        "attribute, or unclassified camera findings. Select Export Mode: Camera "
-        f"Projection. Blocking findings: {details}"
+        "attribute, or unclassified camera findings. "
+        "Select Export Mode: Camera Projection. "
+        f"Blocking findings: {details}"
     )
 
 
