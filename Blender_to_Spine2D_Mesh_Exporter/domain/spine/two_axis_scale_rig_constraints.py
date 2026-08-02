@@ -20,14 +20,13 @@ def build_two_axis_scale_constraints(
 ) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
     """Build the exact five-phase schedule generalized from the reference rig.
 
-    Ordinary model-space documents retain the historical setup offsets. Camera-screen
-    geometry has already undergone complete 3D projection, so ``PREPROJECTED_SCREEN``
-    emits identity setup offsets while preserving live X/Y/Scale controls.
+    Ordinary model-space documents retain the historical setup offsets and scale target
+    set. Camera-relative documents place X and Y orbital transforms above the projected
+    Object Origin. Their independent Scale control targets only ``base`` below that
+    placement, so resizing the object cannot change its distance from camera zero.
 
-    One camera-relative depth group moves the complete object rigidly. Perspective keeps
-    the historical depth-scale channel as whole-object foreshortening. Orthographic sets
-    ``mixScaleX`` to zero on that channel so depth changes translation only and object
-    size remains camera-distance independent.
+    Perspective retains whole-layer depth foreshortening. Orthographic disables the
+    automatic depth-scale channel while preserving rigid camera-relative translation.
     """
 
     if not isinstance(plan, LegacyRigBuildPlan):
@@ -49,6 +48,11 @@ def build_two_axis_scale_constraints(
     control_x, control_y, scale_control = plan.control_bone_names
     constraint_bone, _scale_ik, rotate_ik, ik_target = plan.ik_chain_bone_names
     front_to_back_rotation_bones = tuple(reversed(plan.info.sub_bone_names))
+    scale_bones = (
+        (plan.base_bone_name,)
+        if preprojected_screen
+        else (plan.main_rotation_bone_name, *front_to_back_rotation_bones)
+    )
 
     ik = (
         IKConstraint(
@@ -118,7 +122,7 @@ def build_two_axis_scale_constraints(
         TransformConstraint(
             name=profile.scale_constraint(plan.prefix),
             order=2,
-            bones=(plan.main_rotation_bone_name, *front_to_back_rotation_bones),
+            bones=scale_bones,
             target=scale_control,
             extras={
                 "relative": True,
