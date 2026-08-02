@@ -12,7 +12,9 @@ from ..application import (
 )
 from ..domain.baking import CameraProjectionPlan, resolve_projection_output_policy
 from ..domain.baking.projection_layout import CameraProjectionLayout
+from ..domain.spine import LegacyRigBuildResult, build_legacy_rig
 from ..domain.spine.preprojected_setup import ensure_preprojected_screen_rig
+from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from ..domain.spine.two_axis_scale_rig import build_two_axis_scale_rig
 from .a1_document_preparation import finalize_a1_document_assembly_for_target
 from .a1_preparation_contracts import (
@@ -154,6 +156,41 @@ def _rendered_camera_main_position(
     return (float(projected.u), -float(projected.v)), float(projected.depth)
 
 
+def _positioned_projection_rig(
+    rig: LegacyRigBuildResult,
+    main_position: tuple[float, float],
+) -> LegacyRigBuildResult:
+    """Rebuild the selected profile around the projected Blender Object Origin."""
+
+    if not isinstance(rig, LegacyRigBuildResult):
+        raise TypeError("rig must be LegacyRigBuildResult")
+    resolved_profile = resolve_a1_rig_profile(rig.profile.profile_id)
+
+    if resolved_profile is A1RigProfile.TWO_AXIS_ROTATION_SCALE:
+        neutral_screen_rig = ensure_preprojected_screen_rig(rig)
+        positioned = build_two_axis_scale_rig(
+            replace(
+                neutral_screen_rig.request,
+                main_position_pixels=main_position,
+            )
+        )
+    elif resolved_profile is A1RigProfile.THREE_AXIS_ROTATION:
+        # Preserve the already supported historical three-axis setup payload. This fix
+        # adds the missing Blender Object Origin without silently changing that profile's
+        # animation/control contract.
+        positioned = build_legacy_rig(
+            replace(
+                rig.request,
+                main_position_pixels=main_position,
+            )
+        )
+    else:
+        raise AssertionError(f"Unhandled rig profile: {resolved_profile}")
+
+    positioned.validate()
+    return positioned
+
+
 def finalize_prepared_camera_projection(
     prepared: PreparedA1Object,
     layout: CameraProjectionLayout | None,
@@ -185,18 +222,14 @@ def finalize_prepared_camera_projection(
         context=context,
         scene=scene,
     )
-    neutral_screen_rig = ensure_preprojected_screen_rig(prepared.rig)
-    positioned_screen_rig = build_two_axis_scale_rig(
-        replace(
-            neutral_screen_rig.request,
-            main_position_pixels=main_position,
-        )
+    positioned_rig = _positioned_projection_rig(
+        prepared.rig,
+        main_position,
     )
-    positioned_screen_rig.validate()
 
     skeleton_metadata = build_skeleton_metadata(prepared.settings)
     document_assembly = assemble_a1_camera_projection_document(
-        positioned_screen_rig,
+        positioned_rig,
         prepared.z_groups,
         plan,
         prepared.document_assembly.settings,
@@ -205,7 +238,7 @@ def finalize_prepared_camera_projection(
     )
     document_assembly = recenter_a1_camera_projection_document(
         document_assembly,
-        positioned_screen_rig,
+        positioned_rig,
         main_position,
         skeleton_metadata=skeleton_metadata,
     )
@@ -261,9 +294,7 @@ def finalize_prepared_camera_projection(
             "projection_object_origin_main_x": main_position[0],
             "projection_object_origin_main_y": main_position[1],
             "projection_object_origin_depth": projected_depth,
-            "projection_setup_pose_mode": (
-                positioned_screen_rig.request.setup_pose_mode.value
-            ),
+            "projection_setup_pose_mode": positioned_rig.request.setup_pose_mode.value,
             "final_bone_count": len(document.bones),
             "slot_count": len(document.slots),
             "attachment_count": sum(
