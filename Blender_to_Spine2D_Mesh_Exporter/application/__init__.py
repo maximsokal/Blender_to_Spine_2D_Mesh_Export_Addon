@@ -17,6 +17,7 @@ from .a1_camera_projection import (
     build_camera_projection_mesh_snapshot,
     build_camera_projection_quad_snapshot,
 )
+from .a1_camera_projection_pivot import recenter_a1_camera_projection_document
 from .a1_document_assembly import (
     A1DocumentAssemblyError,
     A1DocumentAssemblyResult,
@@ -193,6 +194,7 @@ __all__ = [
     "project_a1_prepared_geometry_camera",
     "project_triangulated_disk_attachment",
     "propagate_texturing_uv_to_regions",
+    "recenter_a1_camera_projection_document",
     "resolve_a1_multi_object_preparation_settings",
     "resolve_a1_names",
     "resolve_a1_output_paths",
