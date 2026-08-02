@@ -478,7 +478,7 @@ def test_forced_render_failure_rolls_back_json_texture_and_visibility() -> None:
         _assert(final_png.read_bytes() == old_png, "B4 rollback corrupted texture")
         leftovers = tuple(
             sorted(
-                str(path.relative_to(output_directory))
+                path.relative_to(output_directory).as_posix()
                 for path in output_directory.rglob("*")
                 if path.is_file()
             )
