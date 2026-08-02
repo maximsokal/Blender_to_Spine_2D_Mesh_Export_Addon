@@ -138,8 +138,6 @@ def stage_and_finalize_a1_objects(
         finalized = finalize_prepared_camera_projection(
             item,
             staged.projection_layout,
-            context=context,
-            scene=scene,
         )
         finalized_objects.append(finalized)
         record_object_statistics(
