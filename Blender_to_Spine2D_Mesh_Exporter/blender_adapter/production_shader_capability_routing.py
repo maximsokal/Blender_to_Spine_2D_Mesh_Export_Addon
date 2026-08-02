@@ -15,10 +15,23 @@ from ..domain.baking import (
     ShaderBakeCapability,
     TexturePlan,
     build_camera_projection_plan,
-    build_texture_plan,
+    build_bake_plan,
     strongest_shader_capability,
 )
+from ..domain.baking.normal_uv_camera_context import (
+    build_normal_uv_camera_context_plan,
+)
 from .render_engine_contract import RenderEngineContract
+
+
+_NORMAL_UV_BLOCKING_CAMERA_CODES = frozenset(
+    {
+        "DISPLACEMENT_RENDER_REQUIRED",
+        "EEVEE_SHADER_TO_RGB",
+        "SOURCE_ATTRIBUTE_NOT_MATERIALIZED",
+        "VOLUME_RENDER_REQUIRED",
+    }
+)
 
 
 def strongest_object_capability(
@@ -56,10 +69,15 @@ def capability_failure_message(
     return f"shader capability {capability.value} prevents safe export: {tuple(details)}"
 
 
-def normal_mode_camera_requirement_message(
+def _normal_uv_blocking_camera_findings(
     audits: Tuple[MaterialCapabilityAudit, ...],
-) -> str:
-    """Explain why an explicit Normal export cannot silently become B4."""
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Return only camera-capability findings object UV baking cannot represent."""
+
+    if not isinstance(audits, tuple) or not all(
+        isinstance(audit, MaterialCapabilityAudit) for audit in audits
+    ):
+        raise TypeError("audits must contain MaterialCapabilityAudit values")
 
     details = []
     for audit in audits:
@@ -67,13 +85,25 @@ def normal_mode_camera_requirement_message(
             finding.code
             for finding in audit.findings
             if finding.capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED
+            and finding.code in _NORMAL_UV_BLOCKING_CAMERA_CODES
         )
         if codes:
             details.append((audit.material_name, codes))
+    return tuple(details)
+
+
+def normal_mode_camera_requirement_message(
+    audits: Tuple[MaterialCapabilityAudit, ...],
+) -> str:
+    """Explain the narrow cases that still require Camera Projection topology."""
+
+    details = _normal_uv_blocking_camera_findings(audits)
     return (
-        "Normal — UV Segments cannot reproduce this material without changing "
-        "the exported topology. Select Export Mode: Camera Projection. "
-        f"Camera-dependent findings: {tuple(details)}"
+        "Normal — UV Segments can bake source/object/camera-context surface "
+        "appearance, but cannot represent volume, render displacement, Eevee "
+        "Shader-to-RGB, or unavailable source attributes without changing the "
+        "export boundary. Select Export Mode: Camera Projection only for these "
+        f"findings: {details}"
     )
 
 
@@ -89,7 +119,7 @@ def build_capability_checked_texture_plan(
         A1TextureExportMode.NORMAL_UV_SEGMENTS
     ),
 ) -> TexturePlan:
-    """Select Normal UV baking or B4 only from the explicit user mode."""
+    """Select explicit Normal UV baking or Camera Projection without conflating them."""
 
     if not isinstance(analysis, ObjectMaterialAnalysis):
         raise TypeError("analysis must be ObjectMaterialAnalysis")
@@ -120,9 +150,16 @@ def build_capability_checked_texture_plan(
         )
 
     if capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED:
-        raise BakePlanError(normal_mode_camera_requirement_message(audits))
+        if _normal_uv_blocking_camera_findings(audits):
+            raise BakePlanError(normal_mode_camera_requirement_message(audits))
+        return build_normal_uv_camera_context_plan(
+            analysis,
+            settings,
+            object_context=object_context,
+            scene_context=scene_context,
+        )
 
-    return build_texture_plan(
+    return build_bake_plan(
         analysis,
         settings,
         object_context=object_context,
