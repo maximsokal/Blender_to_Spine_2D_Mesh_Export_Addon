@@ -20,6 +20,7 @@ from ..application import (
 from ..domain.baking import CameraProjectionPlan
 from ..domain.camera_projection import A1CameraProjectionKind
 from ..domain.projection import A1ProjectionDirection
+from ..domain.spine import finalize_texture_sequence_animation
 from ..domain.spine.legacy_attachment_builder import (
     LegacyMeshDocumentBuildResult,
 )
@@ -28,7 +29,7 @@ from ..domain.spine.legacy_rig_contracts import (
     LegacyRigBuildResult,
     LegacyZGroupOriginMode,
 )
-from ..domain.spine.model import MeshAttachment, Skin, SpineDocument
+from ..domain.spine.model import MeshAttachment, Skin, Slot, SpineDocument
 from ..domain.spine.rig_builder import build_rig
 from ..domain.spine.rig_profiles import (
     A1CameraLayerProjectionKind,
@@ -98,6 +99,19 @@ def _skin_by_name(document: SpineDocument) -> dict[str, Skin]:
         if skin.name in result:
             raise ValueError(f"Duplicate skin name in finalized document: {skin.name!r}")
         result[skin.name] = skin
+    return result
+
+
+def _slot_by_name(document: SpineDocument) -> dict[str, Slot]:
+    """Index final setup slots while rejecting ambiguous names."""
+
+    if not isinstance(document, SpineDocument):
+        raise TypeError("document must be SpineDocument")
+    result: dict[str, Slot] = {}
+    for slot in document.slots:
+        if slot.name in result:
+            raise ValueError(f"Duplicate slot name in finalized document: {slot.name!r}")
+        result[slot.name] = slot
     return result
 
 
@@ -227,6 +241,75 @@ def _synchronize_document_build_for_spine41(
     )
 
 
+def _synchronize_document_build_with_final_document(
+    document_build: LegacyMeshDocumentBuildResult,
+    final_document: SpineDocument,
+) -> LegacyMeshDocumentBuildResult:
+    """Align immutable component metadata with target-finalized setup attachments.
+
+    Native sequence targets retain the canonical attachment. Attachment-swap targets
+    replace it with many static frame attachments and point the setup slot at frame zero.
+    Downstream composition must see the same request, slot, attachment, skin inventory,
+    and document that will be serialized.
+    """
+
+    if not isinstance(document_build, LegacyMeshDocumentBuildResult):
+        raise TypeError("document_build must be LegacyMeshDocumentBuildResult")
+    if not isinstance(final_document, SpineDocument):
+        raise TypeError("final_document must be SpineDocument")
+
+    skins_by_name = _skin_by_name(final_document)
+    slots_by_name = _slot_by_name(final_document)
+    final_components = []
+
+    for component in document_build.components:
+        slot_name = component.request.slot_name
+        final_slot = slots_by_name.get(slot_name)
+        if final_slot is None:
+            raise ValueError(
+                f"Finalized document is missing component slot {slot_name!r}"
+            )
+        attachment_name = final_slot.attachment
+        if not isinstance(attachment_name, str) or not attachment_name.strip():
+            raise ValueError(
+                f"Finalized component slot {slot_name!r} has no setup attachment"
+            )
+        final_attachment = _adapted_mesh_attachment(
+            skins_by_name,
+            skin_name=component.request.skin_name,
+            slot_name=slot_name,
+            attachment_name=attachment_name,
+        )
+        final_path = final_attachment.path or component.request.image_path
+        final_request = replace(
+            component.request,
+            attachment_name=attachment_name,
+            image_path=final_path,
+            sequence=(
+                component.request.sequence
+                if final_attachment.sequence is not None
+                else None
+            ),
+        )
+        final_components.append(
+            replace(
+                component,
+                request=final_request,
+                attachment=final_attachment,
+                slot=final_slot,
+            )
+        )
+
+    resolved_components = tuple(final_components)
+    return replace(
+        document_build,
+        requests=tuple(component.request for component in resolved_components),
+        components=resolved_components,
+        skins=final_document.skins,
+        document=final_document,
+    )
+
+
 def _resolve_z_group_origin_mode(
     *,
     camera_projection: bool,
@@ -270,7 +353,7 @@ def finalize_a1_document_assembly_for_target(
     spine_target: object,
     prefix: str,
 ) -> A1DocumentAssemblyResult:
-    """Apply target-specific rig semantics only after canonical document assembly."""
+    """Apply target rig semantics and texture-animation encoding exactly once."""
 
     if not isinstance(document_assembly, A1DocumentAssemblyResult):
         raise TypeError("document_assembly must be A1DocumentAssemblyResult")
@@ -280,59 +363,74 @@ def finalize_a1_document_assembly_for_target(
     resolved_target = resolve_spine_json_target(spine_target)
     rig = document_assembly.rig
     resolved_profile = resolve_a1_rig_profile(rig.profile.profile_id)
-
-    if resolved_target in {
-        SpineJsonTarget.SPINE_4_2,
-        SpineJsonTarget.SPINE_4_3,
-    } or (
-        resolved_target is SpineJsonTarget.SPINE_3_8
-        and resolved_profile is A1RigProfile.THREE_AXIS_ROTATION
-    ):
-        return document_assembly
-
-    if resolved_target not in {
+    supported_targets = {
         SpineJsonTarget.SPINE_3_8,
         SpineJsonTarget.SPINE_4_0,
         SpineJsonTarget.SPINE_4_1,
-    }:
+        SpineJsonTarget.SPINE_4_2,
+        SpineJsonTarget.SPINE_4_3,
+    }
+    if resolved_target not in supported_targets:
         raise ValueError(
             "A1 document finalization is not implemented for "
             f"{resolved_target.label} ({resolved_target.exact_version})"
         )
 
-    if (
-        resolved_profile is not A1RigProfile.TWO_AXIS_ROTATION_SCALE
-        or not isinstance(rig.profile, TwoAxisScaleRigProfile)
-    ):
-        raise ValueError(
-            f"{resolved_target.label} legacy safety finalization requires "
-            "TWO_AXIS_ROTATION_SCALE"
-        )
-    if rig.request.prefix.strip() != prefix.strip():
-        raise ValueError(
-            f"Document finalization prefix {prefix!r} does not match rig prefix "
-            f"{rig.request.prefix!r}"
-        )
+    adaptation_required = resolved_target in {
+        SpineJsonTarget.SPINE_3_8,
+        SpineJsonTarget.SPINE_4_0,
+        SpineJsonTarget.SPINE_4_1,
+    } and not (
+        resolved_target is SpineJsonTarget.SPINE_3_8
+        and resolved_profile is A1RigProfile.THREE_AXIS_ROTATION
+    )
 
-    if resolved_target is SpineJsonTarget.SPINE_3_8:
-        adaptation = adapt_two_axis_document_for_spine38_with_report(
-            document_assembly.document,
-            profile=rig.profile,
-            prefix=prefix,
+    if adaptation_required:
+        if (
+            resolved_profile is not A1RigProfile.TWO_AXIS_ROTATION_SCALE
+            or not isinstance(rig.profile, TwoAxisScaleRigProfile)
+        ):
+            raise ValueError(
+                f"{resolved_target.label} legacy safety finalization requires "
+                "TWO_AXIS_ROTATION_SCALE"
+            )
+        if rig.request.prefix.strip() != prefix.strip():
+            raise ValueError(
+                f"Document finalization prefix {prefix!r} does not match rig prefix "
+                f"{rig.request.prefix!r}"
+            )
+
+        if resolved_target is SpineJsonTarget.SPINE_3_8:
+            adaptation = adapt_two_axis_document_for_spine38_with_report(
+                document_assembly.document,
+                profile=rig.profile,
+                prefix=prefix,
+            )
+        else:
+            adaptation = adapt_two_axis_document_for_spine41_with_report(
+                document_assembly.document,
+                profile=rig.profile,
+                prefix=prefix,
+            )
+        adapted_build = _synchronize_document_build_for_spine41(
+            document_assembly.document_build,
+            adaptation,
         )
     else:
-        adaptation = adapt_two_axis_document_for_spine41_with_report(
-            document_assembly.document,
-            profile=rig.profile,
-            prefix=prefix,
-        )
-    adapted_build = _synchronize_document_build_for_spine41(
-        document_assembly.document_build,
-        adaptation,
+        adapted_build = document_assembly.document_build
+
+    finalized_document = finalize_texture_sequence_animation(
+        adapted_build.document,
+        target=resolved_target,
+        timing=document_assembly.settings.sequence_timing,
+    )
+    finalized_build = _synchronize_document_build_with_final_document(
+        adapted_build,
+        finalized_document,
     )
     return replace(
         document_assembly,
-        document_build=adapted_build,
+        document_build=finalized_build,
     )
 
 
@@ -438,6 +536,7 @@ def prepare_a1_document(
             uv_range_policy=source.settings.uv.range_policy,
             uv_range_epsilon=source.settings.uv.range_epsilon,
             compensate_depth_setup_y=active_camera_layout,
+            sequence_timing=source.settings.export.sequence_timing,
         )
         skeleton_metadata = build_skeleton_metadata(source.settings)
         if camera_projection:
@@ -466,6 +565,7 @@ def prepare_a1_document(
         )
         final_rig = document_assembly.rig
         document = document_assembly.document
+        sequence_enabled = source.settings.export.sequence_frame_count > 0
         statistics = freeze_statistics(
             statistics,
             {
@@ -477,12 +577,23 @@ def prepare_a1_document(
                     for attachments in skin.attachments.values()
                 ),
                 "final_rig_setup_pose_mode": final_rig.request.setup_pose_mode.value,
+                "texture_sequence_enabled": int(sequence_enabled),
+                "texture_sequence_fps": (
+                    source.settings.export.sequence_timing.resolved_fps
+                    if sequence_enabled
+                    else 0.0
+                ),
+                "texture_sequence_encoding": (
+                    source.settings.export.spine_target.texture_animation_encoding.value
+                    if sequence_enabled
+                    else "STATIC"
+                ),
             },
         )
         logger.debug(
             "Prepared Spine document for %s: target=%s profile=%s setup=%s "
             "camera_layer=%s z_origin=%s depth_y_compensation=%s "
-            "bones=%d slots=%d attachments=%d",
+            "sequence=%s fps=%s bones=%d slots=%d attachments=%d",
             source.object_id,
             source.settings.export.spine_version,
             final_rig.profile.profile_id,
@@ -494,6 +605,8 @@ def prepare_a1_document(
             ),
             final_rig.request.z_group_origin_mode.value,
             active_camera_layout,
+            statistics["texture_sequence_encoding"],
+            statistics["texture_sequence_fps"],
             len(document.bones),
             len(document.slots),
             statistics["attachment_count"],
