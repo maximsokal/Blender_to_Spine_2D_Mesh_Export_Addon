@@ -24,7 +24,7 @@ from .blender_adapter.a1_ui_bridge import (
     export_selected_objects_a1,
 )
 from .config import get_default_output_dir
-from .domain.baking import A1TextureExportMode
+from .domain.baking import A1TextureExportMode, TextureSequenceTiming
 from .domain.spine.version_target import (
     DEFAULT_SPINE_JSON_TARGET,
     resolve_spine_json_target,
@@ -87,6 +87,10 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene.spine2d_seam_maker_mode = "AUTO"
             scene.spine2d_frames_for_render = 0
             scene.spine2d_bake_frame_start = 0
+            scene.spine2d_sequence_fps_override = 0.0
+            scene.spine2d_include_scene_shadows = True
+            scene.spine2d_include_scene_reflection_transmission = True
+            scene.spine2d_world_affects_lighting_reflections = True
             clear_a1_export_readiness(scene)
             _tag_redraw(context)
             self.report({"INFO"}, "Spine2D Rewrite settings have been reset.")
@@ -404,6 +408,30 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             )
 
     @staticmethod
+    def _sequence_timing(scene: bpy.types.Scene) -> TextureSequenceTiming:
+        render = getattr(scene, "render", None)
+        try:
+            scene_fps = max(0, int(getattr(render, "fps", 30)))
+        except (TypeError, ValueError, OverflowError):
+            scene_fps = 0
+        try:
+            scene_fps_base = max(0.0, float(getattr(render, "fps_base", 1.0)))
+        except (TypeError, ValueError, OverflowError):
+            scene_fps_base = 0.0
+        try:
+            override_fps = max(
+                0.0,
+                float(getattr(scene, "spine2d_sequence_fps_override", 0.0)),
+            )
+        except (TypeError, ValueError, OverflowError):
+            override_fps = 0.0
+        return TextureSequenceTiming(
+            scene_fps=scene_fps,
+            scene_fps_base=scene_fps_base,
+            override_fps=override_fps,
+        )
+
+    @staticmethod
     def _draw_bake_settings(
         column: bpy.types.UILayout,
         context: bpy.types.Context,
@@ -414,6 +442,9 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             for candidate in context.selected_objects
             if candidate.type == "MESH"
         )
+
+        sequence_enabled = False
+        estimated_texture_count = 0
         if len(selected_meshes) > 1:
             for selected_object in selected_meshes:
                 box = column.box()
@@ -425,15 +456,52 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
                 frames = max(0, int(settings.frames_for_render))
                 last = start if frames == 0 else start + frames - 1
                 box.label(text=f"Last frame: {last}")
-            return
+                sequence_enabled = sequence_enabled or frames > 0
+                estimated_texture_count += max(1, frames)
+        else:
+            column.prop(scene, "spine2d_frames_for_render", text="Frames for render")
+            column.prop(scene, "spine2d_bake_frame_start", text="Start")
+            start = max(0, int(scene.spine2d_bake_frame_start))
+            frames = max(0, int(scene.spine2d_frames_for_render))
+            last = start if frames == 0 else start + frames - 1
+            column.label(text=f"Last frame: {last}")
+            column.label(text=f"Playback end: {scene.frame_end}")
+            sequence_enabled = frames > 0
+            estimated_texture_count = max(1, frames)
 
-        column.prop(scene, "spine2d_frames_for_render", text="Frames for render")
-        column.prop(scene, "spine2d_bake_frame_start", text="Start")
-        start = max(0, int(scene.spine2d_bake_frame_start))
-        frames = max(0, int(scene.spine2d_frames_for_render))
-        last = start if frames == 0 else start + frames - 1
-        column.label(text=f"Last frame: {last}")
-        column.label(text=f"Playback end: {scene.frame_end}")
+        column.separator()
+        if sequence_enabled:
+            timing = OBJECT_PT_Spine2DMeshPanel._sequence_timing(scene)
+            column.label(text="Sequence playback: Loop", icon="PLAY")
+            column.label(text=f"Scene FPS: {timing.scene_fps_value:.6g}")
+            column.prop(
+                scene,
+                "spine2d_sequence_fps_override",
+                text="Sequence FPS override (0 = Scene)",
+            )
+            column.label(text=f"Resolved FPS: {timing.resolved_fps:.6g}")
+            column.label(text=f"Frame duration: {timing.frame_duration:.6f} s")
+            column.label(text=f"Estimated textures: {estimated_texture_count}")
+        else:
+            column.label(text="Texture animation: Static current frame", icon="IMAGE_DATA")
+
+        column.separator()
+        column.label(text="Camera Projection scene influence:", icon="CAMERA_DATA")
+        column.prop(
+            scene,
+            "spine2d_include_scene_shadows",
+            text="Include shadows from scene objects",
+        )
+        column.prop(
+            scene,
+            "spine2d_include_scene_reflection_transmission",
+            text="Include reflection/transmission objects",
+        )
+        column.prop(
+            scene,
+            "spine2d_world_affects_lighting_reflections",
+            text="World affects lighting/reflections",
+        )
 
     @staticmethod
     def _issue_icon(severity: IssueSeverity) -> str:
