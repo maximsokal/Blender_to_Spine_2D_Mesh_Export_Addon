@@ -3,22 +3,165 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from math import isfinite
+from typing import Any
 
-from ..application import assemble_a1_camera_projection_document
+from ..application import (
+    assemble_a1_camera_projection_document,
+    recenter_a1_camera_projection_document,
+)
 from ..domain.baking import CameraProjectionPlan, resolve_projection_output_policy
 from ..domain.baking.projection_layout import CameraProjectionLayout
+from ..domain.spine.preprojected_setup import ensure_preprojected_screen_rig
+from ..domain.spine.two_axis_scale_rig import build_two_axis_scale_rig
+from .a1_document_preparation import finalize_a1_document_assembly_for_target
 from .a1_preparation_contracts import (
     PreparedA1Object,
     build_skeleton_metadata,
     freeze_statistics,
 )
+from .active_camera_projection import resolve_a1_active_camera_projection_frame
+from .scene_context_contract import (
+    BlenderSceneContextError,
+    require_depsgraph_scene_consistency,
+)
+
+
+def _resolved_scene_and_depsgraph(
+    context: Any | None,
+    scene: Any | None,
+) -> tuple[Any, Any]:
+    """Resolve the exact Scene/depsgraph pair used for final pivot projection."""
+
+    try:
+        import bpy
+    except Exception as exc:
+        raise ValueError(
+            "Blender bpy module is unavailable for Camera Projection finalization"
+        ) from exc
+
+    resolved_context = context or getattr(bpy, "context", None)
+    resolved_scene = scene or getattr(resolved_context, "scene", None)
+    if resolved_scene is None:
+        raise ValueError("Camera Projection finalization requires a Blender Scene")
+
+    evaluated_depsgraph_get = getattr(
+        resolved_context,
+        "evaluated_depsgraph_get",
+        None,
+    )
+    if not callable(evaluated_depsgraph_get):
+        raise ValueError(
+            "Camera Projection finalization requires evaluated_depsgraph_get()"
+        )
+    try:
+        depsgraph = evaluated_depsgraph_get()
+    except Exception as exc:
+        raise ValueError(
+            "Unable to acquire evaluated dependency graph for Camera Projection pivot"
+        ) from exc
+    if depsgraph is None:
+        raise ValueError(
+            "Blender returned no dependency graph for Camera Projection pivot"
+        )
+    try:
+        require_depsgraph_scene_consistency(depsgraph, resolved_scene)
+    except BlenderSceneContextError as exc:
+        raise ValueError(
+            f"Camera Projection Scene and dependency graph disagree: {exc}"
+        ) from exc
+    return resolved_scene, depsgraph
+
+
+def _evaluated_object_origin(
+    source_object: Any,
+    scene: Any,
+    depsgraph: Any,
+) -> tuple[float, float, float]:
+    """Read Blender Object Origin from the same evaluated Scene used by the camera."""
+
+    if source_object is None:
+        raise ValueError("source_object cannot be None")
+    try:
+        scene_objects = tuple(scene.objects)
+    except Exception as exc:
+        raise ValueError(
+            "Unable to inspect Scene objects for Camera Projection pivot"
+        ) from exc
+    if source_object not in scene_objects:
+        raise ValueError(
+            "Camera Projection source object is not linked to the finalization Scene"
+        )
+
+    evaluated_get = getattr(source_object, "evaluated_get", None)
+    if not callable(evaluated_get):
+        raise ValueError("Camera Projection source object has no evaluated_get()")
+    try:
+        evaluated_source = evaluated_get(depsgraph)
+    except Exception as exc:
+        raise ValueError(
+            "Unable to evaluate Camera Projection source object"
+        ) from exc
+    if evaluated_source is None:
+        raise ValueError("Camera Projection source evaluation returned None")
+
+    matrix_world = getattr(evaluated_source, "matrix_world", None)
+    if matrix_world is None:
+        raise ValueError(
+            "Evaluated Camera Projection source has no matrix_world"
+        )
+    try:
+        origin = tuple(float(matrix_world[index][3]) for index in range(3))
+    except Exception as exc:
+        raise ValueError(
+            "Unable to read evaluated Camera Projection Object Origin"
+        ) from exc
+    if len(origin) != 3 or not all(isfinite(value) for value in origin):
+        raise ValueError(
+            "Evaluated Camera Projection Object Origin must contain finite XYZ"
+        )
+    return origin[0], origin[1], origin[2]
+
+
+def _rendered_camera_main_position(
+    prepared: PreparedA1Object,
+    plan: CameraProjectionPlan,
+    *,
+    context: Any | None,
+    scene: Any | None,
+) -> tuple[tuple[float, float], float]:
+    """Project Blender Object Origin into the rendered attachment coordinate system."""
+
+    resolved_scene, depsgraph = _resolved_scene_and_depsgraph(context, scene)
+    frame = resolve_a1_active_camera_projection_frame(
+        resolved_scene,
+        texture_width=plan.settings.width,
+        texture_height=plan.settings.height,
+        depsgraph=depsgraph,
+    )
+    origin = _evaluated_object_origin(
+        prepared.source_object,
+        resolved_scene,
+        depsgraph,
+    )
+    projected = frame.project_world_point(
+        origin,
+        field_name="rendered_camera_projection_object_origin",
+    )
+
+    # Render contour pixels use image-row Y and are negated by the established
+    # attachment projector. Match that final Spine convention for the main bone.
+    return (float(projected.u), -float(projected.v)), float(projected.depth)
 
 
 def finalize_prepared_camera_projection(
     prepared: PreparedA1Object,
     layout: CameraProjectionLayout | None,
+    *,
+    context: Any | None = None,
+    scene: Any | None = None,
 ) -> PreparedA1Object:
-    """Return a prepared object whose document matches the staged cropped render."""
+    """Return a prepared object whose document matches render, crop, and Blender pivot."""
 
     if not isinstance(prepared, PreparedA1Object):
         raise TypeError("prepared must be PreparedA1Object")
@@ -36,14 +179,42 @@ def finalize_prepared_camera_projection(
         prepared.settings.bake_execution.projection_output_policy,
         plan.settings.texture_format,
     )
+    main_position, projected_depth = _rendered_camera_main_position(
+        prepared,
+        plan,
+        context=context,
+        scene=scene,
+    )
+    neutral_screen_rig = ensure_preprojected_screen_rig(prepared.rig)
+    positioned_screen_rig = build_two_axis_scale_rig(
+        replace(
+            neutral_screen_rig.request,
+            main_position_pixels=main_position,
+        )
+    )
+    positioned_screen_rig.validate()
+
+    skeleton_metadata = build_skeleton_metadata(prepared.settings)
     document_assembly = assemble_a1_camera_projection_document(
-        prepared.rig,
+        positioned_screen_rig,
         prepared.z_groups,
         plan,
         prepared.document_assembly.settings,
         layout=layout,
-        skeleton_metadata=build_skeleton_metadata(prepared.settings),
+        skeleton_metadata=skeleton_metadata,
     )
+    document_assembly = recenter_a1_camera_projection_document(
+        document_assembly,
+        positioned_screen_rig,
+        main_position,
+        skeleton_metadata=skeleton_metadata,
+    )
+    document_assembly = finalize_a1_document_assembly_for_target(
+        document_assembly,
+        spine_target=prepared.settings.export.spine_target,
+        prefix=prepared.prefix,
+    )
+
     document = document_assembly.document
     offset_x, offset_y = layout.offset_pixels
     statistics = freeze_statistics(
@@ -87,6 +258,12 @@ def finalize_prepared_camera_projection(
             "projection_output_alpha_representation": output_policy.alpha_representation.value,
             "projection_output_color_depth": output_policy.color_depth,
             "projection_output_float_buffer": int(output_policy.float_buffer),
+            "projection_object_origin_main_x": main_position[0],
+            "projection_object_origin_main_y": main_position[1],
+            "projection_object_origin_depth": projected_depth,
+            "projection_setup_pose_mode": (
+                positioned_screen_rig.request.setup_pose_mode.value
+            ),
             "final_bone_count": len(document.bones),
             "slot_count": len(document.slots),
             "attachment_count": sum(
@@ -98,6 +275,7 @@ def finalize_prepared_camera_projection(
     )
     return replace(
         prepared,
+        rig=document_assembly.rig,
         document_assembly=document_assembly,
         statistics=statistics,
     )
