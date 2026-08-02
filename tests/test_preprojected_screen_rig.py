@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
+    A1CameraLayerProjectionKind,
     A1RigProfile,
     A1RigSetupPoseMode,
     LegacyRigBuildRequest,
@@ -22,6 +23,9 @@ def _request(
     setup_pose_mode: A1RigSetupPoseMode,
     *,
     z_groups: tuple[LegacyZGroup, ...] = (LegacyZGroup(-4.0),),
+    camera_kind: A1CameraLayerProjectionKind = (
+        A1CameraLayerProjectionKind.PERSPECTIVE
+    ),
 ) -> LegacyRigBuildRequest:
     return LegacyRigBuildRequest(
         prefix="Projected",
@@ -31,6 +35,11 @@ def _request(
         main_position_pixels=(13.0, -7.0),
         setup_pose_mode=setup_pose_mode,
         z_group_origin_mode=LegacyZGroupOriginMode.OBJECT_ORIGIN,
+        camera_layer_projection_kind=(
+            camera_kind
+            if setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
+            else None
+        ),
     )
 
 
@@ -38,9 +47,16 @@ def _two_axis(
     setup_pose_mode: A1RigSetupPoseMode,
     *,
     z_groups: tuple[LegacyZGroup, ...] = (LegacyZGroup(-4.0),),
+    camera_kind: A1CameraLayerProjectionKind = (
+        A1CameraLayerProjectionKind.PERSPECTIVE
+    ),
 ):
     return build_rig(
-        _request(setup_pose_mode, z_groups=z_groups),
+        _request(
+            setup_pose_mode,
+            z_groups=z_groups,
+            camera_kind=camera_kind,
+        ),
         A1RigProfile.TWO_AXIS_ROTATION_SCALE,
         spine_target=SpineJsonTarget.SPINE_4_2,
     )
@@ -95,42 +111,52 @@ def test_preprojected_setup_preserves_live_constraint_topology() -> None:
         assert historical_constraint.target == screen_constraint.target
 
 
-def test_preprojected_setup_neutralizes_only_initial_projection_offsets() -> None:
-    historical = _constraint_by_order(
-        _two_axis(A1RigSetupPoseMode.PRESERVE_COMPOSITION)
-    )
+def test_perspective_layer_keeps_whole_object_depth_scale() -> None:
     screen = _constraint_by_order(
-        _two_axis(A1RigSetupPoseMode.PREPROJECTED_SCREEN)
+        _two_axis(
+            A1RigSetupPoseMode.PREPROJECTED_SCREEN,
+            camera_kind=A1CameraLayerProjectionKind.PERSPECTIVE,
+        )
     )
-
-    assert historical[0].extras["rotation"] != 0.0
-    assert historical[4].extras["rotation"] != 0.0
-    assert historical[3].extras["scaleX"] == -1
 
     assert screen[0].extras["rotation"] == 0.0
     assert screen[4].extras["rotation"] == 0.0
     assert screen[3].extras["x"] == 0.0
     assert screen[3].extras["scaleX"] == 0.0
+    assert "mixScaleX" not in screen[3].extras
 
-    assert screen[0].extras["scaleX"] == -1
-    assert screen[0].extras["mixX"] == 0
-    assert screen[0].extras["mixScaleX"] == 0
+
+def test_orthographic_layer_disables_automatic_depth_scale() -> None:
+    screen = _constraint_by_order(
+        _two_axis(
+            A1RigSetupPoseMode.PREPROJECTED_SCREEN,
+            camera_kind=A1CameraLayerProjectionKind.ORTHOGRAPHIC,
+        )
+    )
+
+    assert screen[3].extras["x"] == 0.0
+    assert screen[3].extras["scaleX"] == 0.0
+    assert screen[3].extras["mixScaleX"] == 0
     assert screen[2].extras["relative"] is True
-    assert screen[3].extras["rotation"] == -90
-    assert screen[4].extras["relative"] is True
 
 
 def test_ensure_preprojected_screen_rig_is_idempotent_and_immutable() -> None:
     source = _two_axis(A1RigSetupPoseMode.PRESERVE_COMPOSITION)
     source_request = source.request
 
-    result = ensure_preprojected_screen_rig(source)
+    result = ensure_preprojected_screen_rig(
+        source,
+        camera_projection_kind=A1CameraLayerProjectionKind.PERSPECTIVE,
+    )
 
     assert result is not source
     assert source.request is source_request
     assert source.request.setup_pose_mode is A1RigSetupPoseMode.PRESERVE_COMPOSITION
     assert result.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
     assert result.request.z_group_origin_mode is LegacyZGroupOriginMode.OBJECT_ORIGIN
+    assert result.request.camera_layer_projection_kind is (
+        A1CameraLayerProjectionKind.PERSPECTIVE
+    )
     assert ensure_preprojected_screen_rig(result) is result
 
 
@@ -144,10 +170,14 @@ def test_helper_can_collapse_rendered_source_depths_to_camera_origin() -> None:
         source,
         main_position_pixels=(21.0, 9.0),
         camera_depth=-6.5,
+        camera_projection_kind=A1CameraLayerProjectionKind.ORTHOGRAPHIC,
     )
 
     assert result.request.z_groups == (LegacyZGroup(-6.5),)
     assert result.request.main_position_pixels == (21.0, 9.0)
+    assert result.request.camera_layer_projection_kind is (
+        A1CameraLayerProjectionKind.ORTHOGRAPHIC
+    )
     assert len(result.info.z_groups) == 1
     assert result.info.z_groups[0].z_value == -6.5
     result.validate()
@@ -160,7 +190,22 @@ def test_helper_rejects_uncollapsed_vertex_depth_groups() -> None:
     )
 
     with pytest.raises(ValueError, match="exactly one Object-Origin depth group"):
-        ensure_preprojected_screen_rig(source)
+        ensure_preprojected_screen_rig(
+            source,
+            camera_projection_kind=A1CameraLayerProjectionKind.PERSPECTIVE,
+        )
+
+
+def test_preprojected_request_requires_camera_kind() -> None:
+    with pytest.raises(TypeError, match="requires camera_layer_projection_kind"):
+        LegacyRigBuildRequest(
+            prefix="Projected",
+            texture_width=160,
+            texture_height=96,
+            z_groups=(LegacyZGroup(-4.0),),
+            setup_pose_mode=A1RigSetupPoseMode.PREPROJECTED_SCREEN,
+            z_group_origin_mode=LegacyZGroupOriginMode.OBJECT_ORIGIN,
+        )
 
 
 def test_preprojected_screen_rejects_unsupported_three_axis_profile() -> None:
@@ -174,4 +219,7 @@ def test_preprojected_screen_rejects_unsupported_three_axis_profile() -> None:
         ValueError,
         match="requires TWO_AXIS_ROTATION_SCALE",
     ):
-        ensure_preprojected_screen_rig(legacy)
+        ensure_preprojected_screen_rig(
+            legacy,
+            camera_projection_kind=A1CameraLayerProjectionKind.PERSPECTIVE,
+        )
