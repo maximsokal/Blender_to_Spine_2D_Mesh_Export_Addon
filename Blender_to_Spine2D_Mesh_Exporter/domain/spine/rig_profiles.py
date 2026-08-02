@@ -38,10 +38,11 @@ class A1RigSetupPoseMode(str, Enum):
     ``PRESERVE_COMPOSITION`` retains the historical model-space setup used by ordinary
     Normal / UV Segments exports and connected composition.
 
-    ``PREPROJECTED_SCREEN`` is reserved for geometry that has already been projected to
-    final camera-screen X/Y. Its default transform-constraint offsets evaluate to an
-    identity screen-space pose while retaining the same live X/Y/Scale controls for later
-    authoring. It must not be selected for ordinary model-space geometry.
+    ``PREPROJECTED_SCREEN`` is reserved for camera-projected geometry. It represents one
+    complete object as a rigid camera-relative layer: camera space is zero, projected
+    Blender Object Origin is stored on the internal base, and one Object-Origin depth
+    group drives parallax/foreshortening for the complete object. It must never be used
+    with per-vertex depth groups or ordinary model-space geometry.
     """
 
     NORMALIZED_SINGLE = "NORMALIZED_SINGLE"
