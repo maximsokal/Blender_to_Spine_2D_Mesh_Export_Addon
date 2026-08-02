@@ -68,6 +68,7 @@ from .execution import (
     BakeArtifact,
     BakeExecutionResult,
     BakeExecutionSettings,
+    CameraProjectionInfluencePolicy,
 )
 from .grouped_camera_projection import (
     GroupedCameraProjectionPlan,
@@ -145,6 +146,7 @@ __all__ = [
     "BakeStrategyRegistry",
     "CameraBakeSnapshot",
     "CameraCombinedBakeStrategy",
+    "CameraProjectionInfluencePolicy",
     "CameraProjectionLayout",
     "CameraProjectionLayoutError",
     "CameraProjectionMode",
