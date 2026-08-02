@@ -96,6 +96,7 @@ def _settings_from_profiles(
             bake_margin=_DEFAULT_BAKE_MARGIN,
             sequence_start_frame=obj.sequence_start_frame,
             sequence_frame_count=obj.sequence_frame_count,
+            sequence_timing=scene.sequence_timing,
         ),
         prefix=obj.object_name,
         output_stem=sanitize_filename_stem(obj.object_name),
