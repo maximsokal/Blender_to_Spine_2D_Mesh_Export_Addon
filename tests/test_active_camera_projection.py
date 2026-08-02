@@ -244,8 +244,6 @@ def test_texture_aspect_ratio_changes_horizontal_projection() -> None:
 
     assert isclose(wide_point.u, 25.0, abs_tol=1.0e-12)
     assert isclose(square_point.u, 25.0, abs_tol=1.0e-12)
-    # Equal pixel displacement with different canvas widths proves that x/y are
-    # calculated from the supplied export dimensions, not a global viewport size.
     assert wide.texture_width != square.texture_width
 
 
@@ -277,7 +275,7 @@ def test_camera_projection_keeps_origin_and_attachment_pixels_consistent() -> No
     assert tuple(vertex.position for vertex in source.vertices) == source_positions
     assert result.projected_origin.u == projected.world_matrix[3] * scale
     assert result.projected_origin.v == projected.world_matrix[7] * scale
-    assert result.projected_origin.depth == projected.world_matrix[11]
+    assert projected.world_matrix[11] == 0.0
 
     for source_vertex, projected_vertex in zip(
         source.vertices,
@@ -294,17 +292,16 @@ def test_camera_projection_keeps_origin_and_attachment_pixels_consistent() -> No
 
         assert isclose(final_spine_x, expected.u, abs_tol=1.0e-10)
         assert isclose(final_spine_y, expected.v, abs_tol=1.0e-10)
-        assert isclose(
-            projected.world_matrix[11] + projected_vertex.position[2],
-            expected.depth,
-            abs_tol=1.0e-10,
-        )
+        assert projected_vertex.position[2] == result.projected_origin.depth
 
+    assert {vertex.position[2] for vertex in projected.vertices} == {
+        result.projected_origin.depth
+    }
     normal_length = sqrt(sum(value * value for value in projected.vertices[0].normal))
     assert isclose(normal_length, 1.0, abs_tol=1.0e-12)
 
 
-def test_camera_depth_range_uses_nearest_vertex_not_object_origin() -> None:
+def test_camera_depth_range_represents_one_rigid_object_layer() -> None:
     result = project_a1_mesh_snapshot_camera(
         _snapshot(translation=(0.0, 0.0, -5.0)),
         _perspective_frame(),
@@ -313,11 +310,12 @@ def test_camera_depth_range_uses_nearest_vertex_not_object_origin() -> None:
 
     depth_range = calculate_a1_projected_snapshot_depth_range(result.snapshot)
 
-    assert depth_range.origin_depth == -5.0
-    assert depth_range.nearest_vertex_id == VertexId(1)
-    assert depth_range.nearest_vertex_depth == -4.5
-    assert depth_range.farthest_vertex_id == VertexId(2)
-    assert depth_range.farthest_vertex_depth == -6.0
+    assert depth_range.origin_depth == 0.0
+    assert depth_range.nearest_vertex_id == VertexId(0)
+    assert depth_range.nearest_vertex_depth == -5.0
+    assert depth_range.farthest_vertex_id == VertexId(0)
+    assert depth_range.farthest_vertex_depth == -5.0
+    assert depth_range.depth_span == 0.0
 
 
 def test_geometry_outside_camera_frame_is_allowed() -> None:
