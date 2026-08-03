@@ -1,4 +1,4 @@
-"""Real Blender 5.2 acceptance for camera-context materials in Normal UV mode."""
+"""Real Blender 5.2 acceptance for Camera/Reflection materials in Normal UV mode."""
 
 from __future__ import annotations
 
@@ -61,7 +61,31 @@ def _create_pentagon(name: str):
     )
 
 
-def _create_animated_camera_context_material(name: str):
+def _scaled_math(nodes, name: str, factor: float):
+    node = nodes.new(type="ShaderNodeMath")
+    node.name = name
+    node.operation = "MULTIPLY"
+    node.inputs[1].default_value = factor
+    return node
+
+
+def _add_math(nodes, name: str, offset: float | None = None):
+    node = nodes.new(type="ShaderNodeMath")
+    node.name = name
+    node.operation = "ADD"
+    if offset is not None:
+        node.inputs[1].default_value = offset
+    return node
+
+
+def _create_animated_camera_reflection_material(name: str):
+    """Create the exact capability shape reported by the user's crystal material.
+
+    The graph consumes Texture Coordinate Camera once and Reflection twice, so the
+    production audit must produce and accept the same three findings seen in the
+    failing manual export while the actual bake still uses Normal / UV Segments.
+    """
+
     material = bpy.data.materials.new(name=name)
     material.use_nodes = True
     nodes = material.node_tree.nodes
@@ -71,30 +95,35 @@ def _create_animated_camera_context_material(name: str):
     output = nodes.new(type="ShaderNodeOutputMaterial")
     emission = nodes.new(type="ShaderNodeEmission")
     coordinates = nodes.new(type="ShaderNodeTexCoord")
-    separate = nodes.new(type="ShaderNodeSeparateXYZ")
-    normal_scale = nodes.new(type="ShaderNodeMath")
-    normal_scale.operation = "MULTIPLY"
-    normal_scale.inputs[1].default_value = 0.35
-    normal_offset = nodes.new(type="ShaderNodeMath")
-    normal_offset.operation = "ADD"
-    normal_offset.inputs[1].default_value = 0.5
-    fresnel = nodes.new(type="ShaderNodeFresnel")
-    fresnel.inputs["IOR"].default_value = 1.45
-    fresnel_scale = nodes.new(type="ShaderNodeMath")
-    fresnel_scale.operation = "MULTIPLY"
-    fresnel_scale.inputs[1].default_value = 0.45
-    factor = nodes.new(type="ShaderNodeMath")
-    factor.operation = "ADD"
-    factor.use_clamp = True
+
+    camera_xyz = nodes.new(type="ShaderNodeSeparateXYZ")
+    camera_xyz.name = "Camera Coordinates"
+    reflection_xyz_a = nodes.new(type="ShaderNodeSeparateXYZ")
+    reflection_xyz_a.name = "Reflection Coordinates A"
+    reflection_xyz_b = nodes.new(type="ShaderNodeSeparateXYZ")
+    reflection_xyz_b.name = "Reflection Coordinates B"
+
+    camera_scale = _scaled_math(nodes, "Camera Scale", 0.30)
+    reflection_scale_a = _scaled_math(nodes, "Reflection X Scale", 0.20)
+    reflection_scale_b = _scaled_math(nodes, "Reflection Z Scale", 0.20)
+    camera_plus_reflection = _add_math(nodes, "Camera Plus Reflection")
+    reflection_sum = _add_math(nodes, "Reflection Sum")
+    centered_factor = _add_math(nodes, "Centered Factor", 0.50)
+    centered_factor.use_clamp = True
     ramp = nodes.new(type="ShaderNodeValToRGB")
 
-    links.new(coordinates.outputs["Normal"], separate.inputs["Vector"])
-    links.new(separate.outputs["Z"], normal_scale.inputs[0])
-    links.new(normal_scale.outputs[0], normal_offset.inputs[0])
-    links.new(fresnel.outputs["Fac"], fresnel_scale.inputs[0])
-    links.new(normal_offset.outputs[0], factor.inputs[0])
-    links.new(fresnel_scale.outputs[0], factor.inputs[1])
-    links.new(factor.outputs[0], ramp.inputs["Fac"])
+    links.new(coordinates.outputs["Camera"], camera_xyz.inputs["Vector"])
+    links.new(coordinates.outputs["Reflection"], reflection_xyz_a.inputs["Vector"])
+    links.new(coordinates.outputs["Reflection"], reflection_xyz_b.inputs["Vector"])
+    links.new(camera_xyz.outputs["Z"], camera_scale.inputs[0])
+    links.new(reflection_xyz_a.outputs["X"], reflection_scale_a.inputs[0])
+    links.new(reflection_xyz_b.outputs["Z"], reflection_scale_b.inputs[0])
+    links.new(camera_scale.outputs[0], camera_plus_reflection.inputs[0])
+    links.new(reflection_scale_a.outputs[0], camera_plus_reflection.inputs[1])
+    links.new(camera_plus_reflection.outputs[0], reflection_sum.inputs[0])
+    links.new(reflection_scale_b.outputs[0], reflection_sum.inputs[1])
+    links.new(reflection_sum.outputs[0], centered_factor.inputs[0])
+    links.new(centered_factor.outputs[0], ramp.inputs["Fac"])
     links.new(ramp.outputs["Color"], emission.inputs["Color"])
     links.new(emission.outputs["Emission"], output.inputs["Surface"])
 
@@ -176,7 +205,7 @@ def _assert_distinct_frames(paths: tuple[Path, ...]) -> None:
             )
             _assert(
                 delta > 0.12,
-                "camera-context Normal UV frames are not visually distinct; "
+                "Camera/Reflection Normal UV frames are not visually distinct; "
                 f"frames={(first_index, second_index)}, delta={delta}",
             )
 
@@ -199,19 +228,19 @@ def _first_mesh_attachment(payload: dict[str, object]) -> dict[str, object]:
     raise AssertionError("serialized document contains no mesh attachment")
 
 
-def test_normal_uv_camera_context_material_exports_sequence() -> None:
+def test_normal_uv_camera_reflection_material_exports_sequence() -> None:
     _clear_scene()
     _configure_scene()
     _create_camera()
     source = _create_pentagon("CrystalSource")
     source.data.materials.append(
-        _create_animated_camera_context_material("CrystalCameraContextMaterial")
+        _create_animated_camera_reflection_material("CrystalCameraReflectionMaterial")
     )
     _activate_only(source)
     scene = bpy.context.scene
     scene.frame_set(19)
 
-    with tempfile.TemporaryDirectory(prefix="spine2d-normal-uv-camera-context-") as directory:
+    with tempfile.TemporaryDirectory(prefix="spine2d-normal-uv-camera-reflection-") as directory:
         output_directory = Path(directory)
         result = export_a1_single_object(
             source,
@@ -219,7 +248,10 @@ def test_normal_uv_camera_context_material_exports_sequence() -> None:
             context=bpy.context,
             scene=scene,
         )
-        _assert(result.success, f"Normal UV camera-context export failed: {result.issues}")
+        _assert(
+            result.success,
+            f"Normal UV Camera/Reflection export failed: {result.issues}",
+        )
         _assert(scene.frame_current == 19, "Normal UV export did not restore frame_current")
         _assert(len(result.output_files) == 4, "expected JSON plus three PNG files")
 
@@ -241,18 +273,18 @@ def test_normal_uv_camera_context_material_exports_sequence() -> None:
 
 
 def main() -> None:
-    tests = (test_normal_uv_camera_context_material_exports_sequence,)
+    tests = (test_normal_uv_camera_reflection_material_exports_sequence,)
     failures: list[tuple[str, str]] = []
     print(f"Blender version: {bpy.app.version_string}")
     for test in tests:
-        print(f"[NORMAL-UV-CAMERA-CONTEXT] RUN {test.__name__}")
+        print(f"[NORMAL-UV-CAMERA-REFLECTION] RUN {test.__name__}")
         try:
             test()
         except Exception:
             failures.append((test.__name__, traceback.format_exc()))
-            print(f"[NORMAL-UV-CAMERA-CONTEXT] FAIL {test.__name__}")
+            print(f"[NORMAL-UV-CAMERA-REFLECTION] FAIL {test.__name__}")
         else:
-            print(f"[NORMAL-UV-CAMERA-CONTEXT] PASS {test.__name__}")
+            print(f"[NORMAL-UV-CAMERA-REFLECTION] PASS {test.__name__}")
         finally:
             _clear_scene()
 
@@ -260,7 +292,7 @@ def main() -> None:
         for name, details in failures:
             print(f"\n--- {name} ---\n{details}")
         raise SystemExit(1)
-    print(f"[NORMAL-UV-CAMERA-CONTEXT] PASS {len(tests)} integration test")
+    print(f"[NORMAL-UV-CAMERA-REFLECTION] PASS {len(tests)} integration test")
 
 
 if __name__ == "__main__":
