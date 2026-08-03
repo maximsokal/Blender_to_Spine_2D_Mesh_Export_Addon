@@ -138,13 +138,15 @@ def test_release_runners_and_persistent_sample_generator_exist() -> None:
 
     assert "SpineJsonTarget.SPINE_3_8" in single
     assert "SpineJsonTarget.SPINE_4_3" in single
-    assert 'camera_type="ORTHO"' in single
-    assert "sequence_frame_count=2" in single
+    assert '_Case(SpineJsonTarget.SPINE_4_2, "ORTHO")' in single
+    assert "_SEQUENCE_COUNT = 2" in single
+    assert "sequence_frame_count=case.sequence_count" in single
 
     assert "export_a1_multi_object(" in multi
     assert "A1MultiObjectMode.STANDALONE" in multi
-    assert "sequence_frame_count=2" in multi
-    assert "sequence_frame_count=0" in multi
+    assert "_SEQUENCE_COUNT = 2" in multi
+    assert '_Case(_TARGET, "PERSP", _SEQUENCE_COUNT)' in multi
+    assert '_Case(_TARGET, "PERSP", 0)' in multi
 
     assert "_run_case(" in samples
     assert "_generate_multi_object(" in samples
