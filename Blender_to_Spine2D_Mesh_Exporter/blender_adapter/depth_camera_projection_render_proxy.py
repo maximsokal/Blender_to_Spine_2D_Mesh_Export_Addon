@@ -172,7 +172,11 @@ def _create_camera_proxy(
     proxy = None
     try:
         proxy = original_camera.copy()
-        camera_data = evaluated.data.copy()
+        # Copy the original ID datablock at the current evaluated frame. Blender may
+        # reject ``evaluated.data.copy()`` because evaluated IDs are temporary owners.
+        # Animated Camera RNA values are already resolved on the original datablock after
+        # ``scene.frame_set``/depsgraph update; animation is removed from the private copy.
+        camera_data = original_camera.data.copy()
         proxy.name = f"__Spine2D_DepthCamera_{original_camera.name}"
         camera_data.name = f"__Spine2D_DepthCameraData_{original_camera.data.name}"
         proxy.data = camera_data
