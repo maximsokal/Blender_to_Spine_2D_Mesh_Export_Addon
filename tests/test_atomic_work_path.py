@@ -11,6 +11,9 @@ from Blender_to_Spine2D_Mesh_Exporter.infrastructure.atomic_files import (
 )
 from Blender_to_Spine2D_Mesh_Exporter.infrastructure.atomic_work_path import (
     AtomicWorkPathError,
+    WINDOWS_EXTERNAL_IO_HEADROOM_CODE_UNITS,
+    WINDOWS_EXTERNAL_IO_PATH_BUDGET,
+    WINDOWS_LEGACY_MAX_PATH_CODE_UNITS,
     build_atomic_backup_path,
     build_atomic_stage_path,
 )
@@ -33,6 +36,16 @@ _TOKEN = (
 
 def _utf16_units(path: Path) -> int:
     return len(str(path).encode("utf-16-le")) // 2
+
+
+def test_windows_budget_is_derived_from_legacy_limit_and_fixed_headroom() -> None:
+    assert WINDOWS_LEGACY_MAX_PATH_CODE_UNITS == 260
+    assert WINDOWS_EXTERNAL_IO_HEADROOM_CODE_UNITS == 12
+    assert WINDOWS_EXTERNAL_IO_PATH_BUDGET == 248
+    assert WINDOWS_EXTERNAL_IO_PATH_BUDGET == (
+        WINDOWS_LEGACY_MAX_PATH_CODE_UNITS
+        - WINDOWS_EXTERNAL_IO_HEADROOM_CODE_UNITS
+    )
 
 
 def test_stage_path_keeps_readable_final_stem_when_it_fits(tmp_path: Path) -> None:
