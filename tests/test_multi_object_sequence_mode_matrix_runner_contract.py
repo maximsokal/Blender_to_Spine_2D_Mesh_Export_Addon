@@ -177,8 +177,8 @@ def test_runner_validates_real_files_runtime_schema_and_state_restoration() -> N
     run_case_calls = set(_call_names(_function(tree, "_run_case")))
 
     assert {
-        "_texture_paths_by_source",
-        "_validate_texture_outputs",
+        "_texture_groups",
+        "_validate_images",
         "json.loads",
         "_assert_document",
         "_assert_state_restored",
@@ -186,7 +186,7 @@ def test_runner_validates_real_files_runtime_schema_and_state_restoration() -> N
 
     assert "_assert_bone_schema" in _call_names(_function(tree, "_assert_document"))
     assert "_assert_constraint_schema" in _call_names(_function(tree, "_assert_document"))
-    assert "_read_image" in _call_names(_function(tree, "_read_image_summary"))
+    assert "_read_image" in _call_names(_function(tree, "_image_summary"))
     assert "_material_fingerprint" in _call_names(
         _function(tree, "_assert_state_restored")
     )
