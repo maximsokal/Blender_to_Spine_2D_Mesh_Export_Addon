@@ -35,6 +35,7 @@ def test_multi_and_mixed_outputs_use_shared_staging_and_statistics_services():
         assert "record_final_document_statistics" in calls
         assert "stage_texture_plan_outputs" not in calls
         assert "finalize_prepared_camera_projection" not in calls
+        assert "finalize_prepared_depth_camera_projection" not in calls
         assert function.end_lineno - function.lineno + 1 < 180
 
 
@@ -60,5 +61,11 @@ def test_shared_staging_service_owns_the_only_per_object_texture_loop():
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert "stage_texture_plan_outputs" in names
-    assert "finalize_prepared_camera_projection" in names
+    assert "finalize_prepared_rendered_projection" in names
     assert any(isinstance(node, ast.For) for node in ast.walk(function))
+
+    dispatcher = (
+        ADAPTER / "a1_rendered_projection_finalization.py"
+    ).read_text(encoding="utf-8")
+    assert "finalize_prepared_camera_projection" in dispatcher
+    assert "finalize_prepared_depth_camera_projection" in dispatcher
