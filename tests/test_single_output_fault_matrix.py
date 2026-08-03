@@ -90,7 +90,7 @@ def _install_common_pipeline(monkeypatch, tmp_path: Path, *, fail_stage=None):
 
     monkeypatch.setattr(
         a1_single_object_export,
-        "finalize_prepared_camera_projection",
+        "finalize_prepared_rendered_projection",
         finalize,
     )
     monkeypatch.setattr(
