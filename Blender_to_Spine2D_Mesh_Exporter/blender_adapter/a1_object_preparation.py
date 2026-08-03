@@ -14,11 +14,15 @@ from ..application import (
     ExportIssue,
     emit_a1_export_progress,
 )
-from ..domain.baking import A1TextureExportMode
+from ..domain.baking import (
+    A1TextureExportMode,
+    CameraProjectionPlan,
+)
 from ..domain.spine.export_capabilities import (
     SpineJsonExportScope,
     require_spine_json_export_capability,
 )
+from .a1_depth_document_preparation import prepare_a1_depth_document
 from .a1_depth_source_geometry_preparation import (
     prepare_a1_depth_source_geometry,
 )
@@ -151,6 +155,13 @@ def _build_prepared_object(
     )
 
 
+def _depth_mode(settings: A1SingleObjectExportSettings) -> bool:
+    return (
+        settings.bake_execution.texture_export_mode
+        is A1TextureExportMode.DEPTH_CAMERA_PROJECTION
+    )
+
+
 def _prepare_source_geometry(
     source_obj: Any,
     settings: A1SingleObjectExportSettings,
@@ -159,14 +170,41 @@ def _prepare_source_geometry(
 ) -> Any:
     """Select the ordinary or depth-relief geometry source explicitly."""
 
-    mode = settings.bake_execution.texture_export_mode
-    if mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
+    if _depth_mode(settings):
         return prepare_a1_depth_source_geometry(
             source_obj,
             settings,
             scene=scene,
         )
     return prepare_a1_source_geometry(source_obj, settings, scene=scene)
+
+
+def _prepare_texture(
+    uv: Any,
+    *,
+    context: Any | None,
+    scene: Any | None,
+) -> Any:
+    """Plan texture output and reject generated-material fallback for camera modes."""
+
+    result = prepare_a1_texture_plan(uv, context=context, scene=scene)
+    if _depth_mode(uv.source.settings) and not isinstance(
+        result.bake_plan,
+        CameraProjectionPlan,
+    ):
+        raise ValueError(
+            "Depth Camera Projection requires renderable source materials and a "
+            "CameraProjectionPlan; generated-material object bake is not compatible"
+        )
+    return result
+
+
+def _prepare_document(texture: Any) -> Any:
+    """Select flat camera or Normal-style depth attachment assembly."""
+
+    if _depth_mode(texture.uv.source.settings):
+        return prepare_a1_depth_document(texture)
+    return prepare_a1_document(texture)
 
 
 def prepare_a1_object(
@@ -213,12 +251,12 @@ def prepare_a1_object(
 
             stage = A1SingleObjectStage.ANALYZE_MATERIALS
             _progress(progress_callback, 65, stage, object_id)
-            texture = prepare_a1_texture_plan(uv, context=context, scene=scene)
+            texture = _prepare_texture(uv, context=context, scene=scene)
             statistics, warnings = texture.statistics, texture.warnings
 
             stage = A1SingleObjectStage.BUILD_RIG
             _progress(progress_callback, 82, stage, object_id)
-            document = prepare_a1_document(texture)
+            document = _prepare_document(texture)
             statistics, warnings = document.statistics, document.warnings
 
             stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
