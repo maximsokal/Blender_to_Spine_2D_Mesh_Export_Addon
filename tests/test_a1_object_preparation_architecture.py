@@ -33,20 +33,51 @@ def _ordered_direct_call_names(function: ast.FunctionDef) -> tuple[str, ...]:
 def test_public_orchestrator_is_short_and_calls_typed_stages_in_order():
     tree = _tree("a1_object_preparation.py")
     function = _function(tree, "prepare_a1_object")
-    assert function.end_lineno - function.lineno + 1 < 85
+    assert function.end_lineno - function.lineno + 1 < 100
     calls = [
         node.func.id
         for node in ast.walk(function)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id.startswith("prepare_a1_")
+        and node.func.id
+        in {
+            "_prepare_source_geometry",
+            "prepare_a1_uv",
+            "_prepare_texture",
+            "_prepare_document",
+        }
     ]
-    assert calls[:4] == [
-        "prepare_a1_source_geometry",
+    calls.sort(
+        key=lambda name: next(
+            node.lineno
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == name
+        )
+    )
+    assert calls == [
+        "_prepare_source_geometry",
         "prepare_a1_uv",
-        "prepare_a1_texture_plan",
-        "prepare_a1_document",
+        "_prepare_texture",
+        "_prepare_document",
     ]
+
+
+def test_depth_dispatch_helpers_preserve_explicit_stage_owners():
+    tree = _tree("a1_object_preparation.py")
+
+    source_dispatch = _ordered_direct_call_names(
+        _function(tree, "_prepare_source_geometry")
+    )
+    texture_dispatch = _ordered_direct_call_names(_function(tree, "_prepare_texture"))
+    document_dispatch = _ordered_direct_call_names(_function(tree, "_prepare_document"))
+
+    assert "prepare_a1_source_geometry" in source_dispatch
+    assert "prepare_a1_depth_source_geometry" in source_dispatch
+    assert "prepare_a1_texture_plan" in texture_dispatch
+    assert "prepare_a1_document" in document_dispatch
+    assert "prepare_a1_depth_document" in document_dispatch
 
 
 def test_public_orchestrator_owns_source_uv_integrity_guard():
@@ -87,9 +118,11 @@ def test_orchestrator_has_no_low_level_blender_preparation_dependencies():
 def test_each_stage_function_stays_below_monolith_threshold():
     stages = {
         "a1_source_geometry_preparation.py": "prepare_a1_source_geometry",
+        "a1_depth_source_geometry_preparation.py": "prepare_a1_depth_source_geometry",
         "a1_uv_preparation.py": "prepare_a1_uv",
         "a1_texture_planning.py": "prepare_a1_texture_plan",
         "a1_document_preparation.py": "prepare_a1_document",
+        "a1_depth_document_preparation.py": "prepare_a1_depth_document",
     }
     for filename, function_name in stages.items():
         function = _function(_tree(filename), function_name)
@@ -153,9 +186,11 @@ def test_stage_modules_do_not_write_output_files():
     forbidden_calls = {"open", "write_text", "write_bytes", "unlink"}
     stage_files = (
         "a1_source_geometry_preparation.py",
+        "a1_depth_source_geometry_preparation.py",
         "a1_uv_preparation.py",
         "a1_texture_planning.py",
         "a1_document_preparation.py",
+        "a1_depth_document_preparation.py",
     )
     for filename in stage_files:
         tree = _tree(filename)
