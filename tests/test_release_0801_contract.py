@@ -112,7 +112,9 @@ def test_release_note_records_windows_safe_atomic_work_paths() -> None:
     normalized = _normalized(note)
 
     assert "windows safe atomic work paths" in normalized
-    assert "240 utf 16 code unit budget" in normalized
+    assert "248 utf 16 code unit" in normalized
+    assert "traditional 260 unit windows boundary" in normalized
+    assert "twelve units of fixed safety headroom" in normalized
     assert "only the repeated final stem is compacted" in normalized
     assert "final json and png filenames are never shortened" in normalized
     assert "choose a shorter directory" in normalized
@@ -145,7 +147,11 @@ def test_durable_transaction_uses_path_budgeted_stage_and_backup_builders() -> N
     work_state = _read(ATOMIC_WORK_STATE)
     durable = _read(DURABLE_TRANSACTION)
 
-    assert "WINDOWS_EXTERNAL_IO_PATH_BUDGET = 240" in work_path
+    assert "WINDOWS_LEGACY_MAX_PATH_CODE_UNITS = 260" in work_path
+    assert "WINDOWS_EXTERNAL_IO_HEADROOM_CODE_UNITS = 12" in work_path
+    assert "WINDOWS_EXTERNAL_IO_PATH_BUDGET = (" in work_path
+    assert "WINDOWS_LEGACY_MAX_PATH_CODE_UNITS" in work_path
+    assert "WINDOWS_EXTERNAL_IO_HEADROOM_CODE_UNITS" in work_path
     assert "def build_atomic_stage_path(" in work_path
     assert "def build_atomic_backup_path(" in work_path
     assert "reservation_index" in work_path
