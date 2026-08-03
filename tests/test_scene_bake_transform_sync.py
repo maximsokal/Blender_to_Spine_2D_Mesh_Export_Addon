@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from struct import pack, unpack
 
 import pytest
 
@@ -34,6 +35,10 @@ def _flatten(rows: tuple[tuple[float, ...], ...]) -> tuple[float, ...]:
     return tuple(value for row in rows for value in row)
 
 
+def _float32(value: float) -> float:
+    return float(unpack("!f", pack("!f", float(value)))[0])
+
+
 class FakeMatrix:
     def __init__(self, rows: tuple[tuple[float, ...], ...]):
         self._rows = tuple(tuple(float(value) for value in row) for row in rows)
@@ -60,6 +65,43 @@ class RejectingTarget:
     def matrix_world(self, value: FakeMatrix) -> None:
         del value
         # Simulate an RNA assignment that silently fails to apply the requested matrix.
+
+
+class Float32Target:
+    """Simulate Blender RNA storing assigned matrix elements at float32 precision."""
+
+    def __init__(self, matrix: FakeMatrix):
+        self._matrix_world = matrix
+
+    @property
+    def matrix_world(self) -> FakeMatrix:
+        return self._matrix_world
+
+    @matrix_world.setter
+    def matrix_world(self, value: FakeMatrix) -> None:
+        self._matrix_world = FakeMatrix(
+            tuple(
+                tuple(_float32(component) for component in row)
+                for row in value.as_rows()
+            )
+        )
+
+
+class PerturbedTarget:
+    """Apply the matrix but introduce a real transform error above float32 ULP noise."""
+
+    def __init__(self, matrix: FakeMatrix):
+        self._matrix_world = matrix
+
+    @property
+    def matrix_world(self) -> FakeMatrix:
+        return self._matrix_world
+
+    @matrix_world.setter
+    def matrix_world(self, value: FakeMatrix) -> None:
+        rows = [list(row) for row in value.as_rows()]
+        rows[1][1] += 1.0e-4
+        self._matrix_world = FakeMatrix(tuple(tuple(row) for row in rows))
 
 
 @dataclass
@@ -164,6 +206,24 @@ def test_sequence_sync_copies_source_matrix_and_updates_view_layer() -> None:
     assert context.view_layer.update_count == 1
 
 
+def test_sequence_sync_accepts_float32_rna_rounding() -> None:
+    source = FakeObject("Crystal", FakeMatrix(_MOVED_ROWS))
+    target = Float32Target(FakeMatrix(_IDENTITY_ROWS))
+    context = FakeContext()
+
+    current = synchronize_runtime_object_transform(
+        source,
+        target,
+        _expected(),
+        context=context,
+        timeline_frame=1,
+    )
+
+    assert current is not None
+    assert target.matrix_world.as_rows() != _MOVED_ROWS
+    assert context.view_layer.update_count == 1
+
+
 def test_sequence_sync_rejects_source_identity_change() -> None:
     source = FakeObject("OtherObject", FakeMatrix(_MOVED_ROWS))
     target = FakeObject("TemporaryTarget", FakeMatrix(_IDENTITY_ROWS))
@@ -181,6 +241,20 @@ def test_sequence_sync_rejects_source_identity_change() -> None:
 def test_sequence_sync_verifies_matrix_after_assignment() -> None:
     source = FakeObject("Crystal", FakeMatrix(_MOVED_ROWS))
     target = RejectingTarget(FakeMatrix(_IDENTITY_ROWS))
+
+    with pytest.raises(SceneBakeAnalysisError, match="differs from"):
+        synchronize_runtime_object_transform(
+            source,
+            target,
+            _expected(),
+            context=FakeContext(),
+            timeline_frame=1,
+        )
+
+
+def test_sequence_sync_rejects_real_error_above_float32_rounding() -> None:
+    source = FakeObject("Crystal", FakeMatrix(_MOVED_ROWS))
+    target = PerturbedTarget(FakeMatrix(_IDENTITY_ROWS))
 
     with pytest.raises(SceneBakeAnalysisError, match="differs from"):
         synchronize_runtime_object_transform(
