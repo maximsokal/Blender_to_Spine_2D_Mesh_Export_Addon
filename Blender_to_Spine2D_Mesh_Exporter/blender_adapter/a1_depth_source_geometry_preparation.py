@@ -201,7 +201,13 @@ def prepare_a1_depth_source_geometry(
             snapshot=depth.snapshot,
             geometry=geometry,
             projected_origin=depth.projected_origin,
-            depth_range=calculate_a1_projected_snapshot_depth_range(depth.snapshot),
+            # ``A1ProjectedSnapshotDepthRange`` uses canonical depth increasing toward
+            # the observer. Positive camera distance uses the opposite ordering and is
+            # owned only by the rig. Preserve diagnostics from the camera-local snapshot
+            # so nearest/farthest semantics remain correct for readiness/composition.
+            depth_range=calculate_a1_projected_snapshot_depth_range(
+                projected_depth.snapshot
+            ),
             camera_projection_kind=frame.kind,
             statistics=_depth_statistics({}, depth),
         )
