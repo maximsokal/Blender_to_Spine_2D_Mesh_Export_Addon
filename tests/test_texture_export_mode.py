@@ -103,10 +103,14 @@ def test_routing_no_longer_uses_eevee_as_camera_projection_switch():
     source = (ADAPTER / "production_shader_capability_routing.py").read_text(
         encoding="utf-8"
     )
+    normalized = " ".join(source.split())
 
     assert "renderer.uses_eevee or" not in source
     assert "_CAMERA_RENDER_MODES" in source
     assert "A1TextureExportMode.CAMERA_PROJECTION" in source
     assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION" in source
     assert "texture_export_mode in _CAMERA_RENDER_MODES" in source
-    assert "Select Export Mode: Camera Projection or Depth Camera Projection" in source
+    assert (
+        "Select Export Mode: Camera Projection or Depth Camera Projection"
+        in normalized
+    )
