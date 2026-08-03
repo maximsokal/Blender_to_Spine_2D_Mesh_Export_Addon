@@ -86,13 +86,17 @@ class AtomicWorkTokenMetadata:
     Live metadata retains the original process-start marker for journals and lock
     files. Metadata parsed from a v3 filename has only the digest because the raw
     marker is intentionally not encoded in the filename.
+
+    The constructor defaults to version 2 for source compatibility with callers that
+    instantiate metadata directly. Production transactions explicitly request version
+    3 through ``create_atomic_work_token_metadata``.
     """
 
     process_id: int
     process_start_marker: str | None
     created_ns: int
     nonce: str
-    token_version: str = _TOKEN_VERSION_V3
+    token_version: str = _TOKEN_VERSION_V2
     process_start_marker_digest: str | None = None
 
     def __post_init__(self) -> None:
