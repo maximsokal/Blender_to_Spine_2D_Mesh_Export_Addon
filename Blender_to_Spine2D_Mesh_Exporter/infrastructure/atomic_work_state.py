@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -15,8 +16,13 @@ from uuid import uuid4
 STAGE_MARKER = ".spine2d-stage-"
 BACKUP_MARKER = ".spine2d-backup-"
 DEFAULT_STALE_WORK_FILE_AGE_SECONDS = 300.0
-_TOKEN_VERSION = "v2"
+_TOKEN_VERSION_V2 = "v2"
+_TOKEN_VERSION_V3 = "v3"
+_TOKEN_VERSION = _TOKEN_VERSION_V3
 _TOKEN_SEPARATOR = "~"
+_MARKER_DIGEST_BYTES = 8
+_MARKER_DIGEST_HEX_LENGTH = _MARKER_DIGEST_BYTES * 2
+_HEX_DIGITS = frozenset("0123456789abcdef")
 
 
 class AtomicWorkFileState(str, Enum):
@@ -42,45 +48,143 @@ class AtomicRecoveryReason(str, Enum):
     MALFORMED_WORK_TOKEN = "MALFORMED_WORK_TOKEN"
 
 
+def _validate_filename_token_part(value: str, field_name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field_name} must be a non-empty string")
+    if value != value.strip() or _TOKEN_SEPARATOR in value or "." in value:
+        raise ValueError(
+            f"{field_name} must be filename-safe and contain no separators"
+        )
+    return value
+
+
+def _is_lower_hex(value: str, *, exact_length: int | None = None) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    if exact_length is not None and len(value) != exact_length:
+        return False
+    return all(character in _HEX_DIGITS for character in value)
+
+
+def _process_start_marker_digest(marker: str) -> str:
+    resolved = _validate_filename_token_part(marker, "process_start_marker")
+    return hashlib.blake2s(
+        resolved.encode("utf-8"),
+        digest_size=_MARKER_DIGEST_BYTES,
+    ).hexdigest()
+
+
 @dataclass(frozen=True, slots=True)
 class AtomicWorkTokenMetadata:
-    """Versioned ownership metadata encoded into every stage/backup filename."""
+    """Versioned ownership metadata encoded into every stage/backup filename.
+
+    Version 2 stores decimal integers and the complete process-start marker. Version
+    3 stores hexadecimal integers plus a fixed-size digest of that marker. The digest
+    still distinguishes PID reuse while reducing every transaction work filename by
+    roughly twenty characters on Windows.
+
+    Live metadata retains the original process-start marker for journals and lock
+    files. Metadata parsed from a v3 filename has only the digest because the raw
+    marker is intentionally not encoded in the filename.
+    """
 
     process_id: int
-    process_start_marker: str
+    process_start_marker: str | None
     created_ns: int
     nonce: str
+    token_version: str = _TOKEN_VERSION_V3
+    process_start_marker_digest: str | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.process_id, bool) or not isinstance(self.process_id, int):
             raise TypeError("process_id must be int")
         if self.process_id <= 0:
             raise ValueError("process_id must be positive")
-        for field_name, value in (
-            ("process_start_marker", self.process_start_marker),
-            ("nonce", self.nonce),
-        ):
-            if not isinstance(value, str) or not value:
-                raise ValueError(f"{field_name} must be a non-empty string")
-            if value != value.strip() or _TOKEN_SEPARATOR in value or "." in value:
-                raise ValueError(
-                    f"{field_name} must be filename-safe and contain no separators"
-                )
+        if self.process_start_marker is not None:
+            _validate_filename_token_part(
+                self.process_start_marker,
+                "process_start_marker",
+            )
+        _validate_filename_token_part(self.nonce, "nonce")
         if isinstance(self.created_ns, bool) or not isinstance(self.created_ns, int):
             raise TypeError("created_ns must be int")
         if self.created_ns <= 0:
             raise ValueError("created_ns must be positive")
+        if self.token_version not in {_TOKEN_VERSION_V2, _TOKEN_VERSION_V3}:
+            raise ValueError(
+                f"unsupported atomic work token version: {self.token_version!r}"
+            )
+
+        digest = self.process_start_marker_digest
+        if digest is not None and not _is_lower_hex(
+            digest,
+            exact_length=_MARKER_DIGEST_HEX_LENGTH,
+        ):
+            raise ValueError(
+                "process_start_marker_digest must contain exactly "
+                f"{_MARKER_DIGEST_HEX_LENGTH} lowercase hexadecimal characters"
+            )
+
+        if self.token_version == _TOKEN_VERSION_V2:
+            if self.process_start_marker is None:
+                raise ValueError("v2 metadata requires the complete process-start marker")
+            if digest is not None:
+                raise ValueError("v2 metadata cannot contain a marker digest")
+            return
+
+        if self.process_start_marker is None and digest is None:
+            raise ValueError(
+                "v3 metadata requires either the process-start marker or its digest"
+            )
+        if not _is_lower_hex(self.nonce, exact_length=32):
+            raise ValueError(
+                "v3 nonce must contain exactly 32 lowercase hexadecimal characters"
+            )
+
+    @property
+    def resolved_process_start_marker_digest(self) -> str:
+        digest = self.process_start_marker_digest
+        if digest is not None:
+            return digest
+        marker = self.process_start_marker
+        if marker is None:
+            raise RuntimeError("atomic work metadata lost process-start identity")
+        return _process_start_marker_digest(marker)
 
     @property
     def token(self) -> str:
+        if self.token_version == _TOKEN_VERSION_V2:
+            marker = self.process_start_marker
+            if marker is None:
+                raise RuntimeError("v2 metadata lost the complete process-start marker")
+            return _TOKEN_SEPARATOR.join(
+                (
+                    _TOKEN_VERSION_V2,
+                    str(self.process_id),
+                    marker,
+                    str(self.created_ns),
+                    self.nonce,
+                )
+            )
+
         return _TOKEN_SEPARATOR.join(
             (
-                _TOKEN_VERSION,
-                str(self.process_id),
-                self.process_start_marker,
-                str(self.created_ns),
+                _TOKEN_VERSION_V3,
+                format(self.process_id, "x"),
+                self.resolved_process_start_marker_digest,
+                format(self.created_ns, "x"),
                 self.nonce,
             )
+        )
+
+    def matches_process_start_marker(self, marker: str) -> bool:
+        """Return whether ``marker`` belongs to the process encoded by this token."""
+
+        resolved = _validate_filename_token_part(marker, "process_start_marker")
+        if self.token_version == _TOKEN_VERSION_V2:
+            return self.process_start_marker == resolved
+        return self.resolved_process_start_marker_digest == _process_start_marker_digest(
+            resolved
         )
 
     @classmethod
@@ -88,14 +192,35 @@ class AtomicWorkTokenMetadata:
         if not isinstance(token, str) or not token:
             return None
         parts = token.split(_TOKEN_SEPARATOR)
-        if len(parts) != 5 or parts[0] != _TOKEN_VERSION:
+        if len(parts) != 5:
             return None
+
+        version, process_text, marker_text, created_text, nonce = parts
         try:
+            if version == _TOKEN_VERSION_V2:
+                return cls(
+                    process_id=int(process_text),
+                    process_start_marker=marker_text,
+                    created_ns=int(created_text),
+                    nonce=nonce,
+                    token_version=_TOKEN_VERSION_V2,
+                )
+            if version != _TOKEN_VERSION_V3:
+                return None
+            if not _is_lower_hex(
+                marker_text,
+                exact_length=_MARKER_DIGEST_HEX_LENGTH,
+            ):
+                return None
+            if not _is_lower_hex(nonce, exact_length=32):
+                return None
             return cls(
-                process_id=int(parts[1]),
-                process_start_marker=parts[2],
-                created_ns=int(parts[3]),
-                nonce=parts[4],
+                process_id=int(process_text, 16),
+                process_start_marker=None,
+                created_ns=int(created_text, 16),
+                nonce=nonce,
+                token_version=_TOKEN_VERSION_V3,
+                process_start_marker_digest=marker_text,
             )
         except (TypeError, ValueError):
             return None
@@ -308,6 +433,7 @@ def create_atomic_work_token_metadata() -> AtomicWorkTokenMetadata:
         process_start_marker=_CURRENT_PROCESS_START_MARKER,
         created_ns=time.time_ns(),
         nonce=uuid4().hex,
+        token_version=_TOKEN_VERSION_V3,
     )
 
 
@@ -459,12 +585,11 @@ def assess_atomic_work_file(
     if metadata is not None:
         if (
             metadata.process_id == _CURRENT_PROCESS_ID
-            and metadata.process_start_marker
-            == _CURRENT_PROCESS_START_MARKER
-        ):
-            stale_reason = (
-                AtomicRecoveryReason.UNREGISTERED_CURRENT_PROCESS_TOKEN
+            and metadata.matches_process_start_marker(
+                _CURRENT_PROCESS_START_MARKER
             )
+        ):
+            stale_reason = AtomicRecoveryReason.UNREGISTERED_CURRENT_PROCESS_TOKEN
         elif not _process_is_alive(metadata.process_id):
             stale_reason = AtomicRecoveryReason.OWNER_PROCESS_EXITED
         else:
@@ -478,7 +603,7 @@ def assess_atomic_work_file(
                     age_seconds,
                     metadata,
                 )
-            if observed_marker == metadata.process_start_marker:
+            if metadata.matches_process_start_marker(observed_marker):
                 return AtomicWorkFileAssessment(
                     path,
                     token,
@@ -487,9 +612,7 @@ def assess_atomic_work_file(
                     age_seconds,
                     metadata,
                 )
-            stale_reason = (
-                AtomicRecoveryReason.OWNER_PROCESS_IDENTITY_MISMATCH
-            )
+            stale_reason = AtomicRecoveryReason.OWNER_PROCESS_IDENTITY_MISMATCH
     elif token is not None:
         legacy_pid = _legacy_process_id(token)
         if legacy_pid is not None:
@@ -502,9 +625,7 @@ def assess_atomic_work_file(
                     age_seconds,
                     None,
                 )
-            stale_reason = (
-                AtomicRecoveryReason.LEGACY_OWNER_PROCESS_EXITED
-            )
+            stale_reason = AtomicRecoveryReason.LEGACY_OWNER_PROCESS_EXITED
         else:
             stale_reason = AtomicRecoveryReason.MALFORMED_WORK_TOKEN
     else:
