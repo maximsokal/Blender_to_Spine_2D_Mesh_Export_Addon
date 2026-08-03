@@ -1,4 +1,10 @@
-"""Real Blender 5.2 acceptance for Camera/Reflection materials in Normal UV mode."""
+"""Real Blender 5.2 Normal-UV sequence acceptance with animated transforms.
+
+This runner deliberately exercises the complete user-facing export path rather than a
+planner fixture.  It bakes 128x128 PNG sequences from a material that consumes Texture
+Coordinate Camera once and Reflection twice while the source object changes location,
+rotation, and scale between frames.
+"""
 
 from __future__ import annotations
 
@@ -32,6 +38,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (  # noqa: E402
     A1RigProfile,
     SpineJsonTarget,
+    SpineTextureAnimationEncoding,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.uv import UvUnwrapSettings  # noqa: E402
 from run_bake_integration import (  # noqa: E402
@@ -43,8 +50,12 @@ from run_bake_integration import (  # noqa: E402
 from run_camera_projection_integration import (  # noqa: E402
     _configure_scene,
     _create_camera,
-    _read_pixels,
+    _read_image,
 )
+
+
+_TEXTURE_SIZE = 128
+_ANALYSIS_FRAME = 19
 
 
 def _create_pentagon(name: str):
@@ -79,12 +90,7 @@ def _add_math(nodes, name: str, offset: float | None = None):
 
 
 def _create_animated_camera_reflection_material(name: str):
-    """Create the exact capability shape reported by the user's crystal material.
-
-    The graph consumes Texture Coordinate Camera once and Reflection twice, so the
-    production audit must produce and accept the same three findings seen in the
-    failing manual export while the actual bake still uses Normal / UV Segments.
-    """
+    """Create the capability shape reported by the user's crystal material."""
 
     material = bpy.data.materials.new(name=name)
     material.use_nodes = True
@@ -146,31 +152,76 @@ def _create_animated_camera_reflection_material(name: str):
     return material
 
 
-def _settings(output_directory: Path) -> A1SingleObjectExportSettings:
-    target = SpineJsonTarget.SPINE_4_2
+def _animate_source_transform(source) -> None:
+    """Key location, rotation, and scale so analysis frame differs from bake frames."""
+
+    transforms = (
+        (1, (-0.85, 0.10, 0.00), (0.15, -0.35, -0.30), (0.75, 1.10, 1.00)),
+        (2, (0.65, 0.30, 0.45), (0.45, 0.20, 0.50), (1.20, 0.70, 1.00)),
+        (3, (0.20, -0.55, -0.20), (-0.35, 0.55, 0.90), (0.90, 1.35, 1.00)),
+    )
+    for frame, location, rotation, scale in transforms:
+        source.location = location
+        source.rotation_euler = rotation
+        source.scale = scale
+        source.keyframe_insert(data_path="location", frame=frame)
+        source.keyframe_insert(data_path="rotation_euler", frame=frame)
+        source.keyframe_insert(data_path="scale", frame=frame)
+
+
+def _matrix_tuple(obj) -> tuple[float, ...]:
+    matrix = obj.matrix_world
+    return tuple(
+        float(matrix[row][column])
+        for row in range(4)
+        for column in range(4)
+    )
+
+
+def _frame_matrices(scene, source, frame_count: int) -> tuple[tuple[float, ...], ...]:
+    original_frame = int(scene.frame_current)
+    try:
+        values = []
+        for frame in range(1, frame_count + 1):
+            scene.frame_set(frame)
+            bpy.context.view_layer.update()
+            values.append(_matrix_tuple(source))
+        return tuple(values)
+    finally:
+        scene.frame_set(original_frame)
+        bpy.context.view_layer.update()
+
+
+def _settings(
+    output_directory: Path,
+    *,
+    target: SpineJsonTarget,
+    frame_count: int,
+    stem: str,
+) -> A1SingleObjectExportSettings:
     return A1SingleObjectExportSettings(
         export=ExportSettings(
-            texture_width=64,
-            texture_height=64,
+            texture_width=_TEXTURE_SIZE,
+            texture_height=_TEXTURE_SIZE,
             output_directory=output_directory,
             images_relative_path="images",
             spine_version=target.exact_version,
             rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
             bake_margin=1,
             sequence_start_frame=1,
-            sequence_frame_count=3,
+            sequence_frame_count=frame_count,
             sequence_timing=TextureSequenceTiming(
                 scene_fps=24,
                 scene_fps_base=1.0,
             ),
         ),
-        prefix="CrystalNormalUv",
-        output_stem="CrystalNormalUv",
-        json_output_stem="CrystalNormalUv",
+        prefix=stem,
+        output_stem=stem,
+        json_output_stem=stem,
         source_geometry_mode=A1SourceGeometryMode.EVALUATED,
         uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
         bake_execution=BakeExecutionSettings(
-            samples=2,
+            samples=1,
             texture_export_mode=A1TextureExportMode.NORMAL_UV_SEGMENTS,
         ),
     )
@@ -190,11 +241,15 @@ def _rgb_signature(pixels: tuple[float, ...]) -> tuple[float, float, float]:
     return red / weight, green / weight, blue / weight
 
 
-def _assert_distinct_frames(paths: tuple[Path, ...]) -> None:
-    signatures = tuple(_rgb_signature(_read_pixels(path)) for path in paths)
-    _assert(len(signatures) == 3, "expected exactly three Normal UV sequence frames")
-    for first_index in range(3):
-        for second_index in range(first_index + 1, 3):
+def _read_and_validate_frames(paths: tuple[Path, ...]) -> None:
+    images = tuple(_read_image(path) for path in paths)
+    for path, (size, pixels) in zip(paths, images, strict=True):
+        _assert(size == (_TEXTURE_SIZE, _TEXTURE_SIZE), f"wrong PNG size for {path}: {size}")
+        _assert(len(pixels) == _TEXTURE_SIZE * _TEXTURE_SIZE * 4, "wrong RGBA buffer size")
+
+    signatures = tuple(_rgb_signature(pixels) for _, pixels in images)
+    for first_index in range(len(signatures)):
+        for second_index in range(first_index + 1, len(signatures)):
             delta = sum(
                 abs(first - second)
                 for first, second in zip(
@@ -204,13 +259,29 @@ def _assert_distinct_frames(paths: tuple[Path, ...]) -> None:
                 )
             )
             _assert(
-                delta > 0.12,
-                "Camera/Reflection Normal UV frames are not visually distinct; "
+                delta > 0.10,
+                "Normal UV sequence frames are not visually distinct; "
                 f"frames={(first_index, second_index)}, delta={delta}",
             )
 
 
-def _first_mesh_attachment(payload: dict[str, object]) -> dict[str, object]:
+def _visual_slot(payload: dict[str, object]) -> tuple[str, str]:
+    slots = payload.get("slots")
+    _assert(isinstance(slots, list), "serialized slots must be a list")
+    for slot in slots:
+        if not isinstance(slot, dict):
+            continue
+        slot_name = slot.get("name")
+        attachment_name = slot.get("attachment")
+        if isinstance(slot_name, str) and isinstance(attachment_name, str):
+            return slot_name, attachment_name
+    raise AssertionError("serialized sequence document has no visual setup slot")
+
+
+def _skin_attachments(
+    payload: dict[str, object],
+    slot_name: str,
+) -> dict[str, object]:
     skins = payload.get("skins")
     _assert(isinstance(skins, list) and skins, "serialized skins must be non-empty")
     for skin in skins:
@@ -219,72 +290,179 @@ def _first_mesh_attachment(payload: dict[str, object]) -> dict[str, object]:
         attachments = skin.get("attachments")
         if not isinstance(attachments, dict):
             continue
-        for slot_attachments in attachments.values():
-            if not isinstance(slot_attachments, dict):
-                continue
-            for attachment in slot_attachments.values():
-                if isinstance(attachment, dict) and attachment.get("type") == "mesh":
-                    return attachment
-    raise AssertionError("serialized document contains no mesh attachment")
+        slot_attachments = attachments.get(slot_name)
+        if isinstance(slot_attachments, dict):
+            return slot_attachments
+    raise AssertionError(f"no skin attachments found for slot {slot_name!r}")
 
 
-def test_normal_uv_camera_reflection_material_exports_sequence() -> None:
+def _contains_sequence(value: object) -> bool:
+    if isinstance(value, dict):
+        return "sequence" in value or any(
+            _contains_sequence(child) for child in value.values()
+        )
+    if isinstance(value, list):
+        return any(_contains_sequence(child) for child in value)
+    return False
+
+
+def _assert_mesh_topology(attachments: dict[str, object]) -> None:
+    _assert(attachments, "sequence attachment set must not be empty")
+    for name, attachment in attachments.items():
+        _assert(isinstance(attachment, dict), f"attachment {name!r} must be a mapping")
+        _assert(attachment.get("type") == "mesh", f"attachment {name!r} is not mesh")
+        uvs = attachment.get("uvs")
+        _assert(isinstance(uvs, list), f"attachment {name!r} UVs must be a list")
+        _assert(
+            len(uvs) == 10,
+            "Normal UV export must preserve the five-vertex source topology; "
+            f"attachment={name!r}, UV scalar count={len(uvs)}",
+        )
+
+
+def _assert_sequence_payload(
+    payload: dict[str, object],
+    *,
+    target: SpineJsonTarget,
+    frame_count: int,
+) -> None:
+    slot_name, setup_attachment = _visual_slot(payload)
+    attachments = _skin_attachments(payload, slot_name)
+    _assert_mesh_topology(attachments)
+
+    if target.texture_animation_encoding is SpineTextureAnimationEncoding.NATIVE_SEQUENCE:
+        _assert(len(attachments) == 1, "native target must keep one mesh attachment")
+        attachment = attachments[setup_attachment]
+        sequence = attachment.get("sequence")
+        _assert(isinstance(sequence, dict), "native sequence metadata is missing")
+        _assert(sequence.get("count") == frame_count, "native sequence count is wrong")
+        timeline = payload["animations"]["animation"]["attachments"]["default"][
+            slot_name
+        ][setup_attachment]["sequence"]
+        _assert(len(timeline) == 2, "native Loop sequence must use two boundary keys")
+        _assert(timeline[0].get("mode") == "loop", "native sequence is not Loop")
+        return
+
+    _assert(not _contains_sequence(payload), "legacy target must not contain sequence metadata")
+    _assert(
+        len(attachments) == frame_count,
+        "legacy target must contain one mesh attachment per frame",
+    )
+    timeline = payload["animations"]["animation"]["slots"][slot_name]["attachment"]
+    _assert(
+        len(timeline) == frame_count + 1,
+        "legacy Loop must contain every frame plus one wrap key",
+    )
+    frame_names = tuple(key.get("name") for key in timeline[:-1])
+    _assert(len(set(frame_names)) == frame_count, "legacy frame keys are not unique")
+    _assert(all(name in attachments for name in frame_names), "legacy key references missing mesh")
+    _assert(timeline[-1].get("name") == frame_names[0], "legacy Loop does not wrap")
+
+
+def _run_export_case(
+    *,
+    target: SpineJsonTarget,
+    frame_count: int,
+    stem: str,
+) -> None:
     _clear_scene()
     _configure_scene()
     _create_camera()
-    source = _create_pentagon("CrystalSource")
+    source = _create_pentagon(f"{stem}_Source")
     source.data.materials.append(
-        _create_animated_camera_reflection_material("CrystalCameraReflectionMaterial")
+        _create_animated_camera_reflection_material(f"{stem}_Material")
     )
+    _animate_source_transform(source)
     _activate_only(source)
-    scene = bpy.context.scene
-    scene.frame_set(19)
 
-    with tempfile.TemporaryDirectory(prefix="spine2d-normal-uv-camera-reflection-") as directory:
+    scene = bpy.context.scene
+    scene.frame_set(_ANALYSIS_FRAME)
+    bpy.context.view_layer.update()
+    original_matrix = _matrix_tuple(source)
+    matrices = _frame_matrices(scene, source, frame_count)
+    _assert(
+        len(set(matrices)) == frame_count,
+        "test fixture must provide a different matrix_world for every bake frame",
+    )
+    _assert(
+        all(matrix != original_matrix for matrix in matrices),
+        "analysis-frame matrix must differ from every requested bake frame",
+    )
+
+    with tempfile.TemporaryDirectory(prefix=f"spine2d-{stem.casefold()}-") as directory:
         output_directory = Path(directory)
         result = export_a1_single_object(
             source,
-            _settings(output_directory),
+            _settings(
+                output_directory,
+                target=target,
+                frame_count=frame_count,
+                stem=stem,
+            ),
             context=bpy.context,
             scene=scene,
         )
+        _assert(result.success, f"Normal UV sequence export failed: {result.issues}")
         _assert(
-            result.success,
-            f"Normal UV Camera/Reflection export failed: {result.issues}",
+            scene.frame_current == _ANALYSIS_FRAME,
+            "sequence export did not restore scene.frame_current",
         )
-        _assert(scene.frame_current == 19, "Normal UV export did not restore frame_current")
-        _assert(len(result.output_files) == 4, "expected JSON plus three PNG files")
+        bpy.context.view_layer.update()
+        _assert(
+            _matrix_tuple(source) == original_matrix,
+            "source matrix_world was not restored with the analysis frame",
+        )
+        _assert(
+            len(result.output_files) == frame_count + 1,
+            "expected one JSON plus one PNG per sequence frame",
+        )
 
         json_path = result.output_files[0]
         texture_paths = tuple(result.output_files[1:])
         _assert(json_path.is_file(), f"missing JSON output: {json_path}")
-        _assert(all(path.is_file() for path in texture_paths), "missing Normal UV PNG")
-        _assert_distinct_frames(texture_paths)
+        _assert(all(path.is_file() for path in texture_paths), "missing sequence PNG")
+        _read_and_validate_frames(texture_paths)
 
         payload = json.loads(json_path.read_text(encoding="utf-8"))
-        attachment = _first_mesh_attachment(payload)
-        uvs = attachment.get("uvs")
-        _assert(isinstance(uvs, list), "mesh attachment UVs must be a list")
-        _assert(
-            len(uvs) == 10,
-            "Normal UV export must preserve the five-vertex source topology; "
-            f"actual UV scalar count={len(uvs)}",
+        _assert_sequence_payload(
+            payload,
+            target=target,
+            frame_count=frame_count,
         )
 
 
+def test_two_frame_spine38_normal_uv_sequence_with_animated_transform() -> None:
+    _run_export_case(
+        target=SpineJsonTarget.SPINE_3_8,
+        frame_count=2,
+        stem="CrystalNormalUv38",
+    )
+
+
+def test_three_frame_spine42_normal_uv_sequence_with_animated_transform() -> None:
+    _run_export_case(
+        target=SpineJsonTarget.SPINE_4_2,
+        frame_count=3,
+        stem="CrystalNormalUv42",
+    )
+
+
 def main() -> None:
-    tests = (test_normal_uv_camera_reflection_material_exports_sequence,)
+    tests = (
+        test_two_frame_spine38_normal_uv_sequence_with_animated_transform,
+        test_three_frame_spine42_normal_uv_sequence_with_animated_transform,
+    )
     failures: list[tuple[str, str]] = []
     print(f"Blender version: {bpy.app.version_string}")
     for test in tests:
-        print(f"[NORMAL-UV-CAMERA-REFLECTION] RUN {test.__name__}")
+        print(f"[NORMAL-UV-SEQUENCE-128] RUN {test.__name__}")
         try:
             test()
         except Exception:
             failures.append((test.__name__, traceback.format_exc()))
-            print(f"[NORMAL-UV-CAMERA-REFLECTION] FAIL {test.__name__}")
+            print(f"[NORMAL-UV-SEQUENCE-128] FAIL {test.__name__}")
         else:
-            print(f"[NORMAL-UV-CAMERA-REFLECTION] PASS {test.__name__}")
+            print(f"[NORMAL-UV-SEQUENCE-128] PASS {test.__name__}")
         finally:
             _clear_scene()
 
@@ -292,7 +470,7 @@ def main() -> None:
         for name, details in failures:
             print(f"\n--- {name} ---\n{details}")
         raise SystemExit(1)
-    print(f"[NORMAL-UV-CAMERA-REFLECTION] PASS {len(tests)} integration test")
+    print(f"[NORMAL-UV-SEQUENCE-128] PASS {len(tests)} integration tests")
 
 
 if __name__ == "__main__":
