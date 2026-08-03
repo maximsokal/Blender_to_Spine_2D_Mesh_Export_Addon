@@ -6,6 +6,9 @@ import pytest
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_scene_capture import (
     _capture_scene_profile,
 )
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.production_shader_capability_routing import (
+    normal_mode_camera_requirement_message,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     A1TextureExportMode,
     BakeExecutionSettings,
@@ -103,7 +106,7 @@ def test_routing_no_longer_uses_eevee_as_camera_projection_switch():
     source = (ADAPTER / "production_shader_capability_routing.py").read_text(
         encoding="utf-8"
     )
-    normalized = " ".join(source.split())
+    message = normal_mode_camera_requirement_message(())
 
     assert "renderer.uses_eevee or" not in source
     assert "_CAMERA_RENDER_MODES" in source
@@ -112,5 +115,5 @@ def test_routing_no_longer_uses_eevee_as_camera_projection_switch():
     assert "texture_export_mode in _CAMERA_RENDER_MODES" in source
     assert (
         "Select Export Mode: Camera Projection or Depth Camera Projection"
-        in normalized
+        in message
     )
