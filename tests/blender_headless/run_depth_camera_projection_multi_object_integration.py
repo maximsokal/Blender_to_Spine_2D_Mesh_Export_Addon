@@ -7,6 +7,7 @@ inside one public STANDALONE multi-object JSON/texture transaction.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 import sys
@@ -52,10 +53,10 @@ from run_camera_projection_integration import (  # noqa: E402
     _scene_render_fingerprint,
 )
 from run_depth_camera_projection_integration import (  # noqa: E402
+    _Case,
     _create_animated_emission_material,
     _create_relief_surface,
     _settings as _single_settings,
-    _Case,
 )
 
 
@@ -93,35 +94,23 @@ def _sources(output_directory: Path) -> tuple[A1MultiObjectSource, ...]:
     static_material = _static_emission_material("DepthStaticB_Material")
     static_object.data.materials.append(static_material)
 
-    sequence_settings = _single_settings(
-        output_directory,
-        _Case(_TARGET, "PERSP", _SEQUENCE_COUNT),
+    sequence_settings = replace(
+        _single_settings(
+            output_directory,
+            _Case(_TARGET, "PERSP", _SEQUENCE_COUNT),
+        ),
+        prefix="DepthSequenceA",
+        output_stem="DepthSequenceA",
+        json_output_stem=None,
     )
-    sequence_settings = sequence_settings.__class__(
-        **{
-            **{
-                field_name: getattr(sequence_settings, field_name)
-                for field_name in sequence_settings.__dataclass_fields__
-            },
-            "prefix": "DepthSequenceA",
-            "output_stem": "DepthSequenceA",
-            "json_output_stem": None,
-        }
-    )
-    static_settings = _single_settings(
-        output_directory,
-        _Case(_TARGET, "PERSP", 0),
-    )
-    static_settings = static_settings.__class__(
-        **{
-            **{
-                field_name: getattr(static_settings, field_name)
-                for field_name in static_settings.__dataclass_fields__
-            },
-            "prefix": "DepthStaticB",
-            "output_stem": "DepthStaticB",
-            "json_output_stem": None,
-        }
+    static_settings = replace(
+        _single_settings(
+            output_directory,
+            _Case(_TARGET, "PERSP", 0),
+        ),
+        prefix="DepthStaticB",
+        output_stem="DepthStaticB",
+        json_output_stem=None,
     )
     return (
         A1MultiObjectSource(
@@ -176,10 +165,22 @@ def _assert_weighted_depth_attachment(
     uvs = attachment.get("uvs")
     vertices = attachment.get("vertices")
     triangles = attachment.get("triangles")
-    _assert(isinstance(uvs, list) and len(uvs) >= 6 and len(uvs) % 2 == 0, f"{prefix} invalid UV")
-    _assert(all(0.0 <= float(value) <= 1.0 for value in uvs), f"{prefix} UV outside crop")
-    _assert(isinstance(vertices, list) and len(vertices) > len(uvs), f"{prefix} mesh is flat/unweighted")
-    _assert(isinstance(triangles, list) and len(triangles) >= 3, f"{prefix} triangles missing")
+    _assert(
+        isinstance(uvs, list) and len(uvs) >= 6 and len(uvs) % 2 == 0,
+        f"{prefix} invalid UV",
+    )
+    _assert(
+        all(0.0 <= float(value) <= 1.0 for value in uvs),
+        f"{prefix} UV outside crop",
+    )
+    _assert(
+        isinstance(vertices, list) and len(vertices) > len(uvs),
+        f"{prefix} mesh is flat/unweighted",
+    )
+    _assert(
+        isinstance(triangles, list) and len(triangles) >= 3,
+        f"{prefix} triangles missing",
+    )
 
 
 def main() -> None:
@@ -226,13 +227,28 @@ def main() -> None:
                 f"{item.object_id} depth surface missing",
             )
             offsets = tuple(group.y_offset_pixels for group in item.rig.info.z_groups)
-            _assert(offsets and min(offsets) == 0.0, f"{item.object_id} depth base mismatch")
-            _assert(all(offset >= 0.0 for offset in offsets), f"{item.object_id} depth points extend away")
+            _assert(
+                offsets and min(offsets) == 0.0,
+                f"{item.object_id} depth base mismatch",
+            )
+            _assert(
+                all(offset >= 0.0 for offset in offsets),
+                f"{item.object_id} depth points extend away",
+            )
 
         _assert(_capture_context() == context_before, "preparation changed context")
-        _assert(_capture_scene_bake_state() == bake_before, "preparation changed bake state")
-        _assert(_scene_render_fingerprint() == render_before, "preparation changed render state")
-        _assert(_temporary_datablock_names() == temporary_before, "preparation leaked datablocks")
+        _assert(
+            _capture_scene_bake_state() == bake_before,
+            "preparation changed bake state",
+        )
+        _assert(
+            _scene_render_fingerprint() == render_before,
+            "preparation changed render state",
+        )
+        _assert(
+            _temporary_datablock_names() == temporary_before,
+            "preparation leaked datablocks",
+        )
 
         result = export_a1_multi_object(
             sources,
@@ -241,35 +257,73 @@ def main() -> None:
             scene=bpy.context.scene,
         )
         _assert(result.success, f"multi-object depth export failed: {result.issues}")
-        _assert(len(result.output_files) == 4, f"expected JSON + 3 PNG: {result.output_files}")
+        _assert(
+            len(result.output_files) == 4,
+            f"expected JSON + 3 PNG: {result.output_files}",
+        )
         json_path = result.output_files[0]
         image_paths = tuple(result.output_files[1:])
         _assert(json_path.suffix.lower() == ".json", "JSON output must be first")
-        _assert(all(path.read_bytes().startswith(PNG_SIGNATURE) for path in image_paths), "invalid PNG")
-        _assert(len({path.name for path in image_paths}) == 3, "texture output names collided")
+        _assert(
+            all(path.read_bytes().startswith(PNG_SIGNATURE) for path in image_paths),
+            "invalid PNG",
+        )
+        _assert(
+            len({path.name for path in image_paths}) == 3,
+            "texture output names collided",
+        )
 
-        sequence_paths = tuple(path for path in image_paths if "DepthSequenceA" in path.name)
-        static_paths = tuple(path for path in image_paths if "DepthStaticB" in path.name)
-        _assert(len(sequence_paths) == 2, f"sequence output count mismatch: {sequence_paths}")
-        _assert(len(static_paths) == 1, f"static output count mismatch: {static_paths}")
-        _assert(len({path.read_bytes() for path in sequence_paths}) == 2, "sequence PNGs are identical")
-        _assert(static_paths[0].read_bytes() not in {path.read_bytes() for path in sequence_paths}, "static PNG collided with sequence")
+        sequence_paths = tuple(
+            path for path in image_paths if "DepthSequenceA" in path.name
+        )
+        static_paths = tuple(
+            path for path in image_paths if "DepthStaticB" in path.name
+        )
+        _assert(
+            len(sequence_paths) == 2,
+            f"sequence output count mismatch: {sequence_paths}",
+        )
+        _assert(
+            len(static_paths) == 1,
+            f"static output count mismatch: {static_paths}",
+        )
+        sequence_payloads = {path.read_bytes() for path in sequence_paths}
+        _assert(len(sequence_payloads) == 2, "sequence PNGs are identical")
+        _assert(
+            static_paths[0].read_bytes() not in sequence_payloads,
+            "static PNG collided with sequence",
+        )
         for path in image_paths:
             (width, height), _pixels = _read_image(path)
-            _assert(1 <= width <= 96 and 1 <= height <= 96, f"invalid crop for {path}: {(width, height)}")
+            _assert(
+                1 <= width <= 96 and 1 <= height <= 96,
+                f"invalid crop for {path}: {(width, height)}",
+            )
 
         document = json.loads(json_path.read_text(encoding="utf-8"))
         _assert(isinstance(document, dict), "combined JSON must be object")
         skeleton = document.get("skeleton")
         _assert(isinstance(skeleton, dict), "skeleton metadata missing")
-        _assert(skeleton.get("spine") == _TARGET.exact_version, "wrong Spine target")
-        _assert("all_objects" not in json.dumps(document.get("bones", [])), "standalone output gained connected wrapper")
+        _assert(
+            skeleton.get("spine") == _TARGET.exact_version,
+            "wrong Spine target",
+        )
+        _assert(
+            "all_objects" not in json.dumps(document.get("bones", [])),
+            "standalone output gained connected wrapper",
+        )
 
         groups = _attachment_groups(document)
         sequence_slot, sequence_group = _one_group(groups, "DepthSequenceA")
         static_slot, static_group = _one_group(groups, "DepthStaticB")
-        _assert(len(sequence_group) == 1, f"native sequence should use one attachment: {sequence_group}")
-        _assert(len(static_group) == 1, f"static object should use one attachment: {static_group}")
+        _assert(
+            len(sequence_group) == 1,
+            f"native sequence should use one attachment: {sequence_group}",
+        )
+        _assert(
+            len(static_group) == 1,
+            f"static object should use one attachment: {static_group}",
+        )
         sequence_attachment = next(iter(sequence_group.values()))
         static_attachment = next(iter(static_group.values()))
         _assert(isinstance(sequence_attachment, dict), "sequence attachment invalid")
@@ -277,13 +331,25 @@ def main() -> None:
         _assert_weighted_depth_attachment(sequence_attachment, "DepthSequenceA")
         _assert_weighted_depth_attachment(static_attachment, "DepthStaticB")
         sequence = sequence_attachment.get("sequence")
-        _assert(isinstance(sequence, dict), "sequence owner lost native sequence metadata")
-        _assert(sequence.get("count") == _SEQUENCE_COUNT, f"sequence count mismatch: {sequence}")
-        _assert("sequence" not in static_attachment, "static sibling inherited sequence metadata")
+        _assert(
+            isinstance(sequence, dict),
+            "sequence owner lost native sequence metadata",
+        )
+        _assert(
+            sequence.get("count") == _SEQUENCE_COUNT,
+            f"sequence count mismatch: {sequence}",
+        )
+        _assert(
+            "sequence" not in static_attachment,
+            "static sibling inherited sequence metadata",
+        )
 
         animations_text = json.dumps(document.get("animations", {}), sort_keys=True)
         _assert(sequence_slot in animations_text, "sequence slot timeline missing")
-        _assert(static_slot not in animations_text, "static sibling inherited sequence timeline")
+        _assert(
+            static_slot not in animations_text,
+            "static sibling inherited sequence timeline",
+        )
 
         bone_names = {
             str(item.get("name"))
@@ -301,14 +367,24 @@ def main() -> None:
             )
 
         _assert(_capture_context() == context_before, "export changed context")
-        _assert(_capture_scene_bake_state() == bake_before, "export changed bake state")
-        _assert(_scene_render_fingerprint() == render_before, "export changed render state")
-        _assert(_temporary_datablock_names() == temporary_before, "export leaked datablocks")
+        _assert(
+            _capture_scene_bake_state() == bake_before,
+            "export changed bake state",
+        )
+        _assert(
+            _scene_render_fingerprint() == render_before,
+            "export changed render state",
+        )
+        _assert(
+            _temporary_datablock_names() == temporary_before,
+            "export leaked datablocks",
+        )
         _assert(
             tuple(
                 _material_fingerprint(source.source_object.data.materials[0])
                 for source in sources
-            ) == material_before,
+            )
+            == material_before,
             "export changed source materials",
         )
 
