@@ -25,8 +25,6 @@ from ..domain.baking.normal_uv_camera_context import (
 from .render_engine_contract import RenderEngineContract
 
 
-# These nodes use source-object surface context that Cycles object baking can evaluate
-# on the owned temporary mesh because geometry and world transform are preserved.
 _NORMAL_UV_SOURCE_CONTEXT_NODE_TYPES = frozenset(
     {
         "FRESNEL",
@@ -36,11 +34,6 @@ _NORMAL_UV_SOURCE_CONTEXT_NODE_TYPES = frozenset(
     }
 )
 
-# Blender Cycles object baking evaluates these Texture Coordinate outputs while the
-# explicit uv_layer argument controls only the destination image layout.  Camera and
-# Reflection therefore remain Normal / UV Segments material inputs; they do not imply
-# Camera Projection topology.  Window remains fail-closed until a real Blender gate
-# proves deterministic object-bake semantics for that output.
 _NORMAL_UV_TEXTURE_COORD_OUTPUTS = frozenset(
     {
         "camera",
@@ -51,8 +44,6 @@ _NORMAL_UV_TEXTURE_COORD_OUTPUTS = frozenset(
     }
 )
 
-# Pointiness and Random Per Island are properties of the preserved source topology.
-# Incoming and Backfacing depend on the bake ray and remain blocked.
 _NORMAL_UV_GEOMETRY_OUTPUTS = frozenset(
     {
         "pointiness",
@@ -61,6 +52,12 @@ _NORMAL_UV_GEOMETRY_OUTPUTS = frozenset(
 )
 
 _GRAPH_CAMERA_AGGREGATE_CODE = "GRAPH_CAMERA_DEPENDENCY"
+_CAMERA_RENDER_MODES = frozenset(
+    {
+        A1TextureExportMode.CAMERA_PROJECTION,
+        A1TextureExportMode.DEPTH_CAMERA_PROJECTION,
+    }
+)
 
 
 def strongest_object_capability(
@@ -126,12 +123,7 @@ def _supports_normal_uv_object_bake(
 def _normal_uv_blocking_camera_findings(
     audits: Tuple[MaterialCapabilityAudit, ...],
 ) -> tuple[tuple[str, tuple[tuple[str, str | None, str | None], ...]], ...]:
-    """Return camera findings that cannot be reproduced by Normal object UV bake.
-
-    ``GRAPH_CAMERA_DEPENDENCY`` is only an aggregate marker.  It is accepted when at
-    least one concrete camera finding exists and every concrete finding is explicitly
-    supported.  An aggregate without concrete evidence fails closed.
-    """
+    """Return camera findings that cannot be reproduced by Normal object UV bake."""
 
     if not isinstance(audits, tuple) or not all(
         isinstance(audit, MaterialCapabilityAudit) for audit in audits
@@ -182,14 +174,14 @@ def _normal_uv_blocking_camera_findings(
 def normal_mode_camera_requirement_message(
     audits: Tuple[MaterialCapabilityAudit, ...],
 ) -> str:
-    """Explain why specific render-ray findings still require Camera Projection."""
+    """Explain why specific render-ray findings require a camera-render mode."""
 
     details = _normal_uv_blocking_camera_findings(audits)
     return (
         "Normal — UV Segments can bake audited source-object surface context, but "
         "cannot reproduce these render-ray, volume, displacement, unsupported source "
-        "attribute, or unclassified camera findings. "
-        "Select Export Mode: Camera Projection. "
+        "attribute, or unclassified camera findings. Select Export Mode: Camera "
+        "Projection or Depth Camera Projection. "
         f"Blocking findings: {details}"
     )
 
@@ -206,7 +198,7 @@ def build_capability_checked_texture_plan(
         A1TextureExportMode.NORMAL_UV_SEGMENTS
     ),
 ) -> TexturePlan:
-    """Select explicit Normal UV baking or Camera Projection without conflating them."""
+    """Select explicit Normal UV baking or one of the camera-render representations."""
 
     if not isinstance(analysis, ObjectMaterialAnalysis):
         raise TypeError("analysis must be ObjectMaterialAnalysis")
@@ -228,7 +220,7 @@ def build_capability_checked_texture_plan(
     }:
         raise BakePlanError(capability_failure_message(audits, capability))
 
-    if texture_export_mode is A1TextureExportMode.CAMERA_PROJECTION:
+    if texture_export_mode in _CAMERA_RENDER_MODES:
         return build_camera_projection_plan(
             analysis,
             settings,
