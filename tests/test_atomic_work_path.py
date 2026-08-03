@@ -140,25 +140,36 @@ def test_durable_transaction_commits_through_compact_stage_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    first_final = (tmp_path / ("Connected_ThreeAxis_NormalUvObjectA_" * 3 + ".png")).resolve()
-    second_final = (tmp_path / ("Connected_ThreeAxis_NormalUvObjectB_" * 3 + ".png")).resolve()
-
-    # The helper still validates explicit budgets normally.  This monkeypatch only
-    # emulates the platform-selected Windows budget on non-Windows pytest hosts.
-    token_probe = _TOKEN
-    first_compact = first_final.with_name(f".s0{STAGE_MARKER}{token_probe}.png")
-    second_compact = second_final.with_name(f".s1{STAGE_MARKER}{token_probe}.png")
-    forced_budget = max(_utf16_units(first_compact), _utf16_units(second_compact))
-    monkeypatch.setattr(
-        work_path_module,
-        "_effective_budget",
-        lambda _path_budget: forced_budget,
-    )
+    first_final = (
+        tmp_path / ("Connected_ThreeAxis_NormalUvObjectA_" * 3 + ".png")
+    ).resolve()
+    second_final = (
+        tmp_path / ("Connected_ThreeAxis_NormalUvObjectB_" * 3 + ".png")
+    ).resolve()
 
     transaction = DurableAtomicFileTransaction(recover_stale_work_files=False)
-    first = transaction.reserve(first_final)
-    second = transaction.reserve(second_final)
     try:
+        # The helper still validates explicit budgets normally. This monkeypatch
+        # emulates the platform-selected Windows budget on non-Windows pytest hosts
+        # using the transaction's actual platform-specific ownership token.
+        first_compact = first_final.with_name(
+            f".s0{STAGE_MARKER}{transaction._token}.png"
+        )
+        second_compact = second_final.with_name(
+            f".s1{STAGE_MARKER}{transaction._token}.png"
+        )
+        forced_budget = max(
+            _utf16_units(first_compact),
+            _utf16_units(second_compact),
+        )
+        monkeypatch.setattr(
+            work_path_module,
+            "_effective_budget",
+            lambda _path_budget: forced_budget,
+        )
+
+        first = transaction.reserve(first_final)
+        second = transaction.reserve(second_final)
         assert first.staged_path.name.startswith(".s0")
         assert second.staged_path.name.startswith(".s1")
         assert work_file_token(first.staged_path) == transaction._token
