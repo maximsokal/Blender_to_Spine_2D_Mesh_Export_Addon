@@ -21,6 +21,18 @@ CONNECTED_MIXED_RUNNER = (
     / "blender_headless"
     / "run_connected_mixed_static_sequence_matrix_integration.py"
 )
+ATOMIC_WORK_PATH = (
+    ROOT
+    / "Blender_to_Spine2D_Mesh_Exporter"
+    / "infrastructure"
+    / "atomic_work_path.py"
+)
+DURABLE_TRANSACTION = (
+    ROOT
+    / "Blender_to_Spine2D_Mesh_Exporter"
+    / "infrastructure"
+    / "durable_atomic_transaction.py"
+)
 CURRENT_DOCS = (
     ROOT / "README.md",
     ROOT / "docs" / "README.md",
@@ -89,6 +101,18 @@ def test_release_note_records_ui_request_contract_and_package() -> None:
     assert "blender_to_spine2d_mesh_exporter-0.80.1.zip" in note
 
 
+def test_release_note_records_windows_safe_atomic_work_paths() -> None:
+    note = _read(RELEASE_NOTE)
+    normalized = _normalized(note)
+
+    assert "windows safe atomic work paths" in normalized
+    assert "240 utf 16 code unit budget" in normalized
+    assert "only the repeated final stem is compacted" in normalized
+    assert "complete transaction token" in normalized
+    assert "final json and png filenames are never shortened" in normalized
+    assert "choose a shorter directory" in normalized
+
+
 def test_release_runners_use_real_public_export_boundaries() -> None:
     standalone = _read(STANDALONE_RUNNER)
     connected_mixed = _read(CONNECTED_MIXED_RUNNER)
@@ -105,3 +129,20 @@ def test_release_runners_use_real_public_export_boundaries() -> None:
     assert "_SEQUENCE_CONNECTED" in connected_mixed
     assert "_SEQUENCE_STANDALONE" in connected_mixed
     assert "static slot inherited sequence timeline" in connected_mixed
+
+
+def test_durable_transaction_uses_path_budgeted_stage_and_backup_builders() -> None:
+    work_path = _read(ATOMIC_WORK_PATH)
+    durable = _read(DURABLE_TRANSACTION)
+
+    assert "WINDOWS_EXTERNAL_IO_PATH_BUDGET = 240" in work_path
+    assert "def build_atomic_stage_path(" in work_path
+    assert "def build_atomic_backup_path(" in work_path
+    assert "reservation_index" in work_path
+    assert "Choose a shorter export directory" in work_path
+
+    assert "from .atomic_work_path import (" in durable
+    assert "build_atomic_stage_path(" in durable
+    assert "build_atomic_backup_path(" in durable
+    assert "reservation_index=len(self._entries)" in durable
+    assert "for reservation_index, entry in enumerate(self._entries)" in durable
