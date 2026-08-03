@@ -230,9 +230,17 @@ def _assert_prepared_relief(prepared: object) -> tuple[int, ...]:
         len(prepared.rig.info.z_groups) > 2,
         "Depth mode did not build multiple Normal-style Z groups",
     )
+    offsets = tuple(group.y_offset_pixels for group in prepared.rig.info.z_groups)
+    _assert(offsets and min(offsets) == 0.0, f"farthest depth base is not zero: {offsets}")
+    _assert(all(offset >= 0.0 for offset in offsets), f"depth extends away from camera: {offsets}")
+    _assert(max(offsets) > 0.0, f"depth relief offsets remained flat: {offsets}")
     _assert(
         int(prepared.statistics.get("depth_camera_vertex_rig", 0)) == 1,
         "depth vertex rig statistic missing",
+    )
+    _assert(
+        int(prepared.statistics.get("depth_camera_offsets_toward_camera_only", 0)) == 1,
+        "one-sided depth offset contract missing",
     )
     _assert(
         int(prepared.statistics.get("depth_projection_point_count", 0))
@@ -303,8 +311,7 @@ def _assert_json_relief(
     slot, attachments = _slot_attachment_group(document)
     setup_name = str(slot["attachment"])
     _assert(setup_name in attachments, "setup attachment missing")
-    expected_count = 1
-    _assert(len(attachments) == expected_count, f"unexpected attachment count: {attachments}")
+    _assert(len(attachments) == 1, f"unexpected attachment count: {attachments}")
     attachment = attachments[setup_name]
     _assert(isinstance(attachment, dict), "setup attachment is not object")
     _assert(attachment.get("type") == "mesh", "setup attachment is not mesh")
@@ -337,9 +344,14 @@ def _assert_json_relief(
         if isinstance(bone, dict)
     }
     _assert(f"{case.key}_main" in bone_names, "main control missing")
+    generated = tuple(
+        name
+        for name in bone_names
+        if name.startswith(f"{case.key}_Segment_") and "_vertex_" in name
+    )
     _assert(
-        sum(name.startswith(f"{case.key}_vertex_") for name in bone_names) >= vertex_count,
-        "generated relief vertex bones missing",
+        len(generated) >= vertex_count,
+        f"generated relief vertex bones missing: {generated}",
     )
 
     if case.sequence_count:
@@ -402,20 +414,32 @@ def _run_case(output_root: Path, case: _Case) -> None:
         scene=bpy.context.scene,
     )
     _assert(result.success, f"{case.key} failed: {result.issues}")
-    _assert(len(result.output_files) == 1 + max(1, case.sequence_count), f"wrong output count: {result.output_files}")
+    _assert(
+        len(result.output_files) == 1 + max(1, case.sequence_count),
+        f"wrong output count: {result.output_files}",
+    )
     json_path = result.output_files[0]
     image_paths = tuple(result.output_files[1:])
     _assert(json_path.suffix.lower() == ".json", "JSON output must be first")
-    _assert(all(path.read_bytes().startswith(PNG_SIGNATURE) for path in image_paths), "invalid PNG signature")
+    _assert(
+        all(path.read_bytes().startswith(PNG_SIGNATURE) for path in image_paths),
+        "invalid PNG signature",
+    )
 
     images = tuple(_read_image(path) for path in image_paths)
     sizes = tuple(image[0] for image in images)
     _assert(len(set(sizes)) == 1, f"sequence crop changed: {sizes}")
     width, height = sizes[0]
-    _assert(1 <= width <= _TEXTURE_SIZE and 1 <= height <= _TEXTURE_SIZE, f"invalid crop: {sizes[0]}")
+    _assert(
+        1 <= width <= _TEXTURE_SIZE and 1 <= height <= _TEXTURE_SIZE,
+        f"invalid crop: {sizes[0]}",
+    )
     if case.sequence_count:
         payloads = tuple(path.read_bytes() for path in image_paths)
-        _assert(len(set(payloads)) == case.sequence_count, "sequence frames are not visually distinct")
+        _assert(
+            len(set(payloads)) == case.sequence_count,
+            "sequence frames are not visually distinct",
+        )
 
     document = json.loads(json_path.read_text(encoding="utf-8"))
     _assert(isinstance(document, dict), "serialized document must be object")
