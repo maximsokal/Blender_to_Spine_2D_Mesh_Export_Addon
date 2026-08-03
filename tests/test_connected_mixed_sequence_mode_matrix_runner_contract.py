@@ -304,9 +304,14 @@ def test_runner_validates_real_files_composition_sequences_and_state() -> None:
     )
 
     state_calls = set(_call_names(_function(tree, "_assert_state_restored")))
-    assert "_material_fingerprint" in state_calls
-    assert "_temporary_datablock_names" in state_calls
-    assert "_scene_render_fingerprint" not in state_calls
+    assert {
+        "_capture_context",
+        "_capture_scene_bake_state",
+        "_scene_render_fingerprint",
+        "_material_fingerprint",
+        "_matrix_tuple",
+        "_temporary_datablock_names",
+    }.issubset(state_calls)
 
 
 def test_mixed_fixture_contains_two_connected_and_one_standalone_object() -> None:
