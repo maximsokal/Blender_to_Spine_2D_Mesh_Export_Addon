@@ -23,50 +23,69 @@
   <p><strong>Click to watch the video</strong></p>
 </div>
 
-Blender to Spine2D Mesh Exporter converts Blender mesh objects into Spine JSON, weighted mesh attachments, baked textures, generated rig data, and optional texture sequences. Spine 4.2.43 is the primary compatibility target. Spine 4.1.24 is available for the 2-Axis Rotation + Scale profile in single-object and standalone multi-object exports. The current extension uses a Blender 5.2-only pipeline with deterministic geometry processing, explicit texture strategies, source-data integrity checks, and atomic output commits.
+Blender to Spine2D Mesh Exporter converts Blender mesh objects into Spine JSON, weighted mesh attachments, baked textures, generated rig data, and optional texture sequences. Version **0.80.0** uses a Blender 5.2-only Rewrite pipeline with deterministic geometry processing, explicit texture strategies, target-specific Spine codecs, source-data integrity checks, and atomic output commits.
 
 ## Requirements
 
 - Blender 5.2 or newer.
-- Spine 4.2.43 is the primary compatibility target.
-- Spine 4.1.24 is supported only for 2-Axis Rotation + Scale with single-object or standalone multi-object output.
+- Spine 3.8.99, 4.0.64, 4.1.24, 4.2.43, or 4.3.23 for the matching selected JSON target.
 - Windows is the currently tested desktop platform.
 - The `.blend` file must be saved before export.
 - Export destinations and source image dependencies must be readable and writable as required.
 
 Blender 4.x and Blender 5.0/5.1 are not supported by the current extension package.
 
+## Supported export scope
+
+- Single-object and standalone multi-object export are supported for Spine 3.8 through Spine 4.3 according to the target/profile capability matrix.
+- Spine 4.2 is the production target for connected and mixed composition.
+- Spine 4.2 connected and mixed composition support both `3-Axis Rotation` and `2-Axis Rotation + Scale` profiles.
+- Unsupported target, profile, and composition combinations fail before Blender geometry or bake work.
+- Public selected-object export remains standalone-only. Connected and mixed services remain explicit development/API routes.
+
 ## Key features
 
 - Deterministic automatic or custom-seam mesh segmentation.
 - Source-loop UV lineage instead of coordinate-based nearest-point matching.
 - Normal UV Segments export with one Spine mesh attachment per final region.
-- Explicit Camera Projection export for camera-dependent or screen-space output.
-- Cycles semantic object baking with Blender 5.2 EEVEE scene-state restoration.
+- Explicit Camera Projection export with render, crop, contour, and screen-space attachment generation.
+- Cycles semantic object baking with Blender 5.2 state restoration.
+- Animated material and object-transform sequence baking.
+- Texture Coordinate `Camera` and `Reflection` support in audited Normal UV object baking.
 - Generated material fallback for missing or intentionally ignored source materials.
-- Single-object and standalone multi-object export for Spine 4.1 and Spine 4.2.
-- Connected and mixed export remain Spine 4.2-only production capabilities.
-- Connected multi-object rigs for both 3-Axis Rotation and 2-Axis Rotation + Scale profiles in Spine 4.2 output.
-- The connected 3-Axis rig reproduces the dedicated hierarchy, target lists, offsets, Z-layer order sharing, and compensator behavior of the working historical `main` exporter.
-- The connected 2-Axis rig uses explicit global X, IK, Scale, depth-scale, and Y targets with the same layer-based scheduling principle.
-- Static texture and frame-sequence output.
+- Target-specific JSON serialization for Spine 3.8, 4.0, 4.1, 4.2, and 4.3.
+- Legacy attachment-swap sequences for Spine 3.8 and 4.0.
+- Native sequence metadata and timelines for Spine 4.1, 4.2, and 4.3.
+- Connected and mixed Spine 4.2 composition with both supported rig profiles.
 - Readiness analysis with structured blockers, warnings, and statistics.
 - Atomic JSON and texture output with rollback and stale work-file recovery.
-- Source mesh, UV layer, material graph, and Blender state integrity checks.
+- Source mesh, UV layer, material graph, transform, Camera, and Blender-state integrity checks.
 
 ## Export modes
 
 ### Normal - UV Segments
 
-This is the default mode. The exporter segments the source mesh, creates a generated bake UV layout, bakes the evaluated appearance to texture files, and writes region-based Spine mesh attachments.
+This is the default mode. The exporter segments the source mesh, creates a generated bake UV layout, evaluates the source material graph on each sequence frame, bakes the appearance to texture files, and writes region-based Spine mesh attachments.
 
-Use this mode for geometry that should remain represented by multiple deformable Spine mesh attachments.
+Animated location, rotation, and scale are synchronized to the temporary UV bake target for each frame. The local mesh topology and generated UV layout remain fixed.
 
 ### Camera Projection
 
-This mode renders through the active Blender camera, derives alpha coverage, crops the result, builds a screen-space contour, and exports one projection attachment.
+This mode renders through the active Blender camera, derives alpha coverage, calculates one sequence-safe crop, builds a screen-space contour, and exports a projection attachment.
 
-Camera Projection is selected explicitly. The exporter does not silently switch from Normal mode when a material requires camera rendering.
+Camera Projection is selected explicitly. The exporter does not silently switch modes when a material uses camera-dependent inputs.
+
+## Sequence support
+
+A sequence can use the Scene frame rate or an explicit export frame rate. Every frame is staged and committed atomically with the final JSON.
+
+The real Blender release gate covers:
+
+- Spine 3.8, 4.0, 4.1, 4.2, and 4.3 standalone multi-object export;
+- Normal - UV Segments and Camera Projection;
+- connected and mixed Spine 4.2 export in both rig profiles and both texture modes;
+- animated object transforms and Camera/Reflection material inputs;
+- PNG, attachment topology, sequence schema, composition hierarchy, and Blender-state restoration.
 
 ## Seam Maker defaults
 
@@ -77,11 +96,11 @@ Camera Projection is selected explicitly. The exporter does not silently switch 
 
 ## Quick start
 
-1. Install the release ZIP through **Edit > Preferences > Extensions > Install from Disk**.
+1. Install `blender_to_spine2d_mesh_exporter-0.80.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
 2. Save the `.blend` file.
 3. Select one or more Mesh objects in Object Mode.
 4. Open **3D View > Sidebar > Blender to Spine2D Mesh Exporter**.
-5. Choose the target Spine version, export mode, rig, generated-material, cut, and bake settings.
+5. Choose the exact Spine target, export mode, rig, generated-material, cut, and bake settings.
 6. Run **Analyze** and resolve every blocker.
 7. Run **Export Current Object** or **Export Selected Objects**.
 8. Import the generated JSON and textures into the exact Spine version selected during export.
@@ -92,7 +111,7 @@ See the [Usage Guide](docs/usage.md) and [Settings Reference](docs/settings-refe
 
 ![Blender to Spine2D Mesh Exporter interface](assets/ui_addon.png)
 
-The panel uses one consistent foldout sequence: Paths and Spine 2D version, Rig, Rewrite Generated Materials, Cut, Bake, and Analysis. Analysis is collapsed by default, runs only when Analyze is pressed, and never disables export. Connected-object composition remains unavailable for Spine 4.1 and is retained only for supported Spine 4.2 workflows.
+The panel uses one consistent foldout sequence: Paths and Spine 2D version, Rig, Rewrite Generated Materials, Cut, Bake, and Analysis. Analysis is collapsed by default, runs only when Analyze is pressed, and never disables export.
 
 ## Output overview
 
@@ -138,7 +157,7 @@ python tools/prepare_package.py --blender <path-to-Blender-5.2-executable>
 
 The resulting ZIP is written to `dist` unless an explicit output path is supplied. Its root contains `blender_manifest.toml` and `__init__.py`.
 
-See [Installation](docs/installation.md) and [Testing](docs/testing.md) for validation commands for the current 0.55.1 candidate.
+See [Installation](docs/installation.md) and [Testing](docs/testing.md) for validation commands for version 0.80.0.
 
 ## Project structure
 
@@ -162,7 +181,7 @@ tools/                Packaging, comparison, audit, and validation tools
 
 The exporter rejects inputs when it cannot prove a safe geometry, UV, material, renderer, target-version, rig-profile, composition, or output contract. Complex non-manifold topology, missing required images, malformed UV layers, unsupported material graphs, invalid camera state, Edit Mode execution, or unsupported target/profile combinations can block export with structured diagnostics.
 
-Keep backups of production scenes and validate generated assets in the target Spine version before shipping.
+Keep backups of production scenes and validate generated assets in the selected Spine version before shipping.
 
 ## Contributing
 
