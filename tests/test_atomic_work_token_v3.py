@@ -64,7 +64,7 @@ def test_direct_metadata_constructor_retains_v2_compatibility() -> None:
 
 def test_v3_parser_rejects_noncanonical_or_malformed_fields() -> None:
     valid = AtomicWorkTokenMetadata(
-        process_id=0x1234,
+        process_id=0xABCD,
         process_start_marker="windows-abcdef",
         created_ns=0x123456789ABC,
         nonce=_V3_NONCE,
