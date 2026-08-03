@@ -58,7 +58,7 @@ def test_single_runner_pins_targets_camera_types_sequence_and_limits() -> None:
     assert "len(cases) == 7" in source
 
 
-def test_single_runner_uses_public_export_and_checks_real_relief_outputs() -> None:
+def test_single_runner_checks_global_camera_zero_and_compensated_one_mesh() -> None:
     source = _source(SINGLE_RUNNER)
     called = _called_names(SINGLE_RUNNER)
 
@@ -66,6 +66,7 @@ def test_single_runner_uses_public_export_and_checks_real_relief_outputs() -> No
         "prepare_a1_object",
         "export_a1_single_object",
         "decode_weighted_vertices",
+        "attachment_setup_positions",
         "_read_image",
         "json.loads",
     ):
@@ -76,11 +77,17 @@ def test_single_runner_uses_public_export_and_checks_real_relief_outputs() -> No
     for evidence in (
         "A1TextureExportMode.DEPTH_CAMERA_PROJECTION",
         "CameraProjectionPlan",
-        "depth_camera_offsets_toward_camera_only",
-        "min(offsets) == 0.0",
-        "all(offset >= 0.0 for offset in offsets)",
-        "attachment.triangles",
-        "prepared_triangles",
+        "edge_threshold_fraction=0.0",
+        "all(distance > 0.0 for distance in distances)",
+        "all(offset > 0.0 for offset in offsets)",
+        "depth_camera_global_camera_zero",
+        "depth_camera_absolute_distance_retained",
+        "depth_camera_parent_y_compensated",
+        "depth_camera_single_attachment",
+        "len(prepared.document_assembly.projections) == 1",
+        "parent depth compensation failed",
+        "unexpected Segment_1 slot",
+        "crop changed triangles",
         "PNG_SIGNATURE",
         "cropped UV outside 0..1",
         "_assert_bone_schema",
@@ -94,7 +101,7 @@ def test_single_runner_uses_public_export_and_checks_real_relief_outputs() -> No
         assert evidence in source
 
 
-def test_multi_runner_pins_one_sequence_and_one_static_depth_object() -> None:
+def test_multi_runner_pins_material_sequence_and_static_depth_object() -> None:
     source = _source(MULTI_RUNNER)
     called = _called_names(MULTI_RUNNER)
 
@@ -114,6 +121,24 @@ def test_multi_runner_pins_one_sequence_and_one_static_depth_object() -> None:
     assert "all_objects" in source
 
 
+def test_multi_runner_animates_object_and_camera_but_freezes_depth_silhouette() -> None:
+    source = _source(MULTI_RUNNER)
+
+    for evidence in (
+        "_keyframe_sequence_source",
+        "_keyframe_active_camera",
+        "animated object/camera changed sequence crop",
+        "animated object/camera changed Depth sequence silhouette",
+        "animated material did not change visible sequence RGB",
+        "objects lost shared camera-zero depth ordering",
+        "projected object origins collapsed",
+        "serialized main bones lost projected relative placement",
+        "must serialize only Segment_0",
+        "unexpected second segment",
+    ):
+        assert evidence in source
+
+
 def test_multi_runner_checks_atomic_files_and_blender_state_restoration() -> None:
     source = _source(MULTI_RUNNER)
 
@@ -127,8 +152,7 @@ def test_multi_runner_checks_atomic_files_and_blender_state_restoration() -> Non
         "_material_fingerprint",
         "_temporary_datablock_names",
         "texture output names collided",
-        "sequence PNGs are identical",
-        "static PNG collided with sequence",
+        "material sequence PNGs are byte-identical",
         "export changed source materials",
     ):
         assert evidence in source
