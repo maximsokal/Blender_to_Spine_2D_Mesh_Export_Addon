@@ -17,4 +17,11 @@ def test_preview_animation_rna_is_retained_but_not_drawn() -> None:
         'row.prop(scene, "spine2d_export_preview_animation", text="")'
         not in source
     )
-    assert "Preview animation is intentionally hidden" in source
+    assert "spine2d_export_preview_animation" not in {
+        fragment
+        for fragment in (
+            'row.label(text="Preview animation")',
+            'row.prop(scene, "spine2d_export_preview_animation", text="")',
+        )
+        if fragment in source
+    }
