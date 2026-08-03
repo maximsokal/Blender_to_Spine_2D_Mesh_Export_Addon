@@ -150,8 +150,10 @@ def validate_runtime_object_transform(
         return current
 
     raise SceneBakeAnalysisError(
-        "Object bake source matrix_world changed after planning and no synchronized "
-        "sequence target is active; "
+        "Object bake source matrix_world changed after planning while using one fixed "
+        "UV target and no synchronized sequence target is active. Use camera projection "
+        "for moving, rotating, or scaling objects when per-frame target synchronization "
+        "is unavailable; "
         f"source={expected_object.source_object_id!r}, frame={timeline_frame!r}, "
         f"maximum_matrix_delta={maximum_delta}, matrix_index={maximum_index}"
     )
