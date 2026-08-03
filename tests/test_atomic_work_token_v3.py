@@ -62,7 +62,7 @@ def test_direct_metadata_constructor_retains_v2_compatibility() -> None:
     assert AtomicWorkTokenMetadata.parse(expected) == metadata
 
 
-def test_v3_parser_rejects_malformed_digest_nonce_and_hex_fields() -> None:
+def test_v3_parser_rejects_noncanonical_or_malformed_fields() -> None:
     valid = AtomicWorkTokenMetadata(
         process_id=0x1234,
         process_start_marker="windows-abcdef",
@@ -74,8 +74,13 @@ def test_v3_parser_rejects_malformed_digest_nonce_and_hex_fields() -> None:
 
     malformed = (
         f"{version}~not-hex~{digest}~{created_ns}~{nonce}",
+        f"{version}~+{process_id}~{digest}~{created_ns}~{nonce}",
+        f"{version}~0{process_id}~{digest}~{created_ns}~{nonce}",
+        f"{version}~{process_id.upper()}~{digest}~{created_ns}~{nonce}",
         f"{version}~{process_id}~short~{created_ns}~{nonce}",
         f"{version}~{process_id}~{digest}~not-hex~{nonce}",
+        f"{version}~{process_id}~{digest}~0{created_ns}~{nonce}",
+        f"{version}~{process_id}~{digest}~{created_ns.upper()}~{nonce}",
         f"{version}~{process_id}~{digest}~{created_ns}~short",
         f"v4~{process_id}~{digest}~{created_ns}~{nonce}",
     )
