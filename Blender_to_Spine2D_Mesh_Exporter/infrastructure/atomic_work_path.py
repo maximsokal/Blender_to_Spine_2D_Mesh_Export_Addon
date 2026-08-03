@@ -21,10 +21,18 @@ from pathlib import Path
 from .atomic_work_state import BACKUP_MARKER, STAGE_MARKER
 
 
-# Leave headroom below the traditional 260 UTF-16-code-unit boundary used by a
-# number of Blender/OpenImageIO Windows code paths. The final output path is not
-# rewritten; only temporary transaction work names are budgeted.
-WINDOWS_EXTERNAL_IO_PATH_BUDGET = 240
+# Several Blender/OpenImageIO Windows code paths still need to stay below the
+# traditional 260 UTF-16-code-unit MAX_PATH boundary. Reserve twelve code units
+# for the terminating NUL and implementation-specific path handling. Final output
+# paths are never rewritten; only transaction-owned sibling work names use this
+# budget. Keeping the derivation explicit prevents changing the limit merely to
+# match one fixture name.
+WINDOWS_LEGACY_MAX_PATH_CODE_UNITS = 260
+WINDOWS_EXTERNAL_IO_HEADROOM_CODE_UNITS = 12
+WINDOWS_EXTERNAL_IO_PATH_BUDGET = (
+    WINDOWS_LEGACY_MAX_PATH_CODE_UNITS
+    - WINDOWS_EXTERNAL_IO_HEADROOM_CODE_UNITS
+)
 
 
 class AtomicWorkPathError(RuntimeError):
@@ -196,7 +204,9 @@ def build_atomic_backup_path(
 
 __all__ = [
     "AtomicWorkPathError",
+    "WINDOWS_EXTERNAL_IO_HEADROOM_CODE_UNITS",
     "WINDOWS_EXTERNAL_IO_PATH_BUDGET",
+    "WINDOWS_LEGACY_MAX_PATH_CODE_UNITS",
     "build_atomic_backup_path",
     "build_atomic_stage_path",
 ]
