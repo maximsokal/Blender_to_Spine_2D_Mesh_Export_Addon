@@ -8,6 +8,7 @@ from typing import Any
 
 import bpy
 
+from ..domain.geometry import DepthProjectionBaseMode
 from ..domain.spine.rig_profiles import A1RigProfile, resolve_a1_rig_profile
 from ..domain.spine.version_target import (
     DEFAULT_SPINE_JSON_TARGET,
@@ -23,13 +24,23 @@ except Exception:  # pragma: no cover - real Blender always provides this decora
 
 
 logger = logging.getLogger(__name__)
-CURRENT_SETTINGS_SCHEMA_VERSION = 6
+CURRENT_SETTINGS_SCHEMA_VERSION = 7
 _REGISTERED = False
 _FILE_LOADING = False
 _SCHEMA_PROPERTY = "spine2d_settings_schema_version"
 _RIG_PROPERTY = "spine2d_rig_profile"
 _SEAM_PROPERTY = "spine2d_seam_maker_mode"
 _TARGET_PROPERTY = "spine2d_target_spine_version"
+_DEPTH_DEFAULTS: tuple[tuple[str, object], ...] = (
+    ("spine2d_depth_smoothing", 0.35),
+    ("spine2d_depth_edge_threshold", 0.08),
+    ("spine2d_depth_mesh_error_pixels", 4.0),
+    ("spine2d_depth_max_points", 128),
+    (
+        "spine2d_depth_base_mode",
+        DepthProjectionBaseMode.FARTHEST_VISIBLE.value,
+    ),
+)
 _MISSING = object()
 
 
@@ -114,12 +125,7 @@ def _persisted_id_value(
     persisted_keys: frozenset[str],
     default: object,
 ) -> object:
-    """Read one raw Blender ID-property before an RNA descriptor can shadow it.
-
-    The key set is captured first through ``Scene.keys()``. Once membership is proven,
-    item access is the single authoritative Blender API for the raw persisted value.
-    This deliberately avoids the retired dynamic ``Scene.get`` compatibility bridge.
-    """
+    """Read one raw Blender ID-property before an RNA descriptor can shadow it."""
 
     if property_name not in persisted_keys:
         return default
@@ -197,13 +203,7 @@ def _capture_pre_registration_scene_state_for_scenes(
 
 
 def capture_pre_registration_scene_state() -> int:
-    """Capture current Scene ID-properties immediately before RNA registration.
-
-    Registering an EnumProperty over an older saved ID-property can make Blender expose
-    the new RNA default before the migration owner runs. This snapshot preserves the
-    actual pre-registration schema, seam mode, rig choice, and target-version choice for
-    that one lifecycle.
-    """
+    """Capture current Scene ID-properties immediately before RNA registration."""
 
     scenes = tuple(getattr(bpy.data, "scenes", ()))
     captured = _capture_pre_registration_scene_state_for_scenes(scenes)
@@ -294,13 +294,28 @@ def _stored_spine_target(
     return _resolve_stored_spine_target(raw)
 
 
+def _initialize_depth_defaults(
+    scene: Any,
+    persisted_keys: frozenset[str],
+) -> tuple[str, ...]:
+    """Initialize only depth fields that did not already exist in the saved Scene."""
+
+    initialized: list[str] = []
+    for property_name, default in _DEPTH_DEFAULTS:
+        if property_name in persisted_keys:
+            continue
+        setattr(scene, property_name, default)
+        initialized.append(property_name)
+    return tuple(initialized)
+
+
 def migrate_scene_settings(scene: Any) -> bool:
     """Migrate one Scene once without overwriting established user choices.
 
-    Schema 4 introduced selectable rig profiles and assigned older saved projects to the
-    byte-compatible three-axis rig. Schema 5 changed only the rig default for genuinely
-    fresh Scenes. Schema 6 adds the Spine JSON target and assigns every Scene without an
-    explicit valid target to Spine 4.2, preserving any valid target already stored.
+    Schema 4 introduced selectable rig profiles. Schema 5 changed the fresh-Scene rig
+    default. Schema 6 added the Spine JSON target. Schema 7 adds the third public
+    `Depth Camera Projection` mode and initializes its quality controls while leaving
+    every established Normal / UV Segments and Camera Projection choice unchanged.
     """
 
     if scene is None:
@@ -317,6 +332,11 @@ def migrate_scene_settings(scene: Any) -> bool:
         _PRE_REGISTRATION_SCENE_STATES.pop(identity, None)
         return False
 
+    persisted_keys = (
+        snapshot.persisted_keys
+        if snapshot is not None
+        else _persisted_scene_keys(scene)
+    )
     fresh_scene = _is_fresh_scene(scene, current, snapshot)
     previous_mode = (
         snapshot.seam_mode
@@ -330,7 +350,6 @@ def migrate_scene_settings(scene: Any) -> bool:
     elif fresh_scene:
         rig_profile = A1RigProfile.TWO_AXIS_ROTATION_SCALE
     else:
-        # Never silently change established pre-profile projects.
         rig_profile = A1RigProfile.THREE_AXIS_ROTATION
 
     spine_target = _stored_spine_target(scene, snapshot)
@@ -340,6 +359,11 @@ def migrate_scene_settings(scene: Any) -> bool:
             scene.spine2d_seam_maker_mode = "AUTO"
         scene.spine2d_rig_profile = rig_profile.value
         scene.spine2d_target_spine_version = spine_target.value
+        initialized_depth = (
+            _initialize_depth_defaults(scene, persisted_keys)
+            if current < 7
+            else ()
+        )
         scene.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION
     except Exception:
         logger.exception(
@@ -352,7 +376,8 @@ def migrate_scene_settings(scene: Any) -> bool:
 
     logger.info(
         "Migrated Spine2D Rewrite Scene '%s' settings schema %d -> %d; "
-        "fresh=%s; Seam Maker %s -> %s; Rig -> %s; Spine target -> %s (%s)",
+        "fresh=%s; Seam Maker %s -> %s; Rig -> %s; Spine target -> %s (%s); "
+        "depth_defaults=%s",
         str(getattr(scene, "name", "<unnamed>")),
         current,
         CURRENT_SETTINGS_SCHEMA_VERSION,
@@ -362,6 +387,7 @@ def migrate_scene_settings(scene: Any) -> bool:
         rig_profile.value,
         spine_target.value,
         spine_target.exact_version,
+        initialized_depth,
     )
     return True
 
