@@ -1,13 +1,11 @@
-"""Release contracts for the 0.80.0 sequence acceptance milestone."""
+"""Historical release contracts for the 0.80.0 all-sequence milestone."""
 
 from __future__ import annotations
 
 from pathlib import Path
-import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "blender_manifest.toml"
 RELEASE_NOTE = ROOT / "docs" / "releases" / "0.80.0.md"
 STANDALONE_RUNNER = (
     ROOT
@@ -21,13 +19,6 @@ CONNECTED_MIXED_RUNNER = (
     / "blender_headless"
     / "run_connected_mixed_sequence_mode_matrix_integration.py"
 )
-CURRENT_DOCS = (
-    ROOT / "README.md",
-    ROOT / "docs" / "README.md",
-    ROOT / "docs" / "CHANGELOG.md",
-    ROOT / "docs" / "installation.md",
-    ROOT / "docs" / "testing.md",
-)
 
 
 def _read(path: Path) -> str:
@@ -38,14 +29,11 @@ def _normalized(value: str) -> str:
     return " ".join(value.lower().replace("-", " ").replace("`", " ").split())
 
 
-def test_manifest_and_current_documentation_use_version_0800() -> None:
-    manifest = tomllib.loads(_read(MANIFEST))
+def test_release_note_is_historical_version_0800() -> None:
+    note = _read(RELEASE_NOTE)
 
-    assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.80.0"
-    assert manifest["blender_version_min"] == "5.2.0"
-    for path in CURRENT_DOCS:
-        assert "0.80.0" in _read(path), path.relative_to(ROOT)
+    assert "# Release 0.80.0" in note
+    assert "blender_to_spine2d_mesh_exporter-0.80.0.zip" in note
 
 
 def test_release_note_records_complete_standalone_sequence_matrix() -> None:
@@ -74,7 +62,7 @@ def test_release_note_records_connected_and_mixed_supported_matrix() -> None:
     assert "unsupported target, profile, and composition combinations remain fail closed" in normalized
 
 
-def test_release_note_records_runtime_restoration_and_package_name() -> None:
+def test_release_note_records_runtime_restoration() -> None:
     note = _read(RELEASE_NOTE)
     normalized = _normalized(note)
 
@@ -90,11 +78,10 @@ def test_release_note_records_runtime_restoration_and_package_name() -> None:
         "temporary blender datablocks",
     ):
         assert phrase in normalized
-    assert "blender_to_spine2d_mesh_exporter-0.80.0.zip" in note
     assert "scene settings schema remains version 6" in normalized
 
 
-def test_release_runners_exist_and_use_real_blender_boundaries() -> None:
+def test_historical_release_runners_still_exist() -> None:
     standalone = _read(STANDALONE_RUNNER)
     connected_mixed = _read(CONNECTED_MIXED_RUNNER)
 
