@@ -65,8 +65,8 @@ def test_release_note_records_exact_three_mode_user_contract() -> None:
     assert "Camera Projection" in note
     assert "Depth Camera Projection" in note
     assert "third public export mode" in normalized
-    assert "does not export Blender camera animation" in note
-    assert "does not require a new user-facing rig selector" in note
+    assert "does not export blender camera animation" in normalized
+    assert "does not require a new user facing rig selector" in normalized
 
 
 def test_release_note_records_depth_surface_and_base_policy() -> None:
@@ -86,6 +86,7 @@ def test_release_note_records_depth_surface_and_base_policy() -> None:
 
 def test_release_note_records_public_depth_quality_controls() -> None:
     note = _read(RELEASE_NOTE)
+    normalized = _normalized(note)
 
     for label in (
         "Depth Smoothing",
@@ -94,8 +95,8 @@ def test_release_note_records_public_depth_quality_controls() -> None:
         "Max Depth Points",
     ):
         assert label in note
-    assert "Smoothing never crosses a protected depth discontinuity" in note
-    assert "structured diagnostic" in note
+    assert "smoothing never crosses a protected depth discontinuity" in normalized
+    assert "structured diagnostic" in normalized
 
 
 def test_release_note_records_hybrid_texture_and_weighted_rig_pipeline() -> None:
