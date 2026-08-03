@@ -35,6 +35,13 @@ from .decomposition import (
     decompose_complex_segments,
     materialize_decomposed_snapshots,
 )
+from .depth_camera_projection import (
+    DepthCameraProjectionError,
+    DepthCameraProjectionResult,
+    DepthCameraProjectionSettings,
+    DepthProjectionBaseMode,
+    build_depth_camera_projection_surface,
+)
 from .disk_region import DiskRegionAddition, DiskRegionState, DiskTopologyIndex
 from .fingerprint import build_mesh_fingerprint
 from .ids import (
@@ -123,6 +130,10 @@ __all__ = [
     "DecompositionError",
     "DecompositionReason",
     "DecompositionSettings",
+    "DepthCameraProjectionError",
+    "DepthCameraProjectionResult",
+    "DepthCameraProjectionSettings",
+    "DepthProjectionBaseMode",
     "DiskRegionAddition",
     "DiskRegionState",
     "DiskTopologyIndex",
@@ -176,6 +187,7 @@ __all__ = [
     "VertexId",
     "analyse_evaluated_lineage",
     "analyse_face_region",
+    "build_depth_camera_projection_surface",
     "build_edge_to_faces",
     "build_face_adjacency",
     "build_mesh_fingerprint",
