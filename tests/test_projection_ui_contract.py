@@ -115,24 +115,31 @@ def test_normal_uv_settings_preserve_every_selected_projection_direction() -> No
 
 
 @pytest.mark.parametrize(
-    "texture_mode",
+    ("texture_mode", "expected_direction"),
     (
-        A1TextureExportMode.CAMERA_PROJECTION,
-        A1TextureExportMode.DEPTH_CAMERA_PROJECTION,
+        (
+            A1TextureExportMode.CAMERA_PROJECTION,
+            A1ProjectionDirection.POSITIVE_Z,
+        ),
+        (
+            A1TextureExportMode.DEPTH_CAMERA_PROJECTION,
+            A1ProjectionDirection.ACTIVE_CAMERA,
+        ),
     ),
 )
-def test_rendered_camera_modes_cannot_enter_object_bake_camera_route(
+def test_rendered_camera_modes_use_their_explicit_geometry_projection_contract(
     texture_mode: A1TextureExportMode,
+    expected_direction: A1ProjectionDirection,
 ) -> None:
     source = _object_profile()
     scene = _scene_profile(
-        A1ProjectionDirection.ACTIVE_CAMERA,
+        A1ProjectionDirection.NEGATIVE_X,
         texture_mode=texture_mode,
     )
 
-    assert _effective_projection_direction(scene) is A1ProjectionDirection.POSITIVE_Z
+    assert _effective_projection_direction(scene) is expected_direction
     assert _settings_from_profiles(source, scene).projection_direction is (
-        A1ProjectionDirection.POSITIVE_Z
+        expected_direction
     )
 
 
