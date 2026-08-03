@@ -27,6 +27,12 @@ ATOMIC_WORK_PATH = (
     / "infrastructure"
     / "atomic_work_path.py"
 )
+ATOMIC_WORK_STATE = (
+    ROOT
+    / "Blender_to_Spine2D_Mesh_Exporter"
+    / "infrastructure"
+    / "atomic_work_state.py"
+)
 DURABLE_TRANSACTION = (
     ROOT
     / "Blender_to_Spine2D_Mesh_Exporter"
@@ -108,9 +114,12 @@ def test_release_note_records_windows_safe_atomic_work_paths() -> None:
     assert "windows safe atomic work paths" in normalized
     assert "240 utf 16 code unit budget" in normalized
     assert "only the repeated final stem is compacted" in normalized
-    assert "complete transaction token" in normalized
     assert "final json and png filenames are never shortened" in normalized
     assert "choose a shorter directory" in normalized
+    assert "compact version 3 ownership token" in normalized
+    assert "complete 128 bit nonce" in normalized
+    assert "blake2 digest" in normalized
+    assert "version 2 work tokens remain readable" in normalized
 
 
 def test_release_runners_use_real_public_export_boundaries() -> None:
@@ -133,6 +142,7 @@ def test_release_runners_use_real_public_export_boundaries() -> None:
 
 def test_durable_transaction_uses_path_budgeted_stage_and_backup_builders() -> None:
     work_path = _read(ATOMIC_WORK_PATH)
+    work_state = _read(ATOMIC_WORK_STATE)
     durable = _read(DURABLE_TRANSACTION)
 
     assert "WINDOWS_EXTERNAL_IO_PATH_BUDGET = 240" in work_path
@@ -140,6 +150,13 @@ def test_durable_transaction_uses_path_budgeted_stage_and_backup_builders() -> N
     assert "def build_atomic_backup_path(" in work_path
     assert "reservation_index" in work_path
     assert "Choose a shorter export directory" in work_path
+
+    assert '_TOKEN_VERSION_V2 = "v2"' in work_state
+    assert '_TOKEN_VERSION_V3 = "v3"' in work_state
+    assert "hashlib.blake2s(" in work_state
+    assert "digest_size=_MARKER_DIGEST_BYTES" in work_state
+    assert 'token_version=_TOKEN_VERSION_V3' in work_state
+    assert "def matches_process_start_marker(" in work_state
 
     assert "from .atomic_work_path import (" in durable
     assert "build_atomic_stage_path(" in durable
