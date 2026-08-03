@@ -25,7 +25,7 @@ from .material_uv_binding import (
 )
 from .mesh_writer import temporary_mesh_object
 from .scene_bake_execution import temporarily_exclude_source_from_render
-from .scene_bake_runtime import validate_runtime_object_transform
+from .scene_bake_runtime import synchronize_runtime_object_transform
 from .semantic_bake_image_io import (
     _activate_uv_layer,
     _create_bake_image,
@@ -287,15 +287,21 @@ def _bake_frame_task(
     task: Any,
     reservation: AtomicOutputReservation,
     prepared_materials: Any,
+    bake_target_object: Any,
 ) -> None:
+    if bake_target_object is None:
+        raise BakeExecutionError("bake_target_object cannot be None")
+
     _set_timeline_frame(
         runtime.scene,
         runtime.context,
         task.timeline_frame,
     )
-    validate_runtime_object_transform(
+    synchronize_runtime_object_transform(
         runtime.source_object,
+        bake_target_object,
         runtime.plan.object_context,
+        context=runtime.context,
         timeline_frame=task.timeline_frame,
     )
     if runtime.plan.requires_composition:
@@ -416,6 +422,7 @@ def run_semantic_bake(
                                 task=task,
                                 reservation=reservation,
                                 prepared_materials=prepared_materials,
+                                bake_target_object=temporary.object,
                             )
                             emit_a1_frame_progress(
                                 progress_callback,
