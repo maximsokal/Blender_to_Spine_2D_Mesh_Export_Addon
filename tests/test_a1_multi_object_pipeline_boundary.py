@@ -98,8 +98,15 @@ def test_composition_module_is_blender_and_io_independent():
 def test_shared_staging_finalizes_before_output_composition_and_serialization():
     staging_tree = _tree("a1_output_staging.py")
     staging = _call_lines(staging_tree, "stage_texture_plan_outputs")
-    finalization = _call_lines(staging_tree, "finalize_prepared_camera_projection")
+    finalization = _call_lines(
+        staging_tree,
+        "finalize_prepared_rendered_projection",
+    )
     assert staging and finalization and max(staging) < min(finalization)
+
+    dispatcher = _source("a1_rendered_projection_finalization.py")
+    assert "finalize_prepared_camera_projection" in dispatcher
+    assert "finalize_prepared_depth_camera_projection" in dispatcher
 
     expectations = {
         "a1_multi_object_output.py": (
