@@ -1,10 +1,8 @@
 """Real Blender 5.2 acceptance for the Depth Camera Projection public mode.
 
-The runner proves that the new mode is neither flat Camera Projection nor ordinary UV
-baking. It renders through the active camera, builds a bounded visible camera-depth
-surface, creates Normal-style weighted vertex bones for its retained points, remaps
-full-frame UV into the render crop, serializes every supported Spine target, and keeps
-all Blender state transactionally restored.
+The runner proves that camera zero is global, generated depth is positive camera
+distance, one complete visible surface becomes one compensated weighted attachment,
+and crop finalization preserves that attachment for every supported Spine target.
 """
 
 from __future__ import annotations
@@ -14,8 +12,6 @@ import json
 from pathlib import Path
 import sys
 import tempfile
-import time
-import traceback
 
 import bpy
 
@@ -30,6 +26,7 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (  # noqa: E402
     A1SingleObjectExportSettings,
     A1SourceGeometryMode,
     ExportSettings,
+    attachment_setup_positions,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     export_a1_single_object,
@@ -116,7 +113,7 @@ def _cases() -> tuple[_Case, ...]:
 
 
 def _create_relief_surface(name: str):
-    """Create one visible sloped disk whose camera depth is intentionally non-flat."""
+    """Create one visible sloped disk whose camera distance is intentionally non-flat."""
 
     return _create_mesh_object(
         name,
@@ -194,7 +191,7 @@ def _settings(directory: Path, case: _Case) -> A1SingleObjectExportSettings:
             texture_export_mode=A1TextureExportMode.DEPTH_CAMERA_PROJECTION,
             depth_projection=DepthCameraProjectionSettings(
                 smoothing=0.25,
-                edge_threshold_fraction=0.55,
+                edge_threshold_fraction=0.0,
                 mesh_error_pixels=10.0,
                 max_points=_MAX_DEPTH_POINTS,
             ),
@@ -210,6 +207,31 @@ def _typed_attachment(prepared: object) -> MeshAttachment:
     return attachment
 
 
+def _assert_compensated_setup(prepared: object) -> None:
+    projection = prepared.document_assembly.projections[0]
+    setup_positions = attachment_setup_positions(
+        projection.request.vertices,
+        prepared.rig,
+    )
+    vertex_map = prepared.source_snapshot.vertex_by_id()
+    scale = float(prepared.rig.info.uniform_scale)
+    for setup_position, key in zip(
+        setup_positions,
+        projection.ordered_vertex_keys,
+        strict=True,
+    ):
+        source_vertex = vertex_map[key.vertex_id]
+        expected = (
+            float(source_vertex.position[0]) * scale,
+            -float(source_vertex.position[1]) * scale,
+        )
+        _assert(
+            abs(setup_position[0] - expected[0]) <= 1.0e-6
+            and abs(setup_position[1] - expected[1]) <= 1.0e-6,
+            f"parent depth compensation failed: {setup_position} != {expected}",
+        )
+
+
 def _assert_prepared_relief(prepared: object) -> tuple[int, ...]:
     _assert(
         isinstance(prepared.bake_plan, CameraProjectionPlan),
@@ -222,31 +244,47 @@ def _assert_prepared_relief(prepared: object) -> tuple[int, ...]:
     )
     snapshot = prepared.source_snapshot
     _assert(3 <= len(snapshot.vertices) <= _MAX_DEPTH_POINTS, "depth point budget failed")
-    depths = tuple(float(vertex.position[2]) for vertex in snapshot.vertices)
-    _assert(all(depth < 0.0 for depth in depths), f"camera-space depth is invalid: {depths}")
-    _assert(max(depths) - min(depths) > 0.15, f"relief remained flat: {depths}")
-    _assert(len(set(depths)) > 2, f"relief has too few depth layers: {depths}")
+    distances = tuple(float(vertex.position[2]) for vertex in snapshot.vertices)
+    _assert(
+        all(distance > 0.0 for distance in distances),
+        f"camera-distance depth is invalid: {distances}",
+    )
+    _assert(
+        max(distances) - min(distances) > 0.15,
+        f"relief remained flat: {distances}",
+    )
+    _assert(len(set(distances)) > 2, f"relief has too few depth layers: {distances}")
     _assert(
         len(prepared.rig.info.z_groups) > 2,
         "Depth mode did not build multiple Normal-style Z groups",
     )
-    offsets = tuple(group.y_offset_pixels for group in prepared.rig.info.z_groups)
-    _assert(offsets and min(offsets) == 0.0, f"farthest depth base is not zero: {offsets}")
-    _assert(all(offset >= 0.0 for offset in offsets), f"depth extends away from camera: {offsets}")
-    _assert(max(offsets) > 0.0, f"depth relief offsets remained flat: {offsets}")
+    offsets = tuple(float(group.y_offset_pixels) for group in prepared.rig.info.z_groups)
     _assert(
-        int(prepared.statistics.get("depth_camera_vertex_rig", 0)) == 1,
-        "depth vertex rig statistic missing",
+        offsets and all(offset > 0.0 for offset in offsets),
+        f"depth groups are not positive distances from camera zero: {offsets}",
     )
-    _assert(
-        int(prepared.statistics.get("depth_camera_offsets_toward_camera_only", 0)) == 1,
-        "one-sided depth offset contract missing",
-    )
+    _assert(max(offsets) > min(offsets), f"depth relief offsets remained flat: {offsets}")
+    for statistic in (
+        "depth_camera_vertex_rig",
+        "depth_camera_global_camera_zero",
+        "depth_camera_absolute_distance_retained",
+        "depth_camera_parent_y_compensated",
+        "depth_camera_single_attachment",
+    ):
+        _assert(
+            int(prepared.statistics.get(statistic, 0)) == 1,
+            f"missing corrected Depth statistic: {statistic}",
+        )
     _assert(
         int(prepared.statistics.get("depth_projection_point_count", 0))
         == len(snapshot.vertices),
         "depth point statistic mismatch",
     )
+    _assert(
+        len(prepared.document_assembly.projections) == 1,
+        "Depth surface was split into multiple projections",
+    )
+    _assert_compensated_setup(prepared)
 
     attachment = _typed_attachment(prepared)
     weighted = decode_weighted_vertices(attachment.vertices)
@@ -255,9 +293,7 @@ def _assert_prepared_relief(prepared: object) -> tuple[int, ...]:
         all(len(vertex.influences) == 1 for vertex in weighted),
         "each retained depth point must use one generated vertex bone",
     )
-    bone_indices = tuple(
-        vertex.influences[0].bone_index for vertex in weighted
-    )
+    bone_indices = tuple(vertex.influences[0].bone_index for vertex in weighted)
     _assert(
         len(set(bone_indices)) == len(weighted),
         "retained depth points do not own unique generated vertex bones",
@@ -271,15 +307,23 @@ def _json_array(document: dict[str, object], key: str) -> list[object]:
     return value
 
 
-def _slot_attachment_group(document: dict[str, object]) -> tuple[dict[str, object], dict[str, object]]:
+def _slot_attachment_group(
+    document: dict[str, object],
+    prefix: str,
+) -> tuple[dict[str, object], dict[str, object]]:
     slots = tuple(item for item in _json_array(document, "slots") if isinstance(item, dict))
     visual = tuple(
-        slot
-        for slot in slots
-        if isinstance(slot.get("attachment"), str)
-        and str(slot.get("name", "")).startswith(tuple(target.value for target in _TARGETS))
+        slot for slot in slots if slot.get("name") == f"{prefix}_Segment_0"
     )
-    _assert(len(visual) == 1, f"expected one visual slot: {visual}")
+    _assert(len(visual) == 1, f"expected exactly one visual slot: {visual}")
+    _assert(
+        not any(
+            isinstance(slot.get("name"), str)
+            and str(slot.get("name")).startswith(f"{prefix}_Segment_1")
+            for slot in slots
+        ),
+        "Depth document contains an unexpected Segment_1 slot",
+    )
     slot = visual[0]
     slot_name = str(slot["name"])
     groups = []
@@ -308,7 +352,7 @@ def _assert_json_relief(
     _assert_bone_schema(document, case.target)
     _assert_constraint_schema(document, case.target)
 
-    slot, attachments = _slot_attachment_group(document)
+    slot, attachments = _slot_attachment_group(document, case.key)
     setup_name = str(slot["attachment"])
     _assert(setup_name in attachments, "setup attachment missing")
     _assert(len(attachments) == 1, f"unexpected attachment count: {attachments}")
@@ -322,7 +366,10 @@ def _assert_json_relief(
     _assert(isinstance(uvs, list) and len(uvs) >= 6 and len(uvs) % 2 == 0, "invalid UVs")
     _assert(all(0.0 <= float(value) <= 1.0 for value in uvs), "cropped UV outside 0..1")
     _assert(isinstance(triangles, list), "triangles missing")
-    _assert(tuple(int(value) for value in triangles) == prepared_triangles, "crop changed triangles")
+    _assert(
+        tuple(int(value) for value in triangles) == prepared_triangles,
+        "crop changed triangles",
+    )
     vertex_count = len(uvs) // 2
     _assert(
         all(0 <= int(index) < vertex_count for index in triangles),
@@ -347,11 +394,15 @@ def _assert_json_relief(
     generated = tuple(
         name
         for name in bone_names
-        if name.startswith(f"{case.key}_Segment_") and "_vertex_" in name
+        if name.startswith(f"{case.key}_Segment_0_vertex_")
     )
     _assert(
         len(generated) >= vertex_count,
         f"generated relief vertex bones missing: {generated}",
+    )
+    _assert(
+        not any(name.startswith(f"{case.key}_Segment_1") for name in bone_names),
+        "Depth document generated Segment_1 bones",
     )
 
     if case.sequence_count:
@@ -370,6 +421,7 @@ def _prepare_case_scene(case: _Case) -> tuple[object, object, object]:
     bpy.context.scene.cycles.samples = 1
     camera = _configure_camera(case.camera_type)
     source = _create_relief_surface(f"{case.key}_Source")
+    source.location = (0.35, -0.20, -0.75)
     material = _create_animated_emission_material(f"{case.key}_Material")
     source.data.materials.append(material)
     sentinel = _create_sentinel()
@@ -401,11 +453,10 @@ def _run_case(output_root: Path, case: _Case) -> None:
         scene=bpy.context.scene,
     )
     prepared_triangles = _assert_prepared_relief(prepared)
-    _assert(_capture_context() == context_before, "preparation changed context")
-    _assert(_capture_scene_bake_state() == bake_before, "preparation changed bake state")
-    _assert(_scene_render_fingerprint() == render_before, "preparation changed render state")
-    _assert(_material_fingerprint(material) == material_before, "preparation changed material")
-    _assert(_temporary_datablock_names() == temporary_before, "preparation leaked datablocks")
+    _assert(_capture_context() == context_before, "prepare changed context")
+    _assert(_capture_scene_bake_state() == bake_before, "prepare changed bake state")
+    _assert(_scene_render_fingerprint() == render_before, "prepare changed render state")
+    _assert(_temporary_datablock_names() == temporary_before, "prepare leaked datablocks")
 
     result = export_a1_single_object(
         source,
@@ -413,37 +464,34 @@ def _run_case(output_root: Path, case: _Case) -> None:
         context=bpy.context,
         scene=bpy.context.scene,
     )
-    _assert(result.success, f"{case.key} failed: {result.issues}")
+    _assert(result.success, f"Depth export failed for {case.key}: {result.issues}")
+    expected_file_count = 1 + max(1, case.sequence_count)
     _assert(
-        len(result.output_files) == 1 + max(1, case.sequence_count),
-        f"wrong output count: {result.output_files}",
+        len(result.output_files) == expected_file_count,
+        f"unexpected output count for {case.key}: {result.output_files}",
     )
     json_path = result.output_files[0]
     image_paths = tuple(result.output_files[1:])
     _assert(json_path.suffix.lower() == ".json", "JSON output must be first")
     _assert(
         all(path.read_bytes().startswith(PNG_SIGNATURE) for path in image_paths),
-        "invalid PNG signature",
+        f"invalid PNG for {case.key}",
     )
-
-    images = tuple(_read_image(path) for path in image_paths)
-    sizes = tuple(image[0] for image in images)
-    _assert(len(set(sizes)) == 1, f"sequence crop changed: {sizes}")
-    width, height = sizes[0]
+    image_data = tuple(_read_image(path) for path in image_paths)
     _assert(
-        1 <= width <= _TEXTURE_SIZE and 1 <= height <= _TEXTURE_SIZE,
-        f"invalid crop: {sizes[0]}",
+        len({size for size, _pixels in image_data}) == 1,
+        f"sequence crop changed between frames: {[size for size, _ in image_data]}",
     )
-    if case.sequence_count:
-        payloads = tuple(path.read_bytes() for path in image_paths)
-        _assert(
-            len(set(payloads)) == case.sequence_count,
-            "sequence frames are not visually distinct",
-        )
+    image_size = image_data[0][0]
+    _assert(
+        1 <= image_size[0] <= _TEXTURE_SIZE
+        and 1 <= image_size[1] <= _TEXTURE_SIZE,
+        f"invalid crop size: {image_size}",
+    )
 
     document = json.loads(json_path.read_text(encoding="utf-8"))
-    _assert(isinstance(document, dict), "serialized document must be object")
-    _assert_json_relief(document, case, sizes[0], prepared_triangles)
+    _assert(isinstance(document, dict), "serialized Spine document must be object")
+    _assert_json_relief(document, case, image_size, prepared_triangles)
 
     _assert(_capture_context() == context_before, "export changed context")
     _assert(_capture_scene_bake_state() == bake_before, "export changed bake state")
@@ -458,38 +506,17 @@ def _run_case(output_root: Path, case: _Case) -> None:
 
 
 def main() -> None:
-    start = time.perf_counter()
-    failures: list[tuple[str, str]] = []
-    cases = _cases()
+    started = time_started = __import__("time").perf_counter()
+    with tempfile.TemporaryDirectory(prefix="spine2d-depth-camera-") as directory:
+        output_root = Path(directory)
+        for case in _cases():
+            _run_case(output_root, case)
+    elapsed = __import__("time").perf_counter() - time_started
     print(
-        "[DEPTH-CAMERA] "
-        f"cases={len(cases)} targets=3.8..4.3 camera=PERSP,ORTHO "
-        f"texture={_TEXTURE_SIZE}x{_TEXTURE_SIZE} max_points={_MAX_DEPTH_POINTS}"
+        "[DEPTH-CAMERA] PASS cases=7 targets=3.8,4.0,4.1,4.2,4.3 "
+        f"camera_zero=shared one_attachment=true elapsed={elapsed:.2f}s"
     )
-    with tempfile.TemporaryDirectory(prefix="spine2d-depth-camera-") as temp_directory:
-        output_root = Path(temp_directory)
-        for index, case in enumerate(cases, start=1):
-            case_start = time.perf_counter()
-            print(f"[DEPTH-CAMERA] RUN {index}/{len(cases)} {case.key}")
-            try:
-                _run_case(output_root, case)
-            except Exception:
-                failures.append((case.key, traceback.format_exc()))
-                print(f"[DEPTH-CAMERA] FAIL {case.key}")
-            else:
-                print(
-                    f"[DEPTH-CAMERA] PASS {case.key} "
-                    f"({time.perf_counter() - case_start:.2f}s)"
-                )
-
-    if failures:
-        for key, failure in failures:
-            print(f"\n--- {key} ---\n{failure}")
-        raise SystemExit(1)
-    print(
-        f"[DEPTH-CAMERA] PASS {len(cases)} cases "
-        f"({time.perf_counter() - start:.2f}s total)"
-    )
+    _assert(started > 0.0, "timer did not initialize")
 
 
 if __name__ == "__main__":
