@@ -181,14 +181,22 @@ def _prepare_source_geometry(
 
 def _prepare_texture(
     uv: Any,
+    settings: A1SingleObjectExportSettings,
     *,
     context: Any | None,
     scene: Any | None,
 ) -> Any:
-    """Plan texture output and reject generated-material fallback for camera modes."""
+    """Plan texture output and validate the selected immutable export mode.
 
+    Dispatch depends only on the original request settings. It never reaches back into
+    the opaque result returned by the UV stage, which keeps stage doubles and future
+    alternative typed products valid as long as they satisfy the next public stage.
+    """
+
+    if not isinstance(settings, A1SingleObjectExportSettings):
+        raise TypeError("settings must be A1SingleObjectExportSettings")
     result = prepare_a1_texture_plan(uv, context=context, scene=scene)
-    if _depth_mode(uv.source.settings) and not isinstance(
+    if _depth_mode(settings) and not isinstance(
         result.bake_plan,
         CameraProjectionPlan,
     ):
@@ -199,10 +207,15 @@ def _prepare_texture(
     return result
 
 
-def _prepare_document(texture: Any) -> Any:
+def _prepare_document(
+    texture: Any,
+    settings: A1SingleObjectExportSettings,
+) -> Any:
     """Select flat camera or Normal-style depth attachment assembly."""
 
-    if _depth_mode(texture.uv.source.settings):
+    if not isinstance(settings, A1SingleObjectExportSettings):
+        raise TypeError("settings must be A1SingleObjectExportSettings")
+    if _depth_mode(settings):
         return prepare_a1_depth_document(texture)
     return prepare_a1_document(texture)
 
@@ -251,12 +264,17 @@ def prepare_a1_object(
 
             stage = A1SingleObjectStage.ANALYZE_MATERIALS
             _progress(progress_callback, 65, stage, object_id)
-            texture = _prepare_texture(uv, context=context, scene=scene)
+            texture = _prepare_texture(
+                uv,
+                settings,
+                context=context,
+                scene=scene,
+            )
             statistics, warnings = texture.statistics, texture.warnings
 
             stage = A1SingleObjectStage.BUILD_RIG
             _progress(progress_callback, 82, stage, object_id)
-            document = _prepare_document(texture)
+            document = _prepare_document(texture, settings)
             statistics, warnings = document.statistics, document.warnings
 
             stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
