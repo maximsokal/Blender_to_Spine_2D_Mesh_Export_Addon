@@ -36,13 +36,18 @@ _NORMAL_UV_SOURCE_CONTEXT_NODE_TYPES = frozenset(
     }
 )
 
-# These Texture Coordinate outputs are stable on the reconstructed temporary target.
-# Camera, Window and Reflection remain render-ray dependent and therefore fail closed.
+# Blender Cycles object baking evaluates these Texture Coordinate outputs while the
+# explicit uv_layer argument controls only the destination image layout.  Camera and
+# Reflection therefore remain Normal / UV Segments material inputs; they do not imply
+# Camera Projection topology.  Window remains fail-closed until a real Blender gate
+# proves deterministic object-bake semantics for that output.
 _NORMAL_UV_TEXTURE_COORD_OUTPUTS = frozenset(
     {
+        "camera",
         "generated",
         "normal",
         "object",
+        "reflection",
     }
 )
 
