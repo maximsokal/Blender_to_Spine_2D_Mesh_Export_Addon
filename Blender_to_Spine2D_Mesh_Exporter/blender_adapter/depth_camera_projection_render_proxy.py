@@ -148,15 +148,15 @@ def _create_source_proxy(
 def _create_camera_proxy(
     runtime: CameraProjectionRuntime,
     depsgraph: Any,
-) -> tuple[Any, Any, Any]:
+    original_camera: Any,
+) -> tuple[Any, Any]:
     bpy_module = runtime.bpy_module
     scene = runtime.scene
-    camera = getattr(scene, "camera", None)
-    if camera is None or getattr(camera, "type", None) != "CAMERA":
+    if original_camera is None or getattr(original_camera, "type", None) != "CAMERA":
         raise CameraProjectionExecutionError(
             "Depth Camera Projection requires an active CAMERA object"
         )
-    evaluated_get = getattr(camera, "evaluated_get", None)
+    evaluated_get = getattr(original_camera, "evaluated_get", None)
     if not callable(evaluated_get):
         raise CameraProjectionExecutionError(
             "Active camera has no evaluated_get()"
@@ -171,10 +171,10 @@ def _create_camera_proxy(
     camera_data = None
     proxy = None
     try:
-        proxy = camera.copy()
+        proxy = original_camera.copy()
         camera_data = evaluated.data.copy()
-        proxy.name = f"__Spine2D_DepthCamera_{camera.name}"
-        camera_data.name = f"__Spine2D_DepthCameraData_{camera.data.name}"
+        proxy.name = f"__Spine2D_DepthCamera_{original_camera.name}"
+        camera_data.name = f"__Spine2D_DepthCameraData_{original_camera.data.name}"
         proxy.data = camera_data
         proxy.parent = None
         proxy.matrix_world = _copy_matrix(
@@ -186,10 +186,10 @@ def _create_camera_proxy(
         _clear_collection(proxy, "constraints")
         runtime.scene.collection.objects.link(proxy)
         scene.camera = proxy
-        return camera, proxy, camera_data
+        return proxy, camera_data
     except Exception:
         try:
-            scene.camera = camera
+            scene.camera = original_camera
         except Exception:
             logger.exception("Unable to restore active camera after proxy failure")
         if proxy is not None:
@@ -217,10 +217,11 @@ def _remove_proxy_resources(
     source_visible_camera: bool,
 ) -> None:
     failures: list[str] = []
-    try:
-        runtime.scene.camera = original_camera
-    except Exception as exc:
-        failures.append(f"scene.camera: {exc}")
+    if original_camera is not None:
+        try:
+            runtime.scene.camera = original_camera
+        except Exception as exc:
+            failures.append(f"scene.camera: {exc}")
     try:
         runtime.source_object.hide_render = source_hide_render
     except Exception as exc:
@@ -230,16 +231,16 @@ def _remove_proxy_resources(
     except Exception as exc:
         failures.append(f"source.visible_camera: {exc}")
 
-    for label, collection, datablock in (
-        ("camera proxy", runtime.bpy_module.data.objects, camera_proxy),
-        ("source proxy", runtime.bpy_module.data.objects, source_proxy),
-        ("camera data proxy", runtime.bpy_module.data.cameras, camera_data),
-        ("source mesh proxy", runtime.bpy_module.data.meshes, source_mesh),
+    for label, collection, datablock, object_datablock in (
+        ("camera proxy", runtime.bpy_module.data.objects, camera_proxy, True),
+        ("source proxy", runtime.bpy_module.data.objects, source_proxy, True),
+        ("camera data proxy", runtime.bpy_module.data.cameras, camera_data, False),
+        ("source mesh proxy", runtime.bpy_module.data.meshes, source_mesh, False),
     ):
         if datablock is None:
             continue
         try:
-            if label.endswith("proxy") and collection is runtime.bpy_module.data.objects:
+            if object_datablock:
                 collection.remove(datablock, do_unlink=True)
             else:
                 collection.remove(datablock)
@@ -271,18 +272,19 @@ def frozen_depth_camera_projection_subject(
     depsgraph = _evaluated_dependency_graph(runtime)
     source_hide_render = bool(runtime.source_object.hide_render)
     source_visible_camera = bool(runtime.source_object.visible_camera)
+    original_camera = getattr(runtime.scene, "camera", None)
     source_proxy = None
     source_mesh = None
-    original_camera = None
     camera_proxy = None
     camera_data = None
     primary_error: BaseException | None = None
 
     try:
         source_proxy, source_mesh = _create_source_proxy(runtime, depsgraph)
-        original_camera, camera_proxy, camera_data = _create_camera_proxy(
+        camera_proxy, camera_data = _create_camera_proxy(
             runtime,
             depsgraph,
+            original_camera,
         )
         runtime.source_object.hide_render = True
         runtime.source_object.visible_camera = False
@@ -298,25 +300,24 @@ def frozen_depth_camera_projection_subject(
         primary_error = exc
         raise
     finally:
-        if source_proxy is None:
-            return
-        try:
-            _remove_proxy_resources(
-                runtime,
-                original_camera=original_camera,
-                source_proxy=source_proxy,
-                source_mesh=source_mesh,
-                camera_proxy=camera_proxy,
-                camera_data=camera_data,
-                source_hide_render=source_hide_render,
-                source_visible_camera=source_visible_camera,
-            )
-        except Exception:
-            if primary_error is None:
-                raise
-            logger.exception(
-                "Failed to clean Depth render proxies while handling another error"
-            )
+        if source_proxy is not None:
+            try:
+                _remove_proxy_resources(
+                    runtime,
+                    original_camera=original_camera,
+                    source_proxy=source_proxy,
+                    source_mesh=source_mesh,
+                    camera_proxy=camera_proxy,
+                    camera_data=camera_data,
+                    source_hide_render=source_hide_render,
+                    source_visible_camera=source_visible_camera,
+                )
+            except Exception:
+                if primary_error is None:
+                    raise
+                logger.exception(
+                    "Failed to clean Depth render proxies while handling another error"
+                )
 
 
 __all__ = ["frozen_depth_camera_projection_subject"]
