@@ -9,6 +9,9 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1GeometryPreparationSettings,
     A1SourceGeometryMode,
 )
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_depth_document_preparation import (
+    _resolve_depth_z_group_origin_mode,
+)
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_scene_capture import (
     _SceneExportProfile,
 )
@@ -29,6 +32,9 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.projection import (
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
     A1RigProfile,
     SpineJsonTarget,
+)
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.legacy_rig_contracts import (
+    LegacyZGroupOriginMode,
 )
 
 
@@ -126,6 +132,15 @@ def test_depth_base_supports_both_policies_but_ui_uses_farthest_visible() -> Non
     assert 'column.prop(scene, "spine2d_depth_base_mode"' not in ui
 
 
+def test_depth_rig_offsets_follow_selected_base_policy() -> None:
+    assert _resolve_depth_z_group_origin_mode(
+        DepthProjectionBaseMode.FARTHEST_VISIBLE
+    ) is LegacyZGroupOriginMode.MINIMUM_Z
+    assert _resolve_depth_z_group_origin_mode(
+        DepthProjectionBaseMode.OBJECT_ORIGIN
+    ) is LegacyZGroupOriginMode.OBJECT_ORIGIN
+
+
 def test_depth_ui_contains_only_depth_specific_quality_controls() -> None:
     source = _read(UI)
 
@@ -152,7 +167,10 @@ def test_depth_route_combines_camera_texture_and_normal_weighted_document() -> N
     assert "build_a1_z_group_assignment(" in source
     assert "prepare_a1_geometry_regions(" in source
     assert "camera_projection=False" in document
+    assert "_resolve_depth_z_group_origin_mode(" in document
+    assert "LegacyZGroupOriginMode.MINIMUM_Z" in document
     assert "LegacyZGroupOriginMode.OBJECT_ORIGIN" in document
+    assert "offsets_toward_camera_only" in document
     assert "build_rig(" in document
 
 
