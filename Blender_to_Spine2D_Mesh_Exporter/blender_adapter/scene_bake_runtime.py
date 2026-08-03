@@ -15,6 +15,7 @@ from ..domain.baking.context import (
 from .scene_bake_capture import analyse_bake_contexts
 from .scene_bake_error import SceneBakeAnalysisError
 from .scene_bake_resources import analyse_object_bake_context
+from .scene_bake_rna import matrix_tuple
 
 
 _MATRIX_RELATIVE_TOLERANCE = 1.0e-9
@@ -86,19 +87,22 @@ def validate_runtime_object_transform(
     expected_object: ObjectBakeContext | None,
     *,
     timeline_frame: int | None,
-) -> None:
-    """Require object-bake source transform to remain at its analysis-frame value.
+    allow_sequence_transform: bool = False,
+) -> ObjectBakeContext | None:
+    """Validate source identity and return the current frame-evaluated transform.
 
-    The Rewrite bake target is materialized once from geometry normalized at the
-    analysis frame. A later source ``matrix_world`` change would make selected-to-active
-    surfaces and object-coordinate materials disagree with that fixed target. Camera
-    projection is the supported route for sequence frames with animated object transforms.
+    Static object-bake callers keep the historical fail-closed matrix check. Sequence
+    execution may opt into frame-evaluated transforms because its temporary UV target
+    is synchronized to the source before every bake operation.
     """
 
     if expected_object is None:
-        return
+        return None
     if not isinstance(expected_object, ObjectBakeContext):
         raise TypeError("expected_object must be ObjectBakeContext or None")
+    if not isinstance(allow_sequence_transform, bool):
+        raise TypeError("allow_sequence_transform must be bool")
+
     current = analyse_object_bake_context(source_obj)
     if current.source_object_id != expected_object.source_object_id:
         raise SceneBakeAnalysisError(
@@ -110,13 +114,94 @@ def validate_runtime_object_transform(
         current.world_matrix,
     )
     if equal:
-        return
+        return current
+    if allow_sequence_transform and timeline_frame is not None:
+        return current
+
     raise SceneBakeAnalysisError(
-        "Object bake cannot evaluate an animated source matrix_world against one "
-        "fixed UV target. Use camera projection for moving/rotating/scaling objects; "
+        "Object bake source matrix_world changed after planning and no synchronized "
+        "sequence target is active; "
         f"source={expected_object.source_object_id!r}, frame={timeline_frame!r}, "
         f"maximum_matrix_delta={maximum_delta}, matrix_index={maximum_index}"
     )
+
+
+def synchronize_runtime_object_transform(
+    source_obj: Any,
+    target_obj: Any,
+    expected_object: ObjectBakeContext | None,
+    *,
+    context: Any,
+    timeline_frame: int | None,
+) -> ObjectBakeContext | None:
+    """Copy the current source ``matrix_world`` to one temporary UV bake target.
+
+    The target mesh stores fixed local-space geometry and UVs. Synchronizing only its
+    world matrix preserves that topology while allowing Camera, Reflection, Generated,
+    Object, Fresnel, and similar material inputs to evaluate at each sequence frame.
+    Vertex deformation is intentionally outside this contract.
+    """
+
+    if target_obj is None:
+        raise SceneBakeAnalysisError("Temporary object-bake target is unavailable")
+    if context is None:
+        raise SceneBakeAnalysisError("Blender context is required for transform sync")
+
+    current = validate_runtime_object_transform(
+        source_obj,
+        expected_object,
+        timeline_frame=timeline_frame,
+        allow_sequence_transform=True,
+    )
+    if current is None:
+        return None
+
+    source_matrix = getattr(source_obj, "matrix_world", None)
+    copy_matrix = getattr(source_matrix, "copy", None)
+    if not callable(copy_matrix):
+        raise SceneBakeAnalysisError(
+            "Source object matrix_world does not provide copy()"
+        )
+    try:
+        target_obj.matrix_world = copy_matrix()
+    except Exception as exc:
+        raise SceneBakeAnalysisError(
+            "Unable to synchronize temporary UV target matrix_world from source"
+        ) from exc
+
+    view_layer = getattr(context, "view_layer", None)
+    update = getattr(view_layer, "update", None)
+    if not callable(update):
+        raise SceneBakeAnalysisError(
+            "Active View Layer does not provide update() after transform sync"
+        )
+    try:
+        update()
+    except Exception as exc:
+        raise SceneBakeAnalysisError(
+            "Unable to update the View Layer after transform sync"
+        ) from exc
+
+    try:
+        target_matrix = matrix_tuple(getattr(target_obj, "matrix_world", None))
+    except SceneBakeAnalysisError:
+        raise
+    except Exception as exc:
+        raise SceneBakeAnalysisError(
+            "Unable to inspect synchronized UV target matrix_world"
+        ) from exc
+
+    equal, maximum_delta, maximum_index = _matrix_difference(
+        current.world_matrix,
+        target_matrix,
+    )
+    if not equal:
+        raise SceneBakeAnalysisError(
+            "Temporary UV target matrix_world differs from the frame-evaluated source; "
+            f"source={current.source_object_id!r}, frame={timeline_frame!r}, "
+            f"maximum_matrix_delta={maximum_delta}, matrix_index={maximum_index}"
+        )
+    return current
 
 
 def validate_runtime_scene_context(
@@ -180,6 +265,7 @@ def validate_runtime_scene_context(
 
 
 __all__ = [
+    "synchronize_runtime_object_transform",
     "validate_runtime_object_transform",
     "validate_runtime_scene_context",
 ]
