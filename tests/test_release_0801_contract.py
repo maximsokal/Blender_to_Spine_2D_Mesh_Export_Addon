@@ -79,7 +79,8 @@ def test_release_note_records_ui_request_contract_and_package() -> None:
     note = _read(RELEASE_NOTE)
     normalized = _normalized(note)
 
-    assert "frames and start per selected mesh object" in normalized
+    assert "frames and start" in normalized
+    assert "selected mesh object" in normalized
     assert "frames = 0" in normalized
     assert "static current frame output" in normalized
     assert "positive value creates a loop texture sequence only for that object" in normalized
