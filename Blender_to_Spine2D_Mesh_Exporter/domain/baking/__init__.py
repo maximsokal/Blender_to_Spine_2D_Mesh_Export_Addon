@@ -1,5 +1,6 @@
 """Blender-independent material analysis and texture planning contracts."""
 
+from ..geometry import DepthCameraProjectionSettings, DepthProjectionBaseMode
 from .capabilities import (
     MaterialCapabilityAudit,
     ShaderBakeCapability,
@@ -154,6 +155,8 @@ __all__ = [
     "ColorManagementSnapshot",
     "ColorRGBA",
     "DEFAULT_SEQUENCE_FPS",
+    "DepthCameraProjectionSettings",
+    "DepthProjectionBaseMode",
     "EmissionBakeStrategy",
     "GeneratedBakePlan",
     "GeneratedMaterialPlan",
