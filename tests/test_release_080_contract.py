@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,8 +32,12 @@ def _normalized(value: str) -> str:
 
 def test_release_note_is_historical_version_0800() -> None:
     note = _read(RELEASE_NOTE)
+    first_heading = next(
+        (line.strip() for line in note.splitlines() if line.strip()),
+        "",
+    )
 
-    assert "# Release 0.80.0" in note
+    assert re.fullmatch(r"#(?:\s+Release)?\s+0\.80\.0", first_heading)
     assert "blender_to_spine2d_mesh_exporter-0.80.0.zip" in note
 
 
