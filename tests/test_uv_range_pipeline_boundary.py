@@ -35,16 +35,26 @@ def test_unwrap_settings_own_explicit_policy_and_epsilon():
     assert 'if numeric_values["range_epsilon"] < 0.0' in source
 
 
-def test_shared_unwrap_is_diagnostic_until_bake_mode_is_known():
+def test_shared_uv_stage_inspects_range_before_region_propagation():
     source = read(UV_PREPARATION)
 
     inspect_index = source.index("range_report = inspect_uv_range(")
     propagate_index = source.index("uv_regions = propagate_texturing_uv_to_regions(")
     assert inspect_index < propagate_index
     assert "enforce_uv_range(" not in source
-    assert "cannot yet know whether material planning" in source
     assert "uv_outside_range_tolerance" in source
     assert "uv.range_policy is WARN_ONLY" in source
+
+
+def test_depth_camera_route_validates_direct_camera_uv_without_blender_unwrap():
+    source = read(UV_PREPARATION)
+
+    assert "def _depth_camera_uv_result(" in source
+    assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION" in source
+    assert "_depth_camera_uv_result(source, texturing_topology)" in source
+    assert "else unwrap_snapshot_uv(" in source
+    assert "Depth Camera Projection topology lost its active camera UV layer" in source
+    assert "Depth Camera Projection topology lost its render camera UV layer" in source
 
 
 def test_propagated_object_bake_regions_are_checked_before_attachment_projection():
