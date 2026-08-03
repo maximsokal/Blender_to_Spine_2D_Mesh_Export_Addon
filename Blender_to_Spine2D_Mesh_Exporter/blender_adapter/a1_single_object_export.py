@@ -1,9 +1,9 @@
 """Atomic output wrapper for one prepared A1 Blender object.
 
 All geometry, UV, material, rig, and initial document construction lives in
-``prepare_a1_object``. Camera projection textures additionally produce a render-derived
-crop/hull layout; this module finalizes that attachment before serializing JSON, while all
-files still share one caller-owned atomic transaction.
+``prepare_a1_object``. Rendered camera textures additionally produce a render-derived
+crop layout; flat Camera Projection and Depth Camera Projection finalize that layout
+through separate topology-preserving routes before JSON serialization.
 """
 
 from __future__ import annotations
@@ -27,7 +27,9 @@ from ..infrastructure import (
 )
 from .a1_export_result import build_a1_failure_result
 from .a1_object_preparation import A1ObjectPreparationError, prepare_a1_object
-from .a1_projection_finalization import finalize_prepared_camera_projection
+from .a1_rendered_projection_finalization import (
+    finalize_prepared_rendered_projection,
+)
 from .bake_uv_spine_validation import validate_staged_normal_bake_coverage
 from .source_uv_integrity import (
     capture_source_uv_fingerprint_if_mesh,
@@ -150,9 +152,6 @@ def export_a1_single_object(
             )
             statistics["bake_uv_coverage_sample_count"] = len(coverage_samples)
 
-            # The semantic bake owner has restored every Blender context and material
-            # transaction at this point. Verify the original source UV datablock before
-            # any staged JSON or texture can become visible at its final path.
             require_source_uv_unchanged_if_captured(
                 export_uv_fingerprint,
                 prepared.source_object,
@@ -165,7 +164,7 @@ def export_a1_single_object(
                 message="Finalizing render-derived attachment layout",
                 object_id=prepared.object_id,
             )
-            finalized = finalize_prepared_camera_projection(
+            finalized = finalize_prepared_rendered_projection(
                 prepared,
                 texture_stage.projection_layout,
             )
