@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 def _normal_camera_request_settings(
     settings: A1SingleObjectExportSettings,
 ) -> A1SingleObjectExportSettings:
-    """Return settings accepted by the shared request validator without losing output."""
+    """Return settings accepted by shared geometry validation without losing output."""
 
     if not isinstance(settings, A1SingleObjectExportSettings):
         raise TypeError("settings must be A1SingleObjectExportSettings")
@@ -71,8 +71,8 @@ def _depth_statistics(
     base: Mapping[str, StatisticsValue],
     result: DepthCameraProjectionResult,
 ) -> Mapping[str, StatisticsValue]:
-    settings = result.snapshot
-    del settings
+    if not isinstance(result, DepthCameraProjectionResult):
+        raise TypeError("result must be DepthCameraProjectionResult")
     return freeze_statistics(
         base,
         {
@@ -242,4 +242,7 @@ def prepare_a1_depth_source_geometry(
         ) from exc
 
 
-__all__ = ["prepare_a1_depth_source_geometry"]
+__all__ = [
+    "_depth_statistics",
+    "prepare_a1_depth_source_geometry",
+]
