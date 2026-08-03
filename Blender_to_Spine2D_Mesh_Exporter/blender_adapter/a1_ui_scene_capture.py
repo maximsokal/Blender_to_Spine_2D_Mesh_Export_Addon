@@ -13,6 +13,8 @@ from ..domain.baking import (
     A1TextureExportMode,
     BakeExecutionSettings,
     CameraProjectionInfluencePolicy,
+    DepthCameraProjectionSettings,
+    DepthProjectionBaseMode,
     TextureSequenceTiming,
 )
 from ..domain.baking.generated_materials import (
@@ -62,12 +64,10 @@ class _SceneExportProfile:
         A1GeneratedMaterialPattern.SOLID_GRAY
     )
     generated_gray_color: ColorRGBA = _DEFAULT_GENERATED_GRAY
-    # New sequence timing precedes the previously appended public mode fields.
     sequence_timing: TextureSequenceTiming = TextureSequenceTiming()
     texture_export_mode: A1TextureExportMode = (
         A1TextureExportMode.NORMAL_UV_SEGMENTS
     )
-    # Appended for Slice 6 so earlier positional construction keeps its exact layout.
     projection_direction: A1ProjectionDirection = (
         A1ProjectionDirection.POSITIVE_Z
     )
@@ -226,6 +226,98 @@ def _projection_alpha_threshold(scene: Any) -> float:
     return value
 
 
+def _finite_scene_float(
+    scene: Any,
+    property_name: str,
+    default: float,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    raw = getattr(scene, property_name, default)
+    if isinstance(raw, bool):
+        raise ValueError(f"{property_name} must be numeric, not bool")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{property_name} must be numeric") from exc
+    if not isfinite(value) or value < minimum or value > maximum:
+        raise ValueError(
+            f"{property_name} must be finite in [{minimum}, {maximum}]"
+        )
+    return value
+
+
+def _scene_integer(
+    scene: Any,
+    property_name: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    raw = getattr(scene, property_name, default)
+    if isinstance(raw, bool):
+        raise ValueError(f"{property_name} must be int, not bool")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{property_name} must be int") from exc
+    if value < minimum or value > maximum:
+        raise ValueError(
+            f"{property_name} must be in [{minimum}, {maximum}]"
+        )
+    return value
+
+
+def _resolve_depth_projection_settings(scene: Any) -> DepthCameraProjectionSettings:
+    """Capture depth controls; only farthest-visible is public in 0.81.0."""
+
+    raw_base = str(
+        getattr(
+            scene,
+            "spine2d_depth_base_mode",
+            DepthProjectionBaseMode.FARTHEST_VISIBLE.value,
+        )
+        or DepthProjectionBaseMode.FARTHEST_VISIBLE.value
+    ).strip().upper()
+    try:
+        base_mode = DepthProjectionBaseMode(raw_base)
+    except ValueError as exc:
+        raise ValueError(f"Unsupported depth base mode: {raw_base!r}") from exc
+    return DepthCameraProjectionSettings(
+        smoothing=_finite_scene_float(
+            scene,
+            "spine2d_depth_smoothing",
+            0.35,
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        edge_threshold_fraction=_finite_scene_float(
+            scene,
+            "spine2d_depth_edge_threshold",
+            0.08,
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        mesh_error_pixels=_finite_scene_float(
+            scene,
+            "spine2d_depth_mesh_error_pixels",
+            4.0,
+            minimum=0.25,
+            maximum=128.0,
+        ),
+        max_points=_scene_integer(
+            scene,
+            "spine2d_depth_max_points",
+            128,
+            minimum=4,
+            maximum=4096,
+        ),
+        base_mode=base_mode,
+    )
+
+
 def _resolve_geometry_settings(scene: Any) -> A1GeometryPreparationSettings:
     raw_mode = str(
         getattr(
@@ -295,8 +387,6 @@ def _resolve_generated_material_pattern(
 
 
 def _resolve_generated_gray_color(scene: Any) -> ColorRGBA:
-    """Read exactly three display-RGB values and append opaque alpha."""
-
     raw = getattr(
         scene,
         "spine2d_generated_gray_color",
@@ -351,8 +441,6 @@ def _resolve_texture_export_mode(scene: Any) -> A1TextureExportMode:
 
 
 def _resolve_projection_direction(scene: Any) -> A1ProjectionDirection:
-    """Resolve the exact persisted Normal/UV projection identifier fail-closed."""
-
     raw = getattr(
         scene,
         "spine2d_projection_direction",
@@ -371,8 +459,6 @@ def _resolve_spine_target(scene: Any) -> SpineJsonTarget:
 
 
 def _resolve_rig_profile(scene: Any) -> A1RigProfile:
-    """Resolve the only public rig and normalize persisted hidden values safely."""
-
     raw = getattr(
         scene,
         "spine2d_rig_profile",
@@ -457,6 +543,7 @@ def _capture_scene_profile(
         projection_alpha_threshold=_projection_alpha_threshold(scene),
         texture_export_mode=texture_export_mode,
         camera_influence_policy=_resolve_camera_influence_policy(scene),
+        depth_projection=_resolve_depth_projection_settings(scene),
     )
     return _SceneExportProfile(
         output_directory=(
@@ -479,7 +566,6 @@ def _capture_scene_profile(
         include_control_icons=bool(
             getattr(scene, "spine2d_control_icons", False)
         ),
-        # Preview rig animation remains independent from texture sequence animation.
         include_preview_animation=_PREVIEW_ANIMATION_EXPORT_ENABLED,
         spine_target=_resolve_spine_target(scene),
         rig_profile=_resolve_rig_profile(scene),
@@ -497,6 +583,7 @@ __all__ = [
     "_capture_scene_profile",
     "_projection_alpha_threshold",
     "_resolve_camera_influence_policy",
+    "_resolve_depth_projection_settings",
     "_resolve_generated_gray_color",
     "_resolve_generated_material_pattern",
     "_resolve_geometry_settings",
