@@ -1,7 +1,7 @@
 """Real Blender 5.2 Normal-UV sequence acceptance with animated transforms.
 
 This runner deliberately exercises the complete user-facing export path rather than a
-planner fixture.  It bakes 128x128 PNG sequences from a material that consumes Texture
+planner fixture. It bakes 128x128 PNG sequences from a material that consumes Texture
 Coordinate Camera once and Reflection twice while the source object changes location,
 rotation, and scale between frames.
 """
@@ -56,6 +56,8 @@ from run_camera_projection_integration import (  # noqa: E402
 
 _TEXTURE_SIZE = 128
 _ANALYSIS_FRAME = 19
+_FLOAT32_EPSILON = 2.0 ** -23
+_MATRIX_COMPARE_ULPS = 4.0
 
 
 def _create_pentagon(name: str):
@@ -153,12 +155,18 @@ def _create_animated_camera_reflection_material(name: str):
 
 
 def _animate_source_transform(source) -> None:
-    """Key location, rotation, and scale so analysis frame differs from bake frames."""
+    """Key bake frames and a distinct analysis frame for pipeline regression coverage."""
 
     transforms = (
         (1, (-0.85, 0.10, 0.00), (0.15, -0.35, -0.30), (0.75, 1.10, 1.00)),
         (2, (0.65, 0.30, 0.45), (0.45, 0.20, 0.50), (1.20, 0.70, 1.00)),
         (3, (0.20, -0.55, -0.20), (-0.35, 0.55, 0.90), (0.90, 1.35, 1.00)),
+        (
+            _ANALYSIS_FRAME,
+            (1.35, -0.80, 0.65),
+            (0.80, -0.90, 1.20),
+            (1.40, 0.85, 1.10),
+        ),
     )
     for frame, location, rotation, scale in transforms:
         source.location = location
@@ -175,6 +183,28 @@ def _matrix_tuple(obj) -> tuple[float, ...]:
         float(matrix[row][column])
         for row in range(4)
         for column in range(4)
+    )
+
+
+def _maximum_matrix_delta(
+    first: tuple[float, ...],
+    second: tuple[float, ...],
+) -> float:
+    _assert(len(first) == 16 and len(second) == 16, "matrix must contain 16 values")
+    return max(abs(left - right) for left, right in zip(first, second, strict=True))
+
+
+def _matrices_equal_at_float32_precision(
+    first: tuple[float, ...],
+    second: tuple[float, ...],
+) -> bool:
+    if len(first) != 16 or len(second) != 16:
+        return False
+    tolerance_scale = _FLOAT32_EPSILON * _MATRIX_COMPARE_ULPS
+    return all(
+        abs(left - right)
+        <= tolerance_scale * max(1.0, abs(left), abs(right)) + tolerance_scale
+        for left, right in zip(first, second, strict=True)
     )
 
 
@@ -244,8 +274,14 @@ def _rgb_signature(pixels: tuple[float, ...]) -> tuple[float, float, float]:
 def _read_and_validate_frames(paths: tuple[Path, ...]) -> None:
     images = tuple(_read_image(path) for path in paths)
     for path, (size, pixels) in zip(paths, images, strict=True):
-        _assert(size == (_TEXTURE_SIZE, _TEXTURE_SIZE), f"wrong PNG size for {path}: {size}")
-        _assert(len(pixels) == _TEXTURE_SIZE * _TEXTURE_SIZE * 4, "wrong RGBA buffer size")
+        _assert(
+            size == (_TEXTURE_SIZE, _TEXTURE_SIZE),
+            f"wrong PNG size for {path}: {size}",
+        )
+        _assert(
+            len(pixels) == _TEXTURE_SIZE * _TEXTURE_SIZE * 4,
+            "wrong RGBA buffer size",
+        )
 
     signatures = tuple(_rgb_signature(pixels) for _, pixels in images)
     for first_index in range(len(signatures)):
@@ -309,8 +345,14 @@ def _contains_sequence(value: object) -> bool:
 def _assert_mesh_topology(attachments: dict[str, object]) -> None:
     _assert(attachments, "sequence attachment set must not be empty")
     for name, attachment in attachments.items():
-        _assert(isinstance(attachment, dict), f"attachment {name!r} must be a mapping")
-        _assert(attachment.get("type") == "mesh", f"attachment {name!r} is not mesh")
+        _assert(
+            isinstance(attachment, dict),
+            f"attachment {name!r} must be a mapping",
+        )
+        _assert(
+            attachment.get("type") == "mesh",
+            f"attachment {name!r} is not mesh",
+        )
         uvs = attachment.get("uvs")
         _assert(isinstance(uvs, list), f"attachment {name!r} UVs must be a list")
         _assert(
@@ -343,7 +385,10 @@ def _assert_sequence_payload(
         _assert(timeline[0].get("mode") == "loop", "native sequence is not Loop")
         return
 
-    _assert(not _contains_sequence(payload), "legacy target must not contain sequence metadata")
+    _assert(
+        not _contains_sequence(payload),
+        "legacy target must not contain sequence metadata",
+    )
     _assert(
         len(attachments) == frame_count,
         "legacy target must contain one mesh attachment per frame",
@@ -355,7 +400,10 @@ def _assert_sequence_payload(
     )
     frame_names = tuple(key.get("name") for key in timeline[:-1])
     _assert(len(set(frame_names)) == frame_count, "legacy frame keys are not unique")
-    _assert(all(name in attachments for name in frame_names), "legacy key references missing mesh")
+    _assert(
+        all(name in attachments for name in frame_names),
+        "legacy key references missing mesh",
+    )
     _assert(timeline[-1].get("name") == frame_names[0], "legacy Loop does not wrap")
 
 
@@ -380,14 +428,25 @@ def _run_export_case(
     bpy.context.view_layer.update()
     original_matrix = _matrix_tuple(source)
     matrices = _frame_matrices(scene, source, frame_count)
-    _assert(
-        len(set(matrices)) == frame_count,
-        "test fixture must provide a different matrix_world for every bake frame",
-    )
-    _assert(
-        all(matrix != original_matrix for matrix in matrices),
-        "analysis-frame matrix must differ from every requested bake frame",
-    )
+
+    for first_index in range(frame_count):
+        for second_index in range(first_index + 1, frame_count):
+            delta = _maximum_matrix_delta(
+                matrices[first_index],
+                matrices[second_index],
+            )
+            _assert(
+                delta > 1.0e-3,
+                "test fixture must provide a meaningfully different matrix_world "
+                f"for bake frames {(first_index + 1, second_index + 1)}; delta={delta}",
+            )
+    for frame_index, matrix in enumerate(matrices, start=1):
+        delta = _maximum_matrix_delta(matrix, original_matrix)
+        _assert(
+            delta > 1.0e-3,
+            "analysis-frame matrix must differ from every requested bake frame; "
+            f"frame={frame_index}, delta={delta}",
+        )
 
     with tempfile.TemporaryDirectory(prefix=f"spine2d-{stem.casefold()}-") as directory:
         output_directory = Path(directory)
@@ -408,9 +467,11 @@ def _run_export_case(
             "sequence export did not restore scene.frame_current",
         )
         bpy.context.view_layer.update()
+        restored_matrix = _matrix_tuple(source)
         _assert(
-            _matrix_tuple(source) == original_matrix,
-            "source matrix_world was not restored with the analysis frame",
+            _matrices_equal_at_float32_precision(restored_matrix, original_matrix),
+            "source matrix_world was not restored with the analysis frame; "
+            f"maximum_delta={_maximum_matrix_delta(restored_matrix, original_matrix)}",
         )
         _assert(
             len(result.output_files) == frame_count + 1,
