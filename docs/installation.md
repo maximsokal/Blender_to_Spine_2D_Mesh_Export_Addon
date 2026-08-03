@@ -18,7 +18,7 @@ Single-object and standalone multi-object output are available according to the 
 2. Open Blender 5.2 or newer.
 3. Open **Edit > Preferences > Extensions**.
 4. Open the Extensions menu and choose **Install from Disk**.
-5. Select `blender_to_spine2d_mesh_exporter-0.80.0.zip`.
+5. Select `blender_to_spine2d_mesh_exporter-0.80.1.zip`.
 6. Enable **Blender to Spine2D Mesh Exporter**.
 7. Open a 3D View, press `N`, and select the **Blender to Spine2D Mesh Exporter** tab.
 
@@ -29,14 +29,29 @@ Do not unpack the release ZIP. Its root must contain `blender_manifest.toml` and
 1. Remove or disable the old extension in **Preferences > Extensions**.
 2. Close Blender completely.
 3. Start Blender again.
-4. Install `blender_to_spine2d_mesh_exporter-0.80.0.zip` through **Install from Disk**.
+4. Install `blender_to_spine2d_mesh_exporter-0.80.1.zip` through **Install from Disk**.
 5. Reopen the project file.
 
-Closing Blender prevents loaded Python modules and cached extension metadata from keeping the previous implementation active. Always export fresh JSON and textures after installing 0.80.0.
+Closing Blender prevents loaded Python modules and cached extension metadata from keeping the previous implementation active. Always export fresh JSON and textures after installing 0.80.1.
+
+## Per-object multi-export timing
+
+For **Export Selected Objects**, open the Bake foldout. Every selected Mesh has its own `Frames` and `Start` values.
+
+```text
+Frames = 0
+    Export one static texture evaluated at the current frame.
+
+Frames > 0
+    Export a Loop texture sequence for this object only.
+    Start selects the first timeline frame.
+```
+
+Objects with different values can be exported together. For example, one object may use `Frames = 2` and `Start = 1`, while all other selected objects use `Frames = 0`. The resulting multi-object JSON contains one sequence and static attachments for the siblings.
 
 ## Scene settings migration
 
-Version 0.80.0 continues to use Scene settings schema 6. Raw persisted Scene ID-properties are captured before Rewrite RNA properties are registered, so newly bound defaults cannot hide values stored in an older `.blend` file.
+Version 0.80.1 continues to use Scene settings schema 6. No new Scene or Object RNA fields are required for mixed static/sequence export; the existing per-object `Spine2DBakeSettings` values are used directly. Raw persisted Scene ID-properties are captured before Rewrite RNA properties are registered, so newly bound defaults cannot hide values stored in an older `.blend` file.
 
 Migration policy:
 
@@ -59,6 +74,7 @@ Saved schema-4 or newer Scene with explicit choices:
     Preserve the selected rig profile
     Preserve a valid Spine target or use 4.2
     Preserve a valid projection direction or use +Z
+    Preserve per-object Frames and Start values
     Settings schema = 6
 ```
 
@@ -72,6 +88,11 @@ print(
     bpy.context.scene.spine2d_target_spine_version,
     bpy.context.scene.spine2d_projection_direction,
 )
+
+for obj in bpy.context.selected_objects:
+    if obj.type == "MESH":
+        bake = obj.spine2d_bake_settings
+        print(obj.name, bake.bake_frame_start, bake.frames_for_render)
 ```
 
 Normal - UV Segments uses the selected signed axis or Active Camera projection route while retaining UV-segment meshes. The separate Camera Projection mode keeps its render, crop, contour, and flattening pipeline.
@@ -103,7 +124,7 @@ if ($LASTEXITCODE -ne 0) {
 The expected archive is:
 
 ```text
-dist/blender_to_spine2d_mesh_exporter-0.80.0.zip
+dist/blender_to_spine2d_mesh_exporter-0.80.1.zip
 ```
 
 The script:
@@ -134,10 +155,10 @@ blender --command extension validate Blender_to_Spine2D_Mesh_Exporter
 Validate the built ZIP:
 
 ```text
-blender --command extension validate dist/blender_to_spine2d_mesh_exporter-0.80.0.zip
+blender --command extension validate dist/blender_to_spine2d_mesh_exporter-0.80.1.zip
 ```
 
-After installation, validate representative outputs in the exact selected Spine Editor version. For sequence exports, confirm frame order, Loop playback, texture paths, attachment topology, and expected object controls.
+After installation, validate representative outputs in the exact selected Spine Editor version. For mixed static/sequence exports, confirm that only the intended object plays a texture sequence and every sibling remains on one static texture.
 
 ## Remove the extension
 
