@@ -222,8 +222,7 @@ def build_a1_readiness_signature(context: Any) -> str:
     """Return a cheap signature for the exact UI export request.
 
     Geometry/material edits are invalidated by the persistent depsgraph handler. This
-    signature additionally catches active/selection and export-setting changes that may
-    not emit a useful dependency-graph update for the panel.
+    signature additionally catches active/selection and every export-setting change.
     """
 
     if context is None:
@@ -249,8 +248,20 @@ def build_a1_readiness_signature(context: Any) -> str:
         "objects": tuple(_object_signature(obj) for obj in ordered),
         "frame_current": _safe_int(getattr(scene, "frame_current", 0)),
         "camera": None if camera is None else _rna_identity(camera),
+        "camera_matrix": (
+            None if camera is None else _matrix_signature(getattr(camera, "matrix_world", None))
+        ),
         "render_engine": str(getattr(render, "engine", "")),
         "settings": {
+            "texture_mode": str(
+                getattr(scene, "spine2d_texture_export_mode", "NORMAL_UV_SEGMENTS")
+            ),
+            "projection_direction": str(
+                getattr(scene, "spine2d_projection_direction", "POSITIVE_Z")
+            ),
+            "spine_target": str(
+                getattr(scene, "spine2d_target_spine_version", "SPINE_4_2")
+            ),
             "texture_size": _safe_int(
                 getattr(scene, "spine2d_texture_size", 1024)
             ),
@@ -276,6 +287,9 @@ def build_a1_readiness_signature(context: Any) -> str:
             "frame_start": _safe_int(
                 getattr(scene, "spine2d_bake_frame_start", 0)
             ),
+            "sequence_fps_override": _safe_float(
+                getattr(scene, "spine2d_sequence_fps_override", 0.0)
+            ),
             "material_policy": str(
                 getattr(scene, "spine2d_material_source_policy", "REQUIRE_SOURCE")
             ),
@@ -284,6 +298,34 @@ def build_a1_readiness_signature(context: Any) -> str:
             ),
             "projection_alpha": _safe_float(
                 getattr(scene, "spine2d_projection_alpha_threshold", 1.0 / 255.0)
+            ),
+            "include_scene_shadows": bool(
+                getattr(scene, "spine2d_include_scene_shadows", True)
+            ),
+            "include_scene_reflection_transmission": bool(
+                getattr(
+                    scene,
+                    "spine2d_include_scene_reflection_transmission",
+                    True,
+                )
+            ),
+            "world_affects_lighting_reflections": bool(
+                getattr(scene, "spine2d_world_affects_lighting_reflections", True)
+            ),
+            "depth_smoothing": _safe_float(
+                getattr(scene, "spine2d_depth_smoothing", 0.35)
+            ),
+            "depth_edge_threshold": _safe_float(
+                getattr(scene, "spine2d_depth_edge_threshold", 0.08)
+            ),
+            "depth_mesh_error_pixels": _safe_float(
+                getattr(scene, "spine2d_depth_mesh_error_pixels", 4.0)
+            ),
+            "depth_max_points": _safe_int(
+                getattr(scene, "spine2d_depth_max_points", 128)
+            ),
+            "depth_base_mode": str(
+                getattr(scene, "spine2d_depth_base_mode", "FARTHEST_VISIBLE")
             ),
         },
     }
