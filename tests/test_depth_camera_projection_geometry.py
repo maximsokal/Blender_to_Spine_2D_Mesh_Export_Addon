@@ -29,6 +29,9 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import (
     VertexId,
     build_depth_camera_projection_surface,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import (
+    depth_camera_projection as depth_geometry,
+)
 
 
 _OBJECT_ID = "DepthObject"
@@ -223,23 +226,42 @@ def test_point_budget_is_hard_and_deterministic() -> None:
     assert first.snapshot == second.snapshot
 
 
-def test_edge_threshold_can_fail_closed_when_every_cell_crosses_depth_jump() -> None:
+def test_edge_threshold_preserves_steep_connected_source_surface() -> None:
     source = _snapshot(local_depths=(0.0, 0.0, 4.0, 4.0))
-    with pytest.raises(
-        DepthCameraProjectionError,
-        match="Depth Edge Threshold disconnected every sampled triangle",
-    ):
-        build_depth_camera_projection_surface(
-            source,
-            _frame(),
-            uniform_scale=128.0,
-            uv_layer_name=_UV_LAYER,
-            settings=_settings(
-                edge_threshold_fraction=0.0,
-                mesh_error_pixels=64.0,
-                max_points=4,
-            ),
-        )
+    result = build_depth_camera_projection_surface(
+        source,
+        _frame(),
+        uniform_scale=128.0,
+        uv_layer_name=_UV_LAYER,
+        settings=_settings(
+            edge_threshold_fraction=0.0,
+            mesh_error_pixels=64.0,
+            max_points=4,
+        ),
+    )
+
+    assert result.sampled_point_count == 4
+    assert len(result.snapshot.faces) == 2
+    assert result.maximum_relief == pytest.approx(4.0)
+
+
+def test_edge_threshold_does_not_bridge_disconnected_depth_surfaces() -> None:
+    samples = {
+        (0, 0): depth_geometry._Sample(0.0, 0.0, -5.0, 0),
+        (1, 0): depth_geometry._Sample(1.0, 0.0, -1.0, 1),
+        (1, 1): depth_geometry._Sample(1.0, 1.0, -1.0, 1),
+        (0, 1): depth_geometry._Sample(0.0, 1.0, -5.0, 0),
+    }
+
+    faces = depth_geometry._cell_faces(
+        samples,
+        columns=1,
+        rows=1,
+        edge_threshold=1.0e-8,
+        face_adjacency={0: frozenset(), 1: frozenset()},
+    )
+
+    assert faces == ()
 
 
 def test_object_origin_base_accepts_origin_behind_visible_surface() -> None:
