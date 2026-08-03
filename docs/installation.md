@@ -5,38 +5,50 @@
 - Blender 5.2 or newer.
 - A matching supported Spine Editor target: 3.8.99, 4.0.64, 4.1.24, 4.2.43, or 4.3.23.
 - Windows is the currently tested desktop platform.
-- A writable directory for JSON, textures, temporary stage files, backups, diagnostics, and logs.
-- Enough memory and disk space for the selected texture resolution and sequence frame count.
+- A saved `.blend` file and a writable output directory.
+- Enough memory and disk space for the selected texture resolution and frame count.
 
-Blender 4.x and Blender 5.0/5.1 are not supported. The minimum version is declared in `Blender_to_Spine2D_Mesh_Exporter/blender_manifest.toml` and checked before registration mutates Blender state.
+Blender 4.x and Blender 5.0/5.1 are not supported. The minimum version is declared in `Blender_to_Spine2D_Mesh_Exporter/blender_manifest.toml`.
 
-Single-object and standalone multi-object output are available according to the target/profile capability matrix. Connected and mixed composition are supported only for Spine 4.2.43 and remain explicit development/API routes. Public selected-object export remains standalone-only.
+## Install the release archive
 
-## Install a release ZIP
-
-1. Close every Blender process that is using an older build of the extension.
+1. Close Blender processes that use an older build.
 2. Open Blender 5.2 or newer.
 3. Open **Edit > Preferences > Extensions**.
-4. Open the Extensions menu and choose **Install from Disk**.
-5. Select `blender_to_spine2d_mesh_exporter-0.80.1.zip`.
+4. Choose **Install from Disk**.
+5. Select `blender_to_spine2d_mesh_exporter-0.81.0.zip`.
 6. Enable **Blender to Spine2D Mesh Exporter**.
-7. Open a 3D View, press `N`, and select the **Blender to Spine2D Mesh Exporter** tab.
+7. Open a 3D View, press `N`, and select the extension tab.
 
-Do not unpack the release ZIP. Its root must contain `blender_manifest.toml` and `__init__.py`.
+Do not unpack the archive. Its root must contain `blender_manifest.toml` and `__init__.py`.
 
 ## Update an existing installation
 
-1. Remove or disable the old extension in **Preferences > Extensions**.
+1. Disable or remove the old extension.
 2. Close Blender completely.
 3. Start Blender again.
-4. Install `blender_to_spine2d_mesh_exporter-0.80.1.zip` through **Install from Disk**.
-5. Reopen the project file.
+4. Install `blender_to_spine2d_mesh_exporter-0.81.0.zip` through **Install from Disk**.
+5. Reopen the project and run **Analyze** before export.
 
-Closing Blender prevents loaded Python modules and cached extension metadata from keeping the previous implementation active. Always export fresh JSON and textures after installing 0.80.1.
+Closing Blender prevents loaded Python modules and cached extension metadata from keeping the previous implementation active.
 
-## Per-object multi-export timing
+## Export modes
 
-For **Export Selected Objects**, open the Bake foldout. Every selected Mesh has its own `Frames` and `Start` values.
+Version 0.81.0 exposes three independent modes:
+
+```text
+Normal - UV Segments
+Camera Projection
+Depth Camera Projection
+```
+
+`Depth Camera Projection` requires an active Perspective or Orthographic camera. It evaluates the visible camera-facing surface, generates a bounded weighted relief mesh, renders the source material through the camera, and remaps the generated camera UVs into the final crop. It does not export camera animation.
+
+The public depth base is **Farthest Visible Point**. The farthest retained point receives zero relief offset and all remaining retained points extend only toward the camera.
+
+## Per-object sequence timing
+
+For **Export Selected Objects**, every selected Mesh has independent `Frames` and `Start` values:
 
 ```text
 Frames = 0
@@ -47,125 +59,90 @@ Frames > 0
     Start selects the first timeline frame.
 ```
 
-Objects with different values can be exported together. For example, one object may use `Frames = 2` and `Start = 1`, while all other selected objects use `Frames = 0`. The resulting multi-object JSON contains one sequence and static attachments for the siblings.
+Static siblings do not inherit sequence metadata or animation timelines.
 
 ## Scene settings migration
 
-Version 0.80.1 continues to use Scene settings schema 6. No new Scene or Object RNA fields are required for mixed static/sequence export; the existing per-object `Spine2DBakeSettings` values are used directly. Raw persisted Scene ID-properties are captured before Rewrite RNA properties are registered, so newly bound defaults cannot hide values stored in an older `.blend` file.
+Version 0.81.0 uses Scene settings schema 7. Migration preserves existing valid export mode, rig profile, Spine target, projection direction, seam mode, material settings, paths, and per-object sequence timing.
 
-Migration policy:
+Schema 7 initializes only missing depth fields:
 
 ```text
-Genuinely fresh Scene:
-    Seam Maker = Auto
-    Rig = 2-Axis Rotation + Scale
-    Spine target = 4.2
-    Projection direction = +Z
-    Settings schema = 6
-
-Saved Scene created before rig profiles:
-    Seam Maker = Auto when required by its older schema
-    Rig = 3-Axis Rotation compatibility profile
-    Spine target = preserved valid value or 4.2
-    Projection direction = preserved valid value or +Z
-    Settings schema = 6
-
-Saved schema-4 or newer Scene with explicit choices:
-    Preserve the selected rig profile
-    Preserve a valid Spine target or use 4.2
-    Preserve a valid projection direction or use +Z
-    Preserve per-object Frames and Start values
-    Settings schema = 6
+Depth base = Farthest Visible Point
+Depth smoothing = production default
+Depth edge threshold = production default
+Depth mesh error = production default
+Max depth points = production default
 ```
 
-The current values can be inspected in Blender's Python Console:
+The hidden Object Origin depth policy remains an internal compatibility contract and is not selectable in the production UI.
+
+Current values can be inspected in Blender's Python Console:
 
 ```python
+scene = bpy.context.scene
 print(
-    bpy.context.scene.spine2d_settings_schema_version,
-    bpy.context.scene.spine2d_seam_maker_mode,
-    bpy.context.scene.spine2d_rig_profile,
-    bpy.context.scene.spine2d_target_spine_version,
-    bpy.context.scene.spine2d_projection_direction,
+    scene.spine2d_settings_schema_version,
+    scene.spine2d_texture_export_mode,
+    scene.spine2d_target_spine_version,
+    scene.spine2d_rig_profile,
+    scene.spine2d_depth_base_mode,
+    scene.spine2d_depth_smoothing,
+    scene.spine2d_depth_edge_threshold,
+    scene.spine2d_depth_mesh_error_pixels,
+    scene.spine2d_depth_max_points,
 )
-
-for obj in bpy.context.selected_objects:
-    if obj.type == "MESH":
-        bake = obj.spine2d_bake_settings
-        print(obj.name, bake.bake_frame_start, bake.frames_for_render)
 ```
-
-Normal - UV Segments uses the selected signed axis or Active Camera projection route while retaining UV-segment meshes. The separate Camera Projection mode keeps its render, crop, contour, and flattening pipeline.
 
 ## Build locally
 
-The repository uses Blender's official extension validator and builder through `tools/prepare_package.py`.
-
-From the repository root on PowerShell:
+From the repository root in PowerShell:
 
 ```powershell
 $Blender = "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
+$Python = ".\.venv-tests\Scripts\python.exe"
 
 if (-not (Test-Path -LiteralPath $Blender -PathType Leaf)) {
     throw "Blender executable not found: $Blender"
 }
+if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    throw "Python environment not found: $Python"
+}
 
 Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
-
-& .\.venv-tests\Scripts\python.exe `
-    tools\prepare_package.py `
-    --blender $Blender
-
+& $Python tools\prepare_package.py --blender $Blender
 if ($LASTEXITCODE -ne 0) {
-    throw "Extension package build failed with exit code $LASTEXITCODE"
+    throw "Extension package build failed"
 }
 ```
 
-The expected archive is:
+Expected archive:
 
 ```text
-dist/blender_to_spine2d_mesh_exporter-0.80.1.zip
+dist/blender_to_spine2d_mesh_exporter-0.81.0.zip
 ```
 
-The script:
+Validate the built archive:
 
-1. resolves and validates the Blender executable;
-2. checks that Blender is 5.2 or newer;
-3. validates the source directory and manifest;
-4. invokes Blender's official extension build command;
-5. validates the physical ZIP, required root files, packaged manifest, and forbidden repository paths.
+```powershell
+& $Blender --command extension validate `
+    dist\blender_to_spine2d_mesh_exporter-0.81.0.zip
 
-Optional arguments:
-
-```text
---source-dir <directory-containing-__init__.py-and-blender_manifest.toml>
---output <output-archive.zip>
+if ($LASTEXITCODE -ne 0) {
+    throw "Built extension validation failed"
+}
 ```
 
-The executable may also be supplied through `BLENDER_EXECUTABLE` or found as `blender` on `PATH`.
+## Manual validation
 
-## Validate manually
+After installation:
 
-Validate the extension source directory:
-
-```text
-blender --command extension validate Blender_to_Spine2D_Mesh_Exporter
-```
-
-Validate the built ZIP:
-
-```text
-blender --command extension validate dist/blender_to_spine2d_mesh_exporter-0.80.1.zip
-```
-
-After installation, validate representative outputs in the exact selected Spine Editor version. For mixed static/sequence exports, confirm that only the intended object plays a texture sequence and every sibling remains on one static texture.
-
-## Remove the extension
-
-Remove it through **Preferences > Extensions** and restart Blender. The extension unregisters classes, Scene and Object RNA properties, handlers, cached readiness data, and preference classes through its normal lifecycle.
-
-Existing custom properties stored in a `.blend` may remain serialized until the file is saved without them; they do not execute code after the extension is removed.
-
-## Next steps
+1. Open a representative saved project.
+2. Verify that the three export modes appear.
+3. Select `Depth Camera Projection` and an active camera.
+4. Export a static object and a two-frame material sequence.
+5. Confirm that JSON and PNG files are produced.
+6. Import the output into the exact selected Spine version.
+7. Move the generated X/Y/Scale controls and confirm that the relief deformation remains stable.
 
 Continue with the [Usage Guide](usage.md), [Settings Reference](settings-reference.md), and [Testing and Release Validation](testing.md).
