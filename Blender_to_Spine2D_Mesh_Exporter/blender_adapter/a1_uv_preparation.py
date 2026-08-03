@@ -14,8 +14,14 @@ from ..application import (
     build_a1_texturing_topology,
     propagate_texturing_uv_to_regions,
 )
+from ..domain.baking import A1TextureExportMode
 from ..domain.projection import A1ProjectionDirection
-from ..domain.uv import UvRangePolicy, UvUnwrapResult, inspect_uv_range
+from ..domain.uv import (
+    UvRangePolicy,
+    UvUnwrapResult,
+    calculate_uv_statistics,
+    inspect_uv_range,
+)
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
     StatisticsValue,
@@ -60,28 +66,53 @@ class A1UvPreparationResult:
             raise TypeError("statistics must be a mapping")
 
 
+def _depth_camera_uv_result(
+    source: A1SourceGeometryPreparationResult,
+    texturing_topology: A1TexturingTopology,
+) -> UvUnwrapResult:
+    """Validate the camera UV already authored by the depth geometry source."""
+
+    layer_name = source.settings.uv.layer_name
+    snapshot = texturing_topology.snapshot
+    if snapshot.active_uv_layer != layer_name:
+        raise ValueError(
+            "Depth Camera Projection topology lost its active camera UV layer; "
+            f"expected={layer_name!r}, actual={snapshot.active_uv_layer!r}"
+        )
+    if snapshot.render_uv_layer != layer_name:
+        raise ValueError(
+            "Depth Camera Projection topology lost its render camera UV layer; "
+            f"expected={layer_name!r}, actual={snapshot.render_uv_layer!r}"
+        )
+    statistics = calculate_uv_statistics(snapshot, layer_name)
+    return UvUnwrapResult(
+        snapshot=snapshot,
+        settings=source.settings.uv,
+        statistics=statistics,
+    )
+
+
 def prepare_a1_uv(
     source: A1SourceGeometryPreparationResult,
     *,
     context: Any | None = None,
     scene: Any | None = None,
 ) -> A1UvPreparationResult:
-    """Build seam topology, unwrap it, inspect range, and propagate region UVs.
+    """Build seam topology, resolve UV layout, inspect range, and propagate regions.
 
-    This stage cannot yet know whether material planning will choose object baking or
-    camera projection. It therefore records range diagnostics but defers strict
-    enforcement to the final UV consumer: propagated object-bake regions or the
-    exporter-generated camera projection snapshot.
+    Normal / UV Segments retains the established Blender unwrap. Depth Camera
+    Projection owns direct full-frame camera UV in its generated relief snapshot and
+    validates that immutable layout instead of invoking another unwrap operation.
     """
 
     if not isinstance(source, A1SourceGeometryPreparationResult):
         raise TypeError("source must be A1SourceGeometryPreparationResult")
     stage = A1SingleObjectStage.BUILD_TEXTURING_TOPOLOGY
     warnings = source.warnings
-    # The object-bake attachment projector always converts internal Mesh Y to Spine Y
-    # by negating it. Active Camera retains that established projector and stores
-    # camera-projected local Y with the opposite sign beforehand. Override the early
-    # source-stage diagnostic so final pipeline statistics describe the complete route.
+    depth_camera_projection = (
+        source.settings.bake_execution.texture_export_mode
+        is A1TextureExportMode.DEPTH_CAMERA_PROJECTION
+    )
     statistics = freeze_statistics(
         source.statistics,
         {
@@ -90,11 +121,10 @@ def prepare_a1_uv(
                 source.settings.projection_direction
                 is A1ProjectionDirection.ACTIVE_CAMERA
             ),
+            "depth_camera_direct_uv": int(depth_camera_projection),
         },
     )
     try:
-        # A temporary object linked to one Scene cannot be activated through a ViewLayer
-        # owned by another Scene. Reject that ambiguity before allocating Blender data.
         require_context_scene_consistency(context, scene)
 
         texturing_topology = build_a1_texturing_topology(
@@ -107,11 +137,15 @@ def prepare_a1_uv(
         )
 
         stage = A1SingleObjectStage.UNWRAP_TEXTURE_UV
-        unwrap_result = unwrap_snapshot_uv(
-            texturing_topology.snapshot,
-            source.settings.uv,
-            context=context,
-            scene=scene,
+        unwrap_result = (
+            _depth_camera_uv_result(source, texturing_topology)
+            if depth_camera_projection
+            else unwrap_snapshot_uv(
+                texturing_topology.snapshot,
+                source.settings.uv,
+                context=context,
+                scene=scene,
+            )
         )
         raw_outside_count = unwrap_result.statistics.outside_unit_square_count
         range_report = inspect_uv_range(
@@ -140,8 +174,8 @@ def prepare_a1_uv(
                     message=(
                         f"{range_report.outside_loop_count} UV loops are outside "
                         "the unit square beyond epsilon "
-                        f"{range_report.epsilon}; object-bake export may continue "
-                        "because uv.range_policy is WARN_ONLY"
+                        f"{range_report.epsilon}; export may continue because "
+                        "uv.range_policy is WARN_ONLY"
                     ),
                     object_id=source.object_id,
                     context={
@@ -160,9 +194,10 @@ def prepare_a1_uv(
             target_layer_name=source.settings.uv.layer_name,
         )
         logger.debug(
-            "Prepared UVs for %s: loops=%d regions=%d raw_outside=%d "
+            "Prepared UVs for %s: mode=%s loops=%d regions=%d raw_outside=%d "
             "outside_tolerance=%d policy=%s epsilon=%s",
             source.object_id,
+            source.settings.bake_execution.texture_export_mode.value,
             unwrap_result.statistics.loop_count,
             len(uv_regions.snapshots),
             raw_outside_count,
