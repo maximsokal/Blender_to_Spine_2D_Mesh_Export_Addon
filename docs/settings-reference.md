@@ -1,37 +1,26 @@
 # Settings Reference
 
-This document describes the user-facing settings registered by the Blender 5.2 extension. Defaults below apply to a genuinely new Scene. Migration rules for saved Scenes are described in the Rig section.
-
-## Main panel order
-
-Every section uses the same boxed foldout style and is rendered in this exact order:
-
-```text
-Export
-Rig
-Rewrite Generated Materials
-Cut
-Bake
-Analysis
-```
-
-Analysis results are contained inside the final **Analysis** foldout, which is collapsed by default. The highlighted export action is below all foldouts; analysis is manual and diagnostic-only, so it never disables export. Export mode and projection direction are grouped under **Rig**. Connected-object controls remain internal development-only functionality and are not shown in the production UI.
+This document describes the public Blender 5.2 Scene and object settings in extension
+version **0.81.0**. Defaults apply to a genuinely new Scene. Saved files migrate to Scene
+settings schema 7 without changing their selected export mode.
 
 ## Export
 
 ### Export mode
 
+The selector contains exactly three values.
+
 | Value | Default | Behavior |
 | --- | --- | --- |
-| Normal - UV Segments | Yes | Segments geometry, creates generated bake UVs, bakes textures, and exports region-based Spine mesh attachments. |
-| Camera Projection | No | Renders through the active camera and exports one screen-space projection attachment. |
+| Normal - UV Segments | Yes | Segments geometry, creates generated bake UV, bakes source surfaces, and exports region-based weighted Spine attachments. |
+| Camera Projection | No | Renders through the active camera and exports a flat cropped screen-space mesh. |
+| Depth Camera Projection | No | Renders through the active camera and exports an optimized visible depth-relief mesh with generated vertex bones. |
 
-Changing Export mode invalidates the cached readiness report; run Analyze manually when
-you want an updated diagnostic.
+Changing Export mode invalidates cached readiness. Run Analyze again before export.
 
 ### Projection direction
 
-Visible only when Export mode is **Normal - UV Segments**.
+Visible only for **Normal - UV Segments**.
 
 | Label | Persisted ID | Default | U / V / depth contract |
 | --- | --- | --- | --- |
@@ -43,23 +32,70 @@ Visible only when Export mode is **Normal - UV Segments**.
 | -Z | `NEGATIVE_Z` | No | U = world -X, V = world +Y, depth = world -Z. |
 | Active Camera | `ACTIVE_CAMERA` | No | U/V come from the active camera frame and depth is camera-local Z. |
 
-The selected identifier is stored in `Scene.spine2d_projection_direction`. New Scenes and older files without a stored value use `POSITIVE_Z`. Changing the value invalidates cached readiness; analysis remains manual.
-
-Active Camera is an object-bake Normal - UV Segments route. It keeps segmented meshes, separate textures, Object Origin placement, and object controls while projecting evaluated geometry through the active Perspective or Orthographic camera using the selected export texture dimensions.
-
-This selector is not used by the separate **Camera Projection** export mode. That mode still renders a coverage image and applies its historical crop, contour, triangulation, and flattening pipeline.
-
-The main Reset operator restores `POSITIVE_Z` together with the other public defaults.
+Active Camera in this selector remains a Normal / UV Segments route. It does not become
+flat Camera Projection or Depth Camera Projection.
 
 ### Projection alpha threshold
 
-Visible only in Camera Projection mode.
+Visible for Camera Projection and Depth Camera Projection.
 
 | Type | Range | Default |
 | --- | --- | --- |
 | Float | 0.0 through 1.0 | `1 / 255` |
 
-Pixels below the configured threshold are excluded from the initial camera-projection coverage mask. Later coverage cleanup, crop, contour, and triangulation rules still apply.
+Pixels below the threshold are excluded from rendered-camera coverage and crop bounds.
+
+### Depth base
+
+Depth Camera Projection uses **Farthest Visible Point** publicly in 0.81.0.
+
+```text
+farthest visible surface → rig offset 0
+nearer retained points   → non-negative offset toward the camera
+```
+
+The architecture also implements `OBJECT_ORIGIN`, but the property is hidden. It fails
+closed unless Object Origin lies behind every visible point. The UI does not expose a
+fourth mode or a public base selector.
+
+### Depth smoothing
+
+Visible only for Depth Camera Projection.
+
+| Type | Range | Default |
+| --- | --- | --- |
+| Float | 0.0 through 1.0 | 0.35 |
+
+Controls one edge-aware depth smoothing pass. Neighboring samples are blended only when
+their depth difference does not exceed the resolved edge threshold.
+
+### Depth edge threshold
+
+| Type | Range | Default |
+| --- | --- | --- |
+| Float fraction | 0.0 through 1.0 | 0.08 |
+
+The value is multiplied by the visible object depth range. Candidate triangles and
+smoothing neighborhoods do not cross larger depth jumps. Values that disconnect every
+candidate triangle block readiness/export instead of silently flattening the object.
+
+### Depth mesh error (px)
+
+| Type | Range | Default |
+| --- | --- | --- |
+| Float pixels | 0.25 through 128.0 | 4.0 |
+
+This is the requested screen-space sample spacing for the generated relief lattice.
+Smaller values retain more points until the hard point limit is reached.
+
+### Max depth points
+
+| Type | Range | Default |
+| --- | --- | --- |
+| Integer | 4 through 4096 | 128 |
+
+Hard limit for retained depth points and their generated vertex bones. The source Blender
+vertex count is not copied directly.
 
 ### Texture size
 
@@ -67,13 +103,25 @@ Pixels below the configured threshold are excluded from the initial camera-proje
 | --- | --- | --- |
 | Even integer | 64 through 4096 | 1024 |
 
-The value controls square semantic bake textures and camera-projection render targets used by the current UI pipeline. Larger values increase render time, memory use, and output size.
+Controls object bake textures and rendered-camera targets.
+
+### Spine version
+
+| UI value | Exact JSON version |
+| --- | --- |
+| Spine 3.8 | 3.8.99 |
+| Spine 4.0 | 4.0.64 |
+| Spine 4.1 | 4.1.24 |
+| Spine 4.2 | 4.2.43 |
+| Spine 4.3 | 4.3.23 |
+
+Standalone single- and multi-object capability is validated by the target/profile
+registry. Connected and mixed composition remain limited to supported Spine 4.2 routes.
 
 ### JSON
 
-Directory for final Spine JSON output. Blender-relative paths are resolved through `bpy.path.abspath`. When empty, the exporter uses the saved `.blend` directory through its default output resolver.
-
-Export requires a saved `.blend` and a writable destination.
+Directory for the final Spine JSON. Blender-relative paths resolve through
+`bpy.path.abspath`. Export requires a saved `.blend` and a writable destination.
 
 ### Images Subfolder
 
@@ -81,66 +129,28 @@ Export requires a saved `.blend` and a writable destination.
 | --- | --- |
 | Relative path | `images/` |
 
-Backslashes are normalized to forward slashes. Leading `./` and surrounding slashes are removed. An empty value resolves to `images`.
-
-The final texture directory is below the JSON output directory.
-
-### Connect (development-only)
-
-The per-object setting is retained for development integrations but is hidden from the
-production UI.
-
-| Type | Default |
-| --- | --- |
-| Boolean | Disabled |
-
-At least two selected objects must have Connect enabled to create a connected subgroup. One connected object falls back to standalone composition with a warning.
-
-`TWO_AXIS_ROTATION_SCALE` supports connected composition through a dedicated five-phase connected constraint schedule. The connected group and every object retain independent X, Y, and Scale controls; no Rotation Z control or synthetic sixth constraint is generated. Global and per-object phases are Rotation X, IK, Uniform Scale, X Depth Scale, and Rotation Y.
-
-Connected order values are assigned by ordered Z layer, matching the historical 3-Axis merger. Objects in the same Z layer intentionally share the same phase order; objects in different layers receive consecutive order values. The set of used phase values is dense, but the complete document may contain duplicate order values by design.
+Backslashes become forward slashes. Leading `./` and surrounding slashes are removed.
 
 ## Rig
 
 ### Rig profile
 
-| Value | Persisted ID | Fresh Scene default | Behavior |
-| --- | --- | --- | --- |
-| 3-Axis Rotation | `LEGACY_ROTATABLE_MESH` | No | Existing X/Y/Z compatibility rig. Connected export reproduces the dedicated wrapper and constraint payload from the historical `main` exporter. |
-| 2-Axis Rotation + Scale | `TWO_AXIS_ROTATION_SCALE` | Yes | Generates X/Y pseudo-rotation controls and one independent uniform Scale control. No Rotation Z control is generated. |
+The public Rewrite UI exports the 2-Axis Rotation + Scale profile. Historical 3-Axis
+values remain persisted for compatibility and explicit development/API composition.
 
-Changing Rig profile invalidates cached readiness and schedules a new analysis because bone names, constraint order, weighted bone indices, control attachments, and preview animation change.
+| Value | Persisted ID | Fresh Scene default |
+| --- | --- | --- |
+| 3-Axis Rotation | `LEGACY_ROTATABLE_MESH` | No |
+| 2-Axis Rotation + Scale | `TWO_AXIS_ROTATION_SCALE` | Yes |
 
-The two-axis profile follows the complete Spine 4.2.43 reference stored in [Rig Profiles](rig-profiles.md). Model-specific `BOX`, `TOP`, and `BOTTOM` names are not copied. They are generalized through the object prefix, ordered Z groups, and existing per-vertex bones.
+Normal / UV Segments and Depth Camera Projection both use the existing generated
+vertex-bone pipeline. Flat Camera Projection retains its flat rendered contour attachment.
 
-### Single-object setup pose
-
-Normal - UV Segments with the public two-axis profile uses `PRESERVE_COMPOSITION`:
-
-```text
-<prefix>_main.x = projected Blender Object Origin U
-<prefix>_main.y = projected Blender Object Origin V
-<prefix>_rotation_X.rotation = 0
-<prefix>_rotation_Y.rotation = 0
-```
-
-The selected signed axis or Active Camera frame determines U, V, and depth. Geometry remains in the local projected plane around the Blender Object Origin, so the exported main bone is the visible rotation and scale pivot.
-
-The separate rendered Camera Projection mode retains the historical `NORMALIZED_SINGLE` setup policy. The reference X/Y setup angles remain transform-constraint rotation offsets in both routes.
-
-### Multi-object setup pose
-
-Each standalone or connected object source uses `PRESERVE_COMPOSITION`: its existing `<prefix>_main` placement remains part of the object-local rig so composition cannot flatten or overlap the scene. Two-axis X/Y rotation controls are still created with neutral `rotation = 0`; their reference setup angles live in the matching transform-constraint offsets.
-
-For connected 3-Axis export, the group is not an ordinary object rig and is not post-normalized. It uses the dedicated Legacy hierarchy from `main`: root-space X/Y/Z controls, neutral generated Z layers, exact global helper transforms, exact constrained-bone lists, full object-main X/Y offsets, Z-layer order sharing, and unchanged object scale-compensator order `6`.
-
-For connected 2-Axis export, every `<prefix>_scale` control is converted from root space to `<prefix>_main` local space before composition. The group then uses explicit global X, IK, Scale, depth-scale, and Y targets with the same Z-layer scheduling principle.
-
-The selected object policy is explicit immutable data passed through UI settings into the rig build request. It is never inferred from object names or coordinate values.
+For public Depth Camera Projection with Farthest Visible Point, the existing Normal rig
+uses `MINIMUM_Z` as the Z-group origin policy. This maps the farthest visible depth to
+zero and keeps every generated group offset non-negative toward the camera.
 
 ### 2-Axis controls
-
-The generated control set is:
 
 ```text
 <prefix>_rotation_X
@@ -149,17 +159,7 @@ The generated control set is:
 <prefix>_main
 ```
 
-X, Y, and Scale controls share one editor X coordinate. Their Y positions are separated by one control length:
-
-```text
-Rotation X
-    one control length
-Rotation Y
-    one control length
-Scale
-```
-
-The Scale transform affects `<prefix>_rotate_X` and every Z-group rotation bone. Single-object constraint evaluation uses the reference order:
+The single-object constraint phase order is:
 
 ```text
 0  Rotation X Transform
@@ -169,17 +169,8 @@ The Scale transform affects `<prefix>_rotate_X` and every Z-group rotation bone.
 4  Rotation Y Transform
 ```
 
-Connected evaluation keeps the same semantic phase order while allocating one object order per connected Z layer.
-
-### Reset Rig Profile
-
-The reset button beside the profile selector restores:
-
-```text
-2-Axis Rotation + Scale (TWO_AXIS_ROTATION_SCALE)
-```
-
-It does not modify texture, cutting, baking, material, or path settings.
+`TWO_AXIS_ROTATION_SCALE` supports connected composition through a dedicated five-phase connected constraint schedule. Connected order values are assigned by ordered Z layer.
+Objects in the same layer may intentionally share one phase order.
 
 ### Control icons
 
@@ -187,55 +178,11 @@ It does not modify texture, cutting, baking, material, or path settings.
 | --- | --- |
 | Boolean | Disabled |
 
-The generated control attachments match the selected profile:
-
-- 3-Axis: X, Y, Z, Main;
-- 2-Axis + Scale: X, Y, Scale, Main.
-
-### Preview animation
-
-| Type | Default |
-| --- | --- |
-| Boolean | Disabled |
-
-The preview matches the selected profile. The two-axis preview references only X, Y, and Scale controls and contains no Z timeline.
-
 ### Saved Scene migration
 
-Schema 5 changes the default only for genuinely fresh Scenes:
-
-- a new Scene with no persisted Rewrite settings receives `TWO_AXIS_ROTATION_SCALE`;
-- a saved pre-profile project is assigned `LEGACY_ROTATABLE_MESH` for compatibility;
-- a schema-4 Scene preserves whichever rig profile the user already selected;
-- current schema values are never overwritten on registration or file loading.
-
-The projection direction does not require a schema migration. It is a new persisted Enum with a `POSITIVE_Z` RNA default, and Blender preserves every valid stored identifier when saving and reopening a `.blend` file.
-
-## Rewrite Generated Materials
-
-### Material Source
-
-| Value | Default | Behavior |
-| --- | --- | --- |
-| Require Source | Yes | Missing required source material data blocks export. |
-| Generate If Missing | No | Uses generated material only when required source material data is missing. |
-| Force Generated | No | Ignores source materials and always uses the generated pattern. |
-
-### Generated Pattern
-
-| Value | Default | Behavior |
-| --- | --- | --- |
-| Solid Gray | Yes | Uses one opaque RGB color. |
-| One Region - One Color | No | Assigns a deterministic color to each final region. |
-| One Polygon - One Color | No | Assigns a deterministic color to each final triangulated exported polygon. |
-
-### Generated Gray
-
-| Type | Range | Default |
-| --- | --- | --- |
-| RGB color | Each channel 0.0 through 1.0 | `(0.5, 0.5, 0.5)` |
-
-Generated output is always opaque; alpha is fixed to 1.0.
+Scene schema 7 adds the Depth Camera Projection quality fields. Missing depth settings
+receive defaults, while valid saved export mode, Spine target, seam mode, rig profile,
+and all established settings remain unchanged.
 
 ## Cut
 
@@ -246,15 +193,15 @@ Generated output is always opaque; alpha is fixed to 1.0.
 | Auto | Yes | Uses angular segmentation controls. |
 | Custom | No | Uses user-marked seams and disables angular splitting controls. |
 
-Older development scenes are migrated once to the current Scene settings schema. Deliberate choices made after migration are preserved.
+Depth Camera Projection creates its own generated relief topology. Its discontinuities are
+controlled by Depth edge threshold, so the Cut foldout displays an explanatory message
+instead of source seam controls.
 
 ### Seed angle limit
 
 | Type | Range | Default |
 | --- | --- | --- |
 | Integer degrees | 1 through 89 | 30 |
-
-In Auto mode, a candidate face must satisfy the selected angular policy relative to the region seed.
 
 ### Angular mode
 
@@ -263,12 +210,43 @@ In Auto mode, a candidate face must satisfy the selected angular policy relative
 | Seed cone | Yes | Compares each candidate face normal with the segment seed normal. |
 | Seed cone + local dihedral | No | Also limits the angle across each traversed shared edge. |
 
-### Local edge angle limit
+## Bake
 
-Visible only for **Seed cone + local dihedral**.
+### Frames and Start
+
+For one active object, Scene `Frames` and `Start` are used. For selected-object export,
+every Mesh stores its own values.
+
+```text
+Frames = 0  → one static texture at current frame
+Frames > 0  → Loop texture sequence for that object only
+```
+
+This applies independently to Normal / UV Segments, Camera Projection, and Depth Camera
+Projection.
+
+### Sequence FPS override
 
 | Type | Range | Default |
 | --- | --- | --- |
-| Float degrees | 0 through 180 | 30.0 |
+| Float | 0.0 through 1000.0 | 0.0 |
 
-The value limits local face-to-face angle changes across shared edges while the seed-cone condition remains active.
+Zero uses Scene FPS. A positive value overrides playback timing.
+
+### Rendered-camera scene influence
+
+Visible for Camera Projection and Depth Camera Projection:
+
+- Include shadows from scene objects;
+- Include reflection/transmission objects;
+- World affects lighting/reflections.
+
+These settings affect render-ray participation without allowing unrelated objects to
+become direct camera-visible output.
+
+## Analysis
+
+Analyze runs production preparation without writing files. Depth Camera Projection reports
+retained depth points, visible source triangles, maximum relief, weighted attachment
+statistics, and structured blockers. Any geometry, material, camera, selection, frame,
+mode, target, or depth-setting change makes the report stale.
