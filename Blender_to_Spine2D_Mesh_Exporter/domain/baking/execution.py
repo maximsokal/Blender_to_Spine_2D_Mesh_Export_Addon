@@ -7,6 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Tuple
 
+from ..geometry import DepthCameraProjectionSettings
 from .camera_projection import TexturePlan
 from .contracts import (
     require_finite_number,
@@ -23,6 +24,7 @@ class A1TextureExportMode(str, Enum):
 
     NORMAL_UV_SEGMENTS = "NORMAL_UV_SEGMENTS"
     CAMERA_PROJECTION = "CAMERA_PROJECTION"
+    DEPTH_CAMERA_PROJECTION = "DEPTH_CAMERA_PROJECTION"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +65,10 @@ class BakeExecutionSettings:
     # Appended to preserve the positional layout of the established settings contract.
     camera_influence_policy: CameraProjectionInfluencePolicy = (
         CameraProjectionInfluencePolicy()
+    )
+    # Appended for 0.81.0 so established positional construction remains stable.
+    depth_projection: DepthCameraProjectionSettings = (
+        DepthCameraProjectionSettings()
     )
 
     def __post_init__(self) -> None:
@@ -110,6 +116,10 @@ class BakeExecutionSettings:
         ):
             raise TypeError(
                 "camera_influence_policy must be CameraProjectionInfluencePolicy"
+            )
+        if not isinstance(self.depth_projection, DepthCameraProjectionSettings):
+            raise TypeError(
+                "depth_projection must be DepthCameraProjectionSettings"
             )
 
 
