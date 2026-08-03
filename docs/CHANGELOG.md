@@ -4,7 +4,42 @@ This changelog records public product releases. Detailed milestone notes are pre
 
 ## Current candidate status
 
-Version **0.80.1** is the current release candidate. It extends the real Blender sequence acceptance matrix to multi-object exports where exactly one object uses a texture sequence and sibling objects remain static.
+Version **0.81.0** is the current release candidate. It adds the third public export mode,
+Depth Camera Projection, while preserving Normal / UV Segments and flat Camera Projection.
+
+## [0.81.0] - 2026-08-03
+
+### Added
+
+- Public `Depth Camera Projection` alongside `Normal / UV Segments` and `Camera Projection`.
+- Evaluated-mesh front-most depth sampling through active Perspective or Orthographic cameras.
+- Bounded generated relief topology controlled by Depth smoothing, Depth edge threshold, Depth mesh error, and Max depth points.
+- Farthest Visible Point base policy with zero offset at the farthest visible surface and non-negative generated offsets toward the camera.
+- Hidden, fail-closed Object Origin base policy for future use.
+- Direct full-frame camera UV and post-render crop-local UV remapping.
+- Normal-style Z groups, weighted attachments, and generated vertex bones for retained depth points.
+- Scene settings schema 7 and safe defaults for new depth controls.
+- Blender-independent depth-surface and public routing contracts.
+- Real Blender single-object Depth acceptance for Spine 3.8 through 4.3, Perspective, Orthographic, and sequence output.
+- Real Blender multi-object Depth acceptance with one two-frame sequence object and one static sibling.
+
+### Preserved
+
+- Existing Normal / UV Segments behavior and projection-direction choices.
+- Existing flat Camera Projection render, crop, contour, and attachment behavior.
+- Existing Spine target/profile/scope capability registry.
+- Existing per-object static/sequence timing and atomic output transaction.
+- Source Mesh, UV, material, transform, camera, render, selection, frame, and temporary datablock restoration contracts.
+
+### Compatibility
+
+- Manifest version: `0.81.0`.
+- Expected archive: `blender_to_spine2d_mesh_exporter-0.81.0.zip`.
+- Minimum Blender version remains 5.2.0.
+- Scene settings schema: 7.
+- Existing saved Scenes retain their selected export mode.
+
+See [the complete 0.81.0 release note](releases/0.81.0.md).
 
 ## [0.80.1] - 2026-08-03
 
@@ -26,11 +61,10 @@ Version **0.80.1** is the current release candidate. It extends the real Blender
 
 ### UI and compatibility
 
-- Existing per-object `Frames` and `Start` values in the multi-object Bake foldout are now an explicitly validated public contract.
+- Existing per-object `Frames` and `Start` values in the multi-object Bake foldout are an explicitly validated public contract.
 - `Frames = 0` means static current-frame output; a positive value creates a Loop sequence only for that object.
-- No new RNA fields or Scene migration are required.
 - Public selected-object export remains standalone-only.
-- Scene settings schema remains version 6.
+- Scene settings schema remains version 6 for this historical release.
 
 ### Packaging
 
