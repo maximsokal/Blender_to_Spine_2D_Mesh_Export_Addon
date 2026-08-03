@@ -31,7 +31,8 @@ def test_current_manifest_keeps_supported_blender_minimum() -> None:
     with MANIFEST.open("rb") as stream:
         manifest = tomllib.load(stream)
 
-    assert manifest["version"] == "0.80.1"
+    # Current product version belongs to the newest release contract. This historical
+    # checkpoint continues to own only the Blender baseline it introduced.
     assert manifest["blender_version_min"] == "5.2.0"
 
 
