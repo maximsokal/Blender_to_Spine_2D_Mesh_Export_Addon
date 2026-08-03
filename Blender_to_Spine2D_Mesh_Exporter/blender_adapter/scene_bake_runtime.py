@@ -20,6 +20,14 @@ from .scene_bake_rna import matrix_tuple
 
 _MATRIX_RELATIVE_TOLERANCE = 1.0e-9
 _MATRIX_ABSOLUTE_TOLERANCE = 1.0e-10
+_FLOAT32_EPSILON = 2.0 ** -23
+_MATRIX_SYNC_ULP_MULTIPLIER = 4.0
+_MATRIX_SYNC_RELATIVE_TOLERANCE = (
+    _FLOAT32_EPSILON * _MATRIX_SYNC_ULP_MULTIPLIER
+)
+_MATRIX_SYNC_ABSOLUTE_TOLERANCE = (
+    _FLOAT32_EPSILON * _MATRIX_SYNC_ULP_MULTIPLIER
+)
 
 
 def _world_structure(
@@ -50,6 +58,9 @@ def _light_structure(
 def _matrix_difference(
     expected: tuple[float, ...],
     actual: tuple[float, ...],
+    *,
+    relative_tolerance: float = _MATRIX_RELATIVE_TOLERANCE,
+    absolute_tolerance: float = _MATRIX_ABSOLUTE_TOLERANCE,
 ) -> tuple[bool, float, int]:
     """Return ``(equal, maximum_delta, maximum_delta_index)`` for affine matrices."""
 
@@ -57,6 +68,26 @@ def _matrix_difference(
         raise TypeError("expected and actual matrices must be tuples")
     if len(expected) != 16 or len(actual) != 16:
         raise ValueError("expected and actual matrices must contain 16 values")
+    if not isinstance(relative_tolerance, (int, float)) or isinstance(
+        relative_tolerance,
+        bool,
+    ):
+        raise TypeError("relative_tolerance must be a finite non-negative number")
+    if not isinstance(absolute_tolerance, (int, float)) or isinstance(
+        absolute_tolerance,
+        bool,
+    ):
+        raise TypeError("absolute_tolerance must be a finite non-negative number")
+
+    resolved_relative = float(relative_tolerance)
+    resolved_absolute = float(absolute_tolerance)
+    if (
+        not isfinite(resolved_relative)
+        or not isfinite(resolved_absolute)
+        or resolved_relative < 0.0
+        or resolved_absolute < 0.0
+    ):
+        raise ValueError("matrix tolerances must be finite and non-negative")
 
     maximum_delta = 0.0
     maximum_index = 0
@@ -72,7 +103,7 @@ def _matrix_difference(
         if delta > maximum_delta:
             maximum_delta = delta
             maximum_index = index
-        tolerance = _MATRIX_ABSOLUTE_TOLERANCE + _MATRIX_RELATIVE_TOLERANCE * max(
+        tolerance = resolved_absolute + resolved_relative * max(
             1.0,
             abs(expected_float),
             abs(actual_float),
@@ -140,6 +171,10 @@ def synchronize_runtime_object_transform(
     world matrix preserves that topology while allowing Camera, Reflection, Generated,
     Object, Fresnel, and similar material inputs to evaluate at each sequence frame.
     Vertex deformation is intentionally outside this contract.
+
+    Blender RNA stores Object transforms with float32-level precision. The post-write
+    verification therefore permits four float32 ULPs while the source-versus-analysis
+    comparison remains on the stricter planning tolerance above.
     """
 
     if target_obj is None:
@@ -194,6 +229,8 @@ def synchronize_runtime_object_transform(
     equal, maximum_delta, maximum_index = _matrix_difference(
         current.world_matrix,
         target_matrix,
+        relative_tolerance=_MATRIX_SYNC_RELATIVE_TOLERANCE,
+        absolute_tolerance=_MATRIX_SYNC_ABSOLUTE_TOLERANCE,
     )
     if not equal:
         raise SceneBakeAnalysisError(
