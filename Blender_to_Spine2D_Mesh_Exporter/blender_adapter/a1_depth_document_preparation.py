@@ -1,4 +1,4 @@
-"""Build a Normal-style weighted rig over a camera-depth relief surface."""
+"""Build a compensated Normal-style rig over one camera-depth relief surface."""
 
 from __future__ import annotations
 
@@ -16,10 +16,10 @@ from ..domain.spine.legacy_rig_contracts import (
 )
 from ..domain.spine.rig_builder import build_rig
 from ..domain.spine.rig_profiles import resolve_a1_rig_profile
-from .a1_document_preparation import (
-    A1DocumentPreparationResult,
-    _assemble_document_for_texture,
+from .a1_depth_document_assembly import (
+    assemble_and_finalize_a1_depth_document,
 )
+from .a1_document_preparation import A1DocumentPreparationResult
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
     freeze_statistics,
@@ -33,19 +33,20 @@ logger = logging.getLogger(__name__)
 def _resolve_depth_z_group_origin_mode(
     base_mode: DepthProjectionBaseMode,
 ) -> LegacyZGroupOriginMode:
-    """Map the depth-surface base policy to the existing Normal rig math.
+    """Keep the active camera as the single depth zero for every object.
 
-    ``FARTHEST_VISIBLE`` uses the minimum camera-local Z as zero. Every other visible
-    point then receives a non-negative offset toward the camera. ``OBJECT_ORIGIN``
-    retains absolute camera-local Z relative to camera-space zero and is accepted only
-    after the geometry stage proved that the origin lies behind all visible points.
+    ``base_mode`` controls how the local one-sided relief was validated while building
+    the visible surface. It must not re-reference the rig independently per object.
+    Generated rig Z values are positive distances from the shared camera plane, so both
+    public ``FARTHEST_VISIBLE`` and hidden ``OBJECT_ORIGIN`` use the global zero.
     """
 
     if not isinstance(base_mode, DepthProjectionBaseMode):
         raise TypeError("base_mode must be DepthProjectionBaseMode")
-    if base_mode is DepthProjectionBaseMode.FARTHEST_VISIBLE:
-        return LegacyZGroupOriginMode.MINIMUM_Z
-    if base_mode is DepthProjectionBaseMode.OBJECT_ORIGIN:
+    if base_mode in {
+        DepthProjectionBaseMode.FARTHEST_VISIBLE,
+        DepthProjectionBaseMode.OBJECT_ORIGIN,
+    }:
         return LegacyZGroupOriginMode.OBJECT_ORIGIN
     raise AssertionError(f"Unhandled depth base mode: {base_mode}")
 
@@ -53,7 +54,7 @@ def _resolve_depth_z_group_origin_mode(
 def prepare_a1_depth_document(
     texture: A1TexturePlanningResult,
 ) -> A1DocumentPreparationResult:
-    """Build generated vertex bones from depth points while retaining camera texture."""
+    """Build camera-distance vertex bones and one camera-textured depth attachment."""
 
     if not isinstance(texture, A1TexturePlanningResult):
         raise TypeError("texture must be A1TexturePlanningResult")
@@ -82,6 +83,11 @@ def prepare_a1_depth_document(
             source.source_snapshot,
             source.settings,
         )
+        if source.settings.use_world_location_for_main_bone and main_position is None:
+            raise ValueError(
+                "Depth Camera Projection lost projected Object Origin placement"
+            )
+
         rig = build_rig(
             LegacyRigBuildRequest(
                 prefix=source.prefix,
@@ -96,13 +102,17 @@ def prepare_a1_depth_document(
             resolved_profile,
             spine_target=source.settings.export.spine_target,
         )
-        offsets = tuple(group.y_offset_pixels for group in rig.info.z_groups)
-        if depth_settings.base_mode is DepthProjectionBaseMode.FARTHEST_VISIBLE:
-            if not offsets or min(offsets) != 0.0 or any(value < 0.0 for value in offsets):
-                raise ValueError(
-                    "FARTHEST_VISIBLE depth rig must start at zero and extend only "
-                    f"toward the camera; offsets={offsets}"
-                )
+        offsets = tuple(float(group.y_offset_pixels) for group in rig.info.z_groups)
+        if not offsets or any(value <= 0.0 for value in offsets):
+            raise ValueError(
+                "Depth rig offsets must be positive distances from shared camera zero; "
+                f"offsets={offsets}"
+            )
+        if len(offsets) > 1 and max(offsets) <= min(offsets):
+            raise ValueError(
+                f"Depth rig lost camera-distance ordering: offsets={offsets}"
+            )
+
         statistics = freeze_statistics(
             statistics,
             {
@@ -111,13 +121,18 @@ def prepare_a1_depth_document(
                 "rig_setup_pose_mode": rig.request.setup_pose_mode.value,
                 "z_group_origin_mode": rig.request.z_group_origin_mode.value,
                 "depth_camera_vertex_rig": 1,
-                "depth_camera_absolute_z_retained": 1,
+                "depth_camera_global_camera_zero": 1,
+                "depth_camera_absolute_distance_retained": 1,
                 "depth_camera_relief_base_mode": depth_settings.base_mode.value,
                 "depth_camera_minimum_rig_offset": min(offsets),
                 "depth_camera_maximum_rig_offset": max(offsets),
-                "depth_camera_offsets_toward_camera_only": int(
-                    depth_settings.base_mode
-                    is DepthProjectionBaseMode.FARTHEST_VISIBLE
+                "depth_camera_parent_y_compensated": 1,
+                "depth_camera_single_attachment": 1,
+                "depth_camera_projected_main_x": (
+                    0.0 if main_position is None else float(main_position[0])
+                ),
+                "depth_camera_projected_main_y": (
+                    0.0 if main_position is None else float(main_position[1])
                 ),
                 "camera_layer_projection_kind": (
                     ""
@@ -128,16 +143,16 @@ def prepare_a1_depth_document(
         )
 
         stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
-        # The texture is rendered by Camera Projection, but attachment topology and
-        # vertex bones are assembled by the Normal / UV Segments document path.
-        document_assembly = _assemble_document_for_texture(
+        document_assembly = assemble_and_finalize_a1_depth_document(
             texture,
             rig,
-            camera_projection=False,
-            active_camera_layout=False,
         )
         final_rig = document_assembly.rig
         document = document_assembly.document
+        if len(document_assembly.document_build.components) != 1:
+            raise ValueError(
+                "Depth Camera Projection must serialize one mesh attachment per object"
+            )
         sequence_enabled = source.settings.export.sequence_frame_count > 0
         statistics = freeze_statistics(
             statistics,
@@ -163,14 +178,15 @@ def prepare_a1_depth_document(
                 ),
             },
         )
-        logger.debug(
-            "Prepared depth relief document for %s: profile=%s setup=%s base=%s "
-            "z_groups=%d offsets=%s bones=%d slots=%d",
+        logger.info(
+            "Prepared depth relief document for %s: profile=%s setup=%s "
+            "base_policy=%s camera_zero=0 main=%s distance_offsets=%s "
+            "bones=%d slots=%d attachments=1",
             source.object_id,
             final_rig.profile.profile_id,
             final_rig.request.setup_pose_mode.value,
             depth_settings.base_mode.value,
-            len(final_rig.info.z_groups),
+            main_position,
             offsets,
             len(document.bones),
             len(document.slots),
