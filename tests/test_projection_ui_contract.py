@@ -114,11 +114,20 @@ def test_normal_uv_settings_preserve_every_selected_projection_direction() -> No
         assert settings.projection_direction is direction
 
 
-def test_rendered_camera_projection_cannot_enter_object_bake_camera_route() -> None:
+@pytest.mark.parametrize(
+    "texture_mode",
+    (
+        A1TextureExportMode.CAMERA_PROJECTION,
+        A1TextureExportMode.DEPTH_CAMERA_PROJECTION,
+    ),
+)
+def test_rendered_camera_modes_cannot_enter_object_bake_camera_route(
+    texture_mode: A1TextureExportMode,
+) -> None:
     source = _object_profile()
     scene = _scene_profile(
         A1ProjectionDirection.ACTIVE_CAMERA,
-        texture_mode=A1TextureExportMode.CAMERA_PROJECTION,
+        texture_mode=texture_mode,
     )
 
     assert _effective_projection_direction(scene) is A1ProjectionDirection.POSITIVE_Z
@@ -198,7 +207,7 @@ def test_projection_reset_preserves_base_cancellation(monkeypatch) -> None:
     operator.report.assert_not_called()
 
 
-def test_slice_six_does_not_change_scene_schema_or_public_multi_mode() -> None:
+def test_depth_feature_uses_schema_seven_and_keeps_public_multi_standalone() -> None:
     migration = (
         PACKAGE / "blender_adapter" / "scene_settings_migration.py"
     ).read_text(encoding="utf-8")
@@ -206,6 +215,6 @@ def test_slice_six_does_not_change_scene_schema_or_public_multi_mode() -> None:
         PACKAGE / "blender_adapter" / "a1_ui_export_plan.py"
     ).read_text(encoding="utf-8")
 
-    assert "CURRENT_SETTINGS_SCHEMA_VERSION = 6" in migration
+    assert "CURRENT_SETTINGS_SCHEMA_VERSION = 7" in migration
     assert "mode=A1MultiObjectMode.STANDALONE" in planner
     assert "build_development_connected_ui_export_plan" not in planner
