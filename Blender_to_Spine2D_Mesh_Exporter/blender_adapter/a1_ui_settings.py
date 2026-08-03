@@ -53,19 +53,29 @@ def _versioned_json_output_stem(
 def _effective_projection_direction(
     scene: _SceneExportProfile,
 ) -> A1ProjectionDirection:
-    """Return the direction owned by the selected public texture route.
-
-    Normal - UV Segments consumes the new public Scene selector. The historical rendered
-    Camera Projection route owns its own render/crop/flattening pipeline and therefore
-    remains on the neutral +Z object-settings value instead of entering object-bake camera
-    projection accidentally.
-    """
+    """Return the direction owned by the selected public texture route."""
 
     if not isinstance(scene, _SceneExportProfile):
         raise TypeError("scene must be _SceneExportProfile")
     if scene.texture_export_mode is A1TextureExportMode.CAMERA_PROJECTION:
+        # Flat Camera Projection owns render/crop/hull and never enters the object
+        # geometry projection route.
         return A1ProjectionDirection.POSITIVE_Z
+    if scene.texture_export_mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
+        return A1ProjectionDirection.ACTIVE_CAMERA
     return scene.projection_direction
+
+
+def _effective_source_geometry_mode(
+    scene: _SceneExportProfile,
+) -> A1SourceGeometryMode:
+    """Depth relief always consumes the evaluated dependency-graph mesh."""
+
+    if not isinstance(scene, _SceneExportProfile):
+        raise TypeError("scene must be _SceneExportProfile")
+    if scene.texture_export_mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
+        return A1SourceGeometryMode.EVALUATED
+    return A1SourceGeometryMode.ORIGINAL
 
 
 def _settings_from_profiles(
@@ -101,7 +111,7 @@ def _settings_from_profiles(
         prefix=obj.object_name,
         output_stem=sanitize_filename_stem(obj.object_name),
         json_output_stem=_versioned_json_output_stem(json_output_stem, scene),
-        source_geometry_mode=A1SourceGeometryMode.ORIGINAL,
+        source_geometry_mode=_effective_source_geometry_mode(scene),
         geometry=scene.geometry,
         uv=UvUnwrapSettings(layer_name=_DEFAULT_UV_LAYER_NAME),
         bake_execution=scene.bake_execution,
@@ -272,5 +282,6 @@ __all__ = [
     "_build_sources_from_profiles",
     "_common_object_settings",
     "_effective_projection_direction",
+    "_effective_source_geometry_mode",
     "_settings_from_profiles",
 ]
