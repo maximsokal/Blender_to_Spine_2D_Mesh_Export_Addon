@@ -4,7 +4,41 @@ This changelog records public product releases. Detailed milestone notes are pre
 
 ## Current candidate status
 
-Version **0.80.0** is the current release candidate. It promotes the Blender 5.2 Rewrite exporter after completing real Blender sequence acceptance for all supported standalone Spine targets and for every production-supported connected/mixed Spine 4.2 profile and texture mode.
+Version **0.80.1** is the current release candidate. It extends the real Blender sequence acceptance matrix to multi-object exports where exactly one object uses a texture sequence and sibling objects remain static.
+
+## [0.80.1] - 2026-08-03
+
+### Added
+
+- Real Blender 5.2 standalone mixed static/sequence coverage for Spine 3.8, 4.0, 4.1, 4.2, and 4.3.
+- Normal - UV Segments and Camera Projection coverage with one two-frame sequence object and two static siblings.
+- Connected Spine 4.2 coverage with one sequence object and one static object for both rig profiles and both texture modes.
+- Mixed Spine 4.2 coverage with the sequence owner inside either the connected subgroup or the standalone subgroup.
+- Pure request-boundary tests proving that selected-object frame counts `(2, 0, 0)` remain independent on the final `A1MultiObjectSource` settings.
+
+### Validated
+
+- Static objects produce one PNG and one setup attachment.
+- Static objects do not receive native sequence metadata, attachment-swap timelines, or native sequence timelines.
+- The sequence object alone receives legacy attachment swaps on Spine 3.8/4.0 or native sequence metadata on Spine 4.1+.
+- Connected wrapper hierarchy and mixed standalone subgroup isolation remain valid with heterogeneous object timing.
+- Source transforms, current frame, active object, selection, materials, Scene bake state, render state, Camera state, and temporary datablocks are restored.
+
+### UI and compatibility
+
+- Existing per-object `Frames` and `Start` values in the multi-object Bake foldout are now an explicitly validated public contract.
+- `Frames = 0` means static current-frame output; a positive value creates a Loop sequence only for that object.
+- No new RNA fields or Scene migration are required.
+- Public selected-object export remains standalone-only.
+- Scene settings schema remains version 6.
+
+### Packaging
+
+- Manifest version: `0.80.1`.
+- Expected archive: `blender_to_spine2d_mesh_exporter-0.80.1.zip`.
+- Minimum Blender version remains 5.2.0.
+
+See [the complete 0.80.1 release note](releases/0.80.1.md).
 
 ## [0.80.0] - 2026-08-03
 
