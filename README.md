@@ -23,7 +23,7 @@
   <p><strong>Click to watch the video</strong></p>
 </div>
 
-Blender to Spine2D Mesh Exporter converts Blender mesh objects into Spine JSON, weighted mesh attachments, baked textures, generated rig data, and optional texture sequences. Version **0.80.0** uses a Blender 5.2-only Rewrite pipeline with deterministic geometry processing, explicit texture strategies, target-specific Spine codecs, source-data integrity checks, and atomic output commits.
+Blender to Spine2D Mesh Exporter converts Blender mesh objects into Spine JSON, weighted mesh attachments, baked textures, generated rig data, and optional texture sequences. Version **0.80.1** uses a Blender 5.2-only Rewrite pipeline with deterministic geometry processing, explicit texture strategies, target-specific Spine codecs, source-data integrity checks, and atomic output commits.
 
 ## Requirements
 
@@ -51,6 +51,7 @@ Blender 4.x and Blender 5.0/5.1 are not supported by the current extension packa
 - Explicit Camera Projection export with render, crop, contour, and screen-space attachment generation.
 - Cycles semantic object baking with Blender 5.2 state restoration.
 - Animated material and object-transform sequence baking.
+- Independent per-object texture timing in multi-object export: one object may use a sequence while sibling objects remain static.
 - Texture Coordinate `Camera` and `Reflection` support in audited Normal UV object baking.
 - Generated material fallback for missing or intentionally ignored source materials.
 - Target-specific JSON serialization for Spine 3.8, 4.0, 4.1, 4.2, and 4.3.
@@ -79,11 +80,22 @@ Camera Projection is selected explicitly. The exporter does not silently switch 
 
 A sequence can use the Scene frame rate or an explicit export frame rate. Every frame is staged and committed atomically with the final JSON.
 
-The real Blender release gate covers:
+For multi-object export, the Bake foldout stores `Frames` and `Start` separately for every selected Mesh:
+
+```text
+Frames = 0  → static texture evaluated at the current frame
+Frames > 0  → Loop texture sequence only for that object
+```
+
+Objects with different timing settings may be exported together in one JSON and one atomic texture transaction. Static siblings do not receive sequence metadata or animation timelines.
+
+The real Blender release gates cover:
 
 - Spine 3.8, 4.0, 4.1, 4.2, and 4.3 standalone multi-object export;
 - Normal - UV Segments and Camera Projection;
+- all-sequence and mixed static/sequence object sets;
 - connected and mixed Spine 4.2 export in both rig profiles and both texture modes;
+- sequence ownership inside both connected and standalone mixed subgroups;
 - animated object transforms and Camera/Reflection material inputs;
 - PNG, attachment topology, sequence schema, composition hierarchy, and Blender-state restoration.
 
@@ -96,14 +108,15 @@ The real Blender release gate covers:
 
 ## Quick start
 
-1. Install `blender_to_spine2d_mesh_exporter-0.80.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
+1. Install `blender_to_spine2d_mesh_exporter-0.80.1.zip` through **Edit > Preferences > Extensions > Install from Disk**.
 2. Save the `.blend` file.
 3. Select one or more Mesh objects in Object Mode.
 4. Open **3D View > Sidebar > Blender to Spine2D Mesh Exporter**.
 5. Choose the exact Spine target, export mode, rig, generated-material, cut, and bake settings.
-6. Run **Analyze** and resolve every blocker.
-7. Run **Export Current Object** or **Export Selected Objects**.
-8. Import the generated JSON and textures into the exact Spine version selected during export.
+6. For selected-object export, set `Frames = 0` on static objects and a positive frame count only on objects that need a texture sequence.
+7. Run **Analyze** and resolve every blocker.
+8. Run **Export Current Object** or **Export Selected Objects**.
+9. Import the generated JSON and textures into the exact Spine version selected during export.
 
 See the [Usage Guide](docs/usage.md) and [Settings Reference](docs/settings-reference.md) for the complete workflow.
 
@@ -129,7 +142,7 @@ images/<ObjectName>_Baked_0000.png
 images/<ObjectName>_Baked_0001.png
 ```
 
-Multi-object output uses the first ordered object name plus the number of additional selected objects. File stems are sanitized for ordinary Windows file APIs.
+A multi-object export may contain both forms at once. Sequence objects use numbered files; static objects use one unnumbered baked texture. Multi-object output uses the first ordered object name plus the number of additional selected objects. File stems are sanitized for ordinary Windows file APIs.
 
 See [Output Format](docs/output-format.md) for naming, attachment, sequence, and transaction details.
 
@@ -157,7 +170,7 @@ python tools/prepare_package.py --blender <path-to-Blender-5.2-executable>
 
 The resulting ZIP is written to `dist` unless an explicit output path is supplied. Its root contains `blender_manifest.toml` and `__init__.py`.
 
-See [Installation](docs/installation.md) and [Testing](docs/testing.md) for validation commands for version 0.80.0.
+See [Installation](docs/installation.md) and [Testing](docs/testing.md) for validation commands for version 0.80.1.
 
 ## Project structure
 
