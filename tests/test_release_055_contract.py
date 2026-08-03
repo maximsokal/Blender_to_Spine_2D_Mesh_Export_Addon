@@ -1,17 +1,11 @@
-"""Release contracts for the 0.55 Object Origin and projection work."""
+"""Release contracts for the historical 0.55 Object Origin and projection work."""
 
 from __future__ import annotations
 
 from pathlib import Path
-import tomllib
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-MANIFEST_PATH = (
-    REPOSITORY_ROOT
-    / "Blender_to_Spine2D_Mesh_Exporter"
-    / "blender_manifest.toml"
-)
 OBJECT_ORIGIN_TASK_PATH = (
     REPOSITORY_ROOT
     / "docs"
@@ -96,13 +90,6 @@ def _normalized_prose(value: str) -> str:
         .replace("`", " ")
         .split()
     )
-
-
-def test_current_release_uses_version_05518() -> None:
-    manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-
-    assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.55.18"
 
 
 def test_object_origin_release_keeps_approved_task_document() -> None:
