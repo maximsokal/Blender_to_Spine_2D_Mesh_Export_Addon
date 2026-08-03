@@ -19,7 +19,9 @@ from .a1_multi_object_contracts import (
     record_object_statistics,
 )
 from .a1_object_preparation import PreparedA1Object, StatisticsValue
-from .a1_projection_finalization import finalize_prepared_camera_projection
+from .a1_rendered_projection_finalization import (
+    finalize_prepared_rendered_projection,
+)
 from .bake_uv_spine_validation import validate_staged_normal_bake_coverage
 from .source_uv_integrity import (
     capture_source_uv_fingerprint,
@@ -135,7 +137,7 @@ def stage_and_finalize_a1_objects(
                 raise
 
         reservations.extend(staged.reservations)
-        finalized = finalize_prepared_camera_projection(
+        finalized = finalize_prepared_rendered_projection(
             item,
             staged.projection_layout,
         )
