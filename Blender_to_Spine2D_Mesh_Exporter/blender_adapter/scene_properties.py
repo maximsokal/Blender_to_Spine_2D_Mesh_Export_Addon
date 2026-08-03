@@ -8,7 +8,10 @@ from typing import Any
 import bpy
 
 from .. import config
-from ..domain.baking import A1TextureExportMode
+from ..domain.baking import (
+    A1TextureExportMode,
+    DepthProjectionBaseMode,
+)
 from ..domain.projection import A1ProjectionDirection
 from ..domain.spine.rig_profiles import A1RigProfile
 from ..domain.spine.version_target import (
@@ -59,12 +62,7 @@ def projection_direction_rna_enum_items() -> tuple[tuple[str, str, str], ...]:
 
 
 def rig_profile_rna_enum_items() -> tuple[tuple[str, str, str], ...]:
-    """Return persisted RNA choices required to load historical `.blend` files.
-
-    Three Axis remains an internal compatibility value so schema migration can bind old
-    Scene ID-properties safely. The public panel deliberately does not draw this Enum as
-    a selector; public export capture normalizes every hidden value to Two Axis.
-    """
+    """Return persisted RNA choices required to load historical `.blend` files."""
 
     return tuple(
         (profile.value, profile.label, profile.description)
@@ -73,26 +71,16 @@ def rig_profile_rna_enum_items() -> tuple[tuple[str, str, str], ...]:
 
 
 def _extension_registration_active() -> bool:
-    """Return whether the root extension is currently registering its RNA surface.
-
-    Blender may invoke EnumProperty update callbacks when persisted ID-property values are
-    rebound to newly registered RNA. That lifecycle callback is not a deliberate user edit
-    and must not advance the Scene schema before the migration owner runs.
-    """
-
     try:
         from .. import get_registration_state
 
         state = get_registration_state()
     except Exception:
-        # Isolated tests and partial imports may not expose the root lifecycle owner.
         return False
     return str(getattr(state, "value", state)).upper() == "REGISTERING"
 
 
 def _update_ui_for_paths(_self: Any, context: bpy.types.Context) -> None:
-    """Refresh visible 3D View panels after an output path changes."""
-
     window_manager = getattr(context, "window_manager", None)
     for window in getattr(window_manager, "windows", ()):
         screen = getattr(window, "screen", None)
@@ -106,8 +94,6 @@ def _invalidate_readiness_for_setting(
     *,
     reason: str,
 ) -> None:
-    """Invalidate cached analysis; refresh is deliberately manual."""
-
     scene = getattr(context, "scene", None)
     try:
         if scene is not None:
@@ -117,13 +103,8 @@ def _invalidate_readiness_for_setting(
     except Exception:
         logger.exception("Unable to invalidate readiness after %s", reason)
 
-    # Do not schedule background analysis here. A settings edit must never start
-    # production work or make the UI busy; the user explicitly presses Analyze.
-
 
 def _update_texture_export_mode(_self: Any, context: bpy.types.Context) -> None:
-    """Invalidate diagnostics after changing the texture export mode."""
-
     _invalidate_readiness_for_setting(
         context,
         reason="texture export mode changed",
@@ -132,8 +113,6 @@ def _update_texture_export_mode(_self: Any, context: bpy.types.Context) -> None:
 
 
 def _update_projection_direction(_self: Any, context: bpy.types.Context) -> None:
-    """Invalidate diagnostics after changing the Normal/UV projection frame."""
-
     _invalidate_readiness_for_setting(
         context,
         reason="projection direction changed",
@@ -142,8 +121,6 @@ def _update_projection_direction(_self: Any, context: bpy.types.Context) -> None
 
 
 def _update_bake_settings(_self: Any, context: bpy.types.Context) -> None:
-    """Invalidate diagnostics after sequence timing or scene influence changes."""
-
     _invalidate_readiness_for_setting(
         context,
         reason="Bake settings changed",
@@ -152,8 +129,6 @@ def _update_bake_settings(_self: Any, context: bpy.types.Context) -> None:
 
 
 def _update_spine_target_version(_self: Any, context: bpy.types.Context) -> None:
-    """Invalidate diagnostics because the final JSON schema has changed."""
-
     _invalidate_readiness_for_setting(
         context,
         reason="Spine target version changed",
@@ -162,8 +137,6 @@ def _update_spine_target_version(_self: Any, context: bpy.types.Context) -> None
 
 
 def _update_rig_profile(_self: Any, context: bpy.types.Context) -> None:
-    """Invalidate diagnostics because rig bones, constraints, and weights changed."""
-
     _invalidate_readiness_for_setting(
         context,
         reason="rig profile changed",
@@ -172,8 +145,6 @@ def _update_rig_profile(_self: Any, context: bpy.types.Context) -> None:
 
 
 def _update_seam_maker_mode(self: Any, context: bpy.types.Context) -> None:
-    """Mark only a deliberate post-registration Seam Maker choice as current."""
-
     lifecycle_update = migration_file_loading() or _extension_registration_active()
     if not lifecycle_update:
         try:
@@ -186,8 +157,6 @@ def _update_seam_maker_mode(self: Any, context: bpy.types.Context) -> None:
 
 
 def _update_texture_size(self: Any, _context: bpy.types.Context) -> None:
-    """Keep the persisted RNA value even and synchronize transitional globals."""
-
     global _TEXTURE_SIZE_SYNCING
     if _TEXTURE_SIZE_SYNCING:
         return
@@ -225,19 +194,23 @@ PROPERTIES = (
         "spine2d_texture_export_mode",
         bpy.props.EnumProperty(
             name="Export Mode",
-            description=(
-                "Choose segmented UV object baking or an explicit active-camera projection"
-            ),
+            description="Choose the public mesh and texture representation",
             items=(
                 (
                     A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
-                    "Normal — UV Segments",
+                    "Normal / UV Segments",
                     "Preserve cut regions and bake textures onto their generated UV layout",
                 ),
                 (
                     A1TextureExportMode.CAMERA_PROJECTION.value,
                     "Camera Projection",
-                    "Render from the active camera and export a screen-space projection mesh",
+                    "Render from the active camera and export a flat screen-space mesh",
+                ),
+                (
+                    A1TextureExportMode.DEPTH_CAMERA_PROJECTION.value,
+                    "Depth Camera Projection",
+                    "Render from the active camera and build an optimized depth-relief "
+                    "mesh with generated vertex bones",
                 ),
             ),
             default=A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
@@ -249,7 +222,7 @@ PROPERTIES = (
         bpy.props.EnumProperty(
             name="Projection Direction",
             description=(
-                "Choose the world axis or active camera used by Normal - UV Segments"
+                "Choose the world axis or active camera used by Normal / UV Segments"
             ),
             items=projection_direction_rna_enum_items(),
             default=A1ProjectionDirection.POSITIVE_Z.value,
@@ -329,7 +302,7 @@ PROPERTIES = (
         bpy.props.BoolProperty(
             name="Include shadows from scene objects",
             description=(
-                "Allow non-exported scene objects to cast shadows into Camera Projection"
+                "Allow non-exported scene objects to cast shadows into rendered camera modes"
             ),
             default=True,
             update=_update_bake_settings,
@@ -361,13 +334,88 @@ PROPERTIES = (
         "spine2d_projection_alpha_threshold",
         bpy.props.FloatProperty(
             name="Projection Alpha Threshold",
-            description=(
-                "Minimum rendered alpha included in camera-projection crop bounds"
-            ),
+            description="Minimum rendered alpha included in camera-projection crop bounds",
             default=1.0 / 255.0,
             min=0.0,
             max=1.0,
             precision=6,
+            update=_update_bake_settings,
+        ),
+    ),
+    (
+        "spine2d_depth_smoothing",
+        bpy.props.FloatProperty(
+            name="Depth Smoothing",
+            description=(
+                "Blend neighboring depth samples without crossing protected depth edges"
+            ),
+            default=0.35,
+            min=0.0,
+            max=1.0,
+            precision=3,
+            update=_update_bake_settings,
+        ),
+    ),
+    (
+        "spine2d_depth_edge_threshold",
+        bpy.props.FloatProperty(
+            name="Depth Edge Threshold",
+            description=(
+                "Maximum neighboring depth jump as a fraction of the visible depth range"
+            ),
+            default=0.08,
+            min=0.0,
+            max=1.0,
+            precision=3,
+            update=_update_bake_settings,
+        ),
+    ),
+    (
+        "spine2d_depth_mesh_error_pixels",
+        bpy.props.FloatProperty(
+            name="Depth Mesh Error",
+            description=(
+                "Requested screen-space sampling distance in pixels; lower values retain "
+                "more depth points"
+            ),
+            default=4.0,
+            min=0.25,
+            max=128.0,
+            precision=2,
+            update=_update_bake_settings,
+        ),
+    ),
+    (
+        "spine2d_depth_max_points",
+        bpy.props.IntProperty(
+            name="Max Depth Points",
+            description="Hard limit for generated depth points and their vertex bones",
+            default=128,
+            min=4,
+            max=4096,
+            update=_update_bake_settings,
+        ),
+    ),
+    (
+        "spine2d_depth_base_mode",
+        bpy.props.EnumProperty(
+            name="Depth Base",
+            description="Internal depth-relief base policy",
+            items=(
+                (
+                    DepthProjectionBaseMode.FARTHEST_VISIBLE.value,
+                    "Farthest Visible Point",
+                    "Use the farthest visible depth point as the relief base",
+                ),
+                (
+                    DepthProjectionBaseMode.OBJECT_ORIGIN.value,
+                    "Object Origin",
+                    "Use Object Origin only when it is behind every visible point",
+                ),
+            ),
+            default=DepthProjectionBaseMode.FARTHEST_VISIBLE.value,
+            update=_update_bake_settings,
+            options={"HIDDEN"},
         ),
     ),
     (
