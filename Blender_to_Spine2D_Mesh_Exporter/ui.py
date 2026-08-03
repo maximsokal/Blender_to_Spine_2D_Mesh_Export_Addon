@@ -25,6 +25,7 @@ from .blender_adapter.a1_ui_bridge import (
 )
 from .config import get_default_output_dir
 from .domain.baking import A1TextureExportMode, TextureSequenceTiming
+from .domain.geometry import DepthProjectionBaseMode
 from .domain.spine.version_target import (
     DEFAULT_SPINE_JSON_TARGET,
     resolve_spine_json_target,
@@ -91,6 +92,14 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene.spine2d_include_scene_shadows = True
             scene.spine2d_include_scene_reflection_transmission = True
             scene.spine2d_world_affects_lighting_reflections = True
+            scene.spine2d_projection_alpha_threshold = 1.0 / 255.0
+            scene.spine2d_depth_smoothing = 0.35
+            scene.spine2d_depth_edge_threshold = 0.08
+            scene.spine2d_depth_mesh_error_pixels = 4.0
+            scene.spine2d_depth_max_points = 128
+            scene.spine2d_depth_base_mode = (
+                DepthProjectionBaseMode.FARTHEST_VISIBLE.value
+            )
             clear_a1_export_readiness(scene)
             _tag_redraw(context)
             self.report({"INFO"}, "Spine2D Rewrite settings have been reset.")
@@ -288,6 +297,20 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         if expanded:
             draw_content(box.column(align=True))
 
+    @staticmethod
+    def _texture_mode(scene: bpy.types.Scene) -> A1TextureExportMode:
+        raw = str(
+            getattr(
+                scene,
+                "spine2d_texture_export_mode",
+                A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
+            )
+        ).strip().upper()
+        try:
+            return A1TextureExportMode(raw)
+        except ValueError:
+            return A1TextureExportMode.NORMAL_UV_SEGMENTS
+
     def _draw_export_settings(
         self,
         column: bpy.types.UILayout,
@@ -295,16 +318,10 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
     ) -> None:
         scene = context.scene
         column.prop(scene, "spine2d_texture_export_mode", text="Export mode")
-        texture_mode = str(
-            getattr(
-                scene,
-                "spine2d_texture_export_mode",
-                A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
-            )
-        ).upper()
-        if texture_mode == A1TextureExportMode.CAMERA_PROJECTION.value:
+        texture_mode = self._texture_mode(scene)
+        if texture_mode is A1TextureExportMode.CAMERA_PROJECTION:
             column.label(
-                text="Active camera render → one screen-space mesh",
+                text="Active camera render → flat screen-space mesh",
                 icon="CAMERA_DATA",
             )
             column.prop(
@@ -312,10 +329,54 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
                 "spine2d_projection_alpha_threshold",
                 text="Projection alpha threshold",
             )
+        elif texture_mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
+            column.label(
+                text="Active camera render → optimized depth-relief mesh",
+                icon="CAMERA_DATA",
+            )
+            column.label(
+                text="Depth base: Farthest visible point",
+                icon="INFO",
+            )
+            column.prop(
+                scene,
+                "spine2d_projection_alpha_threshold",
+                text="Projection alpha threshold",
+            )
+            column.separator()
+            column.prop(
+                scene,
+                "spine2d_depth_smoothing",
+                text="Depth smoothing",
+            )
+            column.prop(
+                scene,
+                "spine2d_depth_edge_threshold",
+                text="Depth edge threshold",
+            )
+            column.prop(
+                scene,
+                "spine2d_depth_mesh_error_pixels",
+                text="Depth mesh error (px)",
+            )
+            column.prop(
+                scene,
+                "spine2d_depth_max_points",
+                text="Max depth points",
+            )
+            column.label(
+                text="One generated vertex bone per retained depth point",
+                icon="BONE_DATA",
+            )
         else:
             column.label(
                 text="Preserves cut regions and generated UV meshes",
                 icon="UV",
+            )
+            column.prop(
+                scene,
+                "spine2d_projection_direction",
+                text="Projection direction",
             )
         column.separator()
 
@@ -365,9 +426,6 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         row = column.row(align=True)
         row.label(text="Control icons")
         row.prop(scene, "spine2d_control_icons", text="")
-        # Preview animation is intentionally hidden while target-version JSON export
-        # supports setup pose only. The legacy RNA property remains registered so old
-        # .blend files can load without losing their persisted setting.
 
         selected_meshes = tuple(
             candidate
@@ -387,6 +445,23 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         column: bpy.types.UILayout,
         scene: bpy.types.Scene,
     ) -> None:
+        texture_mode = OBJECT_PT_Spine2DMeshPanel._texture_mode(scene)
+        if texture_mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
+            column.label(
+                text="Depth surface segmentation is generated automatically",
+                icon="INFO",
+            )
+            column.label(
+                text="Depth edge threshold controls relief discontinuities",
+            )
+            return
+        if texture_mode is A1TextureExportMode.CAMERA_PROJECTION:
+            column.label(
+                text="Flat Camera Projection uses its rendered alpha contour",
+                icon="INFO",
+            )
+            return
+
         column.prop(scene, "spine2d_seam_maker_mode", text="Seam maker")
         if str(scene.spine2d_seam_maker_mode).upper() == "CUSTOM":
             column.label(
@@ -451,21 +526,35 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
                 box.label(text=selected_object.name, icon="MESH_DATA")
                 settings = selected_object.spine2d_bake_settings
                 box.prop(settings, "frames_for_render", text="Frames")
-                box.prop(settings, "bake_frame_start", text="Start")
-                start = max(0, int(settings.bake_frame_start))
                 frames = max(0, int(settings.frames_for_render))
-                last = start if frames == 0 else start + frames - 1
-                box.label(text=f"Last frame: {last}")
+                if frames > 0:
+                    box.prop(settings, "bake_frame_start", text="Start")
+                    start = max(0, int(settings.bake_frame_start))
+                    box.label(
+                        text=f"Sequence: {frames} frames ({start}–{start + frames - 1})"
+                    )
+                else:
+                    box.label(
+                        text=f"Static: current frame {scene.frame_current}",
+                        icon="IMAGE_DATA",
+                    )
                 sequence_enabled = sequence_enabled or frames > 0
                 estimated_texture_count += max(1, frames)
         else:
             column.prop(scene, "spine2d_frames_for_render", text="Frames for render")
-            column.prop(scene, "spine2d_bake_frame_start", text="Start")
-            start = max(0, int(scene.spine2d_bake_frame_start))
             frames = max(0, int(scene.spine2d_frames_for_render))
-            last = start if frames == 0 else start + frames - 1
-            column.label(text=f"Last frame: {last}")
-            column.label(text=f"Playback end: {scene.frame_end}")
+            if frames > 0:
+                column.prop(scene, "spine2d_bake_frame_start", text="Start")
+                start = max(0, int(scene.spine2d_bake_frame_start))
+                column.label(
+                    text=f"Sequence: {frames} frames ({start}–{start + frames - 1})"
+                )
+                column.label(text=f"Playback end: {scene.frame_end}")
+            else:
+                column.label(
+                    text=f"Static: current frame {scene.frame_current}",
+                    icon="IMAGE_DATA",
+                )
             sequence_enabled = frames > 0
             estimated_texture_count = max(1, frames)
 
@@ -485,23 +574,28 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         else:
             column.label(text="Texture animation: Static current frame", icon="IMAGE_DATA")
 
-        column.separator()
-        column.label(text="Camera Projection scene influence:", icon="CAMERA_DATA")
-        column.prop(
-            scene,
-            "spine2d_include_scene_shadows",
-            text="Include shadows from scene objects",
-        )
-        column.prop(
-            scene,
-            "spine2d_include_scene_reflection_transmission",
-            text="Include reflection/transmission objects",
-        )
-        column.prop(
-            scene,
-            "spine2d_world_affects_lighting_reflections",
-            text="World affects lighting/reflections",
-        )
+        texture_mode = OBJECT_PT_Spine2DMeshPanel._texture_mode(scene)
+        if texture_mode in {
+            A1TextureExportMode.CAMERA_PROJECTION,
+            A1TextureExportMode.DEPTH_CAMERA_PROJECTION,
+        }:
+            column.separator()
+            column.label(text="Rendered camera scene influence:", icon="CAMERA_DATA")
+            column.prop(
+                scene,
+                "spine2d_include_scene_shadows",
+                text="Include shadows from scene objects",
+            )
+            column.prop(
+                scene,
+                "spine2d_include_scene_reflection_transmission",
+                text="Include reflection/transmission objects",
+            )
+            column.prop(
+                scene,
+                "spine2d_world_affects_lighting_reflections",
+                text="World affects lighting/reflections",
+            )
 
     @staticmethod
     def _issue_icon(severity: IssueSeverity) -> str:
@@ -541,6 +635,22 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         mode = str(statistics.get("texture_export_mode", ""))
         if mode:
             box.label(text=f"Mode: {mode}")
+        depth_points = int(statistics.get("depth_projection_point_count", 0))
+        if depth_points:
+            depth_triangles = int(
+                statistics.get("depth_projection_source_triangle_count", 0)
+            )
+            maximum_relief = float(
+                statistics.get("depth_projection_maximum_relief", 0.0)
+            )
+            box.label(
+                text=(
+                    f"Depth relief: {depth_points} points / "
+                    f"{depth_triangles} visible source triangles"
+                ),
+                icon="BONE_DATA",
+            )
+            box.label(text=f"Maximum camera-facing relief: {maximum_relief:.6g}")
         pipeline = str(statistics.get("texture_pipeline", ""))
         if pipeline:
             frames = int(statistics.get("bake_frame_count", 0))
