@@ -2,7 +2,7 @@
 
 ## Current release candidate
 
-The current extension candidate is **0.80.0**.
+The current extension candidate is **0.80.1**.
 
 Supported product scope:
 
@@ -11,6 +11,7 @@ Supported product scope:
 - Connected and mixed composition for Spine 4.2.43 only.
 - Connected and mixed Spine 4.2 support both `3-Axis Rotation` and `2-Axis Rotation + Scale`.
 - Normal - UV Segments and Camera Projection are explicit independent texture modes.
+- Multi-object sources own independent `Frames` and `Start` values. Static and sequence objects may be exported in the same transaction.
 - Public selected-object export remains standalone-only.
 - Scene settings schema remains version 6.
 
@@ -57,9 +58,9 @@ if ($LASTEXITCODE -ne 0) {
 
 Do not use fail-fast for final evidence. A release run must expose every failure.
 
-## Standalone multi-object sequence matrix
+## Standalone all-sequence matrix
 
-The runner exercises every supported Spine target in both texture modes:
+The historical 0.80.0 runner exercises every supported Spine target in both texture modes with two sequence objects:
 
 ```powershell
 & $Blender `
@@ -69,7 +70,7 @@ The runner exercises every supported Spine target in both texture modes:
     --python tests\blender_headless\run_multi_object_sequence_mode_matrix_integration.py
 
 if ($LASTEXITCODE -ne 0) {
-    throw "Standalone multi-object sequence matrix failed"
+    throw "Standalone all-sequence matrix failed"
 }
 ```
 
@@ -86,17 +87,54 @@ Total cases: 10
 Total physical PNG files: 40
 ```
 
-The runner validates physical PNG signatures and pixels, frame differences, target-specific JSON schema, attachment topology, Camera Projection crop geometry, legacy attachment swaps for Spine 3.8/4.0, native sequences for Spine 4.1+, output isolation, and Blender-state restoration.
-
 Required marker:
 
 ```text
 [MULTI-SEQUENCE-MATRIX] PASS 10 cases
 ```
 
-## Connected and mixed sequence matrix
+## Standalone mixed static/sequence matrix
 
-The runner covers every production-supported connected/mixed profile and texture mode:
+The 0.80.1 runner proves that per-object timing remains independent through physical output and final JSON serialization:
+
+```powershell
+& $Blender `
+    --background `
+    --factory-startup `
+    --python-exit-code 1 `
+    --python tests\blender_headless\run_multi_object_mixed_static_sequence_matrix_integration.py
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Standalone mixed static/sequence matrix failed"
+}
+```
+
+Required coverage:
+
+```text
+Spine targets: 3.8, 4.0, 4.1, 4.2, 4.3
+Texture modes: Normal - UV Segments, Camera Projection
+Objects per case: 3
+Sequence objects: 1
+Static objects: 2
+Sequence frames: 2
+Texture size: 128x128
+Cycles samples: 1
+Total cases: 10
+Physical PNG files per case: 4
+```
+
+The runner validates that the sequence object owns exactly two physical PNGs and the correct target-specific sequence encoding. Each static sibling must own one PNG, one setup attachment, and no sequence metadata or animation timeline.
+
+Required marker:
+
+```text
+[MULTI-MIXED-TIMING] PASS 10 cases
+```
+
+## Connected and mixed all-sequence matrix
+
+The historical 0.80.0 runner covers every production-supported connected/mixed profile and texture mode with every object animated:
 
 ```powershell
 & $Blender `
@@ -106,7 +144,7 @@ The runner covers every production-supported connected/mixed profile and texture
     --python tests\blender_headless\run_connected_mixed_sequence_mode_matrix_integration.py
 
 if ($LASTEXITCODE -ne 0) {
-    throw "Connected/mixed sequence matrix failed"
+    throw "Connected/mixed all-sequence matrix failed"
 }
 ```
 
@@ -126,17 +164,61 @@ Total cases: 8
 Total physical PNG files: 40
 ```
 
-The runner validates both public output services, connected wrapper hierarchy, mixed standalone hierarchy isolation, native Loop sequence timelines, physical PNGs, attachment topology, target schema, animated material and matrix evaluation, and complete Blender-state restoration.
-
 Required marker:
 
 ```text
 [CONNECTED-MIXED-SEQUENCE-MATRIX] PASS 8 cases
 ```
 
+## Connected and mixed static/sequence matrix
+
+The 0.80.1 runner validates one sequence object with static siblings across every supported Spine 4.2 connected/mixed profile and texture mode:
+
+```powershell
+& $Blender `
+    --background `
+    --factory-startup `
+    --python-exit-code 1 `
+    --python tests\blender_headless\run_connected_mixed_static_sequence_matrix_integration.py
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Connected/mixed static-sequence matrix failed"
+}
+```
+
+Required coverage:
+
+```text
+Target: Spine 4.2.43
+Scopes: CONNECTED, MIXED
+Rig profiles: THREE_AXIS_ROTATION, TWO_AXIS_ROTATION_SCALE
+Texture modes: NORMAL_UV_SEGMENTS, CAMERA_PROJECTION
+Sequence frames: 2
+Texture size: 128x128
+Cycles samples: 1
+Connected pattern: one sequence object + one static object
+Mixed pattern A: sequence owner inside connected subgroup
+Mixed pattern B: sequence owner inside standalone subgroup
+Total cases: 12
+```
+
+The runner validates connected wrapper hierarchy, standalone subgroup isolation, native sequence ownership, static attachment isolation, output namespaces, physical PNGs, attachment topology, target schema, and complete Blender-state restoration.
+
+Required marker:
+
+```text
+[CONNECTED-MIXED-MIXED-TIMING] PASS 12 cases
+```
+
+## UI request timing contract
+
+The pure test `tests/test_mixed_static_sequence_contract.py` constructs selected-object profiles with frame counts `(2, 0, 0)` and start frames `(1, 0, 0)`. It requires the same values on the final `A1MultiObjectSource.settings.export` objects.
+
+This contract proves that public selected-object request capture does not normalize every object to one shared Scene sequence length.
+
 ## Existing Blender headless gates
 
-The sequence matrices complement, rather than replace, the existing focused workers in `tests/blender_headless/`. Release validation must continue to cover:
+The four sequence matrices complement, rather than replace, the existing focused workers in `tests/blender_headless/`. Release validation must continue to cover:
 
 - single-object Normal UV sequence baking;
 - signed-axis projection;
@@ -158,7 +240,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 ```
 
-## Packaging version 0.80.0
+## Packaging version 0.80.1
 
 ```powershell
 Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
@@ -169,7 +251,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Extension package build failed"
 }
 
-$Zip = ".\dist\blender_to_spine2d_mesh_exporter-0.80.0.zip"
+$Zip = ".\dist\blender_to_spine2d_mesh_exporter-0.80.1.zip"
 
 if (-not (Test-Path -LiteralPath $Zip -PathType Leaf)) {
     throw "Expected ZIP was not created: $Zip"
@@ -188,7 +270,7 @@ if ($LASTEXITCODE -ne 0) {
 python `
     tools\run_extension_install_gate.py `
     --blender $Blender `
-    --output-root "E:\test_BtSe\extension_install_gate_0.80.0"
+    --output-root "E:\test_BtSe\extension_install_gate_0.80.1"
 
 if ($LASTEXITCODE -ne 0) {
     throw "Extension install gate failed"
@@ -199,11 +281,11 @@ if ($LASTEXITCODE -ne 0) {
 
 Import representative fresh outputs into the exact selected Spine Editor version.
 
-For Spine 3.8 and 4.0, confirm legacy attachment swaps, frame order, Loop wrap, texture paths, and object controls.
+For Spine 3.8 and 4.0, confirm legacy attachment swaps, frame order, Loop wrap, static sibling attachments, texture paths, and object controls.
 
-For Spine 4.1, 4.2, and 4.3, confirm native sequence metadata, Loop playback, texture paths, attachment topology, and object controls.
+For Spine 4.1, 4.2, and 4.3, confirm native sequence metadata on only the intended object, no sequence timeline on static siblings, texture paths, attachment topology, and object controls.
 
-For Spine 4.2 connected and mixed outputs, additionally confirm the connected wrapper, global controls, connected layer order, standalone subgroup isolation, and independent texture sequences.
+For Spine 4.2 connected and mixed outputs, additionally confirm the connected wrapper, global controls, connected layer order, standalone subgroup isolation, and sequence ownership in both possible mixed subgroups.
 
 ## Release evidence
 
@@ -214,8 +296,10 @@ A release claim records:
 - Python and Blender versions;
 - complete pytest summary;
 - real-bpy summary;
-- standalone sequence matrix marker;
-- connected/mixed sequence matrix marker;
+- standalone all-sequence matrix marker;
+- standalone mixed static/sequence matrix marker;
+- connected/mixed all-sequence matrix marker;
+- connected/mixed static/sequence matrix marker;
 - every additional required Blender-headless marker;
 - package path, size, and SHA256;
 - Blender extension validation result;
