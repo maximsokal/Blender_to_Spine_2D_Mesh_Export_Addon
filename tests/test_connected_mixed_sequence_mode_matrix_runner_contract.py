@@ -88,6 +88,82 @@ def _comparison_sources(node: ast.AST) -> tuple[str, ...]:
     )
 
 
+def _has_get_equality(
+    node: ast.AST,
+    *,
+    receiver_name: str,
+    key: str,
+    expected: str,
+    expected_is_name: bool,
+) -> bool:
+    for candidate in ast.walk(node):
+        if not isinstance(candidate, ast.Compare):
+            continue
+        if len(candidate.ops) != 1 or not isinstance(candidate.ops[0], ast.Eq):
+            continue
+        if len(candidate.comparators) != 1:
+            continue
+        call = candidate.left
+        if not isinstance(call, ast.Call) or call.keywords:
+            continue
+        if len(call.args) != 1:
+            continue
+        function = call.func
+        if not isinstance(function, ast.Attribute) or function.attr != "get":
+            continue
+        if not isinstance(function.value, ast.Name) or function.value.id != receiver_name:
+            continue
+        argument = call.args[0]
+        if not isinstance(argument, ast.Constant) or argument.value != key:
+            continue
+
+        comparator = candidate.comparators[0]
+        if expected_is_name:
+            if isinstance(comparator, ast.Name) and comparator.id == expected:
+                return True
+        elif isinstance(comparator, ast.Constant) and comparator.value == expected:
+            return True
+    return False
+
+
+def _has_index_get_equality(
+    node: ast.AST,
+    *,
+    receiver_name: str,
+    index: int,
+    key: str,
+    expected: str,
+) -> bool:
+    for candidate in ast.walk(node):
+        if not isinstance(candidate, ast.Compare):
+            continue
+        if len(candidate.ops) != 1 or not isinstance(candidate.ops[0], ast.Eq):
+            continue
+        if len(candidate.comparators) != 1:
+            continue
+        call = candidate.left
+        if not isinstance(call, ast.Call) or call.keywords or len(call.args) != 1:
+            continue
+        function = call.func
+        if not isinstance(function, ast.Attribute) or function.attr != "get":
+            continue
+        receiver = function.value
+        if not isinstance(receiver, ast.Subscript):
+            continue
+        if not isinstance(receiver.value, ast.Name) or receiver.value.id != receiver_name:
+            continue
+        slice_value = receiver.slice
+        if not isinstance(slice_value, ast.Constant) or slice_value.value != index:
+            continue
+        argument = call.args[0]
+        if not isinstance(argument, ast.Constant) or argument.value != key:
+            continue
+        comparator = candidate.comparators[0]
+        if isinstance(comparator, ast.Constant) and comparator.value == expected:
+            return True
+    return False
+
+
 def test_matrix_is_two_scopes_by_two_profiles_by_two_texture_modes() -> None:
     tree = _tree()
 
@@ -211,15 +287,20 @@ def test_runner_validates_real_files_composition_sequences_and_state() -> None:
         for node in ast.walk(sequence)
         if isinstance(node, ast.Attribute)
     }
-    sequence_strings = _string_constants(sequence)
-    comparisons = _comparison_sources(sequence)
     assert "SpineTextureAnimationEncoding.NATIVE_SEQUENCE" in sequence_attributes
-    assert "loop" in sequence_strings
-    assert "count" in sequence_strings
-    assert any("timeline[0].get" in value and "== 'loop'" in value for value in comparisons)
-    assert any(
-        "sequence.get" in value and "== _SEQUENCE_FRAME_COUNT" in value
-        for value in comparisons
+    assert _has_index_get_equality(
+        sequence,
+        receiver_name="timeline",
+        index=0,
+        key="mode",
+        expected="loop",
+    )
+    assert _has_get_equality(
+        sequence,
+        receiver_name="sequence",
+        key="count",
+        expected="_SEQUENCE_FRAME_COUNT",
+        expected_is_name=True,
     )
 
     state_calls = set(_call_names(_function(tree, "_assert_state_restored")))
