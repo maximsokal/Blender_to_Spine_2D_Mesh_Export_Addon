@@ -47,8 +47,11 @@ def test_schema_two_custom_scene_is_repaired_during_extension_registration():
 
     extension.register()
     try:
-        assert CURRENT_SETTINGS_SCHEMA_VERSION == 6
-        assert scene.spine2d_settings_schema_version == 6
+        assert CURRENT_SETTINGS_SCHEMA_VERSION == 7
+        assert (
+            scene.spine2d_settings_schema_version
+            == CURRENT_SETTINGS_SCHEMA_VERSION
+        )
         assert scene.spine2d_seam_maker_mode == "AUTO"
         assert (
             scene.spine2d_rig_profile
@@ -59,11 +62,14 @@ def test_schema_two_custom_scene_is_repaired_during_extension_registration():
             == SpineJsonTarget.SPINE_4_2.value
         )
 
-        # Deliberate choices made after schema 6 remain stable.
+        # Deliberate choices made after the current schema migration remain stable.
         scene.spine2d_seam_maker_mode = "CUSTOM"
         scene.spine2d_rig_profile = A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
         scene.spine2d_target_spine_version = SpineJsonTarget.SPINE_3_8.value
-        assert scene.spine2d_settings_schema_version == 6
+        assert (
+            scene.spine2d_settings_schema_version
+            == CURRENT_SETTINGS_SCHEMA_VERSION
+        )
         assert not migrate_scene_settings(scene)
         assert scene.spine2d_seam_maker_mode == "CUSTOM"
         assert (
@@ -91,7 +97,10 @@ def test_genuinely_fresh_scene_gets_current_defaults_in_real_bpy():
     _remove_persisted_test_values(scene)
     try:
         extension.register()
-        assert scene.spine2d_settings_schema_version == 6
+        assert (
+            scene.spine2d_settings_schema_version
+            == CURRENT_SETTINGS_SCHEMA_VERSION
+        )
         assert (
             scene.spine2d_rig_profile
             == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
