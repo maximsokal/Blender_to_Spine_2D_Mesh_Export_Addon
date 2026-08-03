@@ -66,6 +66,16 @@ def _is_lower_hex(value: str, *, exact_length: int | None = None) -> bool:
     return all(character in _HEX_DIGITS for character in value)
 
 
+def _parse_canonical_hex_int(value: str) -> int | None:
+    if not _is_lower_hex(value):
+        return None
+    try:
+        resolved = int(value, 16)
+    except (TypeError, ValueError):
+        return None
+    return resolved if format(resolved, "x") == value else None
+
+
 def _process_start_marker_digest(marker: str) -> str:
     resolved = _validate_filename_token_part(marker, "process_start_marker")
     return hashlib.blake2s(
@@ -211,6 +221,10 @@ class AtomicWorkTokenMetadata:
                 )
             if version != _TOKEN_VERSION_V3:
                 return None
+            process_id = _parse_canonical_hex_int(process_text)
+            created_ns = _parse_canonical_hex_int(created_text)
+            if process_id is None or created_ns is None:
+                return None
             if not _is_lower_hex(
                 marker_text,
                 exact_length=_MARKER_DIGEST_HEX_LENGTH,
@@ -219,9 +233,9 @@ class AtomicWorkTokenMetadata:
             if not _is_lower_hex(nonce, exact_length=32):
                 return None
             return cls(
-                process_id=int(process_text, 16),
+                process_id=process_id,
                 process_start_marker=None,
-                created_ns=int(created_text, 16),
+                created_ns=created_ns,
                 nonce=nonce,
                 token_version=_TOKEN_VERSION_V3,
                 process_start_marker_digest=marker_text,
@@ -232,7 +246,7 @@ class AtomicWorkTokenMetadata:
 
 @dataclass(frozen=True, slots=True)
 class AtomicWorkFileAssessment:
-    """Non-mutating classification of one stage or backup work file."""
+    """Non-mutating classification used before stale-work recovery mutates a file."""
 
     path: Path
     token: str | None
