@@ -1,13 +1,11 @@
-"""Release contracts for per-object mixed static/sequence export in 0.80.1."""
+"""Historical contracts for per-object mixed static/sequence export in 0.80.1."""
 
 from __future__ import annotations
 
 from pathlib import Path
-import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "blender_manifest.toml"
 RELEASE_NOTE = ROOT / "docs" / "releases" / "0.80.1.md"
 STANDALONE_RUNNER = (
     ROOT
@@ -39,13 +37,6 @@ DURABLE_TRANSACTION = (
     / "infrastructure"
     / "durable_atomic_transaction.py"
 )
-CURRENT_DOCS = (
-    ROOT / "README.md",
-    ROOT / "docs" / "README.md",
-    ROOT / "docs" / "CHANGELOG.md",
-    ROOT / "docs" / "installation.md",
-    ROOT / "docs" / "testing.md",
-)
 
 
 def _read(path: Path) -> str:
@@ -56,14 +47,14 @@ def _normalized(value: str) -> str:
     return " ".join(value.lower().replace("-", " ").replace("`", " ").split())
 
 
-def test_manifest_and_current_documentation_use_version_0801() -> None:
-    manifest = tomllib.loads(_read(MANIFEST))
+def test_historical_release_note_is_preserved() -> None:
+    note = _read(RELEASE_NOTE)
+    first_heading = next(
+        line.strip() for line in note.splitlines() if line.strip().startswith("#")
+    )
 
-    assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.80.1"
-    assert manifest["blender_version_min"] == "5.2.0"
-    for path in CURRENT_DOCS:
-        assert "0.80.1" in _read(path), path.relative_to(ROOT)
+    assert "0.80.1" in first_heading
+    assert "blender_to_spine2d_mesh_exporter-0.80.1.zip" in note
 
 
 def test_release_note_records_standalone_mixed_timing_matrix() -> None:
