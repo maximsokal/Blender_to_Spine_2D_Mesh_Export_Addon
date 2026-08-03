@@ -72,6 +72,22 @@ def _call_names(node: ast.AST) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _string_constants(node: ast.AST) -> tuple[str, ...]:
+    return tuple(
+        candidate.value
+        for candidate in ast.walk(node)
+        if isinstance(candidate, ast.Constant) and isinstance(candidate.value, str)
+    )
+
+
+def _comparison_sources(node: ast.AST) -> tuple[str, ...]:
+    return tuple(
+        ast.unparse(candidate)
+        for candidate in ast.walk(node)
+        if isinstance(candidate, ast.Compare)
+    )
+
+
 def test_matrix_is_two_scopes_by_two_profiles_by_two_texture_modes() -> None:
     tree = _tree()
 
@@ -153,8 +169,12 @@ def test_runner_uses_both_public_composition_output_services() -> None:
     assert "serialize_spine_document" not in calls
 
     settings = _function(tree, "_multi_settings")
-    source = ast.unparse(settings)
-    assert "ConnectedCameraRenderPolicy.INDIVIDUAL_LAYERS" in source
+    attributes = {
+        _attribute_path(node)
+        for node in ast.walk(settings)
+        if isinstance(node, ast.Attribute)
+    }
+    assert "ConnectedCameraRenderPolicy.INDIVIDUAL_LAYERS" in attributes
 
 
 def test_runner_validates_real_files_composition_sequences_and_state() -> None:
@@ -178,15 +198,29 @@ def test_runner_validates_real_files_composition_sequences_and_state() -> None:
         "_assert_native_sequences",
     }.issubset(document_calls)
 
-    composition_source = ast.unparse(_function(tree, "_assert_composition"))
-    assert "all_objects" in composition_source
-    assert "all_objects_layer_" in composition_source
-    assert "standalone_parent.startswith" in composition_source
+    composition = _function(tree, "_assert_composition")
+    composition_strings = _string_constants(composition)
+    composition_calls = _call_names(composition)
+    assert "all_objects" in composition_strings
+    assert "all_objects_layer_" in composition_strings
+    assert "standalone_parent.startswith" in composition_calls
 
-    sequence_source = ast.unparse(_function(tree, "_assert_native_sequences"))
-    assert "SpineTextureAnimationEncoding.NATIVE_SEQUENCE" in sequence_source
-    assert 'timeline[0].get("mode") == "loop"' in sequence_source
-    assert "sequence.get(\"count\") == _SEQUENCE_FRAME_COUNT" in sequence_source
+    sequence = _function(tree, "_assert_native_sequences")
+    sequence_attributes = {
+        _attribute_path(node)
+        for node in ast.walk(sequence)
+        if isinstance(node, ast.Attribute)
+    }
+    sequence_strings = _string_constants(sequence)
+    comparisons = _comparison_sources(sequence)
+    assert "SpineTextureAnimationEncoding.NATIVE_SEQUENCE" in sequence_attributes
+    assert "loop" in sequence_strings
+    assert "count" in sequence_strings
+    assert any("timeline[0].get" in value and "== 'loop'" in value for value in comparisons)
+    assert any(
+        "sequence.get" in value and "== _SEQUENCE_FRAME_COUNT" in value
+        for value in comparisons
+    )
 
     state_calls = set(_call_names(_function(tree, "_assert_state_restored")))
     assert "_material_fingerprint" in state_calls
@@ -201,8 +235,14 @@ def test_mixed_fixture_contains_two_connected_and_one_standalone_object() -> Non
         for node in tree.body
         if isinstance(node, ast.ClassDef) and node.name == "_CaseOutput"
     )
-    source = ast.unparse(case_output)
+    comparisons = _comparison_sources(case_output)
 
-    assert "len(self.connected_fixtures) != 2" in source
-    assert "len(self.standalone_fixtures) not in {0, 1}" in source
-    assert "self.fixtures != self.connected_fixtures + self.standalone_fixtures" in source
+    assert any("len(self.connected_fixtures) != 2" in value for value in comparisons)
+    assert any(
+        "len(self.standalone_fixtures) not in {0, 1}" in value
+        for value in comparisons
+    )
+    assert any(
+        "self.fixtures != self.connected_fixtures + self.standalone_fixtures" in value
+        for value in comparisons
+    )
