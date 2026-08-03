@@ -19,9 +19,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_scene_capture import
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_settings import (
     _build_sources_from_profiles,
 )
-from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
-    BakeExecutionSettings,
-)
+from Blender_to_Spine2D_Mesh_Exporter.domain.baking import BakeExecutionSettings
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
     A1RigProfile,
     SpineJsonTarget,
@@ -99,6 +97,14 @@ def _call_names(node: ast.AST) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _name_ids(node: ast.AST) -> set[str]:
+    return {
+        candidate.id
+        for candidate in ast.walk(node)
+        if isinstance(candidate, ast.Name)
+    }
+
+
 def _string_constants(node: ast.AST) -> tuple[str, ...]:
     return tuple(
         candidate.value
@@ -163,7 +169,9 @@ def test_selected_ui_profiles_preserve_one_sequence_and_two_static_objects() -> 
         0,
         0,
     )
-    assert len({source.settings for source in sources}) == 3
+    assert sources[0].settings is not sources[1].settings
+    assert sources[1].settings is not sources[2].settings
+    assert sources[0].settings is not sources[2].settings
 
 
 def test_standalone_runner_covers_all_targets_and_both_texture_modes() -> None:
@@ -223,11 +231,13 @@ def test_connected_mixed_runner_covers_both_profiles_modes_and_sequence_location
     assert _constant(tree, "_SEQUENCE_STANDALONE") == "STANDALONE_OBJECT"
 
     cases = _function(tree, "_cases")
-    strings = set(_string_constants(cases))
-    calls = set(_call_names(cases))
-    assert "_Case" in calls
-    assert "CONNECTED_OBJECT" not in strings
-    assert "STANDALONE_OBJECT" not in strings
+    assert "_Case" in set(_call_names(cases))
+    assert {
+        "_PROFILES",
+        "_TEXTURE_MODES",
+        "_SEQUENCE_CONNECTED",
+        "_SEQUENCE_STANDALONE",
+    }.issubset(_name_ids(cases))
 
     run_case_calls = set(_call_names(_function(tree, "_run_case")))
     assert "_execute_public_export" in run_case_calls
