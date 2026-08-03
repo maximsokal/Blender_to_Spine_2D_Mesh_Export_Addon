@@ -89,6 +89,7 @@ def _analysis(
         dependencies=(
             MaterialDependencyKind.CAMERA,
             MaterialDependencyKind.VIEW,
+            MaterialDependencyKind.REFLECTION,
             MaterialDependencyKind.GEOMETRY,
         ),
     )
@@ -182,7 +183,17 @@ def _camera_audit(
         _finding(
             "TEXTURE_COORD_SOURCE_CONTEXT",
             node_type="TEX_COORD",
-            output_socket="Normal",
+            output_socket="Camera",
+        ),
+        _finding(
+            "TEXTURE_COORD_SOURCE_CONTEXT",
+            node_type="TEX_COORD",
+            output_socket="Reflection",
+        ),
+        _finding(
+            "TEXTURE_COORD_SOURCE_CONTEXT",
+            node_type="TEX_COORD",
+            output_socket="Reflection",
         ),
         *extra_findings,
     )
@@ -214,7 +225,7 @@ def _build(
     )
 
 
-def test_normal_uv_mode_keeps_supported_camera_context_on_object_bake() -> None:
+def test_normal_uv_mode_keeps_camera_and_reflection_coordinates_on_object_bake() -> None:
     plan = _build()
 
     assert type(plan) is BakePlan
@@ -244,7 +255,7 @@ def test_explicit_camera_projection_mode_still_builds_projection_plan() -> None:
         _finding(
             "TEXTURE_COORD_SOURCE_CONTEXT",
             node_type="TEX_COORD",
-            output_socket="Camera",
+            output_socket="Window",
         ),
         _finding("SOURCE_OR_CAMERA_CONTEXT", node_type="OBJECT_INFO"),
         _finding("SOURCE_OR_CAMERA_CONTEXT", node_type="LIGHT_PATH"),
