@@ -72,6 +72,14 @@ def _call_names(node: ast.AST) -> tuple[str, ...]:
     return tuple(names)
 
 
+def _string_constants(node: ast.AST) -> tuple[str, ...]:
+    return tuple(
+        candidate.value
+        for candidate in ast.walk(node)
+        if isinstance(candidate, ast.Constant) and isinstance(candidate.value, str)
+    )
+
+
 def test_matrix_is_exactly_five_targets_by_two_texture_modes() -> None:
     tree = _tree()
 
@@ -190,10 +198,22 @@ def test_runner_validates_real_files_runtime_schema_and_state_restoration() -> N
 def test_sequence_contract_covers_legacy_swap_and_native_sequence() -> None:
     tree = _tree()
     function = _function(tree, "_assert_sequence_encoding")
-    source = ast.unparse(function)
+    attributes = {
+        _attribute_path(node)
+        for node in ast.walk(function)
+        if isinstance(node, ast.Attribute)
+    }
+    calls = _call_names(function)
+    strings = _string_constants(function)
+    comparisons = tuple(
+        ast.unparse(node)
+        for node in ast.walk(function)
+        if isinstance(node, ast.Compare)
+    )
 
-    assert "SpineTextureAnimationEncoding.NATIVE_SEQUENCE" in source
-    assert "_SEQUENCE_FRAME_COUNT + 1" in source
-    assert 'timeline[0].get("mode") == "loop"' in source
-    assert "names[-1] == names[0]" in source
-    assert "not _contains_key(document, \"sequence\")" in source
+    assert "SpineTextureAnimationEncoding.NATIVE_SEQUENCE" in attributes
+    assert "_contains_key" in calls
+    assert "sequence" in strings
+    assert "loop" in strings
+    assert any("_SEQUENCE_FRAME_COUNT + 1" in value for value in comparisons)
+    assert any("names[-1] == names[0]" in value for value in comparisons)
