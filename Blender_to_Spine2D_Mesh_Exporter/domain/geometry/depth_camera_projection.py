@@ -376,13 +376,79 @@ def _sample_front_surface(
     return samples, spacing_x, spacing_y
 
 
+def _triangulated_face_adjacency(
+    snapshot: MeshSnapshot,
+) -> Mapping[int, frozenset[int]]:
+    """Return deterministic shared-edge adjacency for triangulated source faces."""
+
+    if not isinstance(snapshot, MeshSnapshot):
+        raise TypeError("snapshot must be MeshSnapshot")
+    loops_by_id = snapshot.loop_by_id()
+    adjacency: dict[int, set[int]] = {
+        face.id.index: set() for face in snapshot.faces
+    }
+    owners_by_edge: dict[tuple[int, int], list[int]] = {}
+    for face in snapshot.faces:
+        vertex_ids = tuple(
+            loops_by_id[loop_id].vertex_id.index for loop_id in face.loop_ids
+        )
+        if len(vertex_ids) != 3:
+            raise DepthCameraProjectionError(
+                f"triangulated face {face.id.index} does not contain three vertices"
+            )
+        for corner_index, first in enumerate(vertex_ids):
+            second = vertex_ids[(corner_index + 1) % 3]
+            pair = tuple(sorted((first, second)))
+            owners_by_edge.setdefault(pair, []).append(face.id.index)
+
+    for owners in owners_by_edge.values():
+        unique = tuple(sorted(set(owners)))
+        for owner_index, first in enumerate(unique):
+            for second in unique[owner_index + 1 :]:
+                adjacency[first].add(second)
+                adjacency[second].add(first)
+    return {
+        face_index: frozenset(sorted(neighbors))
+        for face_index, neighbors in sorted(adjacency.items())
+    }
+
+
+def _sampled_faces_form_local_patch(
+    keys: tuple[tuple[int, int], ...],
+    samples: Mapping[tuple[int, int], _Sample],
+    face_adjacency: Mapping[int, frozenset[int]],
+) -> bool:
+    """Return whether sampled source faces form one shared-edge-local patch."""
+
+    source_faces = frozenset(samples[key].source_face_index for key in keys)
+    if len(source_faces) <= 1:
+        return True
+    if any(face_index not in face_adjacency for face_index in source_faces):
+        return False
+
+    start = min(source_faces)
+    visited = {start}
+    pending = [start]
+    while pending:
+        current = pending.pop()
+        for neighbor in sorted(face_adjacency[current]):
+            if neighbor not in source_faces or neighbor in visited:
+                continue
+            visited.add(neighbor)
+            pending.append(neighbor)
+    return visited == set(source_faces)
+
+
 def _cell_faces(
     samples: Mapping[tuple[int, int], _Sample],
     *,
     columns: int,
     rows: int,
     edge_threshold: float,
+    face_adjacency: Mapping[int, frozenset[int]],
 ) -> Tuple[tuple[tuple[int, int], tuple[int, int], tuple[int, int]], ...]:
+    """Build grid triangles without mistaking a steep connected face for a depth gap."""
+
     faces: list[tuple[tuple[int, int], tuple[int, int], tuple[int, int]]] = []
     for row in range(rows):
         for column in range(columns):
@@ -396,13 +462,24 @@ def _cell_faces(
             if len(valid) < 3:
                 continue
 
-            def acceptable(keys: tuple[tuple[int, int], ...]) -> bool:
+            def classify(
+                keys: tuple[tuple[int, int], ...],
+            ) -> tuple[bool, bool, float]:
                 depths = tuple(samples[key].depth for key in keys)
-                return max(depths) - min(depths) <= edge_threshold
+                depth_jump = max(depths) - min(depths)
+                if depth_jump <= edge_threshold:
+                    return True, False, depth_jump
+                topology_preserved = _sampled_faces_form_local_patch(
+                    keys,
+                    samples,
+                    face_adjacency,
+                )
+                return topology_preserved, topology_preserved, depth_jump
 
             if len(valid) == 3:
                 triangle = (valid[0], valid[1], valid[2])
-                if acceptable(triangle):
+                accepted, _topology_preserved, _jump = classify(triangle)
+                if accepted:
                     faces.append(triangle)
                 continue
 
@@ -414,14 +491,24 @@ def _cell_faces(
                 (corners[0], corners[1], corners[3]),
                 (corners[1], corners[2], corners[3]),
             )
-            valid_a = all(acceptable(triangle) for triangle in diagonal_a)
-            valid_b = all(acceptable(triangle) for triangle in diagonal_b)
+            classified_a = tuple(classify(triangle) for triangle in diagonal_a)
+            classified_b = tuple(classify(triangle) for triangle in diagonal_b)
+            valid_a = all(result[0] for result in classified_a)
+            valid_b = all(result[0] for result in classified_b)
             if not valid_a and not valid_b:
                 continue
             if valid_a and valid_b:
-                a_jump = abs(samples[corners[0]].depth - samples[corners[2]].depth)
-                b_jump = abs(samples[corners[1]].depth - samples[corners[3]].depth)
-                selected = diagonal_a if a_jump <= b_jump else diagonal_b
+                # Prefer the diagonal that required fewer topology overrides. When both
+                # are equivalent, retain the previous minimum-depth-jump behavior.
+                a_score = (
+                    sum(1 for result in classified_a if result[1]),
+                    abs(samples[corners[0]].depth - samples[corners[2]].depth),
+                )
+                b_score = (
+                    sum(1 for result in classified_b if result[1]),
+                    abs(samples[corners[1]].depth - samples[corners[3]].depth),
+                )
+                selected = diagonal_a if a_score <= b_score else diagonal_b
             else:
                 selected = diagonal_a if valid_a else diagonal_b
             faces.extend(selected)
@@ -622,6 +709,7 @@ def build_depth_camera_projection_surface(
     origin = _translation_only_origin(snapshot.world_matrix)
     projected_origin = frame.project_world_point(origin, field_name="object_origin")
     triangulated = triangulate_snapshot(snapshot).snapshot
+    face_adjacency = _triangulated_face_adjacency(triangulated)
     projected_by_vertex = {
         vertex.id: frame.project_world_point(
             _world_point(origin, vertex.position),
@@ -697,11 +785,13 @@ def build_depth_camera_projection_surface(
         columns=columns,
         rows=rows,
         edge_threshold=edge_threshold,
+        face_adjacency=face_adjacency,
     )
     if not faces:
         raise DepthCameraProjectionError(
-            "Depth Edge Threshold disconnected every sampled triangle; increase the "
-            "threshold or lower Depth Mesh Error"
+            "Depth Edge Threshold disconnected every sampled triangle and source "
+            "topology could not prove local continuity; increase the threshold or "
+            "lower Depth Mesh Error"
         )
     smoothed = _smooth_samples(
         sampled,
