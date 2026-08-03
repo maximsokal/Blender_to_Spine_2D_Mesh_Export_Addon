@@ -22,10 +22,12 @@ from .atomic_journal import (
     AtomicJournalPhase,
     recover_interrupted_atomic_journals,
 )
+from .atomic_work_path import (
+    build_atomic_backup_path,
+    build_atomic_stage_path,
+)
 from .atomic_work_state import (
-    BACKUP_MARKER,
     DEFAULT_STALE_WORK_FILE_AGE_SECONDS,
-    STAGE_MARKER,
     claim_atomic_final_path,
     unregister_atomic_transaction,
 )
@@ -101,9 +103,11 @@ class DurableAtomicFileTransaction(_BaseAtomicFileTransaction):
             raise ValueError(f"final output is reserved twice: {normalized}")
         normalized.parent.mkdir(parents=True, exist_ok=True)
         self._recover_directory_once(normalized.parent)
-        staged_path = normalized.with_name(
-            f".{normalized.stem}{STAGE_MARKER}{self._token}{normalized.suffix}"
-        ).resolve(strict=False)
+        staged_path = build_atomic_stage_path(
+            normalized,
+            self._token,
+            reservation_index=len(self._entries),
+        )
         reservation = AtomicOutputReservation(normalized, staged_path)
         if staged_path.exists():
             durable_unlink(staged_path)
@@ -137,10 +141,12 @@ class DurableAtomicFileTransaction(_BaseAtomicFileTransaction):
 
     def _prepare_durable_journal(self) -> None:
         entries: list[AtomicJournalEntry] = []
-        for entry in self._entries:
-            backup = entry.final_path.with_name(
-                f".{entry.final_path.name}{BACKUP_MARKER}{self._token}"
-            ).resolve(strict=False)
+        for reservation_index, entry in enumerate(self._entries):
+            backup = build_atomic_backup_path(
+                entry.final_path,
+                self._token,
+                reservation_index=reservation_index,
+            )
             entry.backup_path = backup
             had_original = entry.final_path.exists()
             entries.append(
