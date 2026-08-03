@@ -9,6 +9,7 @@ from ..application import (
     calculate_a1_object_bake_main_position_pixels,
 )
 from ..domain.baking import A1TextureExportMode, CameraProjectionPlan
+from ..domain.geometry import DepthProjectionBaseMode
 from ..domain.spine.legacy_rig_contracts import (
     LegacyRigBuildRequest,
     LegacyZGroupOriginMode,
@@ -27,6 +28,26 @@ from .a1_texture_planning import A1TexturePlanningResult
 
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_depth_z_group_origin_mode(
+    base_mode: DepthProjectionBaseMode,
+) -> LegacyZGroupOriginMode:
+    """Map the depth-surface base policy to the existing Normal rig math.
+
+    ``FARTHEST_VISIBLE`` uses the minimum camera-local Z as zero. Every other visible
+    point then receives a non-negative offset toward the camera. ``OBJECT_ORIGIN``
+    retains absolute camera-local Z relative to camera-space zero and is accepted only
+    after the geometry stage proved that the origin lies behind all visible points.
+    """
+
+    if not isinstance(base_mode, DepthProjectionBaseMode):
+        raise TypeError("base_mode must be DepthProjectionBaseMode")
+    if base_mode is DepthProjectionBaseMode.FARTHEST_VISIBLE:
+        return LegacyZGroupOriginMode.MINIMUM_Z
+    if base_mode is DepthProjectionBaseMode.OBJECT_ORIGIN:
+        return LegacyZGroupOriginMode.OBJECT_ORIGIN
+    raise AssertionError(f"Unhandled depth base mode: {base_mode}")
 
 
 def prepare_a1_depth_document(
@@ -53,6 +74,10 @@ def prepare_a1_depth_document(
         resolved_profile = resolve_a1_rig_profile(
             source.settings.export.rig_profile
         )
+        depth_settings = source.settings.bake_execution.depth_projection
+        z_origin_mode = _resolve_depth_z_group_origin_mode(
+            depth_settings.base_mode
+        )
         main_position = calculate_a1_object_bake_main_position_pixels(
             source.source_snapshot,
             source.settings,
@@ -66,13 +91,18 @@ def prepare_a1_depth_document(
                 main_position_pixels=main_position,
                 scale_mode=source.settings.rig_scale_mode,
                 setup_pose_mode=source.settings.rig_setup_pose_mode,
-                # Depth points keep absolute camera-local Z. Camera is therefore the
-                # authored zero plane and all visible points stay on its negative side.
-                z_group_origin_mode=LegacyZGroupOriginMode.OBJECT_ORIGIN,
+                z_group_origin_mode=z_origin_mode,
             ),
             resolved_profile,
             spine_target=source.settings.export.spine_target,
         )
+        offsets = tuple(group.y_offset_pixels for group in rig.info.z_groups)
+        if depth_settings.base_mode is DepthProjectionBaseMode.FARTHEST_VISIBLE:
+            if not offsets or min(offsets) != 0.0 or any(value < 0.0 for value in offsets):
+                raise ValueError(
+                    "FARTHEST_VISIBLE depth rig must start at zero and extend only "
+                    f"toward the camera; offsets={offsets}"
+                )
         statistics = freeze_statistics(
             statistics,
             {
@@ -81,7 +111,14 @@ def prepare_a1_depth_document(
                 "rig_setup_pose_mode": rig.request.setup_pose_mode.value,
                 "z_group_origin_mode": rig.request.z_group_origin_mode.value,
                 "depth_camera_vertex_rig": 1,
-                "depth_camera_camera_zero": 1,
+                "depth_camera_absolute_z_retained": 1,
+                "depth_camera_relief_base_mode": depth_settings.base_mode.value,
+                "depth_camera_minimum_rig_offset": min(offsets),
+                "depth_camera_maximum_rig_offset": max(offsets),
+                "depth_camera_offsets_toward_camera_only": int(
+                    depth_settings.base_mode
+                    is DepthProjectionBaseMode.FARTHEST_VISIBLE
+                ),
                 "camera_layer_projection_kind": (
                     ""
                     if source.camera_projection_kind is None
@@ -127,12 +164,14 @@ def prepare_a1_depth_document(
             },
         )
         logger.debug(
-            "Prepared depth relief document for %s: profile=%s setup=%s "
-            "z_groups=%d bones=%d slots=%d",
+            "Prepared depth relief document for %s: profile=%s setup=%s base=%s "
+            "z_groups=%d offsets=%s bones=%d slots=%d",
             source.object_id,
             final_rig.profile.profile_id,
             final_rig.request.setup_pose_mode.value,
+            depth_settings.base_mode.value,
             len(final_rig.info.z_groups),
+            offsets,
             len(document.bones),
             len(document.slots),
         )
@@ -155,4 +194,7 @@ def prepare_a1_depth_document(
         ) from exc
 
 
-__all__ = ["prepare_a1_depth_document"]
+__all__ = [
+    "_resolve_depth_z_group_origin_mode",
+    "prepare_a1_depth_document",
+]
