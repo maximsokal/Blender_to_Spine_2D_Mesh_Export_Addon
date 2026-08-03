@@ -14,39 +14,41 @@ This directory contains the maintained public documentation for Blender to Spine
 ## Developer documentation
 
 - [Architecture](architecture.md) - package boundaries and production data flow.
-- [Rig Profiles](rig-profiles.md) - selectable rig plan, two-axis-plus-scale design, and the complete Spine 4.2.43 reference skeleton.
+- [Rig Profiles](rig-profiles.md) - selectable rig plans and generated constraint topology.
 - [Testing and Release Validation](testing.md) - pure Python, real bpy, Blender headless, runtime-oracle, and packaging gates.
 - [Contributing](CONTRIBUTING.md) - coding, Blender state, tests, and documentation requirements.
 - [Changelog](CHANGELOG.md) - public release history.
-- [Spine 4.1 release checkpoint](spine-json-versioning/RELEASE_0_47_10.md) - exact limited target scope and accepted evidence for 0.47.10.
+- [0.80.0 release note](releases/0.80.0.md) - complete sequence acceptance and package version milestone.
+- [Spine 4.1 release checkpoint](spine-json-versioning/RELEASE_0_47_10.md) - historical limited target scope and accepted evidence for 0.47.10.
 
 ## Supported product baseline
 
-- Extension version: 0.55.18.
+- Extension version: 0.80.0.
 - Minimum Blender version: 5.2.0.
-- Primary full Spine target: 4.2.43.
-- Limited Spine target: 4.1.24 with `2-Axis Rotation + Scale` for single-object and standalone multi-object export only.
-- Spine 4.1 connected, mixed, and 3-Axis export remain blocked before geometry processing.
+- Standalone targets: Spine 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23 according to the target/profile capability matrix.
+- Connected and mixed composition target: Spine 4.2.43.
+- Spine 4.2 connected and mixed composition support both `3-Axis Rotation` and `2-Axis Rotation + Scale`.
+- Unsupported target, profile, and scope combinations fail before Blender geometry or bake work.
 - Currently tested desktop platform: Windows.
 - Default texture mode: Normal - UV Segments.
 - Default Seam Maker mode: Auto.
 - Default rig profile for genuinely fresh scenes: 2-Axis Rotation + Scale (`TWO_AXIS_ROTATION_SCALE`).
 - Normal - UV Segments exposes persisted `+X`, `-X`, `+Y`, `-Y`, `+Z`, `-Z`, and `Active Camera` projection choices; new and older scenes without a stored value use `+Z`.
-- Active Camera object-bake projection supports Perspective and Orthographic cameras using export texture dimensions while preserving UV-segment meshes.
+- The separate rendered Camera Projection mode remains an explicit render, crop, contour, and flattening pipeline.
 - Public active-object and selected-object plans carry the chosen projection direction; public selected-object export remains standalone-only.
-- The rendered Camera Projection mode remains a separate render/crop/contour/flattening pipeline and does not consume the Normal - UV Segments projection selector.
-- Active Camera segmentation, decomposition, and strict triangulation complete in normalized world geometry before camera projection; only already-triangulated immutable regions are transformed into camera screen/depth space.
-- Source UV boundary ownership is validated immediately after world-transform normalization for both signed-axis and Active Camera routes.
-- `A1ProjectedObjectAnalysis` records projected Object Origin, nearest/farthest evaluated vertex depth, projected bounds, source order, prefix, component ID, and owned slots for every Normal - UV Segments object.
-- Standalone, connected, and mixed Normal - UV Segments setup slots use complete far-to-near object blocks ordered by nearest evaluated vertex; segment order inside an object remains unchanged.
-- Connected object mains are anchor-relative while the global group main stores the anchor's absolute projected Object Origin, preserving the same setup world positions as standalone export.
-- Connected depth layers remain grouped by projected Object Origin depth, independently from visual slot ordering.
-- Mixed internal composition may interleave connected and standalone object blocks by nearest depth without changing subgroup bones, skins, constraints, attachments, or animation metadata.
-- Connected/mixed Blender acceptance evaluates the complete Spine setup hierarchy with translation, rotation, scale, and `onlyTranslation` inheritance instead of assuming a translation-only parent chain.
-- The Active Camera connected/mixed worker owns the setup-transform evaluator and model ID; the signed-axis worker reuses both through its shared worker module.
-- Candidate 0.55.18 implements Slice 6 public projection-direction RNA, UI, planning, Reset, and `.blend` persistence without changing projection mathematics or Slice 5 composition.
-- Saved pre-profile scenes migrate to the compatibility 3-Axis Rotation profile.
-- Spine 4.2 connected 3-Axis composition reproduces the dedicated wrapper, exact constraint payloads, source-order arrays, Z-layer order sharing, and unchanged scale-compensator orders from the historical `main` implementation.
-- Spine 4.2 connected 2-Axis composition uses the same Z-layer scheduling principle with explicit X, IK, Scale, depth-scale, and Y global targets.
+- Connected and mixed output services remain explicit development/API composition routes.
+- Scene settings schema remains version 6.
+
+## Sequence acceptance baseline
+
+Version 0.80.0 includes real Blender 5.2 sequence gates at 128x128 with two frames and one Cycles sample:
+
+- standalone multi-object export for Spine 3.8 through 4.3;
+- Normal - UV Segments and Camera Projection for every standalone target;
+- connected and mixed Spine 4.2 output in both rig profiles and both texture modes;
+- animated location, rotation, scale, and Camera/Reflection material inputs;
+- legacy attachment swaps for Spine 3.8 and 4.0;
+- native sequences for Spine 4.1, 4.2, and 4.3;
+- physical PNG validation, JSON schema validation, composition hierarchy checks, and Blender-state restoration.
 
 Development journals and temporary Rewrite milestone documents are intentionally not part of the public documentation set. Permanent behavior belongs in the documents listed above and in executable tests.
