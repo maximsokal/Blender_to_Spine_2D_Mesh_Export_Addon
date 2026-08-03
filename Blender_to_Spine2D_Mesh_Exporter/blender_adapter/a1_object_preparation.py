@@ -14,9 +14,13 @@ from ..application import (
     ExportIssue,
     emit_a1_export_progress,
 )
+from ..domain.baking import A1TextureExportMode
 from ..domain.spine.export_capabilities import (
     SpineJsonExportScope,
     require_spine_json_export_capability,
+)
+from .a1_depth_source_geometry_preparation import (
+    prepare_a1_depth_source_geometry,
 )
 from .a1_document_preparation import prepare_a1_document
 from .a1_preparation_contracts import (
@@ -147,6 +151,24 @@ def _build_prepared_object(
     )
 
 
+def _prepare_source_geometry(
+    source_obj: Any,
+    settings: A1SingleObjectExportSettings,
+    *,
+    scene: Any | None,
+) -> Any:
+    """Select the ordinary or depth-relief geometry source explicitly."""
+
+    mode = settings.bake_execution.texture_export_mode
+    if mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
+        return prepare_a1_depth_source_geometry(
+            source_obj,
+            settings,
+            scene=scene,
+        )
+    return prepare_a1_source_geometry(source_obj, settings, scene=scene)
+
+
 def prepare_a1_object(
     source_obj: Any,
     settings: A1SingleObjectExportSettings,
@@ -173,7 +195,11 @@ def prepare_a1_object(
         with _source_uv_integrity_guard(source_obj, context):
             _progress(progress_callback, 0, stage)
             _progress(progress_callback, 10, A1SingleObjectStage.READ_GEOMETRY)
-            source = prepare_a1_source_geometry(source_obj, settings, scene=scene)
+            source = _prepare_source_geometry(
+                source_obj,
+                settings,
+                scene=scene,
+            )
             object_id, statistics, warnings = (
                 source.object_id,
                 source.statistics,
