@@ -2,6 +2,8 @@
 
 Unlike the headless regression runners, this utility keeps every generated JSON and PNG
 so a developer can inspect and import the exact test outputs after the automated gates.
+The multi-object sample intentionally contains animated source and camera transforms;
+only material animation may change its sequence PNGs.
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ from run_depth_camera_projection_integration import (  # noqa: E402
     _run_case,
 )
 from run_depth_camera_projection_multi_object_integration import (  # noqa: E402
+    _keyframe_active_camera,
     _sources,
 )
 
@@ -76,6 +79,7 @@ def _prepare_multi_scene() -> None:
     bpy.context.scene.cycles.samples = 1
     camera = _create_camera(name="DepthSamplesMultiCamera")
     camera.data.type = "PERSP"
+    _keyframe_active_camera(camera)
     sentinel = _create_sentinel()
     sentinel.location = (8.0, 0.0, 0.0)
     _activate_only(sentinel)
@@ -129,6 +133,9 @@ def _write_manifest(output_root: Path, elapsed_seconds: float) -> Path:
         "elapsed_seconds": round(float(elapsed_seconds), 3),
         "single_case_count": len(_cases()),
         "multi_object_case_count": 1,
+        "multi_object_sequence_contract": (
+            "material changes; source geometry and active camera remain frozen"
+        ),
         "files": [
             {
                 "path": path.relative_to(output_root).as_posix(),
@@ -162,8 +169,9 @@ def main() -> None:
     started = time.perf_counter()
     single_root = output_root / "single"
     single_root.mkdir(parents=True, exist_ok=False)
-    for index, case in enumerate(_cases(), start=1):
-        print(f"[DEPTH-CAMERA-SAMPLES] RUN single {index}/{len(_cases())} {case.key}")
+    cases = _cases()
+    for index, case in enumerate(cases, start=1):
+        print(f"[DEPTH-CAMERA-SAMPLES] RUN single {index}/{len(cases)} {case.key}")
         _run_case(single_root, case)
         print(f"[DEPTH-CAMERA-SAMPLES] PASS single {case.key}")
 
@@ -178,7 +186,7 @@ def main() -> None:
     physical_files = tuple(path for path in output_root.rglob("*") if path.is_file())
     print(
         "[DEPTH-CAMERA-SAMPLES] PASS "
-        f"single_cases={len(_cases())} multi_cases=1 files={len(physical_files)} "
+        f"single_cases={len(cases)} multi_cases=1 files={len(physical_files)} "
         f"output={output_root} manifest={manifest_path} elapsed={elapsed:.2f}s"
     )
 
