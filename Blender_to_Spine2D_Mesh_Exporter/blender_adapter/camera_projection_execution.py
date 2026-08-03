@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import logging
-from typing import Any, Tuple
+from typing import Any, ContextManager, Tuple
 
 from ..application import A1ExportProgressCallback, emit_a1_frame_progress
+from ..domain.baking import A1TextureExportMode
 from ..infrastructure import AtomicOutputReservation
 from .camera_projection_error import CameraProjectionExecutionError
 from .camera_projection_state import (
@@ -17,6 +19,9 @@ from .camera_projection_state import (
 from .camera_projection_validation import (
     CameraProjectionRuntime,
     validate_camera_projection_reservations,
+)
+from .depth_camera_projection_render_proxy import (
+    frozen_depth_camera_projection_subject,
 )
 
 
@@ -81,13 +86,34 @@ def _require_nonempty_staged_output(reservation: AtomicOutputReservation) -> Non
         )
 
 
+def _render_subject_context(
+    runtime: CameraProjectionRuntime,
+) -> ContextManager[Any]:
+    """Return the mode-owned render subject without changing flat Camera Projection."""
+
+    if not isinstance(runtime, CameraProjectionRuntime):
+        raise TypeError("runtime must be CameraProjectionRuntime")
+    if (
+        runtime.execution_settings.texture_export_mode
+        is A1TextureExportMode.DEPTH_CAMERA_PROJECTION
+    ):
+        return frozen_depth_camera_projection_subject(runtime)
+    return nullcontext(runtime.source_object)
+
+
 def render_camera_projection_frames(
     runtime: CameraProjectionRuntime,
     reservations: Tuple[AtomicOutputReservation, ...],
     *,
     progress_callback: A1ExportProgressCallback | None = None,
 ) -> Tuple[AtomicOutputReservation, ...]:
-    """Render every full-frame task and restore Scene state before returning."""
+    """Render every full-frame task and restore Scene state before returning.
+
+    Flat Camera Projection retains its historical timeline behavior. Depth Camera
+    Projection advances the timeline only while rendering through a fixed evaluated
+    source proxy and a fixed active-camera proxy, so material animation cannot drag the
+    relief geometry or camera through the sequence.
+    """
 
     if not isinstance(runtime, CameraProjectionRuntime):
         raise TypeError("runtime must be CameraProjectionRuntime")
@@ -99,64 +125,70 @@ def render_camera_projection_frames(
     frame_count = len(runtime.plan.frame_tasks)
 
     with preserve_camera_projection_state(runtime.scene):
-        configure_camera_visibility(
-            runtime.source_object,
-            runtime.scene,
-            isolate=runtime.plan.isolate_source_to_camera,
-            influence_policy=runtime.execution_settings.camera_influence_policy,
-        )
+        with _render_subject_context(runtime) as render_subject:
+            configure_camera_visibility(
+                render_subject,
+                runtime.scene,
+                isolate=runtime.plan.isolate_source_to_camera,
+                influence_policy=runtime.execution_settings.camera_influence_policy,
+            )
 
-        for frame_index, (task, reservation) in enumerate(
-            zip(runtime.plan.frame_tasks, resolved, strict=True),
-            start=1,
-        ):
-            emit_a1_frame_progress(
-                progress_callback,
-                stage="CAMERA_RENDER_FRAME",
-                action="Rendering",
-                frame_index=frame_index,
-                frame_count=frame_count,
-                completed=False,
-                object_id=runtime.plan.source_object_id,
-            )
-            set_timeline_frame(
-                runtime.scene,
-                runtime.context,
-                task.timeline_frame,
-            )
-            configure_scene_for_camera_projection(
-                runtime.scene,
-                runtime.plan,
-                runtime.execution_settings,
-                reservation.staged_path,
-            )
-            policy = runtime.execution_settings.camera_influence_policy
-            logger.info(
-                "Rendering camera projection '%s' frame %d/%d camera='%s' "
-                "dynamic_range=%s tone_mapping=%s alpha=%s shadows=%s "
-                "reflection_transmission=%s world=%s",
-                runtime.plan.source_object_id,
-                frame_index,
-                frame_count,
-                runtime.plan.camera_object_id,
-                runtime.output_policy.dynamic_range.value,
-                runtime.output_policy.tone_mapping.value,
-                runtime.output_policy.alpha_representation.value,
-                policy.include_scene_shadows,
-                policy.include_scene_reflection_transmission,
-                policy.world_affects_lighting_reflections,
-            )
-            _call_render_operator(runtime.bpy_module)
-            _require_nonempty_staged_output(reservation)
-            emit_a1_frame_progress(
-                progress_callback,
-                stage="CAMERA_RENDER_FRAME",
-                action="Rendered",
-                frame_index=frame_index,
-                frame_count=frame_count,
-                completed=True,
-                object_id=runtime.plan.source_object_id,
-            )
+            for frame_index, (task, reservation) in enumerate(
+                zip(runtime.plan.frame_tasks, resolved, strict=True),
+                start=1,
+            ):
+                emit_a1_frame_progress(
+                    progress_callback,
+                    stage="CAMERA_RENDER_FRAME",
+                    action="Rendering",
+                    frame_index=frame_index,
+                    frame_count=frame_count,
+                    completed=False,
+                    object_id=runtime.plan.source_object_id,
+                )
+                set_timeline_frame(
+                    runtime.scene,
+                    runtime.context,
+                    task.timeline_frame,
+                )
+                configure_scene_for_camera_projection(
+                    runtime.scene,
+                    runtime.plan,
+                    runtime.execution_settings,
+                    reservation.staged_path,
+                )
+                policy = runtime.execution_settings.camera_influence_policy
+                frozen_pose = (
+                    runtime.execution_settings.texture_export_mode
+                    is A1TextureExportMode.DEPTH_CAMERA_PROJECTION
+                )
+                logger.info(
+                    "Rendering camera projection '%s' frame %d/%d camera='%s' "
+                    "frozen_subject_camera=%s dynamic_range=%s tone_mapping=%s "
+                    "alpha=%s shadows=%s reflection_transmission=%s world=%s",
+                    runtime.plan.source_object_id,
+                    frame_index,
+                    frame_count,
+                    runtime.plan.camera_object_id,
+                    frozen_pose,
+                    runtime.output_policy.dynamic_range.value,
+                    runtime.output_policy.tone_mapping.value,
+                    runtime.output_policy.alpha_representation.value,
+                    policy.include_scene_shadows,
+                    policy.include_scene_reflection_transmission,
+                    policy.world_affects_lighting_reflections,
+                )
+                _call_render_operator(runtime.bpy_module)
+                _require_nonempty_staged_output(reservation)
+                emit_a1_frame_progress(
+                    progress_callback,
+                    stage="CAMERA_RENDER_FRAME",
+                    action="Rendered",
+                    frame_index=frame_index,
+                    frame_count=frame_count,
+                    completed=True,
+                    object_id=runtime.plan.source_object_id,
+                )
 
     return resolved
 
@@ -164,5 +196,6 @@ def render_camera_projection_frames(
 __all__ = [
     "CameraProjectionExecutionError",
     "_call_render_operator",
+    "_render_subject_context",
     "render_camera_projection_frames",
 ]
