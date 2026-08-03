@@ -23,12 +23,8 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     A1TextureExportMode,
     BakeExecutionSettings,
 )
-from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import (
-    DepthProjectionBaseMode,
-)
-from Blender_to_Spine2D_Mesh_Exporter.domain.projection import (
-    A1ProjectionDirection,
-)
+from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import DepthProjectionBaseMode
+from Blender_to_Spine2D_Mesh_Exporter.domain.projection import A1ProjectionDirection
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
     A1RigProfile,
     SpineJsonTarget,
@@ -44,16 +40,17 @@ MANIFEST = PACKAGE / "blender_manifest.toml"
 SCENE_PROPERTIES = PACKAGE / "blender_adapter" / "scene_properties.py"
 SCENE_CAPTURE = PACKAGE / "blender_adapter" / "a1_ui_scene_capture.py"
 OBJECT_PREPARATION = PACKAGE / "blender_adapter" / "a1_object_preparation.py"
-DEPTH_SOURCE = (
-    PACKAGE / "blender_adapter" / "a1_depth_source_geometry_preparation.py"
-)
+DEPTH_SOURCE = PACKAGE / "blender_adapter" / "a1_depth_source_geometry_preparation.py"
 DEPTH_DOCUMENT = PACKAGE / "blender_adapter" / "a1_depth_document_preparation.py"
-DEPTH_FINALIZATION = (
-    PACKAGE / "blender_adapter" / "a1_depth_projection_finalization.py"
+DEPTH_ASSEMBLY = PACKAGE / "blender_adapter" / "a1_depth_document_assembly.py"
+DEPTH_PROJECTOR = PACKAGE / "application" / "a1_depth_attachment_projection.py"
+DEPTH_DISTANCE = PACKAGE / "domain" / "geometry" / "depth_camera_distance.py"
+DEPTH_RENDER_PROXY = (
+    PACKAGE / "blender_adapter" / "depth_camera_projection_render_proxy.py"
 )
-OUTPUT_DISPATCH = (
-    PACKAGE / "blender_adapter" / "a1_rendered_projection_finalization.py"
-)
+CAMERA_EXECUTION = PACKAGE / "blender_adapter" / "camera_projection_execution.py"
+DEPTH_FINALIZATION = PACKAGE / "blender_adapter" / "a1_depth_projection_finalization.py"
+OUTPUT_DISPATCH = PACKAGE / "blender_adapter" / "a1_rendered_projection_finalization.py"
 SCENE_MIGRATION = PACKAGE / "blender_adapter" / "scene_settings_migration.py"
 UI = PACKAGE / "ui.py"
 
@@ -95,7 +92,6 @@ def test_ui_exposes_exactly_the_three_requested_user_labels() -> None:
         '"Camera Projection"',
         '"Depth Camera Projection"',
     )
-
     assert all(label in source for label in labels)
     assert source.count("A1TextureExportMode.NORMAL_UV_SEGMENTS.value") >= 2
     assert source.count("A1TextureExportMode.CAMERA_PROJECTION.value") >= 1
@@ -109,10 +105,8 @@ def test_depth_mode_forces_evaluated_active_camera_without_changing_old_modes() 
 
     assert _effective_source_geometry_mode(normal) is A1SourceGeometryMode.ORIGINAL
     assert _effective_projection_direction(normal) is A1ProjectionDirection.NEGATIVE_X
-
     assert _effective_source_geometry_mode(flat) is A1SourceGeometryMode.ORIGINAL
     assert _effective_projection_direction(flat) is A1ProjectionDirection.POSITIVE_Z
-
     assert _effective_source_geometry_mode(depth) is A1SourceGeometryMode.EVALUATED
     assert _effective_projection_direction(depth) is A1ProjectionDirection.ACTIVE_CAMERA
 
@@ -124,7 +118,6 @@ def test_depth_base_supports_both_policies_but_ui_uses_farthest_visible() -> Non
     )
     properties = _read(SCENE_PROPERTIES)
     ui = _read(UI)
-
     assert 'options={"HIDDEN"}' in properties
     assert "DepthProjectionBaseMode.FARTHEST_VISIBLE.value" in properties
     assert "DepthProjectionBaseMode.OBJECT_ORIGIN.value" in properties
@@ -132,10 +125,10 @@ def test_depth_base_supports_both_policies_but_ui_uses_farthest_visible() -> Non
     assert 'column.prop(scene, "spine2d_depth_base_mode"' not in ui
 
 
-def test_depth_rig_offsets_follow_selected_base_policy() -> None:
+def test_both_relief_base_policies_keep_camera_as_global_rig_zero() -> None:
     assert _resolve_depth_z_group_origin_mode(
         DepthProjectionBaseMode.FARTHEST_VISIBLE
-    ) is LegacyZGroupOriginMode.MINIMUM_Z
+    ) is LegacyZGroupOriginMode.OBJECT_ORIGIN
     assert _resolve_depth_z_group_origin_mode(
         DepthProjectionBaseMode.OBJECT_ORIGIN
     ) is LegacyZGroupOriginMode.OBJECT_ORIGIN
@@ -143,7 +136,6 @@ def test_depth_rig_offsets_follow_selected_base_policy() -> None:
 
 def test_depth_ui_contains_only_depth_specific_quality_controls() -> None:
     source = _read(UI)
-
     for property_name in (
         "spine2d_depth_smoothing",
         "spine2d_depth_edge_threshold",
@@ -154,24 +146,46 @@ def test_depth_ui_contains_only_depth_specific_quality_controls() -> None:
     assert "One generated vertex bone per retained depth point" in source
 
 
-def test_depth_route_combines_camera_texture_and_normal_weighted_document() -> None:
+def test_depth_route_uses_shared_camera_distance_and_one_compensated_attachment() -> None:
     preparation = _read(OBJECT_PREPARATION)
     source = _read(DEPTH_SOURCE)
     document = _read(DEPTH_DOCUMENT)
+    assembly = _read(DEPTH_ASSEMBLY)
+    projector = _read(DEPTH_PROJECTOR)
+    distance = _read(DEPTH_DISTANCE)
 
     assert "prepare_a1_depth_source_geometry(" in preparation
     assert "prepare_a1_depth_document(" in preparation
     assert "CameraProjectionPlan" in preparation
     assert "build_depth_camera_projection_surface(" in source
-    assert "resolve_a1_active_camera_projection_frame(" in source
+    assert "convert_depth_result_to_camera_distance(" in source
     assert "build_a1_z_group_assignment(" in source
-    assert "prepare_a1_geometry_regions(" in source
-    assert "camera_projection=False" in document
-    assert "_resolve_depth_z_group_origin_mode(" in document
-    assert "LegacyZGroupOriginMode.MINIMUM_Z" in document
+    assert "positive distances from shared camera zero" in source
     assert "LegacyZGroupOriginMode.OBJECT_ORIGIN" in document
-    assert "offsets_toward_camera_only" in document
-    assert "build_rig(" in document
+    assert "LegacyZGroupOriginMode.MINIMUM_Z" not in document
+    assert "assemble_and_finalize_a1_depth_document(" in document
+    assert "len(document_assembly.document_build.components) != 1" in document
+    assert "project_depth_camera_attachment(" in assembly
+    assert "texture.uv.unwrap_result.snapshot" in assembly
+    assert "Segment_0" not in assembly or "segment_slot(source.prefix, 0)" in assembly
+    assert "setup_y - parent_y" in projector
+    assert "camera-distance conversion changed projected X/Y" in distance
+
+
+def test_depth_sequence_uses_frozen_source_and_camera_proxies_only_for_depth_mode() -> None:
+    proxy = _read(DEPTH_RENDER_PROXY)
+    execution = _read(CAMERA_EXECUTION)
+
+    assert "meshes.new_from_object(" in proxy
+    assert "evaluated.matrix_world" in proxy
+    assert "animation_data_clear" in proxy
+    assert "constraints" in proxy
+    assert "modifiers" in proxy
+    assert "scene.camera = proxy" in proxy
+    assert "finally:" in proxy
+    assert "frozen_depth_camera_projection_subject(runtime)" in execution
+    assert "nullcontext(runtime.source_object)" in execution
+    assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION" in execution
 
 
 def test_depth_crop_finalization_preserves_weighted_topology() -> None:
