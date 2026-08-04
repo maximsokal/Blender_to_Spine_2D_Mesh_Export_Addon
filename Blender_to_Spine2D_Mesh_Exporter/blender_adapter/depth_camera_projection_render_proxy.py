@@ -14,8 +14,6 @@ import logging
 from math import isfinite
 from typing import Any, Iterator
 
-from mathutils import Matrix
-
 from ..domain.baking import A1TextureExportMode
 from .camera_projection_error import CameraProjectionExecutionError
 from .camera_projection_validation import CameraProjectionRuntime
@@ -36,7 +34,7 @@ def _copy_matrix(value: Any, field_name: str) -> Any:
         ) from exc
 
 
-def _matrix_from_tuple(value: tuple[float, ...], field_name: str) -> Matrix:
+def _matrix_from_tuple(value: tuple[float, ...], field_name: str) -> Any:
     if not isinstance(value, tuple) or len(value) != 16:
         raise CameraProjectionExecutionError(
             f"{field_name} must contain sixteen values"
@@ -46,6 +44,8 @@ def _matrix_from_tuple(value: tuple[float, ...], field_name: str) -> Matrix:
             f"{field_name} contains non-finite values"
         )
     try:
+        from mathutils import Matrix
+
         return Matrix(
             tuple(
                 tuple(float(value[row * 4 + column]) for column in range(4))
