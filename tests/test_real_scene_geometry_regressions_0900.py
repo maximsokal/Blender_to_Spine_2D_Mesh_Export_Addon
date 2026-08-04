@@ -1,9 +1,10 @@
-"""Regressions captured from the real 0.90.0 mushrooms and flower-shop scenes."""
+"""Regressions captured from real 0.90.0 mushrooms and flower-shop scenes."""
 
 from __future__ import annotations
 
 from collections import Counter
 from dataclasses import replace
+from math import sqrt
 
 import pytest
 
@@ -34,18 +35,36 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import (
 
 
 _MUSHROOMS_OBJECT_ID = "Plane.008"
+_MUSHROOMS_CUBE_OBJECT_ID = "Cube.012"
 _FLOWER_SHOP_OBJECT_ID = "banco"
-# One lifted corner on a unit quad yields the exact centroid-plane residue reported by
-# the real evaluated Plane.008 polygon: approximately 0.00018954694198463555.
+
+# One lifted corner on a unit quad yields the centroid-plane residue reported by the
+# evaluated Plane.008 polygon: approximately 0.00018954694198463555.
 _MUSHROOMS_WARP_HEIGHT = 0.0007581877679385422
 _CAPTURED_MAXIMUM_PLANE_DISTANCE = 0.00018954694198463555
+
+# Exact synthetic square dimensions reconstructed from the Cube.012 traceback. With
+# Newell plane + centroid measurement they reproduce both logged values to float error:
+# maximum distance 7.565148185365435e-05 and polygon scale 0.13120450643194492.
+_CUBE012_SIDE_LENGTH = 0.09277534946637461
+_CUBE012_WARP_HEIGHT = 0.00030260673225328884
+_CUBE012_CAPTURED_MAXIMUM_PLANE_DISTANCE = 7.565148185365435e-05
+_CUBE012_CAPTURED_POLYGON_SCALE = 0.13120450643194492
+_CUBE012_CAPTURED_NORMALIZED_WARP = (
+    _CUBE012_CAPTURED_MAXIMUM_PLANE_DISTANCE
+    / _CUBE012_CAPTURED_POLYGON_SCALE
+)
+
 _MATERIAL_WARP_HEIGHT = 0.01
+_DEFAULT_RELATIVE_PLANARITY_TOLERANCE = 1.0e-3
+_RETIRED_TOO_NARROW_RELATIVE_TOLERANCE = 2.5e-4
 
 
 def _quad_snapshot(
     object_id: str,
     *,
     warp_height: float = 0.0,
+    side_length: float = 1.0,
 ) -> MeshSnapshot:
     """Build one ordered Blender-style n-gon with complete boundary lineage."""
 
@@ -53,12 +72,18 @@ def _quad_snapshot(
         raise ValueError("object_id must be a non-empty string")
     if isinstance(warp_height, bool) or not isinstance(warp_height, (int, float)):
         raise TypeError("warp_height must be numeric")
+    if isinstance(side_length, bool) or not isinstance(side_length, (int, float)):
+        raise TypeError("side_length must be numeric")
+    resolved_side = float(side_length)
+    if resolved_side <= 0.0:
+        raise ValueError("side_length must be positive")
 
+    half = resolved_side / 2.0
     positions = (
-        (-0.5, -0.5, 0.0),
-        (0.5, -0.5, 0.0),
-        (0.5, 0.5, float(warp_height)),
-        (-0.5, 0.5, 0.0),
+        (-half, -half, 0.0),
+        (half, -half, 0.0),
+        (half, half, float(warp_height)),
+        (-half, half, 0.0),
     )
     edge_pairs = (
         (0, 1),
@@ -128,6 +153,54 @@ def _quad_snapshot(
     return snapshot
 
 
+def _captured_planarity_metrics(snapshot: MeshSnapshot) -> tuple[float, float]:
+    """Measure the fixture independently using the production geometric definition."""
+
+    MeshSnapshotValidator().validate_or_raise(snapshot)
+    if len(snapshot.faces) != 1:
+        raise ValueError("captured planarity fixture must contain one polygon")
+
+    face = snapshot.faces[0]
+    loop_map = snapshot.loop_by_id()
+    vertex_map = snapshot.vertex_by_id()
+    points = tuple(
+        vertex_map[loop_map[loop_id].vertex_id].position
+        for loop_id in face.loop_ids
+    )
+
+    newell = [0.0, 0.0, 0.0]
+    for index, current in enumerate(points):
+        following = points[(index + 1) % len(points)]
+        newell[0] += (current[1] - following[1]) * (current[2] + following[2])
+        newell[1] += (current[2] - following[2]) * (current[0] + following[0])
+        newell[2] += (current[0] - following[0]) * (current[1] + following[1])
+
+    normal_length = sqrt(sum(component * component for component in newell))
+    if normal_length <= 0.0:
+        raise ValueError("captured polygon normal collapsed")
+    normal = tuple(component / normal_length for component in newell)
+    centroid = tuple(
+        sum(point[axis] for point in points) / float(len(points))
+        for axis in range(3)
+    )
+    maximum_distance = max(
+        abs(
+            sum(
+                (point[axis] - centroid[axis]) * normal[axis]
+                for axis in range(3)
+            )
+        )
+        for point in points
+    )
+    extents = tuple(
+        max(point[axis] for point in points)
+        - min(point[axis] for point in points)
+        for axis in range(3)
+    )
+    polygon_scale = sqrt(sum(extent * extent for extent in extents))
+    return maximum_distance, polygon_scale
+
+
 def test_mushrooms_plane_008_relative_warp_triangulates_deterministically() -> None:
     source = _quad_snapshot(
         _MUSHROOMS_OBJECT_ID,
@@ -146,9 +219,51 @@ def test_mushrooms_plane_008_relative_warp_triangulates_deterministically() -> N
     )
 
 
+def test_mushrooms_cube_012_traceback_warp_triangulates_deterministically() -> None:
+    source = _quad_snapshot(
+        _MUSHROOMS_CUBE_OBJECT_ID,
+        warp_height=_CUBE012_WARP_HEIGHT,
+        side_length=_CUBE012_SIDE_LENGTH,
+    )
+    maximum_distance, polygon_scale = _captured_planarity_metrics(source)
+
+    assert maximum_distance == pytest.approx(
+        _CUBE012_CAPTURED_MAXIMUM_PLANE_DISTANCE,
+        rel=1.0e-12,
+        abs=1.0e-15,
+    )
+    assert polygon_scale == pytest.approx(
+        _CUBE012_CAPTURED_POLYGON_SCALE,
+        rel=1.0e-12,
+        abs=1.0e-15,
+    )
+    assert maximum_distance > (
+        _RETIRED_TOO_NARROW_RELATIVE_TOLERANCE * polygon_scale
+    )
+    assert maximum_distance < (
+        _DEFAULT_RELATIVE_PLANARITY_TOLERANCE * polygon_scale
+    )
+    assert _CUBE012_CAPTURED_NORMALIZED_WARP == pytest.approx(
+        0.0005765920996996728,
+        rel=1.0e-12,
+    )
+
+    first = triangulate_snapshot(source)
+    second = triangulate_snapshot(source)
+    assert first == second
+    assert len(first.snapshot.faces) == 2
+    assert len(first.generated_edge_ids) == 1
+    assert tuple(face.source_id for face in first.snapshot.faces) == (
+        SourceFaceId(_MUSHROOMS_CUBE_OBJECT_ID, 0),
+        SourceFaceId(_MUSHROOMS_CUBE_OBJECT_ID, 0),
+    )
+
+
 def test_default_planarity_window_rejects_percent_level_warp() -> None:
     settings = TriangulationSettings()
-    assert settings.relative_planarity_tolerance == pytest.approx(2.5e-4)
+    assert settings.relative_planarity_tolerance == pytest.approx(
+        _DEFAULT_RELATIVE_PLANARITY_TOLERANCE
+    )
     assert settings.normal_alignment_tolerance_degrees == pytest.approx(1.0)
 
     source = _quad_snapshot(
@@ -176,8 +291,6 @@ def test_mushrooms_plane_008_warp_remains_rejectable_under_explicit_strict_polic
     assert "maximum plane distance" in message
     assert "effective tolerance" in message
     assert "relative=1e-05" in message
-    # Keep the real-scene failure magnitude visible in the contract without relying on
-    # an exact floating-point string representation.
     assert _CAPTURED_MAXIMUM_PLANE_DISTANCE > strict.planarity_tolerance
 
 
