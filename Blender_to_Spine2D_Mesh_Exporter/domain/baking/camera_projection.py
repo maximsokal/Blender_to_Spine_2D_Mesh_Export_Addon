@@ -1,14 +1,15 @@
 """Immutable planning for camera-rendered Spine projection textures.
 
 Camera-dependent shaders and volume cannot be represented by Blender's object UV bake
-operator. This module routes the complete object through a deterministic active-camera
-render and a full-frame Spine quad while preserving the frame/output contract.
+operator. This module routes the complete object through deterministic camera renders and
+preserves one typed frame/output contract for the front and optional parallax views.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
+from math import isfinite
 from pathlib import Path
 from typing import Tuple, TypeAlias
 
@@ -103,26 +104,67 @@ def requires_camera_projection(analysis: ObjectMaterialAnalysis) -> bool:
 class CameraProjectionPlan(BakePlan):
     """BakePlan subtype executed by the camera-render pipeline.
 
-    The inherited ``bake_mode`` and explicit synthetic pass preserve one typed
-    frame/output plan. They are never passed to ``bpy.ops.object.bake``;
-    execution dispatches by this concrete type and invokes
-    ``bpy.ops.render.render`` instead.
+    ``view_id`` is ``FRONT`` for the active-camera render. Depth parallax reserve plans
+    append a stable view id, a camera-world override, and a fitted lens scale. The front
+    defaults preserve the complete pre-0.90.0 plan contract.
     """
 
     projection_mode: CameraProjectionMode = CameraProjectionMode.FULL_FRAME_QUAD
     transparent_background: bool = True
     isolate_source_to_camera: bool = True
+    view_id: str = "FRONT"
+    camera_world_matrix_override: Tuple[float, ...] | None = None
+    lens_scale: float = 1.0
 
     def __post_init__(self) -> None:
         # ``dataclass(slots=True)`` returns a replacement class object. Zero-argument
-        # ``super()`` may therefore capture the pre-replacement class in CPython; calling
-        # the concrete base validator is deterministic for this frozen slots subclass.
+        # ``super()`` may therefore capture the pre-replacement class in CPython.
         BakePlan.__post_init__(self)
         if not isinstance(self.projection_mode, CameraProjectionMode):
             raise TypeError("projection_mode must be CameraProjectionMode")
         for field_name in ("transparent_background", "isolate_source_to_camera"):
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be bool")
+        if not isinstance(self.view_id, str) or not self.view_id.strip():
+            raise ValueError("view_id must be a non-empty string")
+        object.__setattr__(self, "view_id", self.view_id.strip().upper())
+        if self.camera_world_matrix_override is not None:
+            matrix = self.camera_world_matrix_override
+            if not isinstance(matrix, tuple) or len(matrix) != 16:
+                raise TypeError(
+                    "camera_world_matrix_override must be a sixteen-value tuple or None"
+                )
+            if not all(isfinite(float(value)) for value in matrix):
+                raise ValueError(
+                    "camera_world_matrix_override contains non-finite values"
+                )
+            object.__setattr__(
+                self,
+                "camera_world_matrix_override",
+                tuple(float(value) for value in matrix),
+            )
+        if isinstance(self.lens_scale, bool) or not isinstance(
+            self.lens_scale,
+            (int, float),
+        ):
+            raise TypeError("lens_scale must be a finite number")
+        resolved_lens_scale = float(self.lens_scale)
+        if (
+            not isfinite(resolved_lens_scale)
+            or resolved_lens_scale <= 0.0
+            or resolved_lens_scale > 1.0
+        ):
+            raise ValueError("lens_scale must be finite in (0, 1]")
+        object.__setattr__(self, "lens_scale", resolved_lens_scale)
+        if self.view_id == "FRONT":
+            if self.camera_world_matrix_override is not None:
+                raise ValueError("FRONT plan cannot override the active camera matrix")
+            if self.lens_scale != 1.0:
+                raise ValueError("FRONT plan must keep lens_scale=1")
+        elif self.camera_world_matrix_override is None:
+            raise ValueError(
+                "non-FRONT camera projection plans require a camera matrix override"
+            )
         if self.scene_context is None or self.scene_context.camera is None:
             raise ValueError("CameraProjectionPlan requires an active camera snapshot")
         if self.object_context is None:
@@ -141,6 +183,10 @@ class CameraProjectionPlan(BakePlan):
     def camera_object_id(self) -> str:
         assert self.scene_context is not None and self.scene_context.camera is not None
         return self.scene_context.camera.object_id
+
+    @property
+    def virtual_view(self) -> bool:
+        return self.view_id != "FRONT"
 
 
 TexturePlan: TypeAlias = BakePlan | CameraProjectionPlan
@@ -207,6 +253,41 @@ def build_camera_projection_plan(
     )
 
 
+def build_camera_projection_view_plan(
+    front_plan: CameraProjectionPlan,
+    *,
+    view_id: str,
+    camera_world_matrix: Tuple[float, ...],
+    lens_scale: float,
+) -> CameraProjectionPlan:
+    """Clone one front plan into a deterministic virtual-view output namespace."""
+
+    if not isinstance(front_plan, CameraProjectionPlan):
+        raise TypeError("front_plan must be CameraProjectionPlan")
+    if front_plan.view_id != "FRONT":
+        raise ValueError("front_plan must own the FRONT view")
+    if not isinstance(view_id, str) or not view_id.strip():
+        raise ValueError("view_id must be a non-empty string")
+    normalized_view_id = view_id.strip().upper()
+    if normalized_view_id == "FRONT":
+        raise ValueError("reserve view_id cannot be FRONT")
+    suffix = sanitize_filename_stem(normalized_view_id)
+    settings = replace(
+        front_plan.settings,
+        output_stem=(
+            f"{front_plan.settings.output_stem}_Parallax_{suffix}"
+        ),
+    )
+    return replace(
+        front_plan,
+        settings=settings,
+        frame_tasks=_build_frame_tasks(settings),
+        view_id=normalized_view_id,
+        camera_world_matrix_override=tuple(camera_world_matrix),
+        lens_scale=lens_scale,
+    )
+
+
 def build_texture_plan(
     analysis: ObjectMaterialAnalysis,
     settings: BakeSettings,
@@ -239,3 +320,15 @@ def texture_plan_output_paths(plan: TexturePlan) -> Tuple[Path, ...]:
     if not isinstance(plan, BakePlan):
         raise TypeError("plan must be BakePlan or CameraProjectionPlan")
     return tuple(task.output_path for task in plan.frame_tasks)
+
+
+__all__ = [
+    "CameraProjectionMode",
+    "CameraProjectionPlan",
+    "TexturePlan",
+    "build_camera_projection_plan",
+    "build_camera_projection_view_plan",
+    "build_texture_plan",
+    "requires_camera_projection",
+    "texture_plan_output_paths",
+]
