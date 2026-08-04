@@ -92,12 +92,14 @@ def _duplicated_snapshot() -> MeshSnapshot:
             id=FaceId(0),
             source_id=SourceFaceId(_OBJECT_ID, 0),
             loop_ids=(LoopId(0), LoopId(1), LoopId(2)),
+            material_index=0,
             normal=(0.0, 0.0, 1.0),
         ),
         MeshFace(
             id=FaceId(1),
             source_id=SourceFaceId(_OBJECT_ID, 0),
             loop_ids=(LoopId(3), LoopId(4), LoopId(5)),
+            material_index=0,
             normal=(0.0, 0.0, 1.0),
         ),
     )
