@@ -10,7 +10,13 @@ PACKAGE = ROOT / "Blender_to_Spine2D_Mesh_Exporter"
 RIG_UI = PACKAGE / "rig_ui.py"
 DEPTH_SOURCE = PACKAGE / "blender_adapter" / "a1_depth_source_geometry_preparation.py"
 GEOMETRY_PUBLIC = PACKAGE / "domain" / "geometry" / "__init__.py"
-VISIBLE_OWNER = (
+DEPTH_OWNER = (
+    PACKAGE
+    / "domain"
+    / "geometry"
+    / "depth_camera_projection_owner.py"
+)
+VISIBLE_TOPOLOGY = (
     PACKAGE
     / "domain"
     / "geometry"
@@ -36,14 +42,17 @@ def test_camera_modes_show_fixed_active_camera_instead_of_axis_selector() -> Non
 def test_depth_preparation_uses_visible_topology_projection_owner() -> None:
     source = _read(DEPTH_SOURCE)
     public_geometry = _read(GEOMETRY_PUBLIC)
-    visible_owner = _read(VISIBLE_OWNER)
+    owner = _read(DEPTH_OWNER)
+    visible_topology = _read(VISIBLE_TOPOLOGY)
 
     assert "build_depth_camera_projection_surface(" in source
     assert (
-        "from .depth_camera_projection_visible_topology import ("
-        in public_geometry
-    )
-    assert "def _clip_triangle_to_frame(" in visible_owner
-    assert "def _fit_clipped_rings_to_budget(" in visible_owner
-    assert "if not ring.clipped" in visible_owner
-    assert "_build_bounded_surface(" in visible_owner
+        "from .depth_camera_projection_owner import "
+        "build_depth_camera_projection_surface"
+    ) in public_geometry
+    assert "def _crosses_camera_frame(" in owner
+    assert "_build_visible_topology_surface(" in owner
+    assert "_build_bounded_surface(" in owner
+    assert "def _clip_triangle_to_frame(" in visible_topology
+    assert "def _fit_clipped_rings_to_budget(" in visible_topology
+    assert "if not ring.clipped" in visible_topology
