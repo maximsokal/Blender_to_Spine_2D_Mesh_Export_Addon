@@ -27,7 +27,10 @@ class TriangulationError(ValueError):
 class TriangulationSettings:
     epsilon: float = 1e-10
     planarity_tolerance: float = 1e-6
-    relative_planarity_tolerance: float = 2.5e-4
+    # Blender evaluated meshes in the captured Plane.008 and Cube.012 assets contain
+    # sub-per-mille n-gon warp. A 0.1% bounding-diagonal ceiling accepts those residues
+    # while remaining below the percent-level deformation rejected by regression tests.
+    relative_planarity_tolerance: float = 1.0e-3
     normal_alignment_tolerance_degrees: float = 1.0
 
     def __post_init__(self) -> None:
@@ -150,12 +153,13 @@ def _validate_planarity(
     relative_tolerance: float,
     epsilon: float,
 ) -> None:
-    """Reject warp that exceeds a narrow scale-aware tolerance window.
+    """Reject warp that exceeds a bounded scale-aware tolerance window.
 
     Blender stores n-gons as ordered boundaries and may evaluate them with small
     non-planarity. Measuring from the centroid avoids making the result depend on the
     first corner. The absolute floor protects tiny geometry, while the bounded relative
-    term accepts the captured ``Plane.008`` residue without allowing percent-level fold.
+    term accepts captured ``Plane.008`` and ``Cube.012`` residues without allowing
+    percent-level fold.
     """
 
     origin = _centroid(points)
