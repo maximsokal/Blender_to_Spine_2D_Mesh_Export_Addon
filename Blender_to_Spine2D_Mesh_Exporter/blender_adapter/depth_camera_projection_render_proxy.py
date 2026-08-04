@@ -4,7 +4,8 @@ Depth sequences own animated material/texture evaluation, not Blender object or 
 motion. The scene timeline still advances so material F-curves, drivers, and image nodes
 can evaluate, while an evaluated source-mesh proxy and a camera proxy keep the captured
 setup geometry immutable. Parallax reserve plans additionally override only the temporary
-camera transform and fitted lens/ortho scale.
+camera transform and fitted lens/ortho scale, and retain only their assigned source faces
+on the temporary mesh proxy so front geometry cannot occlude hidden texture coverage.
 """
 
 from __future__ import annotations
@@ -106,6 +107,83 @@ def _evaluated_dependency_graph(runtime: CameraProjectionRuntime) -> Any:
     return depsgraph
 
 
+def _retain_virtual_view_source_faces(
+    mesh: Any,
+    runtime: CameraProjectionRuntime,
+) -> None:
+    """Delete non-owned evaluated faces from one temporary reserve mesh.
+
+    Face indices are captured from the same evaluated source topology used by the Depth
+    geometry owner. The front plan intentionally has no filter and keeps the established
+    complete-object render. Every BMesh allocated here is owned locally and freed exactly
+    once in ``finally``.
+    """
+
+    if not runtime.plan.virtual_view:
+        return
+    source_face_indices = runtime.plan.source_face_indices
+    if source_face_indices is None:
+        raise CameraProjectionExecutionError(
+            f"Virtual view {runtime.plan.view_id} has no source-face ownership"
+        )
+
+    polygon_count = len(getattr(mesh, "polygons", ()))
+    unknown = tuple(
+        face_index
+        for face_index in source_face_indices
+        if face_index >= polygon_count
+    )
+    if unknown:
+        raise CameraProjectionExecutionError(
+            "Parallax reserve source-face indices are absent from the evaluated proxy; "
+            f"view={runtime.plan.view_id}, polygon_count={polygon_count}, "
+            f"unknown={unknown}"
+        )
+
+    try:
+        import bmesh
+    except Exception as exc:
+        raise CameraProjectionExecutionError(
+            "Blender bmesh module is unavailable for reserve face isolation"
+        ) from exc
+
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(mesh)
+        bm.faces.ensure_lookup_table()
+        retained = set(source_face_indices)
+        rejected = tuple(face for face in bm.faces if face.index not in retained)
+        if rejected:
+            bmesh.ops.delete(bm, geom=rejected, context="FACES")
+        if not bm.faces:
+            raise CameraProjectionExecutionError(
+                f"Virtual view {runtime.plan.view_id} retained no proxy faces"
+            )
+        bm.to_mesh(mesh)
+        mesh.update()
+    except CameraProjectionExecutionError:
+        raise
+    except Exception as exc:
+        raise CameraProjectionExecutionError(
+            "Unable to isolate evaluated reserve faces for virtual view "
+            f"{runtime.plan.view_id}: {exc}"
+        ) from exc
+    finally:
+        bm.free()
+
+    retained_count = len(getattr(mesh, "polygons", ()))
+    if retained_count <= 0:
+        raise CameraProjectionExecutionError(
+            f"Virtual view {runtime.plan.view_id} produced an empty proxy mesh"
+        )
+    logger.debug(
+        "Isolated Depth parallax proxy faces: view=%s retained=%d source=%s",
+        runtime.plan.view_id,
+        retained_count,
+        source_face_indices,
+    )
+
+
 def _create_source_proxy(
     runtime: CameraProjectionRuntime,
     depsgraph: Any,
@@ -145,6 +223,7 @@ def _create_source_proxy(
 
     proxy = None
     try:
+        _retain_virtual_view_source_faces(mesh, runtime)
         proxy = source.copy()
         proxy.name = f"__Spine2D_DepthSubject_{source.name}"
         proxy.data = mesh
@@ -361,12 +440,13 @@ def frozen_depth_camera_projection_subject(
         runtime.source_object.visible_camera = False
         logger.info(
             "Created frozen Depth render proxies at setup frame %s: source='%s' "
-            "camera='%s' view=%s lens_scale=%s",
+            "camera='%s' view=%s lens_scale=%s source_faces=%s",
             runtime.scene.frame_current,
             runtime.source_object.name,
             original_camera.name,
             runtime.plan.view_id,
             runtime.plan.lens_scale,
+            runtime.plan.source_face_indices,
         )
         yield source_proxy
     except BaseException as exc:
