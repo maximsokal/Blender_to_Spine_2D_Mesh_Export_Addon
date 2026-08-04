@@ -68,6 +68,8 @@ def _install_common_pipeline(monkeypatch, tmp_path: Path, *, fail_stage=None):
         return SimpleNamespace(
             reservations=(reservation,),
             projection_layout=None,
+            primary_reservations=(reservation,),
+            reserve_projection_stages=(),
         )
 
     monkeypatch.setattr(
@@ -83,7 +85,8 @@ def _install_common_pipeline(monkeypatch, tmp_path: Path, *, fail_stage=None):
         warnings=(),
     )
 
-    def finalize(_prepared, _layout):
+    def finalize(_prepared, _layout, *, reserve_layouts=None):
+        assert reserve_layouts == {}
         if fail_stage == "finalize":
             raise RuntimeError("forced finalization failure")
         return finalized
