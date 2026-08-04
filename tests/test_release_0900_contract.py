@@ -14,6 +14,7 @@ SCENE_PROPERTIES = PACKAGE / "blender_adapter" / "scene_properties.py"
 SCENE_CAPTURE = PACKAGE / "blender_adapter" / "a1_ui_scene_capture.py"
 SCENE_MIGRATION = PACKAGE / "blender_adapter" / "scene_settings_migration.py"
 RIG_UI = PACKAGE / "rig_ui.py"
+UI_LAYOUT = PACKAGE / "ui_layout.py"
 GEOMETRY = PACKAGE / "domain" / "geometry" / "depth_parallax.py"
 CAMERA_VIEWS = PACKAGE / "blender_adapter" / "depth_parallax_camera_views.py"
 CAMERA_PLAN = PACKAGE / "domain" / "baking" / "camera_projection.py"
@@ -52,10 +53,11 @@ def test_current_manifest_and_scene_schema_are_0900() -> None:
     assert "if current < 8" in migration
 
 
-def test_scene_rna_stores_radians_and_displays_rotation_angle() -> None:
+def test_scene_rna_stores_radians_and_cut_displays_rotation_angle() -> None:
     properties = _read(SCENE_PROPERTIES)
     capture = _read(SCENE_CAPTURE)
     rig_ui = _read(RIG_UI)
+    ui_layout = _read(UI_LAYOUT)
 
     assert '"spine2d_depth_parallax_horizon_angle"' in properties
     assert 'name="Parallax Horizon Angle"' in properties
@@ -67,8 +69,13 @@ def test_scene_rna_stores_radians_and_displays_rotation_angle() -> None:
     assert "def _resolve_depth_parallax_settings(" in capture
     assert "DepthParallaxSettings(" in capture
     assert "depth_parallax=_resolve_depth_parallax_settings(scene)" in capture
-    assert "def _draw_depth_parallax_horizon(" in rig_ui
-    assert 'text="Parallax Horizon Angle"' in rig_ui
+
+    assert "def _draw_depth_parallax_cut_settings(" in ui_layout
+    assert 'text="Parallax reserve"' in ui_layout
+    assert 'text="Parallax Horizon Angle"' in ui_layout
+    assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION" in ui_layout
+    assert "_draw_depth_parallax_horizon" not in rig_ui
+    assert 'text="Parallax reserve"' not in rig_ui
     assert "spine2d_depth_parallax_horizon_angle = 0.0" in rig_ui
 
 
