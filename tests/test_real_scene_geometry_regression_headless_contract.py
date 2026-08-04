@@ -12,7 +12,7 @@ RUNNER = (
     / "blender_headless"
     / "run_real_scene_geometry_regressions_integration.py"
 )
-CUBE012_RUNNER = (
+CAPTURED_PLANARITY_RUNNER = (
     ROOT
     / "tests"
     / "blender_headless"
@@ -75,48 +75,60 @@ def test_runner_reproduces_plane008_and_banco_public_multi_object_failures() -> 
     assert "[REAL-SCENE-GEOMETRY-REGRESSIONS] PASS" in source
 
 
-def test_cube012_runner_reproduces_exact_traceback_metrics_publicly() -> None:
-    source = _read(CUBE012_RUNNER)
+def test_captured_mushrooms_runner_reproduces_both_traceback_metrics_publicly() -> None:
+    source = _read(CAPTURED_PLANARITY_RUNNER)
 
-    assert '_OBJECT_NAME = "Cube.012"' in source
-    assert '_COMPONENT_ID = "object_1:Cube.012"' in source
-    assert '_CONTROL_OBJECT_NAME = "Cube012Control"' in source
-    assert '_CONTROL_COMPONENT_ID = "object_2:Cube012Control"' in source
-    assert "_SIDE_LENGTH = 0.09277534946637461" in source
-    assert "_WARP_HEIGHT = 0.00030260673225328884" in source
-    assert "_CAPTURED_MAXIMUM_PLANE_DISTANCE = 7.565148185365435e-05" in source
-    assert "_CAPTURED_POLYGON_SCALE = 0.13120450643194492" in source
-    assert "def _create_control_source(" in source
+    assert '_CUBE_OBJECT_NAME = "Cube.012"' in source
+    assert '_CUBE_COMPONENT_ID = "object_1:Cube.012"' in source
+    assert '_PLANE_OBJECT_NAME = "Plane.008"' in source
+    assert '_PLANE_COMPONENT_ID = "object_2:Plane.008"' in source
+
+    assert "_CUBE_SIDE_LENGTH = 0.09277534946637461" in source
+    assert "_CUBE_WARP_HEIGHT = 0.00030260673225328884" in source
+    assert "_CUBE_CAPTURED_MAXIMUM_PLANE_DISTANCE = 7.565148185365435e-05" in source
+    assert "_CUBE_CAPTURED_POLYGON_SCALE = 0.13120450643194492" in source
+
+    assert "_PLANE_SIDE_LENGTH = 0.0164835268501562" in source
+    assert "_PLANE_WARP_HEIGHT = 0.000379143881919382" in source
+    assert "_PLANE_CAPTURED_MAXIMUM_PLANE_DISTANCE = 9.477343601658832e-05" in source
+    assert "_PLANE_CAPTURED_POLYGON_SCALE = 0.023314310303391664" in source
+
+    assert "def _create_cube012_source(" in source
+    assert "def _create_plane008_source(" in source
     assert "sources = (" in source
     assert source.count("A1MultiObjectSource(") == 2
     assert "len(sources) == 2" in source
     assert "prepare_a1_multi_object(" in source
     assert "len(prepared_multi.objects) == 2" in source
     assert "def _prepared_by_component(" in source
-    assert "prepared_by_component[_COMPONENT_ID]" in source
-    assert "prepared_by_component[_CONTROL_COMPONENT_ID]" in source
+    assert "prepared_by_component[_CUBE_COMPONENT_ID]" in source
+    assert "prepared_by_component[_PLANE_COMPONENT_ID]" in source
     assert "PreparedDepthA1Object" in source
-    assert 'prepared.statistics[' in source
     assert '"depth_projection_source_triangle_count"' in source
-    assert "_source_fingerprint(source) == source_before" in source
-    assert "_source_fingerprint(control) == control_before" in source
+    assert "_source_fingerprint(cube) == cube_before" in source
+    assert "_source_fingerprint(plane) == plane_before" in source
     assert "_temporary_datablock_names() == temporary_before" in source
-    assert "[MUSHROOMS-CUBE012-PLANARITY] PASS" in source
-    assert '"triangles=2 sources=2 pipeline=public-multi-object"' in source
+    assert "[MUSHROOMS-CAPTURED-PLANARITY] PASS" in source
+    assert '"triangles=2+2 sources=2 pipeline=public-multi-object"' in source
     assert "import bmesh" not in source
     assert "bpy.ops" not in source
 
 
-def test_triangulation_uses_bounded_planarity_and_normal_alignment() -> None:
+def test_triangulation_uses_bounded_absolute_relative_and_hard_warp_limits() -> None:
     source = _read(TRIANGULATION)
 
+    assert "planarity_tolerance: float = 1.0e-4" in source
     assert "relative_planarity_tolerance: float = 1.0e-3" in source
+    assert "maximum_relative_planarity_warp: float = 1.0e-2" in source
     assert "relative_planarity_tolerance: float = 2.5e-4" not in source
     assert "relative_planarity_tolerance: float = 5e-2" not in source
     assert "normal_alignment_tolerance_degrees: float = 1.0" in source
     assert "def _polygon_scale(" in source
     assert "def _centroid(" in source
+    assert "normalized_warp = maximum / scale" in source
     assert "effective_tolerance = max(" in source
+    assert "or normalized_warp > maximum_relative_warp" in source
+    assert "hard ceiling" in source
     assert "def _validate_declared_normal_alignment(" in source
     assert "def _validate_triangle_orientation(" in source
     assert "Polygon is not planar within deterministic tolerance" in source
