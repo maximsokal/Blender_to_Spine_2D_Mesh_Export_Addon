@@ -69,15 +69,19 @@ def test_runner_reproduces_both_public_multi_object_failures() -> None:
     assert "[REAL-SCENE-GEOMETRY-REGRESSIONS] PASS" in source
 
 
-def test_triangulation_uses_absolute_and_scale_relative_planarity() -> None:
+def test_triangulation_uses_bounded_planarity_and_normal_alignment() -> None:
     source = _read(TRIANGULATION)
 
-    assert "relative_planarity_tolerance: float = 5e-2" in source
+    assert "relative_planarity_tolerance: float = 2.5e-4" in source
+    assert "relative_planarity_tolerance: float = 5e-2" not in source
+    assert "normal_alignment_tolerance_degrees: float = 1.0" in source
     assert "def _polygon_scale(" in source
     assert "def _centroid(" in source
     assert "effective_tolerance = max(" in source
+    assert "def _validate_declared_normal_alignment(" in source
     assert "def _validate_triangle_orientation(" in source
-    assert "Polygon is too non-planar for deterministic projection" in source
+    assert "Polygon is not planar within deterministic tolerance" in source
+    assert "Polygon is not planar relative to its declared face normal" in source
     assert "import bpy" not in source
     assert "import bmesh" not in source
     assert "bpy.ops" not in source
