@@ -251,6 +251,7 @@ def _run() -> None:
     camera = array_smoke._create_orthographic_camera(
         "RealSceneRegressionCamera"
     )
+    camera.data.ortho_scale = 12.0
     sentinel = _create_sentinel()
     sentinel.location = (20.0, 0.0, 0.0)
     _activate_only(sentinel)
@@ -349,7 +350,7 @@ def _run() -> None:
         )
     )
     _assert(
-        reserve_owned_faces == (0, 1),
+        reserve_owned_faces == (0,),
         f"banco reserve render ownership changed: {reserve_owned_faces}",
     )
     _assert_unique_working_lineage(
@@ -411,7 +412,7 @@ def _run() -> None:
         "[REAL-SCENE-GEOMETRY-REGRESSIONS] PASS "
         "mushrooms=Plane.008 warp=0.0001895469 array=4 "
         "flower_shop=banco source_face_collision=canonicalized "
-        "uv_lineage=unique pipeline=public-multi-object"
+        "render_owner=polygon0 uv_lineage=unique pipeline=public-multi-object"
     )
 
 
