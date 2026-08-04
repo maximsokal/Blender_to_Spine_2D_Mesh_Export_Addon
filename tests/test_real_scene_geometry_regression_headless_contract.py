@@ -106,6 +106,10 @@ def test_parallax_union_is_canonical_before_geometry_and_uv_consumers() -> None:
     assert "for face in surface.snapshot.faces" in identity_source
     assert "def _canonical_reserve_surface(" in identity_source
     assert "source_face_indices=render_face_indices" in identity_source
+    assert "def _validate_front_only_package_identity(" in identity_source
+    assert "Reserve-free Depth package must share one unchanged FRONT snapshot" in identity_source
+    assert "if not package.reserve_surfaces:" in identity_source
+    assert "return package" in identity_source
     assert "def canonicalize_depth_parallax_package_identity(" in identity_source
     assert "rebase_mesh_snapshot_to_evaluated_identity(" in identity_source
     assert "duplicate SourceFaceId values" in identity_source
@@ -114,6 +118,12 @@ def test_parallax_union_is_canonical_before_geometry_and_uv_consumers() -> None:
     assert "import bpy" not in identity_source
     assert "import bmesh" not in identity_source
     assert "bpy.ops" not in identity_source
+
+    front_only_index = identity_source.index("if not package.reserve_surfaces:")
+    rebase_index = identity_source.index(
+        "rebase = rebase_mesh_snapshot_to_evaluated_identity("
+    )
+    assert front_only_index < rebase_index
 
     build_index = preparation_source.index(
         "camera_z_package = build_depth_parallax_geometry_package("
