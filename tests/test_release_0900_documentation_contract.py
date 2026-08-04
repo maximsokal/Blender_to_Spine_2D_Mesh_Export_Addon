@@ -53,6 +53,8 @@ def test_settings_reference_describes_the_complete_public_parallax_contract() ->
     assert "version **0.90.0**" in source
     assert "settings schema 8" in source
     assert "### Parallax Horizon Angle" in source
+    assert "Visible only in the **Cut** foldout" in source
+    assert "it is not displayed in Rig" in source
     assert "0° through 89°" in source
     assert "0° through 45°" in source
     assert "The persisted value and the domain contract use radians" in source
@@ -81,6 +83,8 @@ def test_usage_explains_front_reserve_ownership_draw_order_and_atomicity() -> No
 
     assert "### Depth Camera Projection" in source
     assert "## Configure parallax reserve" in source
+    assert "visible only in the **Cut** foldout" in source
+    assert "it is intentionally not a Rig control" in source
     assert "Parallax Horizon Angle" in source
     assert "one union MeshSnapshot" in source
     assert "face-isolated FRONT and reserve camera renders" in source
