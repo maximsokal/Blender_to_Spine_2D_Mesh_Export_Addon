@@ -7,9 +7,9 @@ The real 0.90.0 scene exposed two distinct evaluated quads:
 * ``Plane.008``: maximum residue ``9.477343601658832e-05`` at the much smaller
   polygon scale ``0.023314310303391664``.
 
-The public two-object Depth route must accept both bounded evaluation residues without
-mutating objects, meshes, materials, selection, camera, Scene state, or temporary
-Blender datablocks.
+Blender stores Mesh coordinates as float32. The public two-object Depth route must accept
+both bounded evaluation residues after that storage round-trip without mutating objects,
+meshes, materials, selection, camera, Scene state, or temporary Blender datablocks.
 """
 
 from __future__ import annotations
@@ -85,6 +85,12 @@ _PLANE_CAPTURED_NORMALIZED_WARP = (
 _MULTI_STEM = "MushroomsCapturedPlanarityMulti"
 _CAMERA_ORTHO_SCALE = 0.35
 
+# These are the direct metric tolerances already used by this Blender fixture. The
+# normalized-ratio budget must be derived from them; it must never be a stricter unrelated
+# constant because Mesh coordinates undergo a real float32 storage round-trip.
+_DISTANCE_ABS_TOLERANCE = 1.0e-11
+_SCALE_ABS_TOLERANCE = 1.0e-8
+
 
 def _create_warped_quad(
     *,
@@ -98,11 +104,20 @@ def _create_warped_quad(
 
     if not isinstance(object_name, str) or not object_name.strip():
         raise ValueError("object_name must be a non-empty string")
-    if isinstance(side_length, bool) or not isinstance(side_length, (int, float)):
+    if isinstance(side_length, bool) or not isinstance(
+        side_length,
+        (int, float),
+    ):
         raise TypeError("side_length must be numeric")
-    if isinstance(warp_height, bool) or not isinstance(warp_height, (int, float)):
+    if isinstance(warp_height, bool) or not isinstance(
+        warp_height,
+        (int, float),
+    ):
         raise TypeError("warp_height must be numeric")
-    if isinstance(location_x, bool) or not isinstance(location_x, (int, float)):
+    if isinstance(location_x, bool) or not isinstance(
+        location_x,
+        (int, float),
+    ):
         raise TypeError("location_x must be numeric")
     if not isinstance(material_name, str) or not material_name.strip():
         raise ValueError("material_name must be a non-empty string")
@@ -129,6 +144,8 @@ def _create_warped_quad(
 
 
 def _create_cube012_source():
+    """Create the captured Cube.012 local-space quad."""
+
     return _create_warped_quad(
         object_name=_CUBE_OBJECT_NAME,
         side_length=_CUBE_SIDE_LENGTH,
@@ -139,6 +156,8 @@ def _create_cube012_source():
 
 
 def _create_plane008_source():
+    """Create the captured small Plane.008 local-space quad."""
+
     return _create_warped_quad(
         object_name=_PLANE_OBJECT_NAME,
         side_length=_PLANE_SIDE_LENGTH,
@@ -178,7 +197,7 @@ def _local_planarity_metrics(
     *,
     label: str,
 ) -> tuple[float, float]:
-    """Measure the local Newell-plane distance and bounding-box diagonal."""
+    """Measure local Newell-plane distance and bounding-box diagonal."""
 
     if not isinstance(label, str) or not label.strip():
         raise ValueError("label must be a non-empty string")
@@ -246,6 +265,44 @@ def _local_planarity_metrics(
     return maximum_distance, polygon_scale
 
 
+def _propagated_normalized_warp_tolerance(
+    *,
+    expected_maximum_distance: float,
+    expected_scale: float,
+) -> float:
+    """Return the ratio-error budget implied by distance and scale tolerances."""
+
+    if isinstance(expected_maximum_distance, bool) or not isinstance(
+        expected_maximum_distance,
+        (int, float),
+    ):
+        raise TypeError("expected_maximum_distance must be numeric")
+    if isinstance(expected_scale, bool) or not isinstance(
+        expected_scale,
+        (int, float),
+    ):
+        raise TypeError("expected_scale must be numeric")
+
+    resolved_distance = float(expected_maximum_distance)
+    resolved_scale = float(expected_scale)
+    lower_scale = resolved_scale - _SCALE_ABS_TOLERANCE
+    if lower_scale <= 0.0:
+        raise ValueError(
+            "expected_scale is too small for the metric tolerance budget"
+        )
+
+    distance_term = _DISTANCE_ABS_TOLERANCE / lower_scale
+    scale_term = (
+        abs(resolved_distance)
+        * _SCALE_ABS_TOLERANCE
+        / (resolved_scale * lower_scale)
+    )
+    tolerance = distance_term + scale_term
+    if tolerance <= 0.0:
+        raise ValueError("normalized-warp tolerance must be positive")
+    return tolerance
+
+
 def _assert_metrics(
     source,
     *,
@@ -254,25 +311,55 @@ def _assert_metrics(
     expected_scale: float,
     expected_normalized_warp: float,
 ) -> None:
+    """Validate captured metrics after Blender float32 storage with coherent budgets."""
+
     maximum_distance, polygon_scale = _local_planarity_metrics(
         source,
         label=label,
     )
+    distance_delta = abs(
+        maximum_distance - expected_maximum_distance
+    )
+    scale_delta = abs(polygon_scale - expected_scale)
+
     _assert(
-        abs(maximum_distance - expected_maximum_distance) <= 1.0e-11,
-        f"{label} maximum distance fixture drifted: {maximum_distance}",
+        distance_delta <= _DISTANCE_ABS_TOLERANCE,
+        (
+            f"{label} maximum distance fixture drifted: "
+            f"actual={maximum_distance}, "
+            f"expected={expected_maximum_distance}, "
+            f"delta={distance_delta}, "
+            f"tolerance={_DISTANCE_ABS_TOLERANCE}"
+        ),
     )
     _assert(
-        abs(polygon_scale - expected_scale) <= 1.0e-8,
-        f"{label} polygon scale fixture drifted: {polygon_scale}",
+        scale_delta <= _SCALE_ABS_TOLERANCE,
+        (
+            f"{label} polygon scale fixture drifted: "
+            f"actual={polygon_scale}, "
+            f"expected={expected_scale}, "
+            f"delta={scale_delta}, "
+            f"tolerance={_SCALE_ABS_TOLERANCE}"
+        ),
+    )
+
+    actual_normalized_warp = maximum_distance / polygon_scale
+    ratio_delta = abs(
+        actual_normalized_warp - expected_normalized_warp
+    )
+    ratio_tolerance = _propagated_normalized_warp_tolerance(
+        expected_maximum_distance=expected_maximum_distance,
+        expected_scale=expected_scale,
     )
     _assert(
-        abs(
-            maximum_distance / polygon_scale
-            - expected_normalized_warp
-        )
-        <= 1.0e-10,
-        f"{label} normalized warp fixture drifted",
+        ratio_delta <= ratio_tolerance,
+        (
+            f"{label} normalized warp fixture drifted: "
+            f"actual={actual_normalized_warp}, "
+            f"expected={expected_normalized_warp}, "
+            f"delta={ratio_delta}, "
+            f"propagated_tolerance={ratio_tolerance}"
+        ),
     )
 
 
@@ -304,7 +391,9 @@ def _source_fingerprint(source) -> tuple[object, ...]:
     )
 
 
-def _prepared_by_component(prepared_multi) -> dict[str, PreparedDepthA1Object]:
+def _prepared_by_component(
+    prepared_multi,
+) -> dict[str, PreparedDepthA1Object]:
     """Resolve prepared results by public component identity, never tuple position."""
 
     result: dict[str, PreparedDepthA1Object] = {}
@@ -330,6 +419,8 @@ def _assert_prepared_quad(
     *,
     label: str,
 ) -> None:
+    """Validate the final public Depth result for one captured quad."""
+
     _assert(
         int(
             prepared.statistics[
