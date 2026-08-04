@@ -63,7 +63,7 @@ def stage_and_finalize_a1_objects(
     scene: Any | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
 ) -> A1StagedFinalizedObjects:
-    """Stage every texture plan, validate UV pixels, and finalize render layouts."""
+    """Stage all front/reserve plans and finalize each view-owned crop."""
 
     if not isinstance(prepared, PreparedA1MultiObject):
         raise TypeError("prepared must be PreparedA1MultiObject")
@@ -107,19 +107,23 @@ def stage_and_finalize_a1_objects(
         uv_fingerprint = capture_source_uv_fingerprint(item.source_object)
         primary_error: BaseException | None = None
         try:
+            reserve_plans = tuple(
+                getattr(item, "reserve_bake_plans", ())
+            )
             staged = stage_texture_plan_outputs(
                 item.source_object,
                 item.bake_target_snapshot,
                 item.bake_plan,
                 transaction,
                 item.settings.bake_execution,
+                reserve_plans=reserve_plans,
                 context=context,
                 scene=scene,
                 progress_callback=object_progress,
             )
             coverage_samples = validate_staged_normal_bake_coverage(
                 item,
-                staged.reservations,
+                staged.primary_reservations,
             )
         except BaseException as exc:
             primary_error = exc
@@ -137,9 +141,14 @@ def stage_and_finalize_a1_objects(
                 raise
 
         reservations.extend(staged.reservations)
+        reserve_layouts = {
+            view_stage.view_id: view_stage.layout
+            for view_stage in staged.reserve_projection_stages
+        }
         finalized = finalize_prepared_rendered_projection(
             item,
             staged.projection_layout,
+            reserve_layouts=reserve_layouts,
         )
         finalized_objects.append(finalized)
         record_object_statistics(
@@ -148,6 +157,10 @@ def stage_and_finalize_a1_objects(
             {
                 **dict(finalized.statistics),
                 "bake_uv_coverage_sample_count": len(coverage_samples),
+                "parallax_texture_view_count": 1 + len(
+                    staged.reserve_projection_stages
+                ),
+                "parallax_texture_output_count": len(staged.reservations),
             },
         )
         emit_a1_export_progress(
