@@ -52,6 +52,8 @@ def test_runner_reproduces_both_public_multi_object_failures() -> None:
     assert "_WARP_HEIGHT = 0.0007581877679385422" in source
     assert "_HORIZON_ANGLE = radians(20.0)" in source
     assert "_RESERVE_FOLD_ANGLE = radians(15.0)" in source
+    assert "folded_x = 0.9 - cos(_RESERVE_FOLD_ANGLE)" in source
+    assert "folded_z = -sin(_RESERVE_FOLD_ANGLE)" in source
     assert 'type="ARRAY"' in source
     assert "modifier.count = _COPY_COUNT" in source
     assert "prepare_a1_multi_object(" in source
@@ -61,7 +63,7 @@ def test_runner_reproduces_both_public_multi_object_failures() -> None:
     assert "banco_package.reserve_face_indices == (0, 1)" in source
     assert "banco_prepared_lineage == banco_union_lineage" in source
     assert "region.transfer_report.complete" in source
-    assert "_object_fingerprint(mushrooms, array_modifier)" in source
+    assert "_source_fingerprint(mushrooms, array_modifier)" in source
     assert "_temporary_datablock_names() == temporary_before" in source
     assert "[REAL-SCENE-GEOMETRY-REGRESSIONS] PASS" in source
 
