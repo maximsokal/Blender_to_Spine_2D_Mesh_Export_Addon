@@ -7,6 +7,15 @@ from .capabilities import (
     ShaderCapabilityFinding,
     strongest_shader_capability,
 )
+from .camera_projection import (
+    CameraProjectionMode,
+    CameraProjectionPlan,
+    TexturePlan,
+    build_camera_projection_plan,
+    build_texture_plan,
+    requires_camera_projection,
+    texture_plan_output_paths,
+)
 from .context import (
     CameraBakeSnapshot,
     ColorManagementSnapshot,
@@ -15,12 +24,33 @@ from .context import (
     SceneBakeContext,
     WorldBakeSnapshot,
 )
+from .depth_parallax import DepthParallaxSettings
+from .execution import (
+    A1TextureExportMode,
+    BakeArtifact,
+    BakeExecutionResult,
+    BakeExecutionSettings,
+    CameraProjectionInfluencePolicy,
+)
+from .generated_materials import (
+    A1GeneratedMaterialPattern,
+    A1MaterialSourcePolicy,
+    ColorRGBA,
+    GeneratedBakePlan,
+    GeneratedMaterialPlan,
+)
 from .graph import (
     MaterialDependencyKind,
     MaterialGraphSnapshot,
     MaterialSemanticChannel,
     ShaderLinkSnapshot,
     ShaderNodeSnapshot,
+)
+from .grouped_camera_projection import (
+    GroupedCameraProjectionPlan,
+    GroupedCameraProjectionPlanError,
+    build_grouped_camera_projection_plan,
+    grouped_projection_output_paths,
 )
 from .model import (
     BakeCompositeMode,
@@ -43,39 +73,10 @@ from .model import (
     TextureFormat,
     build_bake_plan,
 )
-from .generated_materials import (
-    A1GeneratedMaterialPattern,
-    A1MaterialSourcePolicy,
-    ColorRGBA,
-    GeneratedBakePlan,
-    GeneratedMaterialPlan,
-)
 from .output_naming import (
     predict_bake_output_paths,
     sanitize_filename_stem,
     windows_path_identity,
-)
-from .camera_projection import (
-    CameraProjectionMode,
-    CameraProjectionPlan,
-    TexturePlan,
-    build_camera_projection_plan,
-    build_texture_plan,
-    requires_camera_projection,
-    texture_plan_output_paths,
-)
-from .execution import (
-    A1TextureExportMode,
-    BakeArtifact,
-    BakeExecutionResult,
-    BakeExecutionSettings,
-    CameraProjectionInfluencePolicy,
-)
-from .grouped_camera_projection import (
-    GroupedCameraProjectionPlan,
-    GroupedCameraProjectionPlanError,
-    build_grouped_camera_projection_plan,
-    grouped_projection_output_paths,
 )
 from .projection_coverage import (
     ProjectionCoverageError,
@@ -156,6 +157,7 @@ __all__ = [
     "ColorRGBA",
     "DEFAULT_SEQUENCE_FPS",
     "DepthCameraProjectionSettings",
+    "DepthParallaxSettings",
     "DepthProjectionBaseMode",
     "EmissionBakeStrategy",
     "GeneratedBakePlan",
