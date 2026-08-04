@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-import pytest
-
 from Blender_to_Spine2D_Mesh_Exporter.domain.camera_projection import (
     A1CameraProjectionFrame,
     A1CameraProjectionKind,
