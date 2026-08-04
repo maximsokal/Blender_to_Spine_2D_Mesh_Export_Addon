@@ -6,7 +6,7 @@
 - A matching supported Spine Editor target: 3.8.99, 4.0.64, 4.1.24, 4.2.43, or 4.3.23.
 - Windows is the currently tested desktop platform.
 - A saved `.blend` file and a writable output directory.
-- Enough memory and disk space for the selected texture resolution and frame count.
+- Enough memory and disk space for the selected texture resolution, frame count, and optional parallax reserve views.
 
 Blender 4.x and Blender 5.0/5.1 are not supported. The minimum version is declared in `Blender_to_Spine2D_Mesh_Exporter/blender_manifest.toml`.
 
@@ -16,7 +16,7 @@ Blender 4.x and Blender 5.0/5.1 are not supported. The minimum version is declar
 2. Open Blender 5.2 or newer.
 3. Open **Edit > Preferences > Extensions**.
 4. Choose **Install from Disk**.
-5. Select `blender_to_spine2d_mesh_exporter-0.81.0.zip`.
+5. Select `blender_to_spine2d_mesh_exporter-0.90.0.zip`.
 6. Enable **Blender to Spine2D Mesh Exporter**.
 7. Open a 3D View, press `N`, and select the extension tab.
 
@@ -27,14 +27,14 @@ Do not unpack the archive. Its root must contain `blender_manifest.toml` and `__
 1. Disable or remove the old extension.
 2. Close Blender completely.
 3. Start Blender again.
-4. Install `blender_to_spine2d_mesh_exporter-0.81.0.zip` through **Install from Disk**.
+4. Install `blender_to_spine2d_mesh_exporter-0.90.0.zip` through **Install from Disk**.
 5. Reopen the project and run **Analyze** before export.
 
 Closing Blender prevents loaded Python modules and cached extension metadata from keeping the previous implementation active.
 
 ## Export modes
 
-Version 0.81.0 exposes three independent modes:
+Version 0.90.0 exposes three independent modes:
 
 ```text
 Normal - UV Segments
@@ -42,9 +42,27 @@ Camera Projection
 Depth Camera Projection
 ```
 
-`Depth Camera Projection` requires an active Perspective or Orthographic camera. It evaluates the visible camera-facing surface, generates a bounded weighted relief mesh, renders the source material through the camera, and remaps the generated camera UVs into the final crop. It does not export camera animation.
+`Depth Camera Projection` requires an active Perspective or Orthographic camera. It evaluates the camera-facing surface, generates a bounded weighted relief mesh, renders the source material through the camera, and remaps generated camera UVs into the final crop. It does not export camera animation.
 
 The public depth base is **Farthest Visible Point**. The farthest retained point receives zero relief offset and all remaining retained points extend only toward the camera.
+
+### Parallax reserve
+
+`Parallax Horizon Angle` is available only for Depth Camera Projection.
+
+```text
+0°
+    Preserve the established front-only behavior: one texture and one attachment.
+
+Greater than 0°
+    Retain connected surfaces around the visible horizon up to the accumulated
+    unsigned dihedral-angle budget. Each retained reserve direction receives its
+    own fitted virtual camera, face-isolated texture, crop, and mesh attachment.
+```
+
+Blender displays the setting in degrees and stores it in radians. The supported range is `0°` through `89°`; the default is `0°` and the UI soft maximum is `45°`.
+
+Reserve attachments reuse the same generated vertex-bone rig as the front attachment. Reserve slots are serialized before the front slot so the front remains above them in Spine draw order. The source camera, source mesh, materials, UV state, selection, frame, and render state are restored after export.
 
 ## Per-object sequence timing
 
@@ -59,23 +77,19 @@ Frames > 0
     Start selects the first timeline frame.
 ```
 
-Static siblings do not inherit sequence metadata or animation timelines.
+When parallax reserve is enabled, FRONT and every reserve view receive the same frame-task count, but each view owns its own stable alpha-union crop and image namespace. Static siblings do not inherit sequence metadata or animation timelines.
 
 ## Scene settings migration
 
-Version 0.81.0 uses Scene settings schema 7. Migration preserves existing valid export mode, rig profile, Spine target, projection direction, seam mode, material settings, paths, and per-object sequence timing.
+Version 0.90.0 uses Scene settings schema 8. Migration preserves existing valid export mode, rig profile, Spine target, projection direction, seam mode, material settings, paths, per-object sequence timing, and all established Depth Camera Projection settings.
 
-Schema 7 initializes only missing depth fields:
+Schema 8 initializes only the missing parallax field:
 
 ```text
-Depth base = Farthest Visible Point
-Depth smoothing = production default
-Depth edge threshold = production default
-Depth mesh error = production default
-Max depth points = production default
+Parallax Horizon Angle = 0°
 ```
 
-The hidden Object Origin depth policy remains an internal compatibility contract and is not selectable in the production UI.
+That default keeps saved files on the pre-0.90.0 front-only path until the user explicitly enables reserve coverage.
 
 Current values can be inspected in Blender's Python Console:
 
@@ -91,6 +105,7 @@ print(
     scene.spine2d_depth_edge_threshold,
     scene.spine2d_depth_mesh_error_pixels,
     scene.spine2d_depth_max_points,
+    scene.spine2d_depth_parallax_horizon_angle,
 )
 ```
 
@@ -119,14 +134,14 @@ if ($LASTEXITCODE -ne 0) {
 Expected archive:
 
 ```text
-dist/blender_to_spine2d_mesh_exporter-0.81.0.zip
+dist/blender_to_spine2d_mesh_exporter-0.90.0.zip
 ```
 
 Validate the built archive:
 
 ```powershell
 & $Blender --command extension validate `
-    dist\blender_to_spine2d_mesh_exporter-0.81.0.zip
+    dist\blender_to_spine2d_mesh_exporter-0.90.0.zip
 
 if ($LASTEXITCODE -ne 0) {
     throw "Built extension validation failed"
@@ -139,10 +154,12 @@ After installation:
 
 1. Open a representative saved project.
 2. Verify that the three export modes appear.
-3. Select `Depth Camera Projection` and an active camera.
-4. Export a static object and a two-frame material sequence.
-5. Confirm that JSON and PNG files are produced.
-6. Import the output into the exact selected Spine version.
-7. Move the generated X/Y/Scale controls and confirm that the relief deformation remains stable.
+3. Select `Depth Camera Projection` and an active Perspective camera.
+4. Leave `Parallax Horizon Angle` at `0°`; export and confirm one texture and one attachment.
+5. Set a positive angle on a folded test mesh; confirm separate FRONT and reserve textures and reserve-before-front slot order.
+6. Repeat with an Orthographic camera.
+7. Export a two-frame material sequence and confirm both FRONT and reserve sequences use stable per-view crops.
+8. Import the output into the exact selected Spine version.
+9. Move the generated X/Y/Scale controls and confirm that front and reserve attachments deform through the shared rig without gaps at their common hinge.
 
 Continue with the [Usage Guide](usage.md), [Settings Reference](settings-reference.md), and [Testing and Release Validation](testing.md).
