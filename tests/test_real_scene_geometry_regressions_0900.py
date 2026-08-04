@@ -39,6 +39,7 @@ _FLOWER_SHOP_OBJECT_ID = "banco"
 # the real evaluated Plane.008 polygon: approximately 0.00018954694198463555.
 _MUSHROOMS_WARP_HEIGHT = 0.0007581877679385422
 _CAPTURED_MAXIMUM_PLANE_DISTANCE = 0.00018954694198463555
+_MATERIAL_WARP_HEIGHT = 0.01
 
 
 def _quad_snapshot(
@@ -143,6 +144,19 @@ def test_mushrooms_plane_008_relative_warp_triangulates_deterministically() -> N
         SourceFaceId(_MUSHROOMS_OBJECT_ID, 0),
         SourceFaceId(_MUSHROOMS_OBJECT_ID, 0),
     )
+
+
+def test_default_planarity_window_rejects_percent_level_warp() -> None:
+    settings = TriangulationSettings()
+    assert settings.relative_planarity_tolerance == pytest.approx(2.5e-4)
+    assert settings.normal_alignment_tolerance_degrees == pytest.approx(1.0)
+
+    source = _quad_snapshot(
+        _MUSHROOMS_OBJECT_ID,
+        warp_height=_MATERIAL_WARP_HEIGHT,
+    )
+    with pytest.raises(TriangulationError, match="Polygon is not planar"):
+        triangulate_snapshot(source, settings)
 
 
 def test_mushrooms_plane_008_warp_remains_rejectable_under_explicit_strict_policy() -> None:
