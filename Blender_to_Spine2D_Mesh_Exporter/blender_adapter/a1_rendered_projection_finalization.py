@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Mapping
+
 from ..domain.baking import A1TextureExportMode, CameraProjectionLayout
 from .a1_depth_projection_finalization import (
     finalize_prepared_depth_camera_projection,
@@ -13,6 +15,8 @@ from .a1_projection_finalization import finalize_prepared_camera_projection
 def finalize_prepared_rendered_projection(
     prepared: PreparedA1Object,
     layout: CameraProjectionLayout | None,
+    *,
+    reserve_layouts: Mapping[str, CameraProjectionLayout] | None = None,
 ) -> PreparedA1Object:
     """Finalize the selected rendered-camera representation exactly once."""
 
@@ -20,7 +24,15 @@ def finalize_prepared_rendered_projection(
         raise TypeError("prepared must be PreparedA1Object")
     mode = prepared.settings.bake_execution.texture_export_mode
     if mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
-        return finalize_prepared_depth_camera_projection(prepared, layout)
+        return finalize_prepared_depth_camera_projection(
+            prepared,
+            layout,
+            reserve_layouts,
+        )
+    if reserve_layouts:
+        raise ValueError(
+            "reserve_layouts are valid only for DEPTH_CAMERA_PROJECTION"
+        )
     return finalize_prepared_camera_projection(prepared, layout)
 
 
