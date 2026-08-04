@@ -42,6 +42,13 @@ from .depth_camera_projection import (
     DepthProjectionBaseMode,
 )
 from .depth_camera_projection_owner import build_depth_camera_projection_surface
+from .depth_parallax import (
+    DepthParallaxCameraView,
+    DepthParallaxGeometryPackage,
+    DepthParallaxReserveSurface,
+    DepthParallaxViewId,
+    build_depth_parallax_geometry_package,
+)
 from .disk_region import DiskRegionAddition, DiskRegionState, DiskTopologyIndex
 from .fingerprint import build_mesh_fingerprint
 from .ids import (
@@ -133,6 +140,10 @@ __all__ = [
     "DepthCameraProjectionError",
     "DepthCameraProjectionResult",
     "DepthCameraProjectionSettings",
+    "DepthParallaxCameraView",
+    "DepthParallaxGeometryPackage",
+    "DepthParallaxReserveSurface",
+    "DepthParallaxViewId",
     "DepthProjectionBaseMode",
     "DiskRegionAddition",
     "DiskRegionState",
@@ -188,6 +199,7 @@ __all__ = [
     "analyse_evaluated_lineage",
     "analyse_face_region",
     "build_depth_camera_projection_surface",
+    "build_depth_parallax_geometry_package",
     "build_edge_to_faces",
     "build_face_adjacency",
     "build_mesh_fingerprint",
