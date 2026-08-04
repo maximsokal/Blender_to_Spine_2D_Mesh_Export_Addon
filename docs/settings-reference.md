@@ -1,8 +1,8 @@
 # Settings Reference
 
 This document describes the public Blender 5.2 Scene and object settings in extension
-version **0.81.0**. Defaults apply to a genuinely new Scene. Saved files migrate to Scene
-settings schema 7 without changing their selected export mode.
+version **0.90.0**. Defaults apply to a genuinely new Scene. Saved files migrate to Scene
+settings schema 8 without changing their selected export mode.
 
 ## Export
 
@@ -14,7 +14,7 @@ The selector contains exactly three values.
 | --- | --- | --- |
 | Normal - UV Segments | Yes | Segments geometry, creates generated bake UV, bakes source surfaces, and exports region-based weighted Spine attachments. |
 | Camera Projection | No | Renders through the active camera and exports a flat cropped screen-space mesh. |
-| Depth Camera Projection | No | Renders through the active camera and exports an optimized visible depth-relief mesh with generated vertex bones. |
+| Depth Camera Projection | No | Renders through the active camera and exports an optimized visible depth-relief mesh with generated vertex bones and optional horizon reserve attachments. |
 
 Changing Export mode invalidates cached readiness. Run Analyze again before export.
 
@@ -47,7 +47,7 @@ Pixels below the threshold are excluded from rendered-camera coverage and crop b
 
 ### Depth base
 
-Depth Camera Projection uses **Farthest Visible Point** publicly in 0.81.0.
+Depth Camera Projection uses **Farthest Visible Point** publicly in 0.90.0.
 
 ```text
 farthest visible surface → rig offset 0
@@ -96,6 +96,48 @@ Smaller values retain more points until the hard point limit is reached.
 
 Hard limit for retained depth points and their generated vertex bones. The source Blender
 vertex count is not copied directly.
+
+When a positive Parallax Horizon Angle causes the union of FRONT and reserve surfaces to
+exceed this limit, readiness and export fail closed. The exporter does not silently remove
+reserve faces, lower the requested horizon angle, or create a second independent rig.
+
+### Parallax Horizon Angle
+
+Visible only for Depth Camera Projection.
+
+| Type | Hard range | Soft range | Default |
+| --- | --- | --- | --- |
+| Rotation angle | 0° through 89° | 0° through 45° | 0° |
+
+Blender displays this setting in degrees because the RNA property uses the `ANGLE`
+subtype and `ROTATION` unit. The persisted value and the domain contract use radians.
+
+`0°` preserves the established front-only path: one camera texture, one weighted mesh
+attachment, and no reserve camera plans.
+
+For a positive value, the exporter performs deterministic Dijkstra traversal over
+face adjacency. The path cost is the accumulated unsigned dihedral angle across shared
+edges. Faces outside the active-camera visible set may be retained when their minimum
+accumulated cost is within the requested horizon budget.
+
+Retained reserve faces are assigned to deterministic virtual directions:
+
+```text
+RIGHT, UP_RIGHT, UP, UP_LEFT,
+LEFT, DOWN_LEFT, DOWN, DOWN_RIGHT
+```
+
+Each non-empty direction owns:
+
+- exact evaluated source-face indices;
+- one fitted Perspective lens or Orthographic scale;
+- one temporary face-isolated render proxy;
+- one alpha-union crop across that view's sequence frames;
+- one texture namespace and one weighted reserve attachment.
+
+Reserve attachments reuse the same generated vertex-bone rig as the FRONT attachment.
+Reserve slots are emitted before the FRONT slot so the FRONT remains above them in Spine
+draw order. Shared hinge vertices keep shared generated bones.
 
 ### Texture size
 
@@ -150,6 +192,10 @@ For public Depth Camera Projection with Farthest Visible Point, the existing Nor
 uses `MINIMUM_Z` as the Z-group origin policy. This maps the farthest visible depth to
 zero and keeps every generated group offset non-negative toward the camera.
 
+Positive parallax does not create a second reserve rig. FRONT and reserve attachments are
+subsets of one union MeshSnapshot and use one shared Z-group assignment and generated
+vertex-bone namespace.
+
 ### 2-Axis controls
 
 ```text
@@ -180,9 +226,12 @@ Objects in the same layer may intentionally share one phase order.
 
 ### Saved Scene migration
 
-Scene schema 7 adds the Depth Camera Projection quality fields. Missing depth settings
-receive defaults, while valid saved export mode, Spine target, seam mode, rig profile,
-and all established settings remain unchanged.
+Scene schema 8 adds `spine2d_depth_parallax_horizon_angle` with a default of `0.0`
+radians. Existing valid export mode, Spine target, seam mode, rig profile, depth quality
+settings, paths, and per-object sequence timing remain unchanged.
+
+The zero default is a compatibility boundary: a migrated Scene does not gain reserve
+textures or attachments until the user explicitly chooses a positive angle.
 
 ## Cut
 
@@ -194,8 +243,9 @@ and all established settings remain unchanged.
 | Custom | No | Uses user-marked seams and disables angular splitting controls. |
 
 Depth Camera Projection creates its own generated relief topology. Its discontinuities are
-controlled by Depth edge threshold, so the Cut foldout displays an explanatory message
-instead of source seam controls.
+controlled by Depth edge threshold, while horizon reserve growth is controlled by
+Parallax Horizon Angle. The Cut foldout displays an explanatory message instead of source
+seam controls for this mode.
 
 ### Seed angle limit
 
@@ -223,7 +273,8 @@ Frames > 0  → Loop texture sequence for that object only
 ```
 
 This applies independently to Normal / UV Segments, Camera Projection, and Depth Camera
-Projection.
+Projection. With positive parallax, each FRONT/reserve view receives the same frame count
+but owns a separate stable crop and image sequence.
 
 ### Sequence FPS override
 
@@ -247,6 +298,7 @@ become direct camera-visible output.
 ## Analysis
 
 Analyze runs production preparation without writing files. Depth Camera Projection reports
-retained depth points, visible source triangles, maximum relief, weighted attachment
-statistics, and structured blockers. Any geometry, material, camera, selection, frame,
-mode, target, or depth-setting change makes the report stale.
+retained depth points, visible and reserve source triangles, FRONT/reserve attachment
+counts, virtual texture-view counts, maximum relief, weighted attachment statistics, and
+structured blockers. Any geometry, material, camera, selection, frame, mode, target,
+depth-setting, or Parallax Horizon Angle change makes the report stale.
