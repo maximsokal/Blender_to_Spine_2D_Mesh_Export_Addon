@@ -3,14 +3,15 @@
 Each generated triangle retains the original face and corner lineage. Existing
 boundary edges keep their source IDs and flags; generated diagonals explicitly use
 ``source_id=None``. Blender n-gons may contain small evaluated warp, so planarity is
-validated against both an absolute and a scale-relative tolerance. Self-intersecting,
-strongly folded, and degenerate polygons remain hard errors.
+validated against bounded absolute and scale-relative tolerances. Declared face normals
+must also remain coherent with the geometric polygon plane. Self-intersecting, strongly
+folded, projection-distorted, and degenerate polygons remain hard errors.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite, sqrt
+from math import acos, isfinite, pi, sqrt
 from typing import Iterable, Tuple
 
 from .ids import EdgeId, FaceId, LoopId, VertexId
@@ -26,13 +27,15 @@ class TriangulationError(ValueError):
 class TriangulationSettings:
     epsilon: float = 1e-10
     planarity_tolerance: float = 1e-6
-    relative_planarity_tolerance: float = 5e-2
+    relative_planarity_tolerance: float = 2.5e-4
+    normal_alignment_tolerance_degrees: float = 1.0
 
     def __post_init__(self) -> None:
         for field_name in (
             "epsilon",
             "planarity_tolerance",
             "relative_planarity_tolerance",
+            "normal_alignment_tolerance_degrees",
         ):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -45,6 +48,10 @@ class TriangulationSettings:
             object.__setattr__(self, field_name, numeric)
         if self.relative_planarity_tolerance > 1.0:
             raise ValueError("relative_planarity_tolerance cannot exceed 1.0")
+        if self.normal_alignment_tolerance_degrees > 90.0:
+            raise ValueError(
+                "normal_alignment_tolerance_degrees cannot exceed 90 degrees"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,12 +150,12 @@ def _validate_planarity(
     relative_tolerance: float,
     epsilon: float,
 ) -> None:
-    """Reject only warp that is large relative to the polygon itself.
+    """Reject warp that exceeds a narrow scale-aware tolerance window.
 
     Blender stores n-gons as ordered boundaries and may evaluate them with small
     non-planarity. Measuring from the centroid avoids making the result depend on the
-    first corner. The absolute floor protects tiny geometry, while the relative term
-    scales with the polygon bounding diagonal.
+    first corner. The absolute floor protects tiny geometry, while the bounded relative
+    term accepts the captured ``Plane.008`` residue without allowing percent-level fold.
     """
 
     origin = _centroid(points)
@@ -166,10 +173,50 @@ def _validate_planarity(
     )
     if maximum > effective_tolerance:
         raise TriangulationError(
-            "Polygon is too non-planar for deterministic projection: "
+            "Polygon is not planar within deterministic tolerance: "
             f"maximum plane distance {maximum} exceeds effective tolerance "
             f"{effective_tolerance} (absolute={absolute_tolerance}, "
             f"relative={relative_tolerance}, polygon_scale={scale})"
+        )
+
+
+def _validate_declared_normal_alignment(
+    declared_normal: Vector3,
+    geometric_normal: Vector3,
+    *,
+    tolerance_degrees: float,
+    epsilon: float,
+) -> None:
+    """Reject polygons whose stored face normal no longer describes their plane.
+
+    Perspective projection is not an affine transform in XYZ. Projecting an n-gon before
+    triangulation can therefore leave a face normal inherited from source space while the
+    generated points describe another plane. Small Blender evaluation residue is accepted;
+    a material orientation mismatch remains a hard error so callers must triangulate in
+    source/world space before non-affine projection.
+    """
+
+    declared_length = _length(declared_normal)
+    if not isfinite(declared_length):
+        raise TriangulationError("Declared face normal contains non-finite values")
+    if declared_length <= epsilon:
+        return
+
+    normalized_declared = (
+        declared_normal[0] / declared_length,
+        declared_normal[1] / declared_length,
+        declared_normal[2] / declared_length,
+    )
+    cosine = abs(_dot(normalized_declared, geometric_normal))
+    if not isfinite(cosine):
+        raise TriangulationError("Declared face-normal alignment became non-finite")
+    clamped = min(1.0, max(0.0, cosine))
+    deviation_degrees = acos(clamped) * 180.0 / pi
+    if deviation_degrees > tolerance_degrees:
+        raise TriangulationError(
+            "Polygon is not planar relative to its declared face normal: "
+            f"normal deviation {deviation_degrees} degrees exceeds tolerance "
+            f"{tolerance_degrees} degrees"
         )
 
 
@@ -407,12 +454,11 @@ def _triangulate_face(
 
     points_3d = tuple(vertex_map[vertex_id].position for vertex_id in vertex_ids)
     newell = _newell_normal(points_3d)
-    normal_value = (
-        newell
-        if _length(newell) > settings.epsilon
-        else face.normal
+    newell_length = _length(newell)
+    normal = _normalized(
+        newell if newell_length > settings.epsilon else face.normal,
+        settings.epsilon,
     )
-    normal = _normalized(normal_value, settings.epsilon)
     _validate_planarity(
         points_3d,
         normal,
@@ -420,6 +466,13 @@ def _triangulate_face(
         relative_tolerance=settings.relative_planarity_tolerance,
         epsilon=settings.epsilon,
     )
+    if newell_length > settings.epsilon:
+        _validate_declared_normal_alignment(
+            face.normal,
+            normal,
+            tolerance_degrees=settings.normal_alignment_tolerance_degrees,
+            epsilon=settings.epsilon,
+        )
     axis = _projection_axis(normal)
     points_2d = tuple(_project(point, axis) for point in points_3d)
     _validate_simple_polygon(points_2d, settings.epsilon)
