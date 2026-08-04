@@ -170,5 +170,5 @@ def test_release_note_records_complete_parallax_reserve_contract() -> None:
     assert "reserve slots are emitted before the established front slot" in normalized
     assert "every virtual view owns its own alpha union crop" in normalized
     assert "same atomicfiletransaction" in normalized
-    assert "scene settings schema is 8" in normalized
+    assert "Scene settings schema is **8**." in note
     assert "blender_to_spine2d_mesh_exporter 0.90.0.zip" in normalized
