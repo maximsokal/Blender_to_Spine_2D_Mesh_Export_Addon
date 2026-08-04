@@ -29,6 +29,9 @@ from ..domain.geometry import (
 from ..domain.geometry.depth_camera_distance import (
     convert_depth_snapshot_to_camera_distance,
 )
+from ..domain.geometry.depth_parallax_identity import (
+    canonicalize_depth_parallax_package_identity,
+)
 from ..domain.geometry.evaluated_identity import (
     EvaluatedIdentityRebaseResult,
     rebase_mesh_snapshot_to_evaluated_identity,
@@ -452,6 +455,10 @@ def prepare_a1_depth_source_geometry(
             uv_layer_name=settings.uv.layer_name,
             horizon_angle_radians=horizon_angle,
             max_points=settings.bake_execution.depth_projection.max_points,
+        )
+        camera_z_package = canonicalize_depth_parallax_package_identity(
+            camera_z_package,
+            uv_layer_name=settings.uv.layer_name,
         )
         depth_package = _package_to_camera_distance(camera_z_package)
         depth = depth_package.front_result
