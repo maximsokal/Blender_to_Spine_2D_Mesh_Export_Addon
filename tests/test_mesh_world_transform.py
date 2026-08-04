@@ -197,6 +197,86 @@ def test_translation_only_snapshot_is_returned_without_geometry_rebuild():
     assert result.translation == (5.0, 6.0, 7.0)
 
 
+def test_float32_affine_row_noise_is_canonicalized():
+    source = replace(
+        build_square_snapshot(),
+        world_matrix=(
+            1.0,
+            0.0,
+            0.0,
+            5.0,
+            0.0,
+            1.0,
+            0.0,
+            6.0,
+            0.0,
+            0.0,
+            1.0,
+            7.0,
+            7.5e-7,
+            -9.0e-7,
+            5.0e-7,
+            0.9999994,
+        ),
+    )
+
+    result = normalize_mesh_snapshot_world_transform(source)
+
+    assert result.changed is True
+    assert result.translation == (5.0, 6.0, 7.0)
+    assert result.snapshot.world_matrix == (
+        1.0,
+        0.0,
+        0.0,
+        5.0,
+        0.0,
+        1.0,
+        0.0,
+        6.0,
+        0.0,
+        0.0,
+        1.0,
+        7.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    )
+    assert tuple(vertex.position for vertex in result.snapshot.vertices) == tuple(
+        vertex.position for vertex in source.vertices
+    )
+
+
+def test_meaningful_projective_row_is_rejected_with_diagnostics():
+    source = replace(
+        build_square_snapshot(),
+        world_matrix=(
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            2.0e-4,
+            0.0,
+            0.0,
+            1.0,
+        ),
+    )
+
+    with pytest.raises(
+        MeshWorldTransformError,
+        match=r"final_row=.*tolerance=1e-05",
+    ):
+        normalize_mesh_snapshot_world_transform(source)
+
+
 def test_singular_object_transform_is_rejected_before_segmentation():
     source = replace(
         build_square_snapshot(),
