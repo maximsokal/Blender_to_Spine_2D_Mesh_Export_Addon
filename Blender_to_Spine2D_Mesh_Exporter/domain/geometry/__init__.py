@@ -41,9 +41,7 @@ from .depth_camera_projection import (
     DepthCameraProjectionSettings,
     DepthProjectionBaseMode,
 )
-from .depth_camera_projection_visible_topology import (
-    build_depth_camera_projection_surface,
-)
+from .depth_camera_projection_owner import build_depth_camera_projection_surface
 from .disk_region import DiskRegionAddition, DiskRegionState, DiskTopologyIndex
 from .fingerprint import build_mesh_fingerprint
 from .ids import (
