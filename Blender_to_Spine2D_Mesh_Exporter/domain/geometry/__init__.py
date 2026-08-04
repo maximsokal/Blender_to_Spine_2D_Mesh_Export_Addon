@@ -40,8 +40,8 @@ from .depth_camera_projection import (
     DepthCameraProjectionResult,
     DepthCameraProjectionSettings,
     DepthProjectionBaseMode,
-    build_depth_camera_projection_surface,
 )
+from .depth_camera_projection_bounded import build_depth_camera_projection_surface
 from .disk_region import DiskRegionAddition, DiskRegionState, DiskTopologyIndex
 from .fingerprint import build_mesh_fingerprint
 from .ids import (
