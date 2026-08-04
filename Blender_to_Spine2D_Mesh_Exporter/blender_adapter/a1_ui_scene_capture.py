@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from math import isfinite
+from math import isfinite, pi
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ from ..domain.baking import (
     BakeExecutionSettings,
     CameraProjectionInfluencePolicy,
     DepthCameraProjectionSettings,
+    DepthParallaxSettings,
     DepthProjectionBaseMode,
     TextureSequenceTiming,
 )
@@ -271,7 +272,7 @@ def _scene_integer(
 
 
 def _resolve_depth_projection_settings(scene: Any) -> DepthCameraProjectionSettings:
-    """Capture depth controls; only farthest-visible is public in 0.81.0."""
+    """Capture Depth Camera Projection quality controls and hidden base policy."""
 
     raw_base = str(
         getattr(
@@ -315,6 +316,20 @@ def _resolve_depth_projection_settings(scene: Any) -> DepthCameraProjectionSetti
             maximum=4096,
         ),
         base_mode=base_mode,
+    )
+
+
+def _resolve_depth_parallax_settings(scene: Any) -> DepthParallaxSettings:
+    """Capture the 0.90.0 angular reserve in Blender-native radians."""
+
+    return DepthParallaxSettings(
+        horizon_angle_radians=_finite_scene_float(
+            scene,
+            "spine2d_depth_parallax_horizon_angle",
+            0.0,
+            minimum=0.0,
+            maximum=pi / 2.0 - 1.0e-9,
+        )
     )
 
 
@@ -544,6 +559,7 @@ def _capture_scene_profile(
         texture_export_mode=texture_export_mode,
         camera_influence_policy=_resolve_camera_influence_policy(scene),
         depth_projection=_resolve_depth_projection_settings(scene),
+        depth_parallax=_resolve_depth_parallax_settings(scene),
     )
     return _SceneExportProfile(
         output_directory=(
@@ -583,6 +599,7 @@ __all__ = [
     "_capture_scene_profile",
     "_projection_alpha_threshold",
     "_resolve_camera_influence_policy",
+    "_resolve_depth_parallax_settings",
     "_resolve_depth_projection_settings",
     "_resolve_generated_gray_color",
     "_resolve_generated_material_pattern",
