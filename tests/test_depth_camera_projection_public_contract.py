@@ -1,4 +1,4 @@
-"""Public and architectural contracts for the 0.81.0 depth-relief mode."""
+"""Public and architectural contracts for the current Depth Camera Projection mode."""
 
 from __future__ import annotations
 
@@ -134,19 +134,21 @@ def test_both_relief_base_policies_keep_camera_as_global_rig_zero() -> None:
     ) is LegacyZGroupOriginMode.OBJECT_ORIGIN
 
 
-def test_depth_ui_contains_only_depth_specific_quality_controls() -> None:
-    source = _read(UI)
+def test_depth_ui_contains_depth_quality_and_parallax_controls() -> None:
+    properties = _read(SCENE_PROPERTIES)
+    ui = _read(UI)
     for property_name in (
         "spine2d_depth_smoothing",
         "spine2d_depth_edge_threshold",
         "spine2d_depth_mesh_error_pixels",
         "spine2d_depth_max_points",
+        "spine2d_depth_parallax_horizon_angle",
     ):
-        assert property_name in source
-    assert "One generated vertex bone per retained depth point" in source
+        assert property_name in properties
+    assert "One generated vertex bone per retained depth point" in ui
 
 
-def test_depth_route_uses_shared_camera_distance_and_one_compensated_attachment() -> None:
+def test_depth_route_uses_shared_camera_distance_and_compensated_view_attachments() -> None:
     preparation = _read(OBJECT_PREPARATION)
     source = _read(DEPTH_SOURCE)
     document = _read(DEPTH_DOCUMENT)
@@ -158,16 +160,19 @@ def test_depth_route_uses_shared_camera_distance_and_one_compensated_attachment(
     assert "prepare_a1_depth_document(" in preparation
     assert "CameraProjectionPlan" in preparation
     assert "build_depth_camera_projection_surface(" in source
-    assert "convert_depth_result_to_camera_distance(" in source
-    assert "build_a1_z_group_assignment(" in source
+    assert "build_depth_parallax_geometry_package(" in source
+    assert "_package_to_camera_distance(" in source
+    assert "convert_depth_snapshot_to_camera_distance(" in source
+    assert "build_a1_z_group_assignment(depth_package.union_snapshot)" in source
     assert "positive distances from shared camera zero" in source
     assert "LegacyZGroupOriginMode.OBJECT_ORIGIN" in document
     assert "LegacyZGroupOriginMode.MINIMUM_Z" not in document
+    assert "expected_attachment_count = package.attachment_count" in document
+    assert "component_count != expected_attachment_count" in document
     assert "assemble_and_finalize_a1_depth_document(" in document
-    assert "len(document_assembly.document_build.components) != 1" in document
+    assert "for surface in package.reserve_surfaces" in assembly
+    assert "front_name = rig.profile.segment_slot(source.prefix, 0)" in assembly
     assert "project_depth_camera_attachment(" in assembly
-    assert "texture.uv.unwrap_result.snapshot" in assembly
-    assert "Segment_0" not in assembly or "segment_slot(source.prefix, 0)" in assembly
     assert "setup_y - parent_y" in projector
     assert "camera-distance conversion changed projected X/Y" in distance
 
@@ -200,15 +205,16 @@ def test_depth_crop_finalization_preserves_weighted_topology() -> None:
     assert "finalize_prepared_camera_projection(" in dispatch
 
 
-def test_scene_schema_and_manifest_are_0810() -> None:
+def test_scene_schema_and_manifest_are_current_0900() -> None:
     manifest = tomllib.loads(_read(MANIFEST))
     migration = _read(SCENE_MIGRATION)
 
-    assert manifest["version"] == "0.81.0"
+    assert manifest["version"] == "0.90.0"
     assert manifest["blender_version_min"] == "5.2.0"
-    assert "CURRENT_SETTINGS_SCHEMA_VERSION = 7" in migration
+    assert "CURRENT_SETTINGS_SCHEMA_VERSION = 8" in migration
     assert "_initialize_depth_defaults(" in migration
     assert "spine2d_depth_base_mode" in migration
+    assert "spine2d_depth_parallax_horizon_angle" in migration
 
 
 def test_scene_capture_owns_depth_settings_in_immutable_request() -> None:
@@ -217,3 +223,5 @@ def test_scene_capture_owns_depth_settings_in_immutable_request() -> None:
     assert "def _resolve_depth_projection_settings(" in source
     assert "DepthCameraProjectionSettings(" in source
     assert "depth_projection=_resolve_depth_projection_settings(scene)" in source
+    assert "def _resolve_depth_parallax_settings(" in source
+    assert "depth_parallax=_resolve_depth_parallax_settings(scene)" in source
