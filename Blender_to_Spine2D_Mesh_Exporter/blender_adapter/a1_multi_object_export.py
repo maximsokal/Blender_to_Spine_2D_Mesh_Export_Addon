@@ -1,7 +1,7 @@
 """Prepare several Blender objects for one A1 output transaction.
 
-This module owns preparation orchestration only. Shared source/result/error contracts live in
-``a1_multi_object_contracts`` so UI, composition, and output modules do not depend on a
+This module owns preparation orchestration only. Shared source/result/error contracts live
+in ``a1_multi_object_contracts`` so UI, composition, and output modules do not depend on a
 preparation implementation merely to import dataclasses.
 """
 
@@ -60,7 +60,12 @@ def _preflight_sources(
     sources: Tuple[A1MultiObjectSource, ...],
     settings: A1MultiObjectExportSettings,
 ) -> Tuple[Path, ...]:
-    """Validate the complete Windows output namespace before geometry preparation."""
+    """Validate predictable front outputs before geometry preparation.
+
+    Reserve view outputs are geometry-dependent and are validated by
+    ``_validate_prepared_outputs`` immediately after every object has produced its
+    immutable angular package.
+    """
 
     result = preflight_a1_output_namespace(
         output_root=settings.output_directory,
@@ -127,6 +132,8 @@ def _validate_prepared_outputs(
     prepared: Tuple[PreparedA1Object, ...],
     settings: A1MultiObjectExportSettings,
 ) -> Tuple[Path, ...]:
+    """Validate front and reserve texture paths against one Windows namespace."""
+
     if not isinstance(prepared, tuple) or not prepared:
         raise ValueError("prepared must be a non-empty tuple")
     if not all(isinstance(item, PreparedA1Object) for item in prepared):
@@ -142,25 +149,35 @@ def _validate_prepared_outputs(
         windows_path_identity(final_json): ("final JSON", final_json)
     }
     for item in prepared:
-        for task in item.bake_plan.frame_tasks:
-            path = task.output_path.expanduser().resolve(strict=False)
-            try:
-                path.relative_to(output_root)
-            except ValueError as exc:
-                raise ValueError(
-                    f"Texture output for '{item.object_id}' escapes the multi-object "
-                    f"root: {path}"
-                ) from exc
-            identity = windows_path_identity(path)
-            previous = owner_by_identity.get(identity)
-            if previous is not None:
-                previous_owner, previous_path = previous
-                raise ValueError(
-                    f"Windows output path collision between {previous_owner} "
-                    f"({previous_path}) and component '{item.object_id}' ({path})"
-                )
-            owner_by_identity[identity] = (item.object_id, path)
-            paths.append(path)
+        plans = (
+            item.bake_plan,
+            *tuple(getattr(item, "reserve_bake_plans", ())),
+        )
+        for plan in plans:
+            plan_owner = (
+                item.object_id
+                if getattr(plan, "view_id", "FRONT") == "FRONT"
+                else f"{item.object_id}:{plan.view_id}"
+            )
+            for task in plan.frame_tasks:
+                path = task.output_path.expanduser().resolve(strict=False)
+                try:
+                    path.relative_to(output_root)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Texture output for '{plan_owner}' escapes the multi-object "
+                        f"root: {path}"
+                    ) from exc
+                identity = windows_path_identity(path)
+                previous = owner_by_identity.get(identity)
+                if previous is not None:
+                    previous_owner, previous_path = previous
+                    raise ValueError(
+                        f"Windows output path collision between {previous_owner} "
+                        f"({previous_path}) and component '{plan_owner}' ({path})"
+                    )
+                owner_by_identity[identity] = (plan_owner, path)
+                paths.append(path)
     if not paths:
         raise ValueError("multi-object export contains no texture output tasks")
     return tuple(paths)
@@ -257,7 +274,7 @@ def prepare_a1_multi_object(
             progress_callback,
             percent=95,
             stage=stage,
-            message="Validating realized texture output paths",
+            message="Validating realized front and reserve texture output paths",
         )
         texture_paths = _validate_prepared_outputs(resolved_objects, settings)
         statistics["texture_output_count"] = len(texture_paths)
