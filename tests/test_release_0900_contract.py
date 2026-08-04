@@ -162,7 +162,7 @@ def test_release_note_records_complete_parallax_reserve_contract() -> None:
     assert note.lstrip().startswith("# Release 0.90.0")
     assert "parallax horizon angle" in normalized
     assert "blender stores the setting in radians and displays it in degrees" in normalized
-    assert "default is 0°" in note.lower()
+    assert "default is **0°**" in note.lower()
     assert "deterministic dijkstra traversal" in normalized
     assert "eight deterministic virtual camera directions" in normalized
     assert "one union meshsnapshot" in normalized
