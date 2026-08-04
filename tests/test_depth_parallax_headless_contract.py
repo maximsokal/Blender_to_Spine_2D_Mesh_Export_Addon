@@ -28,6 +28,7 @@ def test_depth_parallax_blender_runner_covers_runtime_boundaries() -> None:
         "slot_order == (reserve_slot, front_slot)",
         "front and reserve attachments do not share hinge vertex bones",
         "reserve texture does not reveal folded green surface",
+        "front material leaked into face-isolated reserve texture",
         "depth_parallax_cropped_view_count",
         "parallax_texture_output_count",
         "_capture_scene_bake_state() == bake_before",
