@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from typing import Any, Sequence
 
 from ..application import (
     A1SingleObjectStage,
@@ -46,11 +46,11 @@ def _resolve_depth_z_group_origin_mode(
     raise AssertionError(f"Unhandled depth base mode: {base_mode}")
 
 
-def prepare_a1_depth_document(
+def _resolve_depth_document_inputs(
     texture: A1TexturePlanningResult,
-    reserve_plans: Sequence[CameraProjectionPlan] = (),
-) -> A1DocumentPreparationResult:
-    """Build one shared vertex rig and all camera-textured depth attachments."""
+    reserve_plans: Sequence[CameraProjectionPlan],
+) -> tuple[Any, tuple[CameraProjectionPlan, ...], int]:
+    """Validate and normalize the immutable inputs for depth document assembly."""
 
     if not isinstance(texture, A1TexturePlanningResult):
         raise TypeError("texture must be A1TexturePlanningResult")
@@ -58,6 +58,8 @@ def prepare_a1_depth_document(
         isinstance(plan, CameraProjectionPlan) for plan in reserve_plans
     ):
         raise TypeError("reserve_plans must contain CameraProjectionPlan values")
+
+    resolved_reserve_plans = tuple(reserve_plans)
     source = texture.uv.source
     mode = source.settings.bake_execution.texture_export_mode
     if mode is not A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
@@ -68,19 +70,32 @@ def prepare_a1_depth_document(
         raise TypeError(
             "Depth Camera Projection requires a CameraProjectionPlan texture route"
         )
+
     package = getattr(source, "parallax_package", None)
     if not isinstance(package, DepthParallaxGeometryPackage):
         raise TypeError(
             "Depth document preparation requires DepthParallaxGeometryPackage"
         )
     expected_attachment_count = package.attachment_count
-    if expected_attachment_count != 1 + len(tuple(reserve_plans)):
+    if expected_attachment_count != 1 + len(resolved_reserve_plans):
         raise ValueError(
             "Parallax package attachment count does not match reserve plans"
         )
+    return source, resolved_reserve_plans, expected_attachment_count
 
+
+def prepare_a1_depth_document(
+    texture: A1TexturePlanningResult,
+    reserve_plans: Sequence[CameraProjectionPlan] = (),
+) -> A1DocumentPreparationResult:
+    """Build one shared vertex rig and all camera-textured depth attachments."""
+
+    source, resolved_reserve_plans, expected_attachment_count = (
+        _resolve_depth_document_inputs(texture, reserve_plans)
+    )
     stage = A1SingleObjectStage.BUILD_RIG
     statistics = texture.statistics
+
     try:
         resolved_profile = resolve_a1_rig_profile(
             source.settings.export.rig_profile
@@ -144,7 +159,7 @@ def prepare_a1_depth_document(
                     expected_attachment_count
                 ),
                 "depth_camera_reserve_attachment_count": len(
-                    tuple(reserve_plans)
+                    resolved_reserve_plans
                 ),
                 "depth_camera_projected_main_x": (
                     0.0 if main_position is None else float(main_position[0])
@@ -164,7 +179,7 @@ def prepare_a1_depth_document(
         document_assembly = assemble_and_finalize_a1_depth_document(
             texture,
             rig,
-            reserve_plans,
+            resolved_reserve_plans,
         )
         final_rig = document_assembly.rig
         document = document_assembly.document
@@ -174,6 +189,7 @@ def prepare_a1_depth_document(
                 "Depth Camera Projection component count differs from parallax package; "
                 f"expected={expected_attachment_count}, got={component_count}"
             )
+
         sequence_enabled = source.settings.export.sequence_frame_count > 0
         actual_attachment_count = sum(
             len(attachments)
@@ -219,7 +235,7 @@ def prepare_a1_depth_document(
             len(document.bones),
             len(document.slots),
             actual_attachment_count,
-            len(tuple(reserve_plans)),
+            len(resolved_reserve_plans),
         )
         return A1DocumentPreparationResult(
             texture=texture,
@@ -241,6 +257,7 @@ def prepare_a1_depth_document(
 
 
 __all__ = [
+    "_resolve_depth_document_inputs",
     "_resolve_depth_z_group_origin_mode",
     "prepare_a1_depth_document",
 ]
