@@ -404,10 +404,22 @@ def _face_adjacency(
 
 
 def _dihedral_angle(first: _FaceGeometry, second: _FaceGeometry) -> float:
-    """Return unsigned plane bend independent of accidental winding reversal."""
+    """Return the unsigned bend between two planes with stable normalization."""
 
-    cosine = min(1.0, max(0.0, abs(_dot(first.normal_world, second.normal_world))))
-    return float(acos(cosine))
+    first_length_squared = _dot(first.normal_world, first.normal_world)
+    second_length_squared = _dot(second.normal_world, second.normal_world)
+    denominator_squared = first_length_squared * second_length_squared
+    if not isfinite(denominator_squared) or denominator_squared <= 1.0e-30:
+        raise DepthCameraProjectionError(
+            "parallax dihedral angle received a collapsed face normal"
+        )
+    denominator = sqrt(denominator_squared)
+    cosine = abs(_dot(first.normal_world, second.normal_world)) / denominator
+    if not isfinite(cosine):
+        raise DepthCameraProjectionError(
+            "parallax dihedral angle became non-finite"
+        )
+    return float(acos(min(1.0, max(0.0, cosine))))
 
 
 def _front_visible_face_indices(
