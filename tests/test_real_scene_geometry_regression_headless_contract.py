@@ -61,6 +61,7 @@ def test_runner_reproduces_both_public_multi_object_failures() -> None:
     assert 'issue.code == "EVALUATED_IDENTITY_REBASED"' in source
     assert "banco_package.front_face_indices == (2, 3)" in source
     assert "banco_package.reserve_face_indices == (0, 1)" in source
+    assert "reserve_owned_faces == (0,)" in source
     assert "banco_prepared_lineage == banco_union_lineage" in source
     assert "region.transfer_report.complete" in source
     assert "_source_fingerprint(mushrooms, array_modifier)" in source
@@ -97,12 +98,15 @@ def test_parallax_union_is_canonical_before_geometry_and_uv_consumers() -> None:
     identity_source = _read(PARALLAX_IDENTITY)
     preparation_source = _read(DEPTH_PREPARATION)
 
+    assert "def _evaluated_render_face_indices(" in identity_source
+    assert "for face in surface.snapshot.faces" in identity_source
+    assert "def _canonical_reserve_surface(" in identity_source
+    assert "source_face_indices=render_face_indices" in identity_source
     assert "def canonicalize_depth_parallax_package_identity(" in identity_source
     assert "rebase_mesh_snapshot_to_evaluated_identity(" in identity_source
     assert "duplicate SourceFaceId values" in identity_source
     assert "duplicate SourceLoopId values" in identity_source
     assert "_subset_material(" in identity_source
-    assert "source_face_indices" in identity_source
     assert "import bpy" not in identity_source
     assert "import bmesh" not in identity_source
     assert "bpy.ops" not in identity_source
