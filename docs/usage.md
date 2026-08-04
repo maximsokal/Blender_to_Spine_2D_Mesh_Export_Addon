@@ -17,12 +17,12 @@ Before analysis or export:
 - save the `.blend` file;
 - keep source Mesh objects in Object Mode;
 - ensure required source images exist or are packed/generated inside Blender;
-- select a supported renderer and a valid active camera when Camera Projection is used;
+- select a supported renderer and a valid active camera when Camera Projection or Depth Camera Projection is used;
 - choose a writable output directory;
 - confirm that the intended UV layer and material graph are valid;
-- avoid changing geometry, UVs, materials, selection, or export settings after analysis without running analysis again.
+- avoid changing geometry, UVs, materials, selection, camera, frame, or export settings after analysis without running analysis again.
 
-The exporter reads evaluated geometry through isolated temporary objects and verifies that source mesh, UV, material, and Blender state remain unchanged.
+The exporter reads evaluated geometry through isolated temporary objects and verifies that source mesh, UV, material, camera, selection, timeline, and Blender render state remain unchanged.
 
 ## Choose an export mode
 
@@ -66,6 +66,55 @@ Use it for camera-dependent, volume, screen-space, or other supported render-dep
 
 Camera Projection requires a valid active camera and a supported render context.
 
+### Depth Camera Projection
+
+Depth Camera Projection combines a camera render with a weighted relief mesh. It is intended for camera-dependent materials that must retain controlled X/Y/Scale deformation in Spine.
+
+Front-only pipeline at `Parallax Horizon Angle = 0°`:
+
+```text
+active camera visible faces
+  -> bounded depth lattice
+  -> farthest visible point becomes zero relief
+  -> generated shared vertex-bone rig
+  -> FRONT camera render and alpha-union crop
+  -> one weighted FRONT attachment
+  -> JSON and texture commit
+```
+
+Positive parallax pipeline:
+
+```text
+active camera visible faces
+  -> accumulated unsigned dihedral traversal
+  -> one union MeshSnapshot for FRONT and reserve faces
+  -> deterministic virtual camera assignment
+  -> face-isolated FRONT and reserve camera renders
+  -> one stable crop per view across all sequence frames
+  -> reserve attachments followed by FRONT attachment
+  -> one shared atomic JSON/texture commit
+```
+
+The active camera may be Perspective or Orthographic. Virtual reserve cameras are temporary copies. Perspective views fit the copied lens; Orthographic views fit the copied `ortho_scale`. The source camera is restored and never receives the virtual transform.
+
+## Configure parallax reserve
+
+`Parallax Horizon Angle` is visible only in Depth Camera Projection.
+
+- `0°` exports the established FRONT-only result.
+- A positive value retains connected surfaces whose minimum accumulated dihedral cost is within the selected angle.
+- The default is `0°`.
+- The hard maximum is `89°`; the UI soft maximum is `45°`.
+- Blender displays degrees but stores radians.
+
+The exporter may assign retained faces to up to eight virtual directions. Empty directions create no texture or attachment.
+
+Every reserve view owns exact source-face indices. Its temporary evaluated mesh contains only those faces, preventing the FRONT surface from occluding hidden reserve texture coverage. Each reserve texture therefore contains its own surface rather than a duplicate render of the whole object.
+
+Reserve slots are serialized before the FRONT slot. In Spine this keeps reserve surfaces below the FRONT surface. FRONT and reserve attachments share generated hinge bones where their union topology shares source vertices.
+
+A positive horizon can increase the union point count. When the requested union exceeds **Max depth points**, Analyze and Export fail instead of silently reducing the angle or dropping faces.
+
 ## Configure cutting
 
 ### Seam Maker: Auto
@@ -92,6 +141,8 @@ Typical workflow:
 
 The topology pipeline may still decompose a seam-defined region when required to produce valid manifold disk attachments. It does not enable the Auto angular split policy.
 
+Depth Camera Projection does not use source seam controls. Depth discontinuities are controlled by Depth edge threshold and horizon growth is controlled by Parallax Horizon Angle.
+
 ## Configure textures and output paths
 
 Set:
@@ -101,11 +152,14 @@ Set:
 - Images Subfolder;
 - Control icons;
 - Preview animation;
-- Projection alpha threshold when Camera Projection is selected.
+- Projection alpha threshold for rendered-camera modes;
+- Depth quality and Parallax Horizon Angle for Depth Camera Projection.
 
 Texture size must be an even integer from 64 through 4096. The default is 1024.
 
 The JSON path is a directory. The Images Subfolder is normalized as a relative path below that directory; the default is `images/`.
+
+FRONT and every reserve view use separate deterministic image stems. A two-frame positive-parallax export therefore creates two FRONT PNG files and two PNG files for each non-empty reserve view.
 
 ## Configure generated materials
 
@@ -121,7 +175,7 @@ Patterns:
 - **One Region - One Color**;
 - **One Polygon - One Color**.
 
-Generated materials are temporary. The exporter removes generated materials, node trees, images, meshes, objects, and color attributes on success and failure paths.
+Generated materials are temporary. The exporter removes generated materials, node trees, images, meshes, objects, color attributes, camera proxies, and render proxies on success and failure paths.
 
 ## Configure frame output
 
@@ -135,6 +189,8 @@ For one selected object, Bake settings are stored on the Scene:
 
 For multiple selected objects, each object has independent Frames and Start values. This allows static and sequence objects to participate in the same multi-object request.
 
+For positive Depth parallax, FRONT and reserve views have matching frame counts. Crop is stable across frames inside one view, while FRONT and reserve views keep independent crop rectangles.
+
 ## Configure multi-object composition
 
 Connected-object controls are currently retained as development-only functionality and are not shown in the production UI.
@@ -146,6 +202,8 @@ Connected-object controls are currently retained as development-only functionali
 
 Connected objects share the connected rig contract. Standalone objects retain independent component rigs inside the final document.
 
+Standalone multi-object Depth parallax places every object's FRONT and reserve outputs in one outer atomic transaction. A failure while staging a later object rolls back the JSON and every staged texture from earlier objects.
+
 ## Run readiness analysis
 
 Press **Analyze** before export.
@@ -153,15 +211,15 @@ Press **Analyze** before export.
 The readiness report can include:
 
 - source and exported vertex/triangle counts;
-- region, attachment, and bone counts;
+- visible and reserve source-face counts;
+- region, attachment, virtual-view, and bone counts;
 - texture pipeline and frame count;
-- topology statistics;
+- topology and crop statistics;
 - structured blockers and warnings.
 
-The cached report becomes stale when relevant selection, geometry, UV, material, Scene, renderer, camera, or export settings change. Run analysis again after any such change.
+The cached report becomes stale when relevant selection, geometry, UV, material, Scene, renderer, camera, frame, or export settings change. This includes Depth quality values and Parallax Horizon Angle. Run analysis again after any such change.
 
-The report is diagnostic-only. Export remains available even when the report is missing,
-stale, or contains blockers.
+The report is diagnostic-only. Export remains available even when the report is missing, stale, or contains blockers; production validation still fails closed during export when the request is invalid.
 
 ## Export one object
 
@@ -173,6 +231,8 @@ stale, or contains blockers.
 
 The JSON stem is derived from the object name and ends with `_merged.json`. Texture paths are written below the configured Images Subfolder.
 
+For positive parallax, inspect the result statistics for FRONT/reserve view count and verify that output files contain one JSON, all FRONT frames, and all reserve frames.
+
 ## Export multiple objects
 
 1. Select at least two Mesh objects.
@@ -182,15 +242,16 @@ The JSON stem is derived from the object name and ends with `_merged.json`. Text
 5. Review any reported blockers and warnings.
 6. Press **Export Selected Objects**.
 
-The output stem uses the first ordered selected object name plus the number of additional selected objects.
+The output stem uses the first ordered selected object name plus the number of additional selected objects. All object textures and the final JSON are committed together.
 
 ## Import into Spine
 
 1. Keep the JSON and image directory relationship unchanged.
-2. Open or create a Spine 4.2 project.
+2. Open or create a project in the exact selected Spine version.
 3. Import the generated Spine JSON.
 4. Point Spine to the exported images directory when needed.
-5. Inspect setup pose, attachments, UV placement, constraints, preview animation, and texture sequences.
+5. Inspect setup pose, attachment order, UV placement, constraints, preview animation, and texture sequences.
+6. For positive parallax, confirm that reserve slots occur immediately below their object's FRONT slot and that shared hinge deformation remains coherent.
 
 Normal-mode textures are saved with the file-space orientation expected by the exported Spine UV coordinates.
 
@@ -207,7 +268,8 @@ The main Reset button restores:
 - Seed cone angular mode;
 - local angle limit 30;
 - Seam Maker Auto;
-- current-frame baking.
+- current-frame baking;
+- Parallax Horizon Angle `0°`.
 
 The Generated Materials panel has its own Reset button and restores Require Source, Solid Gray, and gray RGB `(0.5, 0.5, 0.5)`.
 
