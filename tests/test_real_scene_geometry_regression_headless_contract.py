@@ -1,4 +1,4 @@
-"""Static contract for the real-scene geometry regression runner."""
+"""Static contracts for captured real-scene geometry regressions."""
 
 from __future__ import annotations
 
@@ -11,6 +11,12 @@ RUNNER = (
     / "tests"
     / "blender_headless"
     / "run_real_scene_geometry_regressions_integration.py"
+)
+CUBE012_RUNNER = (
+    ROOT
+    / "tests"
+    / "blender_headless"
+    / "run_mushrooms_cube012_planarity_integration.py"
 )
 TRIANGULATION = (
     ROOT
@@ -44,7 +50,7 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_runner_reproduces_both_public_multi_object_failures() -> None:
+def test_runner_reproduces_plane008_and_banco_public_multi_object_failures() -> None:
     source = _read(RUNNER)
 
     assert '_MUSHROOMS_OBJECT_NAME = "Plane.008"' in source
@@ -69,10 +75,30 @@ def test_runner_reproduces_both_public_multi_object_failures() -> None:
     assert "[REAL-SCENE-GEOMETRY-REGRESSIONS] PASS" in source
 
 
+def test_cube012_runner_reproduces_exact_traceback_metrics_publicly() -> None:
+    source = _read(CUBE012_RUNNER)
+
+    assert '_OBJECT_NAME = "Cube.012"' in source
+    assert '_COMPONENT_ID = "object_1:Cube.012"' in source
+    assert "_SIDE_LENGTH = 0.09277534946637461" in source
+    assert "_WARP_HEIGHT = 0.00030260673225328884" in source
+    assert "_CAPTURED_MAXIMUM_PLANE_DISTANCE = 7.565148185365435e-05" in source
+    assert "_CAPTURED_POLYGON_SCALE = 0.13120450643194492" in source
+    assert "prepare_a1_multi_object(" in source
+    assert "PreparedDepthA1Object" in source
+    assert 'prepared.statistics["depth_projection_source_triangle_count"]' in source
+    assert "_source_fingerprint(source) == source_before" in source
+    assert "_temporary_datablock_names() == temporary_before" in source
+    assert "[MUSHROOMS-CUBE012-PLANARITY] PASS" in source
+    assert "import bmesh" not in source
+    assert "bpy.ops" not in source
+
+
 def test_triangulation_uses_bounded_planarity_and_normal_alignment() -> None:
     source = _read(TRIANGULATION)
 
-    assert "relative_planarity_tolerance: float = 2.5e-4" in source
+    assert "relative_planarity_tolerance: float = 1.0e-3" in source
+    assert "relative_planarity_tolerance: float = 2.5e-4" not in source
     assert "relative_planarity_tolerance: float = 5e-2" not in source
     assert "normal_alignment_tolerance_degrees: float = 1.0" in source
     assert "def _polygon_scale(" in source
