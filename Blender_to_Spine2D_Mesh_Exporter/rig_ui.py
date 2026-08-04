@@ -70,6 +70,20 @@ def _draw_projection_direction(
     )
 
 
+def _draw_forced_active_camera_projection(
+    layout: bpy.types.UILayout,
+) -> None:
+    """Show the camera-only projection contract without exposing an invalid selector."""
+
+    row = layout.row(align=True)
+    row.label(text="Projection")
+    row.label(text="Active Camera", icon="CAMERA_DATA")
+    layout.label(
+        text="Perspective and Orthographic cameras are supported",
+        icon="INFO",
+    )
+
+
 def draw_rig_settings(
     layout: bpy.types.UILayout,
     context: bpy.types.Context,
@@ -91,11 +105,18 @@ def draw_rig_settings(
             text="Active camera render -> one screen-space mesh",
             icon="CAMERA_DATA",
         )
+        _draw_forced_active_camera_projection(layout)
         layout.prop(
             scene,
             "spine2d_projection_alpha_threshold",
             text="Projection alpha threshold",
         )
+    elif texture_mode == A1TextureExportMode.DEPTH_CAMERA_PROJECTION.value:
+        layout.label(
+            text="Active camera render -> optimized depth-relief mesh",
+            icon="CAMERA_DATA",
+        )
+        _draw_forced_active_camera_projection(layout)
     else:
         layout.label(
             text="Preserves cut regions and generated UV meshes",
@@ -116,6 +137,9 @@ def draw_rig_settings(
     )
     if texture_mode == A1TextureExportMode.CAMERA_PROJECTION.value:
         description.label(text="Camera Projection keeps compatibility placement")
+    elif texture_mode == A1TextureExportMode.DEPTH_CAMERA_PROJECTION.value:
+        description.label(text="Depth geometry and rig depth use the active camera")
+        description.label(text="Main bone matches projected Blender Object Origin")
     else:
         description.label(text="Main bone matches projected Blender Object Origin")
         description.label(text="Depth uses the selected axis or active camera")
