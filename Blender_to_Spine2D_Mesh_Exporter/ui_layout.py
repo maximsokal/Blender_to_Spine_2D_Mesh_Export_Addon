@@ -101,7 +101,7 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
         )
         box.label(
             text="Max Depth Points limits combined front + reserve geometry",
-            icon="MOD_SIMPLIFY",
+            icon="BONE_DATA",
         )
 
     @staticmethod
