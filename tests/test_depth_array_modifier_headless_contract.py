@@ -62,7 +62,7 @@ def test_evaluated_identity_rebases_every_topology_domain_without_bpy() -> None:
 def test_depth_route_validates_provenance_before_local_identity_rebase() -> None:
     source = _read(DEPTH_PREPARATION)
     read_index = source.index("source_snapshot, modifier_count, warnings, uv_report")
-    rebase_index = source.index("_canonicalize_depth_evaluated_identity(")
+    rebase_index = source.index(") = _canonicalize_depth_evaluated_identity(")
     normalize_index = source.index("normalized = _normalize_source_geometry(")
 
     assert "modifier_lineage_policy=ModifierLineagePolicy.ALLOW_SOURCE_DUPLICATION" in source
