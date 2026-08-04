@@ -214,7 +214,7 @@ def test_projection_reset_preserves_base_cancellation(monkeypatch) -> None:
     operator.report.assert_not_called()
 
 
-def test_depth_feature_uses_schema_seven_and_keeps_public_multi_standalone() -> None:
+def test_depth_feature_uses_schema_eight_and_keeps_public_multi_standalone() -> None:
     migration = (
         PACKAGE / "blender_adapter" / "scene_settings_migration.py"
     ).read_text(encoding="utf-8")
@@ -222,6 +222,7 @@ def test_depth_feature_uses_schema_seven_and_keeps_public_multi_standalone() -> 
         PACKAGE / "blender_adapter" / "a1_ui_export_plan.py"
     ).read_text(encoding="utf-8")
 
-    assert "CURRENT_SETTINGS_SCHEMA_VERSION = 7" in migration
+    assert "CURRENT_SETTINGS_SCHEMA_VERSION = 8" in migration
+    assert '("spine2d_depth_parallax_horizon_angle", 0.0)' in migration
     assert "mode=A1MultiObjectMode.STANDALONE" in planner
     assert "build_development_connected_ui_export_plan" not in planner
