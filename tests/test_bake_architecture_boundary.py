@@ -28,6 +28,8 @@ def _function_for_line(tree: ast.Module, line_number: int) -> str | None:
 
 
 def _operator_owners() -> set[tuple[str, str | None, str]]:
+    """Collect stateful bpy operators without classifying low-level bmesh.ops as bpy."""
+
     owners = set()
     for path in ADAPTER.glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -35,6 +37,8 @@ def _operator_owners() -> set[tuple[str, str | None, str]]:
             if not isinstance(node, ast.Attribute):
                 continue
             attribute = _attribute_path(node)
+            if attribute.startswith("bmesh.ops."):
+                continue
             if ".ops." not in f".{attribute}.":
                 continue
             # Only record the deepest concrete operator property, not parent chains.
