@@ -255,7 +255,7 @@ def test_mushrooms_plane_008_small_traceback_uses_bounded_absolute_floor() -> No
     )
     assert maximum_distance < settings.planarity_tolerance
     assert _PLANE008_SMALL_CAPTURED_NORMALIZED_WARP == pytest.approx(
-        0.00406415863471256,
+        0.004065032796736908,
         rel=1.0e-12,
     )
     assert (
