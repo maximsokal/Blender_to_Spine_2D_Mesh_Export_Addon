@@ -49,7 +49,7 @@ from .depth_parallax_camera_views import resolve_depth_parallax_camera_views
 
 
 logger = logging.getLogger(__name__)
-_LINEAGE_COORDINATE_DECIMALS = 9
+_LINEAGE_POSITION_TOLERANCE = 1.0e-9
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -137,81 +137,72 @@ def _depth_statistics(
     )
 
 
-def _position_signature(vertex: object) -> tuple[float, float, float]:
-    position = getattr(vertex, "position", None)
-    if not isinstance(position, tuple) or len(position) != 3:
-        raise TypeError("vertex.position must contain three values")
-    return tuple(
-        round(float(value), _LINEAGE_COORDINATE_DECIMALS)
-        for value in position
-    )  # type: ignore[return-value]
-
-
-def _share_union_lineage(
+def _require_subset_union_lineage(
     subset: MeshSnapshot,
     union: MeshSnapshot,
     *,
-    suffix: str,
-) -> MeshSnapshot:
+    label: str,
+) -> None:
+    """Require subset vertices to retain exact union IDs and projected positions."""
+
     if not isinstance(subset, MeshSnapshot):
         raise TypeError("subset must be MeshSnapshot")
     if not isinstance(union, MeshSnapshot):
         raise TypeError("union must be MeshSnapshot")
-    source_by_position = {
-        _position_signature(vertex): vertex.source_id
-        for vertex in union.vertices
-    }
-    if len(source_by_position) != len(union.vertices):
-        raise ValueError(
-            "Parallax union contains duplicate projected positions with conflicting vertex lineage"
-        )
-    vertices = []
+    if not isinstance(label, str) or not label.strip():
+        raise ValueError("label must be a non-empty string")
+    MeshSnapshotValidator().validate_or_raise(subset)
+    MeshSnapshotValidator().validate_or_raise(union)
+
+    union_by_source = {vertex.source_id: vertex for vertex in union.vertices}
+    if len(union_by_source) != len(union.vertices):
+        raise ValueError("Parallax union contains duplicate SourceVertexId values")
+
     for vertex in subset.vertices:
-        signature = _position_signature(vertex)
-        try:
-            source_id = source_by_position[signature]
-        except KeyError as exc:
+        union_vertex = union_by_source.get(vertex.source_id)
+        if union_vertex is None:
             raise ValueError(
-                "Parallax subset contains a vertex absent from the union snapshot: "
-                f"position={vertex.position}"
-            ) from exc
-        vertices.append(replace(vertex, source_id=source_id))
-    resolved = replace(
-        subset,
-        snapshot_id=f"{subset.snapshot_id}:{suffix}",
-        vertices=tuple(vertices),
-    )
-    MeshSnapshotValidator().validate_or_raise(resolved)
-    return resolved
+                f"{label} contains vertex lineage absent from parallax union: "
+                f"source_id={vertex.source_id}"
+            )
+        if any(
+            abs(float(vertex.position[index]) - float(union_vertex.position[index]))
+            > _LINEAGE_POSITION_TOLERANCE
+            for index in range(3)
+        ):
+            raise ValueError(
+                f"{label} vertex position differs from parallax union for "
+                f"source_id={vertex.source_id}; subset={vertex.position}, "
+                f"union={union_vertex.position}"
+            )
 
 
 def _package_to_camera_distance(
     package: DepthParallaxGeometryPackage,
 ) -> DepthParallaxGeometryPackage:
+    """Convert the complete package without reconstructing lineage by coordinates."""
+
     if not isinstance(package, DepthParallaxGeometryPackage):
         raise TypeError("package must be DepthParallaxGeometryPackage")
-    front_camera_z = _share_union_lineage(
+
+    _require_subset_union_lineage(
         package.front_snapshot,
         package.union_snapshot,
-        suffix="union-lineage",
+        label="front parallax subset",
     )
-    reserve_camera_z = tuple(
-        replace(
-            surface,
-            snapshot=_share_union_lineage(
-                surface.snapshot,
-                package.union_snapshot,
-                suffix=f"union-lineage-{surface.view.view_id.value.lower()}",
-            ),
+    for surface in package.reserve_surfaces:
+        _require_subset_union_lineage(
+            surface.snapshot,
+            package.union_snapshot,
+            label=f"reserve parallax subset {surface.view.view_id.value}",
         )
-        for surface in package.reserve_surfaces
-    )
+
     union_distance = convert_depth_snapshot_to_camera_distance(
         package.union_snapshot,
         snapshot_suffix="parallax-union-camera-distance",
     )
     front_distance = convert_depth_snapshot_to_camera_distance(
-        front_camera_z,
+        package.front_snapshot,
         snapshot_suffix="parallax-front-camera-distance",
     )
     reserve_distance = tuple(
@@ -219,10 +210,12 @@ def _package_to_camera_distance(
             surface,
             snapshot=convert_depth_snapshot_to_camera_distance(
                 surface.snapshot,
-                snapshot_suffix=f"parallax-{surface.view.view_id.value.lower()}-camera-distance",
+                snapshot_suffix=(
+                    f"parallax-{surface.view.view_id.value.lower()}-camera-distance"
+                ),
             ),
         )
-        for surface in reserve_camera_z
+        for surface in package.reserve_surfaces
     )
     front_result = replace(package.front_result, snapshot=front_distance)
     return replace(
