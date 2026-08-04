@@ -159,12 +159,48 @@ def _collision_union(front: MeshSnapshot, reserve: MeshSnapshot) -> MeshSnapshot
         MeshEdge(EdgeId(5), None, (VertexId(3), VertexId(5))),
     )
     loops = (
-        MeshLoop(LoopId(0), SourceLoopId(_OBJECT_ID, 0, 0), VertexId(0), EdgeId(0), front.loops[0].uvs),
-        MeshLoop(LoopId(1), SourceLoopId(_OBJECT_ID, 0, 1), VertexId(1), EdgeId(1), front.loops[1].uvs),
-        MeshLoop(LoopId(2), SourceLoopId(_OBJECT_ID, 0, 2), VertexId(2), EdgeId(2), front.loops[2].uvs),
-        MeshLoop(LoopId(3), SourceLoopId(_OBJECT_ID, 0, 0), VertexId(3), EdgeId(3), reserve.loops[0].uvs),
-        MeshLoop(LoopId(4), SourceLoopId(_OBJECT_ID, 0, 1), VertexId(4), EdgeId(4), reserve.loops[1].uvs),
-        MeshLoop(LoopId(5), SourceLoopId(_OBJECT_ID, 0, 2), VertexId(5), EdgeId(5), reserve.loops[2].uvs),
+        MeshLoop(
+            LoopId(0),
+            SourceLoopId(_OBJECT_ID, 0, 0),
+            VertexId(0),
+            EdgeId(0),
+            front.loops[0].uvs,
+        ),
+        MeshLoop(
+            LoopId(1),
+            SourceLoopId(_OBJECT_ID, 0, 1),
+            VertexId(1),
+            EdgeId(1),
+            front.loops[1].uvs,
+        ),
+        MeshLoop(
+            LoopId(2),
+            SourceLoopId(_OBJECT_ID, 0, 2),
+            VertexId(2),
+            EdgeId(2),
+            front.loops[2].uvs,
+        ),
+        MeshLoop(
+            LoopId(3),
+            SourceLoopId(_OBJECT_ID, 0, 0),
+            VertexId(3),
+            EdgeId(3),
+            reserve.loops[0].uvs,
+        ),
+        MeshLoop(
+            LoopId(4),
+            SourceLoopId(_OBJECT_ID, 0, 1),
+            VertexId(4),
+            EdgeId(4),
+            reserve.loops[1].uvs,
+        ),
+        MeshLoop(
+            LoopId(5),
+            SourceLoopId(_OBJECT_ID, 0, 2),
+            VertexId(5),
+            EdgeId(5),
+            reserve.loops[2].uvs,
+        ),
     )
     faces = (
         MeshFace(
@@ -200,6 +236,24 @@ def _collision_union(front: MeshSnapshot, reserve: MeshSnapshot) -> MeshSnapshot
     return union
 
 
+def _front_result(front: MeshSnapshot) -> DepthCameraProjectionResult:
+    return DepthCameraProjectionResult(
+        snapshot=front,
+        frame=_frame(),
+        projected_origin=A1ProjectedPoint(0.0, 0.0, -5.0),
+        base_mode=DepthProjectionBaseMode.FARTHEST_VISIBLE,
+        base_depth=-5.0,
+        farthest_visible_depth=-5.0,
+        nearest_visible_depth=-5.0,
+        maximum_relief=0.0,
+        requested_spacing_pixels=4.0,
+        resolved_spacing_x_pixels=4.0,
+        resolved_spacing_y_pixels=4.0,
+        source_triangle_count=1,
+        sampled_point_count=3,
+    )
+
+
 def _package() -> DepthParallaxGeometryPackage:
     frame = _frame()
     front = _triangle_snapshot(
@@ -213,21 +267,6 @@ def _package() -> DepthParallaxGeometryPackage:
         vertex_offset=3,
     )
     union = _collision_union(front, reserve)
-    front_result = DepthCameraProjectionResult(
-        snapshot=front,
-        frame=frame,
-        projected_origin=A1ProjectedPoint(0.0, 0.0, -5.0),
-        base_mode=DepthProjectionBaseMode.FARTHEST_VISIBLE,
-        base_depth=-5.0,
-        farthest_visible_depth=-5.0,
-        nearest_visible_depth=-5.0,
-        maximum_relief=0.0,
-        requested_spacing_pixels=4.0,
-        resolved_spacing_x_pixels=4.0,
-        resolved_spacing_y_pixels=4.0,
-        source_triangle_count=1,
-        sampled_point_count=3,
-    )
     view = DepthParallaxCameraView(
         view_id=DepthParallaxViewId.RIGHT,
         yaw_radians=0.1,
@@ -242,13 +281,53 @@ def _package() -> DepthParallaxGeometryPackage:
         maximum_accumulated_angle_radians=0.1,
     )
     return DepthParallaxGeometryPackage(
-        front_result=front_result,
+        front_result=_front_result(front),
         union_snapshot=union,
         front_snapshot=front,
         reserve_surfaces=(surface,),
         horizon_angle_radians=0.2,
         front_face_indices=(1,),
         reserve_face_indices=(0,),
+    )
+
+
+def _front_only_package() -> DepthParallaxGeometryPackage:
+    front = _triangle_snapshot(
+        snapshot_id="front-only-stable-identity",
+        material_index=0,
+        vertex_offset=11,
+    )
+    return DepthParallaxGeometryPackage(
+        front_result=_front_result(front),
+        union_snapshot=front,
+        front_snapshot=front,
+        reserve_surfaces=(),
+        horizon_angle_radians=0.0,
+        front_face_indices=(0,),
+        reserve_face_indices=(),
+    )
+
+
+def test_front_only_package_preserves_exact_local_identity() -> None:
+    package = _front_only_package()
+    before_vertex_ids = tuple(vertex.id for vertex in package.union_snapshot.vertices)
+    before_source_ids = tuple(
+        vertex.source_id for vertex in package.union_snapshot.vertices
+    )
+
+    resolved = canonicalize_depth_parallax_package_identity(
+        package,
+        uv_layer_name=_UV_LAYER,
+    )
+
+    assert resolved is package
+    assert resolved.union_snapshot is package.union_snapshot
+    assert resolved.front_snapshot is package.front_snapshot
+    assert resolved.front_result.snapshot is package.front_result.snapshot
+    assert tuple(vertex.id for vertex in resolved.union_snapshot.vertices) == before_vertex_ids
+    assert (
+        tuple(vertex.source_id for vertex in resolved.union_snapshot.vertices)
+        == before_source_ids
     )
 
 
