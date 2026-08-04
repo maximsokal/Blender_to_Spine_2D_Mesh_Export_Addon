@@ -29,8 +29,8 @@ from .model import (
     ObjectMaterialAnalysis,
     TextureFormat,
     build_bake_plan,
-    sanitize_filename_stem,
 )
+from .output_naming import sanitize_filename_stem
 
 
 class CameraProjectionMode(str, Enum):
