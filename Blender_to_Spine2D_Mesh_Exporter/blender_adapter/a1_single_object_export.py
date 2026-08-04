@@ -1,9 +1,8 @@
 """Atomic output wrapper for one prepared A1 Blender object.
 
 All geometry, UV, material, rig, and initial document construction lives in
-``prepare_a1_object``. Rendered camera textures additionally produce a render-derived
-crop layout; flat Camera Projection and Depth Camera Projection finalize that layout
-through separate topology-preserving routes before JSON serialization.
+``prepare_a1_object``. Rendered camera textures additionally produce render-derived crop
+layouts; Depth Camera Projection may carry multiple view-owned layouts and attachments.
 """
 
 from __future__ import annotations
@@ -50,7 +49,7 @@ def export_a1_single_object(
     scene: Any | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
 ) -> ExportResult:
-    """Prepare, bake, validate UV pixels, and atomically commit one object."""
+    """Prepare, render every view, validate, and atomically commit one object."""
 
     emit_a1_export_progress(
         progress_callback,
@@ -114,7 +113,7 @@ def export_a1_single_object(
             progress_callback,
             percent=65,
             stage=stage,
-            message="Staging texture outputs",
+            message="Staging front and parallax texture outputs",
             object_id=prepared.object_id,
         )
         texture_progress = scale_a1_export_progress_callback(
@@ -127,12 +126,16 @@ def export_a1_single_object(
             json_reservation = output_transaction.reserve(
                 prepared.output_paths.json_path
             )
+            reserve_plans = tuple(
+                getattr(prepared, "reserve_bake_plans", ())
+            )
             texture_stage = stage_texture_plan_outputs(
                 prepared.source_object,
                 prepared.bake_target_snapshot,
                 prepared.bake_plan,
                 output_transaction,
                 settings.bake_execution,
+                reserve_plans=reserve_plans,
                 context=context,
                 scene=scene,
                 progress_callback=texture_progress,
@@ -148,7 +151,7 @@ def export_a1_single_object(
             )
             coverage_samples = validate_staged_normal_bake_coverage(
                 prepared,
-                texture_stage.reservations,
+                texture_stage.primary_reservations,
             )
             statistics["bake_uv_coverage_sample_count"] = len(coverage_samples)
 
@@ -161,15 +164,26 @@ def export_a1_single_object(
                 progress_callback,
                 percent=84,
                 stage=stage,
-                message="Finalizing render-derived attachment layout",
+                message="Finalizing view-owned attachment layouts",
                 object_id=prepared.object_id,
             )
+            reserve_layouts = {
+                item.view_id: item.layout
+                for item in texture_stage.reserve_projection_stages
+            }
             finalized = finalize_prepared_rendered_projection(
                 prepared,
                 texture_stage.projection_layout,
+                reserve_layouts=reserve_layouts,
             )
             statistics.update(finalized.statistics)
             statistics["bake_uv_coverage_sample_count"] = len(coverage_samples)
+            statistics["parallax_texture_view_count"] = 1 + len(
+                texture_stage.reserve_projection_stages
+            )
+            statistics["parallax_texture_output_count"] = len(
+                texture_stage.reservations
+            )
             emit_a1_export_progress(
                 progress_callback,
                 percent=90,
