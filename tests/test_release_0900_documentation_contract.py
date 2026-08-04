@@ -84,7 +84,7 @@ def test_usage_explains_front_reserve_ownership_draw_order_and_atomicity() -> No
     assert "### Depth Camera Projection" in source
     assert "## Configure parallax reserve" in source
     assert "visible only in the **Cut** foldout" in source
-    assert "it is intentionally not a Rig control" in source
+    assert "It is intentionally not a Rig control" in source
     assert "Parallax Horizon Angle" in source
     assert "one union MeshSnapshot" in source
     assert "face-isolated FRONT and reserve camera renders" in source
