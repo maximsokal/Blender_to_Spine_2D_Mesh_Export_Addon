@@ -39,8 +39,8 @@ def test_installation_uses_0900_archive_schema_and_manual_parallax_gate() -> Non
     assert "Version 0.90.0 exposes three independent modes" in source
     assert "Version 0.90.0 uses Scene settings schema 8" in source
     assert "Parallax Horizon Angle" in source
-    assert "The default is `0°`" in source
-    assert "reserve attachments reuse the same generated vertex-bone rig" in normalized
+    assert "the default is 0°" in normalized
+    assert "reserve attachments reuse the same generated vertex bone rig" in normalized
     assert "reserve slots are serialized before the front slot" in normalized
     assert "Repeat with an Orthographic camera" in source
     assert "two-frame material sequence" in source
@@ -87,7 +87,7 @@ def test_usage_explains_front_reserve_ownership_draw_order_and_atomicity() -> No
     assert "reserve attachments followed by FRONT attachment" in source
     assert "Each reserve texture therefore contains its own surface" in source
     assert "Reserve slots are serialized before the FRONT slot" in source
-    assert "shared generated bones" in source
+    assert "share generated hinge bones" in source
     assert "rolls back the JSON and every staged texture" in source
     assert "front and reserve views keep independent crop rectangles" in normalized
 
