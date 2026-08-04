@@ -77,27 +77,24 @@ def test_each_physical_frame_loop_emits_before_and_after_real_work():
 
 
 def test_texture_dispatcher_forwards_progress_to_both_execution_routes():
+    camera_stage = _function("texture_executor.py", "_stage_camera_plan")
     stage = _function("texture_executor.py", "stage_texture_plan_outputs")
     execute = _function("texture_executor.py", "execute_bake_plan")
 
-    for function, called_names in (
-        (
-            stage,
-            (
-                "stage_camera_projection_outputs_detailed",
-                "stage_object_bake_outputs",
-            ),
-        ),
-        (
-            execute,
-            (
-                "execute_camera_projection_plan",
-                "execute_object_bake_plan",
-            ),
-        ),
-    ):
-        for called_name in called_names:
-            assert "progress_callback" in _keyword_names(function, called_name)
+    assert "progress_callback" in _keyword_names(
+        camera_stage,
+        "stage_camera_projection_outputs_detailed",
+    )
+    assert "progress_callback" in _keyword_names(stage, "_stage_camera_plan")
+    assert "progress_callback" in _keyword_names(stage, "stage_object_bake_outputs")
+    assert "progress_callback" in _keyword_names(
+        execute,
+        "execute_camera_projection_plan",
+    )
+    assert "progress_callback" in _keyword_names(
+        execute,
+        "execute_object_bake_plan",
+    )
 
 
 def test_output_services_scale_frame_ranges_before_texture_and_grouped_staging():
