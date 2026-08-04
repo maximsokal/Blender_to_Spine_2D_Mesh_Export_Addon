@@ -87,9 +87,13 @@ def _emission_color_socket(material: object):
     node_tree = getattr(material, "node_tree", None)
     nodes = getattr(node_tree, "nodes", None)
     if nodes is None:
-        raise AssertionError(f"material {getattr(material, 'name', '<unknown>')} has no nodes")
+        raise AssertionError(
+            f"material {getattr(material, 'name', '<unknown>')} has no nodes"
+        )
     emission_nodes = tuple(
-        node for node in nodes if str(getattr(node, "bl_idname", "")) == "ShaderNodeEmission"
+        node
+        for node in nodes
+        if str(getattr(node, "bl_idname", "")) == "ShaderNodeEmission"
     )
     _assert(
         len(emission_nodes) == 1,
@@ -148,12 +152,35 @@ def _prepare_case_scene(case: _Case):
     return source, front_material, reserve_material, camera
 
 
+def _surface_ownership_counts(
+    pixels: tuple[float, ...],
+) -> tuple[int, int]:
+    """Count FRONT/reserve ownership while allowing animation on the blue channel.
+
+    The fixture separates surfaces on the red/green axis. Blender color management may
+    increase blue for the animated second FRONT frame, so blue must not be used to decide
+    whether the pixel still belongs to the FRONT material. Alpha and the opposing ownership
+    channel remain strict.
+    """
+
+    front = reserve = 0
+    for offset in range(0, len(pixels), 4):
+        red, green, _blue, alpha = pixels[offset : offset + 4]
+        if alpha <= 0.08:
+            continue
+        if red > green * 1.35:
+            front += 1
+        if green > red * 1.35:
+            reserve += 1
+    return front, reserve
+
+
 def _assert_view_images(
     label: str,
     paths: tuple[Path, ...],
     *,
     expected_frames: int,
-    expect_red: bool,
+    expect_front: bool,
 ) -> tuple[tuple[int, int], tuple[tuple[float, ...], ...]]:
     _assert(len(paths) == expected_frames, f"{label} frame count differs")
     image_data = []
@@ -184,21 +211,26 @@ def _assert_view_images(
             transparent > 0,
             f"{label} frame {frame_index} crop has no transparent padding",
         )
-        red, green = smoke._dominant_color_counts(pixels)
-        if expect_red:
-            _assert(red > 100, f"{label} frame {frame_index} lost front material: {red}")
+        front, reserve = _surface_ownership_counts(pixels)
+        if expect_front:
             _assert(
-                green < max(8, red // 50),
-                f"reserve material leaked into {label} frame {frame_index}: green={green}",
+                front > 100,
+                f"{label} frame {frame_index} lost FRONT surface: {front}",
+            )
+            _assert(
+                reserve < max(8, front // 50),
+                f"reserve surface leaked into {label} frame {frame_index}: "
+                f"reserve={reserve}",
             )
         else:
             _assert(
-                green > 20,
-                f"{label} frame {frame_index} lost reserve material: {green}",
+                reserve > 20,
+                f"{label} frame {frame_index} lost reserve surface: {reserve}",
             )
             _assert(
-                red < max(8, green // 50),
-                f"front material leaked into {label} frame {frame_index}: red={red}",
+                front < max(8, reserve // 50),
+                f"FRONT surface leaked into {label} frame {frame_index}: "
+                f"front={front}",
             )
 
     if expected_frames > 1:
@@ -218,7 +250,10 @@ def _assert_sequence_metadata(
     attachment = group.get(slot_name)
     _assert(isinstance(attachment, dict), f"attachment missing for {slot_name}")
     if sequence_count == 0:
-        _assert("sequence" not in attachment, f"static attachment has sequence: {slot_name}")
+        _assert(
+            "sequence" not in attachment,
+            f"static attachment has sequence: {slot_name}",
+        )
         return
     sequence = attachment.get("sequence")
     _assert(isinstance(sequence, dict), f"sequence metadata missing for {slot_name}")
@@ -273,7 +308,10 @@ def _run_case(output_root: Path, case: _Case) -> None:
         context=bpy.context,
         scene=bpy.context.scene,
     )
-    _assert(result.success, f"Depth parallax export failed for {case.key}: {result.issues}")
+    _assert(
+        result.success,
+        f"Depth parallax export failed for {case.key}: {result.issues}",
+    )
 
     front_paths = tuple(task.output_path for task in prepared.bake_plan.frame_tasks)
     reserve_paths = tuple(
@@ -291,13 +329,13 @@ def _run_case(output_root: Path, case: _Case) -> None:
         f"{case.key}:FRONT",
         tuple(result.output_files[1 : 1 + case.frame_count]),
         expected_frames=case.frame_count,
-        expect_red=True,
+        expect_front=True,
     )
     reserve_size, reserve_pixels = _assert_view_images(
         f"{case.key}:RESERVE",
         tuple(result.output_files[1 + case.frame_count :]),
         expected_frames=case.frame_count,
-        expect_red=False,
+        expect_front=False,
     )
     _assert(
         front_size != reserve_size or front_pixels != reserve_pixels,
@@ -366,7 +404,9 @@ def _run_case(output_root: Path, case: _Case) -> None:
 
 
 def main() -> None:
-    with tempfile.TemporaryDirectory(prefix="spine2d-depth-parallax-matrix-") as directory:
+    with tempfile.TemporaryDirectory(
+        prefix="spine2d-depth-parallax-matrix-"
+    ) as directory:
         output_root = Path(directory)
         for case in _CASES:
             _run_case(output_root, case)
