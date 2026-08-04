@@ -1,15 +1,16 @@
-"""Build a compensated Normal-style rig over one camera-depth relief surface."""
+"""Build one compensated camera-distance rig over front and reserve surfaces."""
 
 from __future__ import annotations
 
 import logging
+from typing import Sequence
 
 from ..application import (
     A1SingleObjectStage,
     calculate_a1_object_bake_main_position_pixels,
 )
 from ..domain.baking import A1TextureExportMode, CameraProjectionPlan
-from ..domain.geometry import DepthProjectionBaseMode
+from ..domain.geometry import DepthParallaxGeometryPackage, DepthProjectionBaseMode
 from ..domain.spine.legacy_rig_contracts import (
     LegacyRigBuildRequest,
     LegacyZGroupOriginMode,
@@ -33,13 +34,7 @@ logger = logging.getLogger(__name__)
 def _resolve_depth_z_group_origin_mode(
     base_mode: DepthProjectionBaseMode,
 ) -> LegacyZGroupOriginMode:
-    """Keep the active camera as the single depth zero for every object.
-
-    ``base_mode`` controls how the local one-sided relief was validated while building
-    the visible surface. It must not re-reference the rig independently per object.
-    Generated rig Z values are positive distances from the shared camera plane, so both
-    public ``FARTHEST_VISIBLE`` and hidden ``OBJECT_ORIGIN`` use the global zero.
-    """
+    """Keep the active camera as the single depth zero for every object."""
 
     if not isinstance(base_mode, DepthProjectionBaseMode):
         raise TypeError("base_mode must be DepthProjectionBaseMode")
@@ -53,11 +48,16 @@ def _resolve_depth_z_group_origin_mode(
 
 def prepare_a1_depth_document(
     texture: A1TexturePlanningResult,
+    reserve_plans: Sequence[CameraProjectionPlan] = (),
 ) -> A1DocumentPreparationResult:
-    """Build camera-distance vertex bones and one camera-textured depth attachment."""
+    """Build one shared vertex rig and all camera-textured depth attachments."""
 
     if not isinstance(texture, A1TexturePlanningResult):
         raise TypeError("texture must be A1TexturePlanningResult")
+    if not isinstance(reserve_plans, (tuple, list)) or not all(
+        isinstance(plan, CameraProjectionPlan) for plan in reserve_plans
+    ):
+        raise TypeError("reserve_plans must contain CameraProjectionPlan values")
     source = texture.uv.source
     mode = source.settings.bake_execution.texture_export_mode
     if mode is not A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
@@ -67,6 +67,16 @@ def prepare_a1_depth_document(
     if not isinstance(texture.bake_plan, CameraProjectionPlan):
         raise TypeError(
             "Depth Camera Projection requires a CameraProjectionPlan texture route"
+        )
+    package = getattr(source, "parallax_package", None)
+    if not isinstance(package, DepthParallaxGeometryPackage):
+        raise TypeError(
+            "Depth document preparation requires DepthParallaxGeometryPackage"
+        )
+    expected_attachment_count = package.attachment_count
+    if expected_attachment_count != 1 + len(tuple(reserve_plans)):
+        raise ValueError(
+            "Parallax package attachment count does not match reserve plans"
         )
 
     stage = A1SingleObjectStage.BUILD_RIG
@@ -127,7 +137,15 @@ def prepare_a1_depth_document(
                 "depth_camera_minimum_rig_offset": min(offsets),
                 "depth_camera_maximum_rig_offset": max(offsets),
                 "depth_camera_parent_y_compensated": 1,
-                "depth_camera_single_attachment": 1,
+                "depth_camera_single_attachment": int(
+                    expected_attachment_count == 1
+                ),
+                "depth_camera_expected_attachment_count": (
+                    expected_attachment_count
+                ),
+                "depth_camera_reserve_attachment_count": len(
+                    tuple(reserve_plans)
+                ),
                 "depth_camera_projected_main_x": (
                     0.0 if main_position is None else float(main_position[0])
                 ),
@@ -146,24 +164,34 @@ def prepare_a1_depth_document(
         document_assembly = assemble_and_finalize_a1_depth_document(
             texture,
             rig,
+            reserve_plans,
         )
         final_rig = document_assembly.rig
         document = document_assembly.document
-        if len(document_assembly.document_build.components) != 1:
+        component_count = len(document_assembly.document_build.components)
+        if component_count != expected_attachment_count:
             raise ValueError(
-                "Depth Camera Projection must serialize one mesh attachment per object"
+                "Depth Camera Projection component count differs from parallax package; "
+                f"expected={expected_attachment_count}, got={component_count}"
             )
         sequence_enabled = source.settings.export.sequence_frame_count > 0
+        actual_attachment_count = sum(
+            len(attachments)
+            for skin in document.skins
+            for attachments in skin.attachments.values()
+        )
+        if actual_attachment_count != expected_attachment_count:
+            raise ValueError(
+                "Depth Camera Projection serialized attachment count differs from "
+                f"package; expected={expected_attachment_count}, "
+                f"got={actual_attachment_count}"
+            )
         statistics = freeze_statistics(
             statistics,
             {
                 "final_bone_count": len(document.bones),
                 "slot_count": len(document.slots),
-                "attachment_count": sum(
-                    len(attachments)
-                    for skin in document.skins
-                    for attachments in skin.attachments.values()
-                ),
+                "attachment_count": actual_attachment_count,
                 "final_rig_setup_pose_mode": final_rig.request.setup_pose_mode.value,
                 "texture_sequence_enabled": int(sequence_enabled),
                 "texture_sequence_fps": (
@@ -179,9 +207,9 @@ def prepare_a1_depth_document(
             },
         )
         logger.info(
-            "Prepared depth relief document for %s: profile=%s setup=%s "
+            "Prepared depth parallax document for %s: profile=%s setup=%s "
             "base_policy=%s camera_zero=0 main=%s distance_offsets=%s "
-            "bones=%d slots=%d attachments=1",
+            "bones=%d slots=%d attachments=%d reserve=%d",
             source.object_id,
             final_rig.profile.profile_id,
             final_rig.request.setup_pose_mode.value,
@@ -190,6 +218,8 @@ def prepare_a1_depth_document(
             offsets,
             len(document.bones),
             len(document.slots),
+            actual_attachment_count,
+            len(tuple(reserve_plans)),
         )
         return A1DocumentPreparationResult(
             texture=texture,
