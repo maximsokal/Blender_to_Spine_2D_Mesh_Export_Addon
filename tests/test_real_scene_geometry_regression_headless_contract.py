@@ -80,16 +80,29 @@ def test_cube012_runner_reproduces_exact_traceback_metrics_publicly() -> None:
 
     assert '_OBJECT_NAME = "Cube.012"' in source
     assert '_COMPONENT_ID = "object_1:Cube.012"' in source
+    assert '_CONTROL_OBJECT_NAME = "Cube012Control"' in source
+    assert '_CONTROL_COMPONENT_ID = "object_2:Cube012Control"' in source
     assert "_SIDE_LENGTH = 0.09277534946637461" in source
     assert "_WARP_HEIGHT = 0.00030260673225328884" in source
     assert "_CAPTURED_MAXIMUM_PLANE_DISTANCE = 7.565148185365435e-05" in source
     assert "_CAPTURED_POLYGON_SCALE = 0.13120450643194492" in source
+    assert "def _create_control_source(" in source
+    assert "sources = (" in source
+    assert source.count("A1MultiObjectSource(") == 2
+    assert "len(sources) == 2" in source
     assert "prepare_a1_multi_object(" in source
+    assert "len(prepared_multi.objects) == 2" in source
+    assert "def _prepared_by_component(" in source
+    assert "prepared_by_component[_COMPONENT_ID]" in source
+    assert "prepared_by_component[_CONTROL_COMPONENT_ID]" in source
     assert "PreparedDepthA1Object" in source
-    assert 'prepared.statistics["depth_projection_source_triangle_count"]' in source
+    assert 'prepared.statistics[' in source
+    assert '"depth_projection_source_triangle_count"' in source
     assert "_source_fingerprint(source) == source_before" in source
+    assert "_source_fingerprint(control) == control_before" in source
     assert "_temporary_datablock_names() == temporary_before" in source
     assert "[MUSHROOMS-CUBE012-PLANARITY] PASS" in source
+    assert '"triangles=2 sources=2 pipeline=public-multi-object"' in source
     assert "import bmesh" not in source
     assert "bpy.ops" not in source
 
@@ -133,7 +146,10 @@ def test_parallax_union_is_canonical_before_geometry_and_uv_consumers() -> None:
     assert "def _canonical_reserve_surface(" in identity_source
     assert "source_face_indices=render_face_indices" in identity_source
     assert "def _validate_front_only_package_identity(" in identity_source
-    assert "Reserve-free Depth package must share one unchanged FRONT snapshot" in identity_source
+    assert (
+        "Reserve-free Depth package must share one unchanged FRONT snapshot"
+        in identity_source
+    )
     assert "if not package.reserve_surfaces:" in identity_source
     assert "return package" in identity_source
     assert "def canonicalize_depth_parallax_package_identity(" in identity_source
@@ -145,7 +161,9 @@ def test_parallax_union_is_canonical_before_geometry_and_uv_consumers() -> None:
     assert "import bmesh" not in identity_source
     assert "bpy.ops" not in identity_source
 
-    front_only_index = identity_source.index("if not package.reserve_surfaces:")
+    front_only_index = identity_source.index(
+        "if not package.reserve_surfaces:"
+    )
     rebase_index = identity_source.index(
         "rebase = rebase_mesh_snapshot_to_evaluated_identity("
     )
