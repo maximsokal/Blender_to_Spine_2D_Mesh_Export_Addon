@@ -21,6 +21,7 @@ from ..domain.geometry import (
     DepthParallaxGeometryPackage,
     MeshSnapshot,
     MeshSnapshotValidator,
+    ModifierLineagePolicy,
     build_depth_camera_projection_surface,
     build_depth_parallax_geometry_package,
     calculate_a1_projected_snapshot_depth_range,
@@ -28,12 +29,17 @@ from ..domain.geometry import (
 from ..domain.geometry.depth_camera_distance import (
     convert_depth_snapshot_to_camera_distance,
 )
+from ..domain.geometry.evaluated_identity import (
+    EvaluatedIdentityRebaseResult,
+    rebase_mesh_snapshot_to_evaluated_identity,
+)
 from ..domain.projection import A1ProjectionDirection
 from ..domain.spine import calculate_uniform_scale
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
     StatisticsValue,
     freeze_statistics,
+    warning_issue,
 )
 from .a1_source_geometry_preparation import (
     A1SourceGeometryPreparationResult,
@@ -71,7 +77,15 @@ class A1DepthSourceGeometryPreparationResult(A1SourceGeometryPreparationResult):
 def _normal_camera_request_settings(
     settings: A1SingleObjectExportSettings,
 ) -> A1SingleObjectExportSettings:
-    """Return settings accepted by shared geometry validation without losing output."""
+    """Return the evaluated-geometry contract consumed by shared preparation.
+
+    Depth Camera Projection renders and projects the evaluated modifier result. Array,
+    Mirror, and equivalent duplication may legitimately produce several evaluated
+    elements from one stamped source element. The permissive lineage policy validates
+    that every required evaluated element still has safe provenance; evaluated-local
+    identities are canonicalized immediately after the read so unrelated copies remain
+    distinct throughout depth adjacency, rig generation, and render-face ownership.
+    """
 
     if not isinstance(settings, A1SingleObjectExportSettings):
         raise TypeError("settings must be A1SingleObjectExportSettings")
@@ -85,12 +99,99 @@ def _normal_camera_request_settings(
     return replace(
         settings,
         source_geometry_mode=A1SourceGeometryMode.EVALUATED,
+        modifier_lineage_policy=ModifierLineagePolicy.ALLOW_SOURCE_DUPLICATION,
         projection_direction=A1ProjectionDirection.ACTIVE_CAMERA,
         bake_execution=replace(
             settings.bake_execution,
             texture_export_mode=A1TextureExportMode.NORMAL_UV_SEGMENTS,
         ),
     )
+
+
+def _canonicalize_depth_evaluated_identity(
+    snapshot: MeshSnapshot,
+    warnings: Tuple[ExportIssue, ...],
+    statistics: Mapping[str, StatisticsValue],
+    *,
+    object_id: str,
+) -> tuple[
+    MeshSnapshot,
+    Tuple[ExportIssue, ...],
+    Mapping[str, StatisticsValue],
+    EvaluatedIdentityRebaseResult,
+]:
+    """Replace duplicate modifier lineage with unique evaluated-local identities."""
+
+    if not isinstance(snapshot, MeshSnapshot):
+        raise TypeError("snapshot must be MeshSnapshot")
+    if not isinstance(warnings, tuple) or not all(
+        isinstance(issue, ExportIssue) for issue in warnings
+    ):
+        raise TypeError("warnings must be a tuple of ExportIssue values")
+    if not isinstance(statistics, Mapping):
+        raise TypeError("statistics must be a mapping")
+    if not isinstance(object_id, str) or not object_id.strip():
+        raise ValueError("object_id must be a non-empty string")
+
+    result = rebase_mesh_snapshot_to_evaluated_identity(snapshot)
+    resolved_statistics = freeze_statistics(
+        statistics,
+        {
+            "evaluated_identity_rebased": int(result.changed),
+            "evaluated_identity_duplicate_vertex_source_ids": (
+                result.duplicate_vertex_source_id_count
+            ),
+            "evaluated_identity_duplicate_edge_source_ids": (
+                result.duplicate_edge_source_id_count
+            ),
+            "evaluated_identity_duplicate_face_source_ids": (
+                result.duplicate_face_source_id_count
+            ),
+            "evaluated_identity_duplicate_loop_source_ids": (
+                result.duplicate_loop_source_id_count
+            ),
+            "evaluated_identity_generated_edge_count": (
+                result.missing_edge_source_id_count
+            ),
+        },
+    )
+    if not result.changed:
+        return result.snapshot, warnings, resolved_statistics, result
+
+    resolved_warnings = warnings + (
+        warning_issue(
+            stage=A1SingleObjectStage.READ_GEOMETRY,
+            code="EVALUATED_IDENTITY_REBASED",
+            message=(
+                "Validated modifier topology was canonicalized to unique "
+                "evaluated-local identities. Duplicated or merged modifier copies "
+                "remain independent in depth adjacency, rig generation, and "
+                "virtual-view face ownership."
+            ),
+            object_id=object_id,
+            context={
+                "duplicate_vertex_source_ids": (
+                    result.duplicate_vertex_source_id_count
+                ),
+                "duplicate_edge_source_ids": result.duplicate_edge_source_id_count,
+                "duplicate_face_source_ids": result.duplicate_face_source_id_count,
+                "duplicate_loop_source_ids": result.duplicate_loop_source_id_count,
+                "generated_edges": result.missing_edge_source_id_count,
+            },
+        ),
+    )
+    logger.info(
+        "Depth evaluated identity rebased for '%s': vertex_collisions=%d "
+        "edge_collisions=%d loop_collisions=%d face_collisions=%d "
+        "generated_edges=%d",
+        object_id,
+        result.duplicate_vertex_source_id_count,
+        result.duplicate_edge_source_id_count,
+        result.duplicate_loop_source_id_count,
+        result.duplicate_face_source_id_count,
+        result.missing_edge_source_id_count,
+    )
+    return result.snapshot, resolved_warnings, resolved_statistics, result
 
 
 def _depth_statistics(
@@ -281,6 +382,9 @@ def prepare_a1_depth_source_geometry(
                 "texture_export_mode": A1TextureExportMode.DEPTH_CAMERA_PROJECTION.value,
                 "source_geometry_mode": A1SourceGeometryMode.EVALUATED.value,
                 "projection_direction": A1ProjectionDirection.ACTIVE_CAMERA.value,
+                "modifier_lineage_policy": (
+                    validated_settings.modifier_lineage_policy.value
+                ),
             },
         )
         stage = A1SingleObjectStage.READ_GEOMETRY
@@ -290,6 +394,17 @@ def prepare_a1_depth_source_geometry(
             validated_settings,
             scene=request.scene,
             depsgraph=request.depsgraph,
+        )
+        (
+            source_snapshot,
+            warnings,
+            statistics,
+            _identity_rebase,
+        ) = _canonicalize_depth_evaluated_identity(
+            source_snapshot,
+            warnings,
+            statistics,
+            object_id=request.object_id,
         )
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
         normalized = _normalize_source_geometry(
@@ -425,6 +540,7 @@ def prepare_a1_depth_source_geometry(
 
 __all__ = [
     "A1DepthSourceGeometryPreparationResult",
+    "_canonicalize_depth_evaluated_identity",
     "_depth_statistics",
     "prepare_a1_depth_source_geometry",
 ]
