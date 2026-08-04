@@ -260,7 +260,7 @@ def _build_reserve_bake_plans(
     texture: Any,
     settings: A1SingleObjectExportSettings,
 ) -> Tuple[CameraProjectionPlan, ...]:
-    """Create one auxiliary camera plan for every retained reserve surface."""
+    """Create one face-isolated camera plan for every retained reserve surface."""
 
     if not _depth_mode(settings):
         return ()
@@ -277,6 +277,7 @@ def _build_reserve_bake_plans(
             view_id=surface.view.view_id.value,
             camera_world_matrix=surface.view.camera_world_matrix,
             lens_scale=surface.view.lens_scale,
+            source_face_indices=surface.source_face_indices,
         )
         for surface in package.reserve_surfaces
     )
