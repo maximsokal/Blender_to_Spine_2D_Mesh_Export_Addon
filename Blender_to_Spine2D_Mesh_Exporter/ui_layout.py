@@ -12,6 +12,7 @@ import bpy
 from . import rig_ui, ui
 from .blender_adapter import generated_material_ui
 from .config import get_default_output_dir
+from .domain.baking import A1TextureExportMode
 from .domain.spine.version_target import (
     DEFAULT_SPINE_JSON_TARGET,
     resolve_spine_json_target,
@@ -67,11 +68,54 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
         )
 
     @staticmethod
+    def _draw_depth_parallax_cut_settings(
+        column: bpy.types.UILayout,
+        scene: bpy.types.Scene,
+    ) -> None:
+        """Draw the Depth horizon reserve beside the topology-cut controls."""
+
+        box = column.box()
+        box.label(text="Parallax reserve", icon="ORIENTATION_GIMBAL")
+        box.prop(
+            scene,
+            "spine2d_depth_parallax_horizon_angle",
+            text="Parallax Horizon Angle",
+        )
+        angle = float(
+            getattr(scene, "spine2d_depth_parallax_horizon_angle", 0.0) or 0.0
+        )
+        if angle <= 1.0e-12:
+            box.label(
+                text="0°: current front surface and one camera texture",
+                icon="INFO",
+            )
+            return
+
+        box.label(
+            text="Adds angular surface reserve beyond the camera horizon",
+            icon="MESH_DATA",
+        )
+        box.label(
+            text="Fitted virtual views create textured reserve attachments",
+            icon="IMAGE_DATA",
+        )
+        box.label(
+            text="Max Depth Points limits combined front + reserve geometry",
+            icon="MOD_SIMPLIFY",
+        )
+
+    @staticmethod
     def _draw_cut_settings(
         column: bpy.types.UILayout,
         scene: bpy.types.Scene,
     ) -> None:
         ui.OBJECT_PT_Spine2DMeshPanel._draw_cut_settings(column, scene)
+        texture_mode = ui.OBJECT_PT_Spine2DMeshPanel._texture_mode(scene)
+        if texture_mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
+            OBJECT_PT_Spine2DOrderedMeshPanel._draw_depth_parallax_cut_settings(
+                column,
+                scene,
+            )
 
     @staticmethod
     def _draw_bake_settings(
