@@ -84,6 +84,42 @@ def _draw_forced_active_camera_projection(
     )
 
 
+def _draw_depth_parallax_horizon(
+    layout: bpy.types.UILayout,
+    scene: bpy.types.Scene,
+) -> None:
+    """Draw the 0.90.0 angular geometry and texture reserve contract."""
+
+    box = layout.box()
+    box.label(text="Parallax reserve", icon="ORIENTATION_GIMBAL")
+    box.prop(
+        scene,
+        "spine2d_depth_parallax_horizon_angle",
+        text="Parallax Horizon Angle",
+    )
+    angle = float(
+        getattr(scene, "spine2d_depth_parallax_horizon_angle", 0.0) or 0.0
+    )
+    if angle <= 1.0e-12:
+        box.label(
+            text="0°: current front surface and one camera texture",
+            icon="INFO",
+        )
+    else:
+        box.label(
+            text="Adds angular surface reserve beyond the camera horizon",
+            icon="MESH_DATA",
+        )
+        box.label(
+            text="Fitted virtual views create textured reserve attachments",
+            icon="IMAGE_DATA",
+        )
+        box.label(
+            text="Max Depth Points limits the combined front + reserve rig",
+            icon="BONE_DATA",
+        )
+
+
 def draw_rig_settings(
     layout: bpy.types.UILayout,
     context: bpy.types.Context,
@@ -117,6 +153,7 @@ def draw_rig_settings(
             icon="CAMERA_DATA",
         )
         _draw_forced_active_camera_projection(layout)
+        _draw_depth_parallax_horizon(layout, scene)
     else:
         layout.label(
             text="Preserves cut regions and generated UV meshes",
@@ -140,6 +177,7 @@ def draw_rig_settings(
     elif texture_mode == A1TextureExportMode.DEPTH_CAMERA_PROJECTION.value:
         description.label(text="Depth geometry and rig depth use the active camera")
         description.label(text="Main bone matches projected Blender Object Origin")
+        description.label(text="Parallax reserve supports X/Y horizon reveals")
     else:
         description.label(text="Main bone matches projected Blender Object Origin")
         description.label(text="Depth uses the selected axis or active camera")
