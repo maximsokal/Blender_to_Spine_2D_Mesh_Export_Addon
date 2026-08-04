@@ -99,7 +99,7 @@ The active camera may be Perspective or Orthographic. Virtual reserve cameras ar
 
 ## Configure parallax reserve
 
-`Parallax Horizon Angle` is visible only in Depth Camera Projection.
+`Parallax Horizon Angle` is visible only in the **Cut** foldout when **Depth Camera Projection** is selected. It is intentionally not a Rig control because it changes retained surface topology and reserve-view generation.
 
 - `0°` exports the established FRONT-only result.
 - A positive value retains connected surfaces whose minimum accumulated dihedral cost is within the selected angle.
@@ -141,7 +141,7 @@ Typical workflow:
 
 The topology pipeline may still decompose a seam-defined region when required to produce valid manifold disk attachments. It does not enable the Auto angular split policy.
 
-Depth Camera Projection does not use source seam controls. Depth discontinuities are controlled by Depth edge threshold and horizon growth is controlled by Parallax Horizon Angle.
+Depth Camera Projection does not use source seam controls. Its Cut foldout instead exposes Parallax Horizon Angle beside the generated-depth explanation. Depth discontinuities are controlled by Depth edge threshold and horizon growth is controlled by Parallax Horizon Angle.
 
 ## Configure textures and output paths
 
@@ -237,7 +237,7 @@ For positive parallax, inspect the result statistics for FRONT/reserve view coun
 
 1. Select at least two Mesh objects.
 2. Configure the Rig settings if needed.
-3. Configure Scene and per-object Bake settings.
+3. Configure Cut and per-object Bake settings.
 4. Run Analyze.
 5. Review any reported blockers and warnings.
 6. Press **Export Selected Objects**.
