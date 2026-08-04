@@ -35,6 +35,13 @@ Matrix3x3 = Tuple[
     float,
 ]
 
+# Blender stores object transforms with single-precision components internally. Parent
+# inverses, linked collection instances, and long hierarchy evaluation can therefore
+# leave a small numerical residue in the homogeneous row of an otherwise affine object
+# matrix. Values within this bound are canonicalized by the normalized output matrix;
+# larger projective components remain unsupported and fail closed.
+_AFFINE_ROW_FLOAT32_TOLERANCE = 1.0e-5
+
 
 class MeshWorldTransformError(ValueError):
     """Raised when an affine world transform cannot be baked safely."""
@@ -75,21 +82,30 @@ class MeshWorldTransformResult:
 
 
 def _matrix_parts(matrix: Matrix4x4) -> tuple[Matrix3x3, Vector3]:
+    """Return affine linear/translation parts and reject real projective transforms.
+
+    The domain tuple is row-major. Small float32 residue in the homogeneous row is
+    accepted because Blender Object transforms are semantically affine; the normalized
+    snapshot later writes an exact ``(0, 0, 0, 1)`` row. A larger residue is treated as a
+    genuine unsupported projective transform and remains a hard error.
+    """
+
     if not isinstance(matrix, tuple) or len(matrix) != 16:
         raise TypeError("world_matrix must be a 16-value tuple")
     values = tuple(float(value) for value in matrix)
     if not all(isfinite(value) for value in values):
         raise MeshWorldTransformError("world_matrix contains non-finite values")
 
-    affine_tolerance = 1.0e-10
-    if (
-        abs(values[12]) > affine_tolerance
-        or abs(values[13]) > affine_tolerance
-        or abs(values[14]) > affine_tolerance
-        or abs(values[15] - 1.0) > affine_tolerance
+    final_row = (values[12], values[13], values[14], values[15])
+    expected_row = (0.0, 0.0, 0.0, 1.0)
+    if any(
+        abs(actual - expected) > _AFFINE_ROW_FLOAT32_TOLERANCE
+        for actual, expected in zip(final_row, expected_row, strict=True)
     ):
         raise MeshWorldTransformError(
-            "world_matrix must be affine with final row (0, 0, 0, 1)"
+            "world_matrix must be affine with final row (0, 0, 0, 1); "
+            f"final_row={final_row!r}, "
+            f"tolerance={_AFFINE_ROW_FLOAT32_TOLERANCE}"
         )
     return (
         (
