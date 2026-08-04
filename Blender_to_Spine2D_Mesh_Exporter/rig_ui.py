@@ -192,7 +192,7 @@ def draw_rig_settings(
 
 
 class SPINE2D_OT_ResetSettingsWithProjection(bpy.types.Operator):
-    """Extend the main Reset operator with the Slice 6 projection default."""
+    """Extend the main Reset operator with current projection and parallax defaults."""
 
     bl_idname = ui.SPINE2D_OT_ResetSettings.bl_idname
     bl_label = ui.SPINE2D_OT_ResetSettings.bl_label
@@ -207,10 +207,11 @@ class SPINE2D_OT_ResetSettingsWithProjection(bpy.types.Operator):
             context.scene.spine2d_projection_direction = (
                 A1ProjectionDirection.POSITIVE_Z.value
             )
+            context.scene.spine2d_depth_parallax_horizon_angle = 0.0
             return result
         except Exception as exc:
-            logger.exception("Unable to reset Spine2D projection direction")
-            self.report({"ERROR"}, f"Projection reset error: {exc}")
+            logger.exception("Unable to reset Spine2D projection and parallax settings")
+            self.report({"ERROR"}, f"Projection/parallax reset error: {exc}")
             return {"CANCELLED"}
 
 
