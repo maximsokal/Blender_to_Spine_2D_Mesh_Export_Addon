@@ -4,7 +4,7 @@ The projection domain follows Blender camera-local convention: visible points in
 of the camera have negative Z. Spine depth controls are easier and less error-prone when
 the shared camera is the global zero and every visible point stores a positive distance.
 This module performs that representation conversion without changing projected X/Y, UV,
-lineage, triangles, or the diagnostic camera-local values retained by the result.
+lineage, triangles, or the diagnostic camera-local values retained by result owners.
 """
 
 from __future__ import annotations
@@ -23,23 +23,23 @@ from .validator import MeshSnapshotValidator
 _CAMERA_PLANE_EPSILON = 1.0e-9
 
 
-def convert_depth_result_to_camera_distance(
-    result: DepthCameraProjectionResult,
-) -> DepthCameraProjectionResult:
-    """Return ``result`` with snapshot Z expressed as positive camera distance.
+def convert_depth_snapshot_to_camera_distance(
+    source: MeshSnapshot,
+    *,
+    snapshot_suffix: str = "camera-distance",
+) -> MeshSnapshot:
+    """Convert one projected snapshot Z stream without touching topology or UV.
 
-    ``DepthCameraProjectionResult`` keeps its original ``farthest_visible_depth``,
-    ``nearest_visible_depth``, and ``base_depth`` diagnostics in Blender camera-local Z.
-    Only the generated snapshot consumed by Z-group and rig construction is converted.
-    This preserves one global camera zero across every object in a multi-object export.
+    This lower-level entry point is shared by the front surface, the parallax union, and
+    every view-owned reserve subset. All snapshots therefore enter rig/document assembly
+    in the same positive-distance coordinate system while preserving exact X/Y and loop
+    correspondence.
     """
 
-    if not isinstance(result, DepthCameraProjectionResult):
-        raise TypeError("result must be DepthCameraProjectionResult")
-
-    source = result.snapshot
     if not isinstance(source, MeshSnapshot):
-        raise TypeError("result.snapshot must be MeshSnapshot")
+        raise TypeError("source must be MeshSnapshot")
+    if not isinstance(snapshot_suffix, str) or not snapshot_suffix.strip():
+        raise ValueError("snapshot_suffix must be a non-empty string")
     MeshSnapshotValidator().validate_or_raise(source)
 
     converted_vertices: list[MeshVertex] = []
@@ -69,7 +69,7 @@ def convert_depth_result_to_camera_distance(
 
     converted_snapshot = replace(
         source,
-        snapshot_id=f"{source.snapshot_id}:camera-distance",
+        snapshot_id=f"{source.snapshot_id}:{snapshot_suffix.strip()}",
         vertices=tuple(converted_vertices),
     )
     MeshSnapshotValidator().validate_or_raise(converted_snapshot)
@@ -98,8 +98,27 @@ def convert_depth_result_to_camera_distance(
         raise DepthCameraProjectionError(
             "camera-distance conversion changed depth surface edges"
         )
+    return converted_snapshot
 
+
+def convert_depth_result_to_camera_distance(
+    result: DepthCameraProjectionResult,
+) -> DepthCameraProjectionResult:
+    """Return ``result`` with snapshot Z expressed as positive camera distance.
+
+    ``DepthCameraProjectionResult`` keeps its original ``farthest_visible_depth``,
+    ``nearest_visible_depth``, and ``base_depth`` diagnostics in Blender camera-local Z.
+    Only the generated snapshot consumed by Z-group and rig construction is converted.
+    This preserves one global camera zero across every object in a multi-object export.
+    """
+
+    if not isinstance(result, DepthCameraProjectionResult):
+        raise TypeError("result must be DepthCameraProjectionResult")
+    converted_snapshot = convert_depth_snapshot_to_camera_distance(result.snapshot)
     return replace(result, snapshot=converted_snapshot)
 
 
-__all__ = ["convert_depth_result_to_camera_distance"]
+__all__ = [
+    "convert_depth_result_to_camera_distance",
+    "convert_depth_snapshot_to_camera_distance",
+]
