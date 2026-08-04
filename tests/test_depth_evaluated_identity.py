@@ -161,8 +161,12 @@ def test_rebase_assigns_unique_local_identity_without_geometry_mutation() -> Non
     assert len({edge.source_id for edge in rebased.edges}) == 6
     assert len({face.source_id for face in rebased.faces}) == 2
     assert len({loop.source_id for loop in rebased.loops}) == 6
-    assert tuple(vertex.source_id.index for vertex in rebased.vertices) == tuple(range(6))
-    assert tuple(edge.source_id.index for edge in rebased.edges) == tuple(range(6))
+    assert tuple(
+        vertex.source_id.vertex_index for vertex in rebased.vertices
+    ) == tuple(range(6))
+    assert tuple(
+        edge.source_id.edge_index for edge in rebased.edges
+    ) == tuple(range(6))
     assert tuple(face.source_id.face_index for face in rebased.faces) == (0, 1)
 
     loops = rebased.loop_by_id()
