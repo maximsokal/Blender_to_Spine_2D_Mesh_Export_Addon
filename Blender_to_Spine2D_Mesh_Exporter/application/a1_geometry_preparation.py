@@ -7,6 +7,7 @@ triangulation. It creates no Blender objects and performs no UV operators.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from math import isfinite
 from typing import Tuple
@@ -20,6 +21,7 @@ from ..domain.geometry import (
     SegmentationPlan,
     SegmentationSettings,
     SegmentTopology,
+    SourceFaceId,
     TriangulationResult,
     TriangulationSettings,
     analyse_face_region,
@@ -67,7 +69,7 @@ class A1PreparedRegion:
     region_index: int
     decomposition_region_id: int
     source_segment_id: int
-    source_face_ids: tuple
+    source_face_ids: Tuple[SourceFaceId, ...]
     topology_before_triangulation: SegmentTopology
     triangulation: TriangulationResult
 
@@ -85,6 +87,11 @@ class A1PreparedRegion:
             raise ValueError("source_segment_id must be a non-negative integer")
         if not isinstance(self.source_face_ids, tuple) or not self.source_face_ids:
             raise ValueError("source_face_ids must be a non-empty tuple")
+        if not all(
+            isinstance(source_face_id, SourceFaceId)
+            for source_face_id in self.source_face_ids
+        ):
+            raise TypeError("source_face_ids must contain SourceFaceId values")
         if not isinstance(self.topology_before_triangulation, SegmentTopology):
             raise TypeError("topology_before_triangulation must be SegmentTopology")
         if not isinstance(self.triangulation, TriangulationResult):
@@ -119,20 +126,47 @@ class A1GeometryPreparationResult:
             raise ValueError("region indices must be ordered and dense from zero")
 
 
+def _lineage_count_diagnostics(
+    values: Counter[SourceFaceId],
+) -> Tuple[Tuple[str, int, int], ...]:
+    """Return deterministic ``(object_id, face_index, count)`` diagnostics."""
+
+    if not isinstance(values, Counter):
+        raise TypeError("values must be collections.Counter")
+    return tuple(
+        (
+            source_id.object_id,
+            source_id.face_index,
+            int(count),
+        )
+        for source_id, count in sorted(
+            values.items(),
+            key=lambda item: (
+                item[0].object_id,
+                item[0].face_index,
+            ),
+        )
+        if count > 0
+    )
+
+
 def _validate_prepared_coverage(
     source_snapshot: MeshSnapshot,
     decomposition: MeshDecompositionPlan,
     prepared_regions: Tuple[A1PreparedRegion, ...],
 ) -> None:
+    """Require exact local coverage and exact SourceFaceId multiplicity.
+
+    ``FaceId`` is the unique working identity of one derived face. ``SourceFaceId`` is
+    provenance and may repeat legitimately after triangulating a Blender n-gon. Local
+    coverage therefore owns overlap detection, while lineage is compared as a multiset.
+    """
+
     source_face_ids = {face.id for face in source_snapshot.faces}
     decomposition_face_ids = [
         face_id for region in decomposition.regions for face_id in region.face_ids
     ]
-    prepared_source_face_ids = [
-        source_face_id
-        for region in prepared_regions
-        for source_face_id in region.source_face_ids
-    ]
+
     if len(decomposition_face_ids) != len(set(decomposition_face_ids)):
         raise A1GeometryPreparationError(
             "Decomposition regions overlap in local face coverage"
@@ -145,17 +179,51 @@ def _validate_prepared_coverage(
             f"missing={tuple(sorted(item.index for item in missing))}, "
             f"unknown={tuple(sorted(item.index for item in unknown))}"
         )
-    if len(prepared_source_face_ids) != len(set(prepared_source_face_ids)):
+
+    planned_by_region_id = {
+        region.region_id: region for region in decomposition.regions
+    }
+    if len(planned_by_region_id) != len(decomposition.regions):
         raise A1GeometryPreparationError(
-            "Prepared regions overlap in SourceFaceId coverage"
+            "Decomposition contains duplicate region identifiers"
         )
-    expected_source_ids = {face.source_id for face in source_snapshot.faces}
-    if set(prepared_source_face_ids) != expected_source_ids:
-        missing = expected_source_ids - set(prepared_source_face_ids)
-        unknown = set(prepared_source_face_ids) - expected_source_ids
+
+    for prepared in prepared_regions:
+        planned = planned_by_region_id.get(prepared.decomposition_region_id)
+        if planned is None:
+            raise A1GeometryPreparationError(
+                "Prepared region references an unknown decomposition region; "
+                f"region_id={prepared.decomposition_region_id}"
+            )
+        if prepared.source_segment_id != planned.source_segment_id:
+            raise A1GeometryPreparationError(
+                "Prepared region source segment differs from decomposition plan; "
+                f"region_id={prepared.decomposition_region_id}, "
+                f"prepared={prepared.source_segment_id}, "
+                f"planned={planned.source_segment_id}"
+            )
+        if prepared.source_face_ids != planned.source_face_ids:
+            raise A1GeometryPreparationError(
+                "Prepared region SourceFaceId lineage differs from decomposition plan; "
+                f"region_id={prepared.decomposition_region_id}"
+            )
+
+    prepared_source_face_ids = tuple(
+        source_face_id
+        for region in prepared_regions
+        for source_face_id in region.source_face_ids
+    )
+    expected_counts = Counter(
+        face.source_id for face in source_snapshot.faces
+    )
+    actual_counts = Counter(prepared_source_face_ids)
+    if actual_counts != expected_counts:
+        missing_counts = expected_counts - actual_counts
+        excess_counts = actual_counts - expected_counts
         raise A1GeometryPreparationError(
-            "Prepared regions do not cover source lineage exactly; "
-            f"missing={missing}, unknown={unknown}"
+            "Prepared regions do not cover SourceFaceId multiplicity exactly; "
+            f"missing={_lineage_count_diagnostics(missing_counts)}, "
+            f"excess={_lineage_count_diagnostics(excess_counts)}"
         )
 
 
@@ -194,7 +262,7 @@ def prepare_a1_geometry_regions(
 
     prepared: list[A1PreparedRegion] = []
     for region_index, (region, region_snapshot) in enumerate(
-        zip(decomposition.regions, region_snapshots)
+        zip(decomposition.regions, region_snapshots, strict=True)
     ):
         if not is_simple_disk(region.topology):
             raise A1GeometryPreparationError(
