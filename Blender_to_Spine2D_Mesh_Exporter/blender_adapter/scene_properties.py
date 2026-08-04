@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from math import radians
 from typing import Any
 
 import bpy
@@ -389,10 +390,31 @@ PROPERTIES = (
         "spine2d_depth_max_points",
         bpy.props.IntProperty(
             name="Max Depth Points",
-            description="Hard limit for generated depth points and their vertex bones",
+            description=(
+                "Hard limit for front and parallax-reserve depth points and vertex bones"
+            ),
             default=128,
             min=4,
             max=4096,
+            update=_update_bake_settings,
+        ),
+    ),
+    (
+        "spine2d_depth_parallax_horizon_angle",
+        bpy.props.FloatProperty(
+            name="Parallax Horizon Angle",
+            description=(
+                "Accumulated surface angle retained beyond the active-camera horizon. "
+                "Zero exports only the current front surface; positive values add fitted "
+                "virtual-view textures and reserve attachments for X/Y parallax"
+            ),
+            default=0.0,
+            min=0.0,
+            max=radians(89.0),
+            soft_max=radians(45.0),
+            subtype="ANGLE",
+            unit="ROTATION",
+            precision=2,
             update=_update_bake_settings,
         ),
     ),
