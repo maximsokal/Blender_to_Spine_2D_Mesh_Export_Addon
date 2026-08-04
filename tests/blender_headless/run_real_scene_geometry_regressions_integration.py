@@ -1,22 +1,15 @@
 """Blender 5.2 regressions captured from mushrooms and flower_shop 0.90.0.
 
-The fixture reproduces both public multi-object PREPARE_OBJECTS failures:
-
-* ``Plane.008`` owns one slightly warped n-gon and an Array modifier with four copies.
-  Evaluated provenance repeats legitimately and the n-gon centroid-plane residue matches
-  the real scene failure magnitude.
-* ``banco`` owns a hidden reserve n-gon before a camera-visible front n-gon in evaluated
-  face order. Triangulation creates FRONT and reserve face-index collisions. The completed
-  parallax union must canonicalize those working IDs before geometry coverage and UV
-  propagation, while retaining the original reserve render-face ownership.
-
-Preparation must complete without mutating source objects, modifiers, materials, camera,
-selection, frame, or temporary Blender datablocks.
+``Plane.008`` reproduces a slightly warped n-gon evaluated through Array x4.
+``banco`` places a hidden reserve n-gon before a visible front n-gon, forcing FRONT and
+reserve face-index collisions after triangulation. Public multi-object Depth preparation
+must resolve both cases without changing the caller's Blender state or source datablocks.
 """
 
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import replace
 from math import cos, radians, sin
 from pathlib import Path
 import sys
@@ -24,7 +17,6 @@ import tempfile
 import traceback
 
 import bpy
-from mathutils import Vector
 
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
@@ -36,9 +28,6 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
 from Blender_to_Spine2D_Mesh_Exporter.application import (  # noqa: E402
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
-    A1SingleObjectExportSettings,
-    A1SourceGeometryMode,
-    ExportSettings,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     A1MultiObjectSource,
@@ -48,19 +37,8 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_object_preparation impo
     PreparedDepthA1Object,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
-    A1TextureExportMode,
-    BakeExecutionSettings,
-    DepthCameraProjectionSettings,
     DepthParallaxSettings,
 )
-from Blender_to_Spine2D_Mesh_Exporter.domain.projection import (  # noqa: E402
-    A1ProjectionDirection,
-)
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (  # noqa: E402
-    A1RigProfile,
-    SpineJsonTarget,
-)
-from Blender_to_Spine2D_Mesh_Exporter.domain.uv import UvUnwrapSettings  # noqa: E402
 from run_bake_integration import (  # noqa: E402
     _activate_only,
     _assert,
@@ -75,9 +53,9 @@ from run_camera_projection_integration import (  # noqa: E402
     _configure_scene,
     _purge_orphan_scene_data,
 )
+import run_depth_array_modifier_integration as array_smoke  # noqa: E402
 
 
-_TARGET = SpineJsonTarget.SPINE_4_2
 _MUSHROOMS_OBJECT_NAME = "Plane.008"
 _FLOWER_SHOP_OBJECT_NAME = "banco"
 _MUSHROOMS_COMPONENT = "object_1:Plane.008"
@@ -91,7 +69,7 @@ _HORIZON_ANGLE = radians(20.0)
 _RESERVE_FOLD_ANGLE = radians(15.0)
 
 
-def _create_emission_material(
+def _create_material(
     name: str,
     color: tuple[float, float, float, float],
 ):
@@ -110,23 +88,6 @@ def _create_emission_material(
     return material
 
 
-def _create_orthographic_camera(name: str):
-    data = bpy.data.cameras.new(name=f"{name}_Data")
-    data.type = "ORTHO"
-    data.ortho_scale = 11.0
-    data.clip_start = 0.1
-    data.clip_end = 100.0
-    camera = bpy.data.objects.new(name, data)
-    bpy.context.scene.collection.objects.link(camera)
-    target = Vector((1.0, 0.0, 0.0))
-    camera.location = (1.0, 0.0, 9.0)
-    camera.rotation_euler = (
-        target - camera.location
-    ).to_track_quat("-Z", "Y").to_euler()
-    bpy.context.scene.camera = camera
-    return camera
-
-
 def _create_mushrooms_source():
     source = _create_mesh_object(
         _MUSHROOMS_OBJECT_NAME,
@@ -139,7 +100,7 @@ def _create_mushrooms_source():
         ((0, 1, 2, 3),),
     )
     source.location = (-1.75, 0.0, 0.0)
-    material = _create_emission_material(
+    material = _create_material(
         "MushroomsPlane008Material",
         (0.12, 0.68, 1.0, 1.0),
     )
@@ -155,11 +116,11 @@ def _create_mushrooms_source():
 
 
 def _create_flower_shop_source():
-    """Create reserve face 0 and front face 1 to force generated-ID collisions."""
+    """Create reserve face 0 and front face 1 with a true 15-degree dihedral."""
 
     flap_length = 0.75
-    folded_x = 0.9 - sin(_RESERVE_FOLD_ANGLE) * flap_length
-    folded_z = -cos(_RESERVE_FOLD_ANGLE) * flap_length
+    folded_x = 0.9 - cos(_RESERVE_FOLD_ANGLE) * flap_length
+    folded_z = -sin(_RESERVE_FOLD_ANGLE) * flap_length
     source = _create_mesh_object(
         _FLOWER_SHOP_OBJECT_NAME,
         (
@@ -171,14 +132,12 @@ def _create_flower_shop_source():
             (folded_x, 0.9, folded_z),
         ),
         (
-            # Historical evaluated source face 0: hidden reserve n-gon.
-            (1, 4, 5, 2),
-            # Historical evaluated source face 1: camera-visible front n-gon.
-            (0, 1, 2, 3),
+            (1, 4, 5, 2),  # hidden reserve n-gon, evaluated source face 0
+            (0, 1, 2, 3),  # visible front n-gon, evaluated source face 1
         ),
     )
     source.location = (3.4, 0.0, 0.0)
-    material = _create_emission_material(
+    material = _create_material(
         "FlowerShopBancoMaterial",
         (1.0, 0.32, 0.08, 1.0),
     )
@@ -186,36 +145,19 @@ def _create_flower_shop_source():
     return source, material
 
 
-def _single_settings(
-    output_directory: Path,
-    *,
-    prefix: str,
-) -> A1SingleObjectExportSettings:
-    return A1SingleObjectExportSettings(
-        export=ExportSettings(
-            texture_width=128,
-            texture_height=128,
-            output_directory=output_directory,
-            images_relative_path="images",
-            spine_version=_TARGET.exact_version,
-            rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
-            bake_margin=1,
-        ),
+def _settings(output_directory: Path, prefix: str):
+    base = array_smoke._settings(output_directory)
+    return replace(
+        base,
         prefix=prefix,
         output_stem=prefix,
         json_output_stem=prefix,
-        source_geometry_mode=A1SourceGeometryMode.EVALUATED,
-        projection_direction=A1ProjectionDirection.ACTIVE_CAMERA,
-        uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
-        bake_execution=BakeExecutionSettings(
-            samples=1,
-            texture_export_mode=A1TextureExportMode.DEPTH_CAMERA_PROJECTION,
-            depth_projection=DepthCameraProjectionSettings(
-                smoothing=0.0,
-                edge_threshold_fraction=1.0,
-                mesh_error_pixels=8.0,
-                max_points=512,
-            ),
+        export=replace(
+            base.export,
+            output_directory=output_directory,
+        ),
+        bake_execution=replace(
+            base.bake_execution,
             depth_parallax=DepthParallaxSettings(
                 horizon_angle_radians=_HORIZON_ANGLE,
             ),
@@ -223,7 +165,7 @@ def _single_settings(
     )
 
 
-def _object_fingerprint(source, modifier=None) -> tuple[object, ...]:
+def _source_fingerprint(source, modifier=None) -> tuple[object, ...]:
     modifier_values: tuple[object, ...] = ()
     if modifier is not None:
         modifier_values = (
@@ -250,19 +192,6 @@ def _object_fingerprint(source, modifier=None) -> tuple[object, ...]:
             for material in source.data.materials
         ),
         modifier_values,
-    )
-
-
-def _camera_fingerprint(camera) -> tuple[object, ...]:
-    return (
-        camera.name,
-        camera.data.name,
-        tuple(tuple(float(value) for value in row) for row in camera.matrix_world),
-        str(camera.data.type),
-        float(camera.data.ortho_scale),
-        float(camera.data.clip_start),
-        float(camera.data.clip_end),
-        bpy.context.scene.camera.name if bpy.context.scene.camera is not None else None,
     )
 
 
@@ -319,7 +248,9 @@ def _run() -> None:
 
     mushrooms, mushrooms_material, array_modifier = _create_mushrooms_source()
     banco, banco_material = _create_flower_shop_source()
-    camera = _create_orthographic_camera("RealSceneRegressionCamera")
+    camera = array_smoke._create_orthographic_camera(
+        "RealSceneRegressionCamera"
+    )
     sentinel = _create_sentinel()
     sentinel.location = (20.0, 0.0, 0.0)
     _activate_only(sentinel)
@@ -328,9 +259,9 @@ def _run() -> None:
     bpy.context.view_layer.update()
 
     context_before = _capture_context()
-    mushrooms_before = _object_fingerprint(mushrooms, array_modifier)
-    banco_before = _object_fingerprint(banco)
-    camera_before = _camera_fingerprint(camera)
+    mushrooms_before = _source_fingerprint(mushrooms, array_modifier)
+    banco_before = _source_fingerprint(banco)
+    camera_before = array_smoke._camera_fingerprint(camera)
     materials_before = (
         _material_fingerprint(mushrooms_material),
         _material_fingerprint(banco_material),
@@ -346,32 +277,24 @@ def _run() -> None:
             A1MultiObjectSource(
                 source_object=mushrooms,
                 component_id=_MUSHROOMS_COMPONENT,
-                settings=_single_settings(
-                    output_directory,
-                    prefix=_MUSHROOMS_PREFIX,
-                ),
+                settings=_settings(output_directory, _MUSHROOMS_PREFIX),
             ),
             A1MultiObjectSource(
                 source_object=banco,
                 component_id=_FLOWER_SHOP_COMPONENT,
-                settings=_single_settings(
-                    output_directory,
-                    prefix=_FLOWER_SHOP_PREFIX,
-                ),
+                settings=_settings(output_directory, _FLOWER_SHOP_PREFIX),
             ),
-        )
-        settings = A1MultiObjectExportSettings(
-            output_directory=output_directory,
-            output_stem=_MULTI_STEM,
-            mode=A1MultiObjectMode.STANDALONE,
         )
         prepared = prepare_a1_multi_object(
             sources,
-            settings,
+            A1MultiObjectExportSettings(
+                output_directory=output_directory,
+                output_stem=_MULTI_STEM,
+                mode=A1MultiObjectMode.STANDALONE,
+            ),
             context=bpy.context,
             scene=bpy.context.scene,
         )
-
         _assert(
             not tuple(path for path in output_directory.rglob("*") if path.is_file()),
             "preparation wrote output files",
@@ -456,14 +379,17 @@ def _run() -> None:
 
     _assert(_capture_context() == context_before, "selection or active context changed")
     _assert(
-        _object_fingerprint(mushrooms, array_modifier) == mushrooms_before,
+        _source_fingerprint(mushrooms, array_modifier) == mushrooms_before,
         "Plane.008 object, mesh, or Array modifier changed",
     )
     _assert(
-        _object_fingerprint(banco) == banco_before,
+        _source_fingerprint(banco) == banco_before,
         "banco object or mesh changed",
     )
-    _assert(_camera_fingerprint(camera) == camera_before, "active camera changed")
+    _assert(
+        array_smoke._camera_fingerprint(camera) == camera_before,
+        "active camera changed",
+    )
     _assert(
         (
             _material_fingerprint(mushrooms_material),
