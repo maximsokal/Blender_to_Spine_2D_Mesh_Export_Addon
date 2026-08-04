@@ -4,8 +4,44 @@ This changelog records public product releases. Detailed milestone notes are pre
 
 ## Current candidate status
 
-Version **0.81.0** is the current release candidate. It adds the third public export mode,
-Depth Camera Projection, while preserving Normal / UV Segments and flat Camera Projection.
+Version **0.90.0** is the current release candidate. It extends Depth Camera Projection
+with optional parallax reserve textures and weighted mesh attachments while preserving the
+`0°` single-FRONT compatibility path.
+
+## [0.90.0] - 2026-08-04
+
+### Added
+
+- Public `Parallax Horizon Angle` for Depth Camera Projection, displayed in degrees and persisted in radians.
+- Compatibility default `0°`, soft UI range through `45°`, and hard limit `89°`.
+- Deterministic Dijkstra traversal over face adjacency using accumulated unsigned dihedral angle.
+- Eight deterministic reserve directions: RIGHT, UP_RIGHT, UP, UP_LEFT, LEFT, DOWN_LEFT, DOWN, and DOWN_RIGHT.
+- One union `MeshSnapshot` and one shared generated vertex-bone rig across FRONT and reserve attachments.
+- Fitted Perspective and Orthographic virtual camera views without mutating the source camera.
+- Face-isolated temporary reserve render proxies so FRONT geometry cannot occlude hidden retained surfaces.
+- Independent alpha-union crop and crop-local UV layout for every FRONT/reserve view.
+- Static and native/legacy sequence output for every view-owned attachment.
+- Scene settings schema 8 with a safe `0.0` parallax-horizon migration default.
+
+### Validated
+
+- Positive Perspective parallax with a hidden forty-five-degree folded surface.
+- Orthographic reserve fitting and a two-frame FRONT/reserve material sequence.
+- Standalone multi-object output with two parallax objects, four textures, and one JSON document.
+- Reserve slots serialized before the established FRONT slot while sharing hinge vertex bones.
+- Public-path atomic rollback after FRONT and reserve files for object one have already been staged.
+- Complete source Mesh, material, transform, camera, frame, selection, render-state, and temporary datablock restoration.
+- Zero-angle compatibility for Spine 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23.
+
+### Compatibility
+
+- Manifest version: `0.90.0`.
+- Expected archive: `blender_to_spine2d_mesh_exporter-0.90.0.zip`.
+- Minimum Blender version remains 5.2.0.
+- Scene settings schema: 8.
+- Existing saved Scenes receive `Parallax Horizon Angle = 0°` and preserve established Depth output.
+
+See [the complete 0.90.0 release note](releases/0.90.0.md).
 
 ## [0.81.0] - 2026-08-03
 
