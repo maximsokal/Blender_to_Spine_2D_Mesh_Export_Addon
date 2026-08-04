@@ -51,7 +51,7 @@ from .source_uv_integrity import (
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class PreparedDepthA1Object(PreparedA1Object):
     """Prepared object with auxiliary parallax texture plans and topology."""
 
