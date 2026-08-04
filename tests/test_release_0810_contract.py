@@ -1,15 +1,11 @@
-"""Current release-scope contracts for Depth Camera Projection 0.81.0."""
+"""Historical release-scope contracts for Depth Camera Projection 0.81.0."""
 
 from __future__ import annotations
 
 from pathlib import Path
-import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / "Blender_to_Spine2D_Mesh_Exporter"
-MANIFEST = PACKAGE / "blender_manifest.toml"
-SCENE_MIGRATION = PACKAGE / "blender_adapter" / "scene_settings_migration.py"
 RELEASE_NOTE = ROOT / "docs" / "releases" / "0.81.0.md"
 SINGLE_RUNNER = ROOT / "tests" / "blender_headless" / "run_depth_camera_projection_integration.py"
 MULTI_RUNNER = ROOT / "tests" / "blender_headless" / "run_depth_camera_projection_multi_object_integration.py"
@@ -26,19 +22,10 @@ def _normalized(value: str) -> str:
     )
 
 
-def test_current_manifest_and_scene_schema_are_0810() -> None:
-    with MANIFEST.open("rb") as stream:
-        manifest = tomllib.load(stream)
-    migration = _read(SCENE_MIGRATION)
-
-    assert manifest["version"] == "0.81.0"
-    assert manifest["blender_version_min"] == "5.2.0"
-    assert "CURRENT_SETTINGS_SCHEMA_VERSION = 7" in migration
-    assert "spine2d_depth_smoothing" in migration
-    assert "spine2d_depth_edge_threshold" in migration
-    assert "spine2d_depth_mesh_error_pixels" in migration
-    assert "spine2d_depth_max_points" in migration
-    assert "spine2d_depth_base_mode" in migration
+def test_0810_release_note_remains_historical_and_immutable() -> None:
+    note = _read(RELEASE_NOTE)
+    assert note.lstrip().startswith("# Release 0.81.0")
+    assert "blender_to_spine2d_mesh_exporter-0.81.0.zip" in note
 
 
 def test_release_note_records_exact_three_mode_user_contract() -> None:
