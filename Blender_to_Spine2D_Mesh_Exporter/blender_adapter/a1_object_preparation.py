@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 import logging
 from typing import Any, Iterator, Mapping, Tuple
 
@@ -18,6 +19,10 @@ from ..domain.baking import (
     A1TextureExportMode,
     CameraProjectionPlan,
 )
+from ..domain.baking.camera_projection import (
+    build_camera_projection_view_plan,
+)
+from ..domain.geometry import DepthParallaxGeometryPackage
 from ..domain.spine.export_capabilities import (
     SpineJsonExportScope,
     require_spine_json_export_capability,
@@ -44,6 +49,41 @@ from .source_uv_integrity import (
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedDepthA1Object(PreparedA1Object):
+    """Prepared object with auxiliary parallax texture plans and topology."""
+
+    depth_parallax_package: DepthParallaxGeometryPackage
+    reserve_bake_plans: Tuple[CameraProjectionPlan, ...] = ()
+
+    def __post_init__(self) -> None:
+        PreparedA1Object.__post_init__(self)
+        if not isinstance(
+            self.depth_parallax_package,
+            DepthParallaxGeometryPackage,
+        ):
+            raise TypeError(
+                "depth_parallax_package must be DepthParallaxGeometryPackage"
+            )
+        if not isinstance(self.reserve_bake_plans, tuple) or not all(
+            isinstance(plan, CameraProjectionPlan)
+            for plan in self.reserve_bake_plans
+        ):
+            raise TypeError(
+                "reserve_bake_plans must contain CameraProjectionPlan values"
+            )
+        expected = len(self.depth_parallax_package.reserve_surfaces)
+        if len(self.reserve_bake_plans) != expected:
+            raise ValueError(
+                "reserve_bake_plans must match reserve surface count; "
+                f"plans={len(self.reserve_bake_plans)}, surfaces={expected}"
+            )
+        if self.source_snapshot != self.depth_parallax_package.union_snapshot:
+            raise ValueError(
+                "Prepared Depth source_snapshot must equal parallax union_snapshot"
+            )
 
 
 _PROGRESS_MESSAGES = {
@@ -116,6 +156,7 @@ def _build_prepared_object(
     uv: Any,
     texture: Any,
     document: Any,
+    reserve_bake_plans: Tuple[CameraProjectionPlan, ...],
     *,
     context: Any | None,
     scene: Any | None,
@@ -130,7 +171,7 @@ def _build_prepared_object(
         if isinstance(assembly, A1DocumentAssemblyResult)
         else document.rig
     )
-    return PreparedA1Object(
+    common = dict(
         source_object=source.source_object,
         object_id=source.object_id,
         prefix=source.prefix,
@@ -153,6 +194,18 @@ def _build_prepared_object(
             scene=scene,
         ),
     )
+    package = getattr(source, "parallax_package", None)
+    if isinstance(package, DepthParallaxGeometryPackage):
+        return PreparedDepthA1Object(
+            **common,
+            depth_parallax_package=package,
+            reserve_bake_plans=reserve_bake_plans,
+        )
+    if reserve_bake_plans:
+        raise ValueError(
+            "Non-Depth prepared object cannot carry reserve_bake_plans"
+        )
+    return PreparedA1Object(**common)
 
 
 def _depth_mode(settings: A1SingleObjectExportSettings) -> bool:
@@ -186,12 +239,7 @@ def _prepare_texture(
     context: Any | None,
     scene: Any | None,
 ) -> Any:
-    """Plan texture output and validate the selected immutable export mode.
-
-    Dispatch depends only on the original request settings. It never reaches back into
-    the opaque result returned by the UV stage, which keeps stage doubles and future
-    alternative typed products valid as long as they satisfy the next public stage.
-    """
+    """Plan texture output and validate the selected immutable export mode."""
 
     if not isinstance(settings, A1SingleObjectExportSettings):
         raise TypeError("settings must be A1SingleObjectExportSettings")
@@ -207,16 +255,49 @@ def _prepare_texture(
     return result
 
 
+def _build_reserve_bake_plans(
+    source: Any,
+    texture: Any,
+    settings: A1SingleObjectExportSettings,
+) -> Tuple[CameraProjectionPlan, ...]:
+    """Create one auxiliary camera plan for every retained reserve surface."""
+
+    if not _depth_mode(settings):
+        return ()
+    package = getattr(source, "parallax_package", None)
+    if not isinstance(package, DepthParallaxGeometryPackage):
+        raise TypeError(
+            "Depth Camera Projection source lost its parallax package"
+        )
+    if not isinstance(texture.bake_plan, CameraProjectionPlan):
+        raise TypeError("Depth front texture plan must be CameraProjectionPlan")
+    plans = tuple(
+        build_camera_projection_view_plan(
+            texture.bake_plan,
+            view_id=surface.view.view_id.value,
+            camera_world_matrix=surface.view.camera_world_matrix,
+            lens_scale=surface.view.lens_scale,
+        )
+        for surface in package.reserve_surfaces
+    )
+    if len(plans) != len(package.reserve_surfaces):
+        raise ValueError("Reserve plan count differs from reserve surface count")
+    return plans
+
+
 def _prepare_document(
     texture: Any,
     settings: A1SingleObjectExportSettings,
+    reserve_bake_plans: Tuple[CameraProjectionPlan, ...],
 ) -> Any:
     """Select flat camera or Normal-style depth attachment assembly."""
 
     if not isinstance(settings, A1SingleObjectExportSettings):
         raise TypeError("settings must be A1SingleObjectExportSettings")
     if _depth_mode(settings):
-        return prepare_a1_depth_document(texture)
+        return prepare_a1_depth_document(texture, reserve_bake_plans)
+    if reserve_bake_plans:
+        raise ValueError("Only Depth mode may carry reserve_bake_plans")
     return prepare_a1_document(texture)
 
 
@@ -271,10 +352,19 @@ def prepare_a1_object(
                 scene=scene,
             )
             statistics, warnings = texture.statistics, texture.warnings
+            reserve_bake_plans = _build_reserve_bake_plans(
+                source,
+                texture,
+                settings,
+            )
 
             stage = A1SingleObjectStage.BUILD_RIG
             _progress(progress_callback, 82, stage, object_id)
-            document = _prepare_document(texture, settings)
+            document = _prepare_document(
+                texture,
+                settings,
+                reserve_bake_plans,
+            )
             statistics, warnings = document.statistics, document.warnings
 
             stage = A1SingleObjectStage.ASSEMBLE_DOCUMENT
@@ -283,6 +373,7 @@ def prepare_a1_object(
                 uv,
                 texture,
                 document,
+                reserve_bake_plans,
                 context=context,
                 scene=scene,
                 warnings=warnings,
@@ -305,6 +396,7 @@ def prepare_a1_object(
 __all__ = [
     "A1ObjectPreparationError",
     "PreparedA1Object",
+    "PreparedDepthA1Object",
     "StatisticsValue",
     "prepare_a1_object",
 ]
