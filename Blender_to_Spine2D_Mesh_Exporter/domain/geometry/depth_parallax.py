@@ -1,15 +1,13 @@
 """Angular parallax-reserve geometry for Depth Camera Projection 0.90.0.
 
-The front surface remains the exact active-camera result. When a positive horizon angle
-is requested, this module expands from front-visible source triangles through shared-edge
-adjacency using accumulated unsigned dihedral angle. Extra faces are assigned to one of
-eight deterministic virtual camera views, projected into the front-camera rig space, and
-receive UVs from the virtual view that textures them.
+The active-camera front surface remains unchanged. A positive horizon angle expands
+through shared-edge adjacency using accumulated unsigned dihedral angle. Only retained
+reserve triangles are projected through fitted virtual cameras and emitted into separate
+material/view groups.
 
-One union MeshSnapshot owns every retained vertex and face. Material index zero denotes
-the front attachment; positive material indices denote reserve views. This keeps one
-shared Z-group/vertex-bone domain while allowing document assembly to emit independent
-front and reserve attachments with independent rendered images.
+One union :class:`MeshSnapshot` owns the complete front + reserve rig domain. Front and
+reserve subsets preserve the union vertex lineage exactly, so every attachment resolves
+against one deterministic Z-group assignment without position-only lineage recovery.
 """
 
 from __future__ import annotations
@@ -25,7 +23,6 @@ from ..projection import A1ProjectedPoint
 from .depth_camera_projection import (
     DepthCameraProjectionError,
     DepthCameraProjectionResult,
-    _ProjectedTriangle,
     _translation_only_origin,
     _world_point,
 )
@@ -57,7 +54,6 @@ from .triangulation import triangulate_snapshot
 from .validator import MeshSnapshotValidator
 
 
-_AREA_EPSILON = 1.0e-12
 _COORDINATE_QUANTUM = 1.0e-9
 
 
@@ -107,7 +103,7 @@ class DepthParallaxCameraView:
         for field_name in ("yaw_radians", "pitch_radians", "lens_scale"):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise TypeError(f"{field_name} must be a finite number")
+                raise TypeError(f"{field_name} must be numeric")
             numeric = float(value)
             if not isfinite(numeric):
                 raise ValueError(f"{field_name} must be finite")
@@ -116,9 +112,10 @@ class DepthParallaxCameraView:
             raise ValueError("lens_scale must be in (0, 1]")
         if not isinstance(self.frame, A1CameraProjectionFrame):
             raise TypeError("frame must be A1CameraProjectionFrame")
-        if not isinstance(self.camera_world_matrix, tuple) or len(
-            self.camera_world_matrix
-        ) != 16:
+        if (
+            not isinstance(self.camera_world_matrix, tuple)
+            or len(self.camera_world_matrix) != 16
+        ):
             raise TypeError("camera_world_matrix must contain sixteen values")
         if not all(isfinite(float(value)) for value in self.camera_world_matrix):
             raise ValueError("camera_world_matrix contains non-finite values")
@@ -149,20 +146,16 @@ class DepthParallaxReserveSurface:
             raise TypeError("source_face_indices must contain non-negative ints")
         if tuple(sorted(set(self.source_face_indices))) != self.source_face_indices:
             raise ValueError("source_face_indices must be sorted and unique")
-        if (
-            isinstance(self.maximum_accumulated_angle_radians, bool)
-            or not isinstance(
-                self.maximum_accumulated_angle_radians,
-                (int, float),
-            )
-        ):
+        value = self.maximum_accumulated_angle_radians
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise TypeError("maximum_accumulated_angle_radians must be numeric")
-        angle = float(self.maximum_accumulated_angle_radians)
-        if not isfinite(angle) or angle < 0.0:
+        numeric = float(value)
+        if not isfinite(numeric) or numeric < 0.0:
             raise ValueError(
                 "maximum_accumulated_angle_radians must be finite and non-negative"
             )
-        object.__setattr__(self, "maximum_accumulated_angle_radians", angle)
+        object.__setattr__(self, "maximum_accumulated_angle_radians", numeric)
+        MeshSnapshotValidator().validate_or_raise(self.snapshot)
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,28 +183,33 @@ class DepthParallaxGeometryPackage:
             raise TypeError(
                 "reserve_surfaces must contain DepthParallaxReserveSurface values"
             )
-        if (
-            isinstance(self.horizon_angle_radians, bool)
-            or not isinstance(self.horizon_angle_radians, (int, float))
-        ):
+        value = self.horizon_angle_radians
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise TypeError("horizon_angle_radians must be numeric")
-        angle = float(self.horizon_angle_radians)
-        if not isfinite(angle) or angle < 0.0 or angle >= pi / 2.0:
+        numeric = float(value)
+        if not isfinite(numeric) or numeric < 0.0 or numeric >= pi / 2.0:
             raise ValueError("horizon_angle_radians must be finite in [0, pi/2)")
-        object.__setattr__(self, "horizon_angle_radians", angle)
+        object.__setattr__(self, "horizon_angle_radians", numeric)
+
         for field_name in ("front_face_indices", "reserve_face_indices"):
             values = getattr(self, field_name)
             if not isinstance(values, tuple) or not all(
-                isinstance(value, int) and not isinstance(value, bool) and value >= 0
-                for value in values
+                isinstance(item, int) and not isinstance(item, bool) and item >= 0
+                for item in values
             ):
                 raise TypeError(f"{field_name} must contain non-negative ints")
             if tuple(sorted(set(values))) != values:
                 raise ValueError(f"{field_name} must be sorted and unique")
+
         MeshSnapshotValidator().validate_or_raise(self.union_snapshot)
         MeshSnapshotValidator().validate_or_raise(self.front_snapshot)
         if self.front_snapshot.source_object_id != self.union_snapshot.source_object_id:
             raise ValueError("front and union snapshots must share source_object_id")
+        if any(
+            surface.snapshot.source_object_id != self.union_snapshot.source_object_id
+            for surface in self.reserve_surfaces
+        ):
+            raise ValueError("reserve and union snapshots must share source_object_id")
 
     @property
     def reserve_enabled(self) -> bool:
@@ -225,7 +223,12 @@ class DepthParallaxGeometryPackage:
 @dataclass(frozen=True, slots=True)
 class _FaceGeometry:
     face_index: int
-    vertex_ids: tuple[VertexId, VertexId, VertexId]
+    source_face_index: int
+    source_vertex_ids: tuple[
+        SourceVertexId,
+        SourceVertexId,
+        SourceVertexId,
+    ]
     world_points: tuple[
         tuple[float, float, float],
         tuple[float, float, float],
@@ -239,6 +242,11 @@ class _FaceGeometry:
 class _FaceRecord:
     material_index: int
     source_face_index: int
+    source_vertex_ids: tuple[
+        SourceVertexId,
+        SourceVertexId,
+        SourceVertexId,
+    ]
     positions: tuple[
         tuple[float, float, float],
         tuple[float, float, float],
@@ -249,6 +257,36 @@ class _FaceRecord:
         tuple[float, float],
         tuple[float, float],
     ]
+
+    def __post_init__(self) -> None:
+        if isinstance(self.material_index, bool) or not isinstance(
+            self.material_index,
+            int,
+        ):
+            raise TypeError("material_index must be int")
+        if self.material_index < 0:
+            raise ValueError("material_index must be non-negative")
+        if isinstance(self.source_face_index, bool) or not isinstance(
+            self.source_face_index,
+            int,
+        ):
+            raise TypeError("source_face_index must be int")
+        if self.source_face_index < 0:
+            raise ValueError("source_face_index must be non-negative")
+        if not all(
+            isinstance(value, SourceVertexId) for value in self.source_vertex_ids
+        ):
+            raise TypeError("source_vertex_ids must contain SourceVertexId values")
+        if not all(
+            len(value) == 3 and all(isfinite(float(component)) for component in value)
+            for value in self.positions
+        ):
+            raise ValueError("positions must contain three finite 3D vectors")
+        if not all(
+            len(value) == 2 and all(isfinite(float(component)) for component in value)
+            for value in self.uvs
+        ):
+            raise ValueError("uvs must contain three finite 2D vectors")
 
 
 def _subtract(
@@ -277,7 +315,10 @@ def _dot(
     first: tuple[float, float, float],
     second: tuple[float, float, float],
 ) -> float:
-    return sum(a * b for a, b in zip(first, second, strict=True))
+    return sum(
+        first[index] * second[index]
+        for index in range(3)
+    )
 
 
 def _normalized(
@@ -296,23 +337,22 @@ def _normalized(
     )
 
 
-def _face_geometry(
-    snapshot: MeshSnapshot,
-) -> Mapping[int, _FaceGeometry]:
+def _face_geometry(snapshot: MeshSnapshot) -> Mapping[int, _FaceGeometry]:
     triangulated = triangulate_snapshot(snapshot).snapshot
     loops = triangulated.loop_by_id()
     vertices = triangulated.vertex_by_id()
     origin = _translation_only_origin(triangulated.world_matrix)
     result: dict[int, _FaceGeometry] = {}
+
     for face in sorted(triangulated.faces, key=lambda value: value.id.index):
-        vertex_ids = tuple(loops[loop_id].vertex_id for loop_id in face.loop_ids)
-        if len(vertex_ids) != 3:
+        face_loops = tuple(loops[loop_id] for loop_id in face.loop_ids)
+        if len(face_loops) != 3:
             raise DepthCameraProjectionError(
                 f"triangulated face {face.id.index} is not triangular"
             )
+        face_vertices = tuple(vertices[loop.vertex_id] for loop in face_loops)
         world_points = tuple(
-            _world_point(origin, vertices[vertex_id].position)
-            for vertex_id in vertex_ids
+            _world_point(origin, vertex.position) for vertex in face_vertices
         )
         first_edge = _subtract(world_points[1], world_points[0])
         second_edge = _subtract(world_points[2], world_points[0])
@@ -326,7 +366,12 @@ def _face_geometry(
         )
         result[face.id.index] = _FaceGeometry(
             face_index=face.id.index,
-            vertex_ids=(vertex_ids[0], vertex_ids[1], vertex_ids[2]),
+            source_face_index=face.source_id.face_index,
+            source_vertex_ids=(
+                face_vertices[0].source_id,
+                face_vertices[1].source_id,
+                face_vertices[2].source_id,
+            ),
             world_points=(world_points[0], world_points[1], world_points[2]),
             normal_world=normal,
             centroid_world=(centroid[0], centroid[1], centroid[2]),
@@ -337,12 +382,14 @@ def _face_geometry(
 def _face_adjacency(
     geometry: Mapping[int, _FaceGeometry],
 ) -> Mapping[int, tuple[int, ...]]:
-    owners: dict[tuple[int, int], list[int]] = {}
+    owners: dict[tuple[SourceVertexId, SourceVertexId], list[int]] = {}
     for face_index, face in geometry.items():
-        values = tuple(vertex_id.index for vertex_id in face.vertex_ids)
-        for corner, first in enumerate(values):
-            second = values[(corner + 1) % 3]
-            owners.setdefault(tuple(sorted((first, second))), []).append(face_index)
+        values = face.source_vertex_ids
+        for corner_index, first in enumerate(values):
+            second = values[(corner_index + 1) % 3]
+            pair = tuple(sorted((first, second)))
+            owners.setdefault(pair, []).append(face_index)
+
     adjacency: dict[int, set[int]] = {face_index: set() for face_index in geometry}
     for edge_owners in owners.values():
         unique = tuple(sorted(set(edge_owners)))
@@ -357,7 +404,8 @@ def _face_adjacency(
 
 
 def _dihedral_angle(first: _FaceGeometry, second: _FaceGeometry) -> float:
-    # Ignore accidental winding inversion while retaining the geometric plane bend.
+    """Return unsigned plane bend independent of accidental winding reversal."""
+
     cosine = min(1.0, max(0.0, abs(_dot(first.normal_world, second.normal_world))))
     return float(acos(cosine))
 
@@ -404,13 +452,24 @@ def _accumulated_horizon_costs(
     seeds: Sequence[int],
     limit: float,
 ) -> Mapping[int, float]:
-    costs: dict[int, float] = {face_index: 0.0 for face_index in seeds}
-    pending: list[tuple[float, int]] = [(0.0, face_index) for face_index in seeds]
-    for item in pending:
-        heappush([], item)
-    pending = []
-    for face_index in sorted(set(seeds)):
+    """Return minimum accumulated shared-edge bend from any visible seed face."""
+
+    resolved_seeds = tuple(sorted(set(seeds)))
+    if not resolved_seeds:
+        raise DepthCameraProjectionError(
+            "parallax horizon expansion requires at least one visible seed face"
+        )
+    unknown = tuple(face_index for face_index in resolved_seeds if face_index not in geometry)
+    if unknown:
+        raise DepthCameraProjectionError(
+            f"visible seed faces are absent from triangulated geometry: {unknown}"
+        )
+
+    costs: dict[int, float] = {face_index: 0.0 for face_index in resolved_seeds}
+    pending: list[tuple[float, int]] = []
+    for face_index in resolved_seeds:
         heappush(pending, (0.0, face_index))
+
     tolerance = max(1.0e-12, limit * 1.0e-10)
     while pending:
         current_cost, face_index = heappop(pending)
@@ -449,44 +508,55 @@ def _view_for_face(
     )
     if _dot(normal, toward_camera) < 0.0:
         normal = (-normal[0], -normal[1], -normal[2])
+
     if abs(normal[0]) <= 1.0e-12 and abs(normal[1]) <= 1.0e-12:
-        # A nearly front-facing reserve face is assigned by stable face index so the
-        # result stays deterministic even on coplanar non-manifold fixtures.
         view_id = _VIEW_ORDER[face.face_index % len(_VIEW_ORDER)]
         return available[view_id]
+
     azimuth = atan2(normal[1], normal[0])
-    sector = int(round(azimuth / (pi / 4.0))) % 8
-    view_id = _VIEW_ORDER[sector]
-    return available[view_id]
+    sector = int(round(azimuth / (pi / 4.0))) % len(_VIEW_ORDER)
+    return available[_VIEW_ORDER[sector]]
 
 
-def _front_records(front: MeshSnapshot, uv_layer_name: str) -> list[_FaceRecord]:
+def _front_records(
+    front: MeshSnapshot,
+    uv_layer_name: str,
+) -> list[_FaceRecord]:
     loops = front.loop_by_id()
     vertices = front.vertex_by_id()
     records: list[_FaceRecord] = []
+
     for face in sorted(front.faces, key=lambda value: value.id.index):
         if len(face.loop_ids) != 3:
             raise DepthCameraProjectionError(
                 f"front depth face {face.id.index} is not triangulated"
             )
-        positions = []
-        uvs = []
-        for loop_id in face.loop_ids:
-            loop = loops[loop_id]
-            uv = loop.uv(uv_layer_name)
-            if uv is None:
-                raise DepthCameraProjectionError(
-                    f"front depth loop {loop.id.index} has no {uv_layer_name!r} UV"
-                )
-            vertex = vertices[loop.vertex_id]
-            positions.append(tuple(float(value) for value in vertex.position))
-            uvs.append((float(uv[0]), float(uv[1])))
+        face_loops = tuple(loops[loop_id] for loop_id in face.loop_ids)
+        face_vertices = tuple(vertices[loop.vertex_id] for loop in face_loops)
+        uvs = tuple(loop.uv(uv_layer_name) for loop in face_loops)
+        if any(uv is None for uv in uvs):
+            raise DepthCameraProjectionError(
+                f"front depth face {face.id.index} has incomplete {uv_layer_name!r} UV"
+            )
         records.append(
             _FaceRecord(
                 material_index=0,
-                source_face_index=face.id.index,
-                positions=(positions[0], positions[1], positions[2]),
-                uvs=(uvs[0], uvs[1], uvs[2]),
+                source_face_index=face.source_id.face_index,
+                source_vertex_ids=(
+                    face_vertices[0].source_id,
+                    face_vertices[1].source_id,
+                    face_vertices[2].source_id,
+                ),
+                positions=(
+                    tuple(float(value) for value in face_vertices[0].position),
+                    tuple(float(value) for value in face_vertices[1].position),
+                    tuple(float(value) for value in face_vertices[2].position),
+                ),
+                uvs=(
+                    (float(uvs[0][0]), float(uvs[0][1])),  # type: ignore[index]
+                    (float(uvs[1][0]), float(uvs[1][1])),  # type: ignore[index]
+                    (float(uvs[2][0]), float(uvs[2][1])),  # type: ignore[index]
+                ),
             )
         )
     return records
@@ -499,8 +569,9 @@ def _reserve_record(
     projected_origin: A1ProjectedPoint,
     uniform_scale: float,
 ) -> _FaceRecord:
-    positions = []
-    uvs = []
+    positions: list[tuple[float, float, float]] = []
+    uvs: list[tuple[float, float]] = []
+
     for point_index, world_point in enumerate(face.world_points):
         front = front_frame.project_world_point(
             world_point,
@@ -508,9 +579,7 @@ def _reserve_record(
         )
         reserve = view.frame.project_world_point(
             world_point,
-            field_name=(
-                f"face[{face.face_index}].{view.view_id.value}[{point_index}]"
-            ),
+            field_name=f"face[{face.face_index}].{view.view_id.value}[{point_index}]",
         )
         positions.append(
             (
@@ -526,22 +595,35 @@ def _reserve_record(
             float(reserve.v) + float(view.frame.texture_height) / 2.0
         ) / float(view.frame.texture_height)
         tolerance = 1.0e-7
-        if u < -tolerance or u > 1.0 + tolerance or v < -tolerance or v > 1.0 + tolerance:
+        if (
+            u < -tolerance
+            or u > 1.0 + tolerance
+            or v < -tolerance
+            or v > 1.0 + tolerance
+        ):
             raise DepthCameraProjectionError(
                 "virtual parallax camera did not frame its assigned reserve surface; "
                 f"view={view.view_id.value}, face={face.face_index}, uv={(u, v)}"
             )
         uvs.append((min(1.0, max(0.0, u)), min(1.0, max(0.0, v))))
+
     return _FaceRecord(
         material_index=view.material_index,
-        source_face_index=face.face_index,
+        source_face_index=face.source_face_index,
+        source_vertex_ids=face.source_vertex_ids,
         positions=(positions[0], positions[1], positions[2]),
         uvs=(uvs[0], uvs[1], uvs[2]),
     )
 
 
-def _vertex_signature(position: tuple[float, float, float]) -> tuple[int, int, int]:
-    return tuple(round(float(value) / _COORDINATE_QUANTUM) for value in position)  # type: ignore[return-value]
+def _vertex_signature(
+    source_id: SourceVertexId,
+    position: tuple[float, float, float],
+) -> tuple[SourceVertexId, int, int, int]:
+    quantized = tuple(
+        round(float(value) / _COORDINATE_QUANTUM) for value in position
+    )
+    return source_id, quantized[0], quantized[1], quantized[2]
 
 
 def _snapshot_from_records(
@@ -550,30 +632,55 @@ def _snapshot_from_records(
     *,
     uv_layer_name: str,
     snapshot_suffix: str,
+    preserve_source_vertex_ids: bool,
 ) -> MeshSnapshot:
-    if not records:
+    """Materialize records with coherent face/loop and vertex lineage."""
+
+    if not isinstance(source, MeshSnapshot):
+        raise TypeError("source must be MeshSnapshot")
+    if not isinstance(records, Sequence) or not records:
         raise DepthCameraProjectionError("parallax snapshot records cannot be empty")
-    vertex_index_by_signature: dict[tuple[int, int, int], int] = {}
+    if not all(isinstance(record, _FaceRecord) for record in records):
+        raise TypeError("records must contain _FaceRecord values")
+    if not isinstance(uv_layer_name, str) or not uv_layer_name.strip():
+        raise ValueError("uv_layer_name must be a non-empty string")
+    if not isinstance(snapshot_suffix, str) or not snapshot_suffix.strip():
+        raise ValueError("snapshot_suffix must be a non-empty string")
+    if not isinstance(preserve_source_vertex_ids, bool):
+        raise TypeError("preserve_source_vertex_ids must be bool")
+
+    vertex_index_by_signature: dict[
+        tuple[SourceVertexId, int, int, int],
+        int,
+    ] = {}
     vertex_positions: list[tuple[float, float, float]] = []
-    face_vertex_indices: list[tuple[int, int, int]] = []
+    vertex_lineage: list[SourceVertexId] = []
+    retained: list[tuple[_FaceRecord, tuple[int, int, int]]] = []
+
     for record in records:
-        indices = []
-        for position in record.positions:
-            signature = _vertex_signature(position)
+        indices: list[int] = []
+        for corner_index, position in enumerate(record.positions):
+            source_id = record.source_vertex_ids[corner_index]
+            signature = _vertex_signature(source_id, position)
             index = vertex_index_by_signature.get(signature)
             if index is None:
                 index = len(vertex_positions)
                 vertex_index_by_signature[signature] = index
-                vertex_positions.append(position)
+                vertex_positions.append(
+                    (float(position[0]), float(position[1]), float(position[2]))
+                )
+                vertex_lineage.append(source_id)
             indices.append(index)
         if len(set(indices)) != 3:
             continue
-        face_vertex_indices.append((indices[0], indices[1], indices[2]))
-    if not face_vertex_indices:
+        retained.append((record, (indices[0], indices[1], indices[2])))
+
+    if not retained:
         raise DepthCameraProjectionError(
             "parallax records collapsed to no non-degenerate triangles"
         )
 
+    face_vertex_indices = tuple(indices for _record, indices in retained)
     edge_pairs = tuple(
         sorted(
             {
@@ -584,11 +691,16 @@ def _snapshot_from_records(
         )
     )
     edge_id_by_pair = {pair: EdgeId(index) for index, pair in enumerate(edge_pairs)}
+
     vertices = tuple(
         MeshVertex(
             id=VertexId(index),
-            source_id=SourceVertexId(source.source_object_id, index),
-            position=(float(position[0]), float(position[1]), float(position[2])),
+            source_id=(
+                vertex_lineage[index]
+                if preserve_source_vertex_ids
+                else SourceVertexId(source.source_object_id, index)
+            ),
+            position=position,
             normal=(0.0, 0.0, 1.0),
         )
         for index, position in enumerate(vertex_positions)
@@ -606,15 +718,8 @@ def _snapshot_from_records(
 
     loops: list[MeshLoop] = []
     faces: list[MeshFace] = []
-    retained_record_index = 0
-    for record in records:
-        indices = tuple(
-            vertex_index_by_signature[_vertex_signature(position)]
-            for position in record.positions
-        )
-        if len(set(indices)) != 3:
-            continue
-        loop_ids = []
+    for record, indices in retained:
+        loop_ids: list[LoopId] = []
         for corner_index, vertex_index in enumerate(indices):
             following = indices[(corner_index + 1) % 3]
             pair = tuple(sorted((vertex_index, following)))
@@ -624,7 +729,7 @@ def _snapshot_from_records(
                     id=loop_id,
                     source_id=SourceLoopId(
                         source.source_object_id,
-                        retained_record_index,
+                        record.source_face_index,
                         corner_index,
                     ),
                     vertex_id=VertexId(vertex_index),
@@ -651,7 +756,6 @@ def _snapshot_from_records(
                 smooth=True,
             )
         )
-        retained_record_index += 1
 
     snapshot = MeshSnapshot(
         snapshot_id=f"{source.snapshot_id}:{snapshot_suffix}",
@@ -679,30 +783,40 @@ def _subset_material(
 ) -> MeshSnapshot:
     loops = union.loop_by_id()
     vertices = union.vertex_by_id()
-    records = []
+    records: list[_FaceRecord] = []
+
     for face in sorted(union.faces, key=lambda value: value.id.index):
         if face.material_index != material_index:
             continue
-        positions = []
-        uvs = []
-        for loop_id in face.loop_ids:
-            loop = loops[loop_id]
-            vertex = vertices[loop.vertex_id]
-            uv = loop.uv(uv_layer_name)
-            if uv is None:
-                raise DepthCameraProjectionError(
-                    f"union loop {loop.id.index} has no {uv_layer_name!r} UV"
-                )
-            positions.append(vertex.position)
-            uvs.append(uv)
+        face_loops = tuple(loops[loop_id] for loop_id in face.loop_ids)
+        face_vertices = tuple(vertices[loop.vertex_id] for loop in face_loops)
+        uvs = tuple(loop.uv(uv_layer_name) for loop in face_loops)
+        if any(uv is None for uv in uvs):
+            raise DepthCameraProjectionError(
+                f"union face {face.id.index} has incomplete {uv_layer_name!r} UV"
+            )
         records.append(
             _FaceRecord(
                 material_index=0,
                 source_face_index=face.source_id.face_index,
-                positions=(positions[0], positions[1], positions[2]),
-                uvs=(uvs[0], uvs[1], uvs[2]),
+                source_vertex_ids=(
+                    face_vertices[0].source_id,
+                    face_vertices[1].source_id,
+                    face_vertices[2].source_id,
+                ),
+                positions=(
+                    face_vertices[0].position,
+                    face_vertices[1].position,
+                    face_vertices[2].position,
+                ),
+                uvs=(
+                    (float(uvs[0][0]), float(uvs[0][1])),  # type: ignore[index]
+                    (float(uvs[1][0]), float(uvs[1][1])),  # type: ignore[index]
+                    (float(uvs[2][0]), float(uvs[2][1])),  # type: ignore[index]
+                ),
             )
         )
+
     if not records:
         raise DepthCameraProjectionError(
             f"union snapshot has no faces for material index {material_index}"
@@ -712,6 +826,7 @@ def _subset_material(
         records,
         uv_layer_name=uv_layer_name,
         snapshot_suffix=suffix,
+        preserve_source_vertex_ids=True,
     )
 
 
@@ -746,19 +861,17 @@ def build_depth_parallax_geometry_package(
     angle = float(horizon_angle_radians)
     if not isfinite(angle) or angle < 0.0 or angle >= pi / 2.0:
         raise ValueError("horizon_angle_radians must be finite in [0, pi/2)")
-    if isinstance(max_points, bool) or not isinstance(max_points, int) or max_points < 4:
-        raise ValueError("max_points must be an integer of at least four")
+    if isinstance(max_points, bool) or not isinstance(max_points, int):
+        raise TypeError("max_points must be int")
+    if max_points < 4:
+        raise ValueError("max_points must be at least four")
 
     MeshSnapshotValidator().validate_or_raise(source)
     MeshSnapshotValidator().validate_or_raise(front_result.snapshot)
     front_faces = _front_visible_face_indices(source, front_result.frame)
+
     if angle <= 1.0e-12:
-        front = _snapshot_from_records(
-            front_result.snapshot,
-            _front_records(front_result.snapshot, uv_layer_name),
-            uv_layer_name=uv_layer_name,
-            snapshot_suffix="parallax-front",
-        )
+        front = front_result.snapshot
         return DepthParallaxGeometryPackage(
             front_result=front_result,
             union_snapshot=front,
@@ -769,13 +882,20 @@ def build_depth_parallax_geometry_package(
             reserve_face_indices=(),
         )
 
-    available = {view.view_id: view for view in reserve_views}
+    available: dict[DepthParallaxViewId, DepthParallaxCameraView] = {}
+    for view in reserve_views:
+        if not isinstance(view, DepthParallaxCameraView):
+            raise TypeError("reserve_views must contain DepthParallaxCameraView values")
+        if view.view_id in available:
+            raise ValueError(f"duplicate reserve view {view.view_id.value}")
+        available[view.view_id] = view
     missing = tuple(view_id.value for view_id in _VIEW_ORDER if view_id not in available)
     if missing:
         raise ValueError(
             "positive parallax horizon requires all eight reserve views; "
             f"missing={missing}"
         )
+
     geometry = _face_geometry(source)
     adjacency = _face_adjacency(geometry)
     costs = _accumulated_horizon_costs(
@@ -785,6 +905,18 @@ def build_depth_parallax_geometry_package(
         angle,
     )
     reserve_indices = tuple(sorted(set(costs) - set(front_faces)))
+    if not reserve_indices:
+        front = front_result.snapshot
+        return DepthParallaxGeometryPackage(
+            front_result=front_result,
+            union_snapshot=front,
+            front_snapshot=front,
+            reserve_surfaces=(),
+            horizon_angle_radians=angle,
+            front_face_indices=front_faces,
+            reserve_face_indices=(),
+        )
+
     records = _front_records(front_result.snapshot, uv_layer_name)
     assigned: dict[DepthParallaxViewId, list[int]] = {
         view_id: [] for view_id in _VIEW_ORDER
@@ -813,6 +945,7 @@ def build_depth_parallax_geometry_package(
         records,
         uv_layer_name=uv_layer_name,
         snapshot_suffix="parallax-union",
+        preserve_source_vertex_ids=False,
     )
     if len(union.vertices) > max_points:
         raise DepthCameraProjectionError(
@@ -820,13 +953,14 @@ def build_depth_parallax_geometry_package(
             f"coverage: points={len(union.vertices)}, max_points={max_points}. "
             "Reduce the horizon angle or increase Max Depth Points."
         )
+
     front = _subset_material(
         union,
         0,
         uv_layer_name=uv_layer_name,
         suffix="parallax-front",
     )
-    surfaces = []
+    surfaces: list[DepthParallaxReserveSurface] = []
     for view_id in _VIEW_ORDER:
         face_indices = tuple(sorted(assigned[view_id]))
         if not face_indices:
