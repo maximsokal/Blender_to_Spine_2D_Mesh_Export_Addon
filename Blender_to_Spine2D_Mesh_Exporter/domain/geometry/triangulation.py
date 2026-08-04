@@ -3,9 +3,10 @@
 Each generated triangle retains the original face and corner lineage. Existing
 boundary edges keep their source IDs and flags; generated diagonals explicitly use
 ``source_id=None``. Blender n-gons may contain small evaluated warp, so planarity is
-validated against bounded absolute and scale-relative tolerances. Declared face normals
-must also remain coherent with the geometric polygon plane. Self-intersecting, strongly
-folded, projection-distorted, and degenerate polygons remain hard errors.
+validated against bounded absolute, scale-relative, and normalized-warp tolerances.
+Declared face normals must also remain coherent with the geometric polygon plane.
+Self-intersecting, strongly folded, projection-distorted, and degenerate polygons remain
+hard errors.
 """
 
 from __future__ import annotations
@@ -26,11 +27,21 @@ class TriangulationError(ValueError):
 @dataclass(frozen=True, slots=True)
 class TriangulationSettings:
     epsilon: float = 1e-10
-    planarity_tolerance: float = 1e-6
-    # Blender evaluated meshes in the captured Plane.008 and Cube.012 assets contain
-    # sub-per-mille n-gon warp. A 0.1% bounding-diagonal ceiling accepts those residues
-    # while remaining below the percent-level deformation rejected by regression tests.
+
+    # Blender's evaluated float mesh can contain sub-millimetre n-gon residue even when
+    # the polygon is still safe to triangulate. This absolute floor accepts the captured
+    # small Plane.008 polygon without weakening the scale-relative rule for normal-sized
+    # geometry.
+    planarity_tolerance: float = 1.0e-4
+
+    # Normal-sized polygons may use at most 0.1% of their bounding-box diagonal as the
+    # ordinary planarity window.
     relative_planarity_tolerance: float = 1.0e-3
+
+    # The absolute floor must never swallow a genuinely folded tiny polygon. Regardless
+    # of absolute size, more than 1% normalized warp remains a hard error.
+    maximum_relative_planarity_warp: float = 1.0e-2
+
     normal_alignment_tolerance_degrees: float = 1.0
 
     def __post_init__(self) -> None:
@@ -38,6 +49,7 @@ class TriangulationSettings:
             "epsilon",
             "planarity_tolerance",
             "relative_planarity_tolerance",
+            "maximum_relative_planarity_warp",
             "normal_alignment_tolerance_degrees",
         ):
             value = getattr(self, field_name)
@@ -49,8 +61,19 @@ class TriangulationSettings:
             if numeric <= 0.0:
                 raise ValueError(f"{field_name} must be positive")
             object.__setattr__(self, field_name, numeric)
+
         if self.relative_planarity_tolerance > 1.0:
             raise ValueError("relative_planarity_tolerance cannot exceed 1.0")
+        if self.maximum_relative_planarity_warp > 1.0:
+            raise ValueError("maximum_relative_planarity_warp cannot exceed 1.0")
+        if (
+            self.relative_planarity_tolerance
+            > self.maximum_relative_planarity_warp
+        ):
+            raise ValueError(
+                "relative_planarity_tolerance cannot exceed "
+                "maximum_relative_planarity_warp"
+            )
         if self.normal_alignment_tolerance_degrees > 90.0:
             raise ValueError(
                 "normal_alignment_tolerance_degrees cannot exceed 90 degrees"
@@ -151,36 +174,46 @@ def _validate_planarity(
     *,
     absolute_tolerance: float,
     relative_tolerance: float,
+    maximum_relative_warp: float,
     epsilon: float,
 ) -> None:
-    """Reject warp that exceeds a bounded scale-aware tolerance window.
+    """Reject warp outside both the practical window and the hard relative ceiling.
 
     Blender stores n-gons as ordered boundaries and may evaluate them with small
-    non-planarity. Measuring from the centroid avoids making the result depend on the
-    first corner. The absolute floor protects tiny geometry, while the bounded relative
-    term accepts captured ``Plane.008`` and ``Cube.012`` residues without allowing
-    percent-level fold.
+    non-planarity. Measuring from the centroid avoids dependence on the first corner.
+
+    ``max(absolute, relative * scale)`` accepts small float/evaluation residue. A second
+    normalized-warp ceiling prevents that absolute floor from accepting a severely folded
+    polygon merely because the whole polygon is tiny.
     """
 
     origin = _centroid(points)
     scale = _polygon_scale(points)
     if not isfinite(scale) or scale <= epsilon:
         raise TriangulationError("Polygon extent is zero or numerically unstable")
+
     distances = tuple(
         abs(_dot(_subtract(point, origin), normal))
         for point in points
     )
     maximum = max(distances)
+    normalized_warp = maximum / scale
     effective_tolerance = max(
         float(absolute_tolerance),
         float(relative_tolerance) * scale,
     )
-    if maximum > effective_tolerance:
+
+    if (
+        maximum > effective_tolerance
+        or normalized_warp > maximum_relative_warp
+    ):
         raise TriangulationError(
             "Polygon is not planar within deterministic tolerance: "
             f"maximum plane distance {maximum} exceeds effective tolerance "
-            f"{effective_tolerance} (absolute={absolute_tolerance}, "
-            f"relative={relative_tolerance}, polygon_scale={scale})"
+            f"{effective_tolerance} or normalized warp {normalized_warp} exceeds "
+            f"hard ceiling {maximum_relative_warp} "
+            f"(absolute={absolute_tolerance}, relative={relative_tolerance}, "
+            f"polygon_scale={scale})"
         )
 
 
@@ -468,6 +501,7 @@ def _triangulate_face(
         normal,
         absolute_tolerance=settings.planarity_tolerance,
         relative_tolerance=settings.relative_planarity_tolerance,
+        maximum_relative_warp=settings.maximum_relative_planarity_warp,
         epsilon=settings.epsilon,
     )
     if newell_length > settings.epsilon:
