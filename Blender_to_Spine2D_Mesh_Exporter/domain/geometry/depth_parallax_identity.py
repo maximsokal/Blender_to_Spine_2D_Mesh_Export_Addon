@@ -5,10 +5,10 @@ front faces are generated screen-space triangles, while reserve faces retain eva
 Blender polygon ownership for isolated rendering. Their historical integer indices may
 therefore collide even though the derived faces are unrelated.
 
-This module rebases the completed union to one dense local identity domain, then rebuilds
-front and reserve subsets from that canonical union. Reserve render ownership is resolved
-from the pre-rebase SourceFaceId provenance, so triangulated n-gons still isolate the
-correct evaluated Blender polygons.
+This module rebases only packages that actually contain reserve geometry. Front-only
+packages already own one coherent local identity domain and must remain byte-for-byte
+stable so attachment vertex IDs, Z bindings, and setup compensation continue to refer to
+the same generated relief vertices.
 """
 
 from __future__ import annotations
@@ -91,16 +91,66 @@ def _canonical_reserve_surface(
     )
 
 
+def _validate_front_only_package_identity(
+    package: DepthParallaxGeometryPackage,
+) -> None:
+    """Require a reserve-free package to keep one unchanged FRONT identity domain.
+
+    Rebuilding a front-only snapshot through ``_subset_material`` can reorder local
+    ``VertexId`` values by face traversal. That is harmless geometrically but breaks
+    attachment keys and Z-group setup compensation, both of which intentionally refer to
+    the original generated relief vertex IDs. A package with no reserve surfaces must
+    therefore already expose the exact same snapshot through all three FRONT views.
+    """
+
+    if not isinstance(package, DepthParallaxGeometryPackage):
+        raise TypeError("package must be DepthParallaxGeometryPackage")
+    if package.reserve_surfaces:
+        raise ValueError("front-only identity validation received reserve surfaces")
+    if package.reserve_face_indices:
+        raise ValueError(
+            "Depth package has reserve face indices without reserve surfaces"
+        )
+
+    union = package.union_snapshot
+    front = package.front_snapshot
+    result_front = package.front_result.snapshot
+    for snapshot in (union, front, result_front):
+        MeshSnapshotValidator().validate_or_raise(snapshot)
+
+    if union != front or front != result_front:
+        raise ValueError(
+            "Reserve-free Depth package must share one unchanged FRONT snapshot; "
+            f"union={union.snapshot_id!r}, front={front.snapshot_id!r}, "
+            f"front_result={result_front.snapshot_id!r}"
+        )
+    non_front_materials = tuple(
+        sorted(
+            {
+                int(face.material_index)
+                for face in union.faces
+                if int(face.material_index) != 0
+            }
+        )
+    )
+    if non_front_materials:
+        raise ValueError(
+            "Reserve-free Depth package contains non-FRONT material indices: "
+            f"{non_front_materials}"
+        )
+
+
 def canonicalize_depth_parallax_package_identity(
     package: DepthParallaxGeometryPackage,
     *,
     uv_layer_name: str,
 ) -> DepthParallaxGeometryPackage:
-    """Return one package whose union and subsets share unique working lineage.
+    """Return a package with safe working lineage and stable FRONT local IDs.
 
-    The incoming package has already completed source provenance checks and render-view
-    assignment. Generated working IDs are canonicalized, while reserve render ownership
-    is restored to original evaluated polygon indices before the old lineage is replaced.
+    Reserve packages contain two generated topology domains and are rebased to one dense
+    identity after evaluated render ownership has been captured. Reserve-free packages
+    cannot contain FRONT/reserve collisions, so they are validated and returned unchanged
+    rather than being rebuilt and silently renumbering local relief vertices.
     """
 
     if not isinstance(package, DepthParallaxGeometryPackage):
@@ -109,6 +159,16 @@ def canonicalize_depth_parallax_package_identity(
         raise ValueError("uv_layer_name must be a non-empty string")
 
     MeshSnapshotValidator().validate_or_raise(package.union_snapshot)
+    if not package.reserve_surfaces:
+        _validate_front_only_package_identity(package)
+        logger.debug(
+            "Preserved front-only Depth identity for '%s': faces=%d vertices=%d",
+            package.union_snapshot.source_object_id,
+            len(package.union_snapshot.faces),
+            len(package.union_snapshot.vertices),
+        )
+        return package
+
     evaluated_render_owners = tuple(
         _evaluated_render_face_indices(surface)
         for surface in package.reserve_surfaces
