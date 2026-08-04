@@ -6,10 +6,9 @@ Blender polygon ownership for isolated rendering. Their historical integer indic
 therefore collide even though the derived faces are unrelated.
 
 This module rebases the completed union to one dense local identity domain, then rebuilds
-front and reserve subsets from that canonical union. Render ownership remains stored in
-``front_face_indices``, ``reserve_face_indices``, and each reserve surface's
-``source_face_indices``; downstream segmentation and UV correspondence receive unique
-SourceFaceId and SourceLoopId values.
+front and reserve subsets from that canonical union. Reserve render ownership is resolved
+from the pre-rebase SourceFaceId provenance, so triangulated n-gons still isolate the
+correct evaluated Blender polygons.
 """
 
 from __future__ import annotations
@@ -23,10 +22,73 @@ from .depth_parallax import (
     _subset_material,
 )
 from .evaluated_identity import rebase_mesh_snapshot_to_evaluated_identity
+from .model import MeshSnapshot
 from .validator import MeshSnapshotValidator
 
 
 logger = logging.getLogger(__name__)
+
+
+def _evaluated_render_face_indices(
+    surface: DepthParallaxReserveSurface,
+) -> tuple[int, ...]:
+    """Resolve original evaluated polygon indices from reserve provenance.
+
+    ``surface.source_face_indices`` may still contain triangulated working indices from
+    horizon expansion. The reserve snapshot itself retains SourceFaceId values copied
+    from evaluated Blender polygons, including legal repetition when one n-gon emitted
+    several triangles. Those historical values are the only valid indices for BMesh face
+    isolation on the temporary evaluated render proxy.
+    """
+
+    if not isinstance(surface, DepthParallaxReserveSurface):
+        raise TypeError("surface must be DepthParallaxReserveSurface")
+    MeshSnapshotValidator().validate_or_raise(surface.snapshot)
+    resolved = tuple(
+        sorted(
+            {
+                int(face.source_id.face_index)
+                for face in surface.snapshot.faces
+            }
+        )
+    )
+    if not resolved:
+        raise ValueError(
+            f"Reserve view {surface.view.view_id.value} has no evaluated face ownership"
+        )
+    return resolved
+
+
+def _canonical_reserve_surface(
+    surface: DepthParallaxReserveSurface,
+    union: MeshSnapshot,
+    *,
+    uv_layer_name: str,
+) -> DepthParallaxReserveSurface:
+    """Rebuild one reserve subset and preserve evaluated render ownership."""
+
+    if not isinstance(surface, DepthParallaxReserveSurface):
+        raise TypeError("surface must be DepthParallaxReserveSurface")
+    if not isinstance(union, MeshSnapshot):
+        raise TypeError("union must be MeshSnapshot")
+    if not isinstance(uv_layer_name, str) or not uv_layer_name.strip():
+        raise ValueError("uv_layer_name must be a non-empty string")
+
+    render_face_indices = _evaluated_render_face_indices(surface)
+    snapshot = _subset_material(
+        union,
+        surface.view.material_index,
+        uv_layer_name=uv_layer_name,
+        suffix=(
+            "parallax-"
+            f"{surface.view.view_id.value.lower()}-canonical"
+        ),
+    )
+    return replace(
+        surface,
+        snapshot=snapshot,
+        source_face_indices=render_face_indices,
+    )
 
 
 def canonicalize_depth_parallax_package_identity(
@@ -37,8 +99,8 @@ def canonicalize_depth_parallax_package_identity(
     """Return one package whose union and subsets share unique working lineage.
 
     The incoming package has already completed source provenance checks and render-view
-    assignment. Only generated working identities are changed; geometry, UV coordinates,
-    materials, camera plans, and evaluated source-face ownership remain unchanged.
+    assignment. Generated working IDs are canonicalized, while reserve render ownership
+    is restored to original evaluated polygon indices before the old lineage is replaced.
     """
 
     if not isinstance(package, DepthParallaxGeometryPackage):
@@ -47,6 +109,11 @@ def canonicalize_depth_parallax_package_identity(
         raise ValueError("uv_layer_name must be a non-empty string")
 
     MeshSnapshotValidator().validate_or_raise(package.union_snapshot)
+    evaluated_render_owners = tuple(
+        _evaluated_render_face_indices(surface)
+        for surface in package.reserve_surfaces
+    )
+
     rebase = rebase_mesh_snapshot_to_evaluated_identity(
         package.union_snapshot
     )
@@ -70,26 +137,20 @@ def canonicalize_depth_parallax_package_identity(
         suffix="parallax-front-canonical",
     )
     reserve_surfaces = tuple(
-        replace(
+        _canonical_reserve_surface(
             surface,
-            snapshot=_subset_material(
-                union,
-                surface.view.material_index,
-                uv_layer_name=uv_layer_name,
-                suffix=(
-                    "parallax-"
-                    f"{surface.view.view_id.value.lower()}-canonical"
-                ),
-            ),
+            union,
+            uv_layer_name=uv_layer_name,
         )
         for surface in package.reserve_surfaces
     )
-    if not all(
-        isinstance(surface, DepthParallaxReserveSurface)
-        for surface in reserve_surfaces
-    ):
-        raise TypeError(
-            "reserve_surfaces must contain DepthParallaxReserveSurface values"
+    actual_render_owners = tuple(
+        surface.source_face_indices for surface in reserve_surfaces
+    )
+    if actual_render_owners != evaluated_render_owners:
+        raise ValueError(
+            "Canonical reserve surfaces changed evaluated render ownership; "
+            f"expected={evaluated_render_owners}, actual={actual_render_owners}"
         )
 
     result = replace(
@@ -106,12 +167,13 @@ def canonicalize_depth_parallax_package_identity(
 
     logger.info(
         "Canonicalized Depth parallax package identity for '%s': changed=%s "
-        "faces=%d loops=%d reserve_surfaces=%d",
+        "faces=%d loops=%d reserve_surfaces=%d render_owners=%s",
         union.source_object_id,
         rebase.changed,
         len(union.faces),
         len(union.loops),
         len(result.reserve_surfaces),
+        actual_render_owners,
     )
     return result
 
