@@ -13,8 +13,6 @@ from __future__ import annotations
 from math import isfinite, pi, sqrt
 from typing import Any
 
-from mathutils import Matrix, Quaternion, Vector
-
 from ..domain.camera_projection import A1CameraProjectionFrame
 from ..domain.geometry import (
     DepthParallaxCameraView,
@@ -48,10 +46,22 @@ class DepthParallaxCameraViewError(ValueError):
     """Raised when virtual reserve cameras cannot be derived safely."""
 
 
+def _load_mathutils() -> tuple[Any, Any, Any]:
+    """Load Blender math types only when a positive reserve is actually resolved."""
+
+    try:
+        from mathutils import Matrix, Quaternion, Vector
+    except Exception as exc:
+        raise DepthParallaxCameraViewError(
+            "Blender mathutils is unavailable for virtual parallax camera views"
+        ) from exc
+    return Matrix, Quaternion, Vector
+
+
 def _active_camera_world_matrix(
     scene: Any,
     depsgraph: Any,
-) -> tuple[Any, Matrix]:
+) -> tuple[Any, Any]:
     camera = getattr(scene, "camera", None)
     if camera is None or str(getattr(camera, "type", "")) != "CAMERA":
         raise DepthParallaxCameraViewError(
@@ -76,12 +86,13 @@ def _active_camera_world_matrix(
 
 
 def _virtual_camera_world_matrix(
-    camera_world: Matrix,
-    pivot_world: Vector,
+    camera_world: Any,
+    pivot_world: Any,
     *,
     yaw_radians: float,
     pitch_radians: float,
-) -> Matrix:
+) -> Any:
+    _Matrix, Quaternion, Vector = _load_mathutils()
     location = camera_world.translation.copy()
     offset = location - pivot_world
     if offset.length_squared <= 1.0e-18:
@@ -192,6 +203,7 @@ def resolve_depth_parallax_camera_views(
     if angle <= 1.0e-12:
         return ()
 
+    _Matrix, _Quaternion, Vector = _load_mathutils()
     try:
         resolved_scene, resolved_depsgraph = _resolved_scene_and_depsgraph(
             scene,
