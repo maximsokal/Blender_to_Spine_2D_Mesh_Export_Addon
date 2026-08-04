@@ -11,7 +11,7 @@ MANIFEST = (
     / "Blender_to_Spine2D_Mesh_Exporter"
     / "blender_manifest.toml"
 )
-EXPECTED_RELEASE_VERSION = "0.81.0"
+EXPECTED_RELEASE_VERSION = "0.90.0"
 
 
 def test_extension_manifest_version_is_current_release() -> None:
