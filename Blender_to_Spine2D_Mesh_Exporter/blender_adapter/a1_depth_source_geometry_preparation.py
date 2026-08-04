@@ -19,7 +19,6 @@ from ..domain.baking import A1TextureExportMode
 from ..domain.geometry import (
     DepthCameraProjectionResult,
     DepthParallaxGeometryPackage,
-    DepthParallaxReserveSurface,
     MeshSnapshot,
     MeshSnapshotValidator,
     build_depth_camera_projection_surface,
@@ -53,7 +52,7 @@ logger = logging.getLogger(__name__)
 _LINEAGE_COORDINATE_DECIMALS = 9
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class A1DepthSourceGeometryPreparationResult(A1SourceGeometryPreparationResult):
     """Depth source plus front/reserve topology required by later render stages."""
 
@@ -120,15 +119,9 @@ def _depth_statistics(
             "depth_projection_farthest_camera_distance": max(camera_distances),
             "depth_projection_camera_zero_shared": 1,
             "depth_projection_maximum_relief": result.maximum_relief,
-            "depth_projection_requested_spacing_pixels": (
-                result.requested_spacing_pixels
-            ),
-            "depth_projection_resolved_spacing_x_pixels": (
-                result.resolved_spacing_x_pixels
-            ),
-            "depth_projection_resolved_spacing_y_pixels": (
-                result.resolved_spacing_y_pixels
-            ),
+            "depth_projection_requested_spacing_pixels": result.requested_spacing_pixels,
+            "depth_projection_resolved_spacing_x_pixels": result.resolved_spacing_x_pixels,
+            "depth_projection_resolved_spacing_y_pixels": result.resolved_spacing_y_pixels,
             "depth_projection_source_triangle_count": result.source_triangle_count,
             "depth_projection_point_count": result.sampled_point_count,
             "active_camera_projection_applied": 1,
@@ -160,8 +153,6 @@ def _share_union_lineage(
     *,
     suffix: str,
 ) -> MeshSnapshot:
-    """Map one attachment subset back to the union SourceVertexId namespace."""
-
     if not isinstance(subset, MeshSnapshot):
         raise TypeError("subset must be MeshSnapshot")
     if not isinstance(union, MeshSnapshot):
@@ -172,8 +163,7 @@ def _share_union_lineage(
     }
     if len(source_by_position) != len(union.vertices):
         raise ValueError(
-            "Parallax union contains duplicate projected positions with conflicting "
-            "vertex lineage"
+            "Parallax union contains duplicate projected positions with conflicting vertex lineage"
         )
     vertices = []
     for vertex in subset.vertices:
@@ -198,8 +188,6 @@ def _share_union_lineage(
 def _package_to_camera_distance(
     package: DepthParallaxGeometryPackage,
 ) -> DepthParallaxGeometryPackage:
-    """Convert union and every attachment subset while retaining shared lineage."""
-
     if not isinstance(package, DepthParallaxGeometryPackage):
         raise TypeError("package must be DepthParallaxGeometryPackage")
     front_camera_z = _share_union_lineage(
@@ -231,10 +219,7 @@ def _package_to_camera_distance(
             surface,
             snapshot=convert_depth_snapshot_to_camera_distance(
                 surface.snapshot,
-                snapshot_suffix=(
-                    "parallax-"
-                    f"{surface.view.view_id.value.lower()}-camera-distance"
-                ),
+                snapshot_suffix=f"parallax-{surface.view.view_id.value.lower()}-camera-distance",
             ),
         )
         for surface in reserve_camera_z
@@ -269,26 +254,16 @@ def _parallax_statistics(
         base,
         {
             "depth_parallax_horizon_angle_radians": package.horizon_angle_radians,
-            "depth_parallax_horizon_angle_degrees": degrees(
-                package.horizon_angle_radians
-            ),
+            "depth_parallax_horizon_angle_degrees": degrees(package.horizon_angle_radians),
             "depth_parallax_enabled": int(package.reserve_enabled),
-            "depth_parallax_front_source_face_count": len(
-                package.front_face_indices
-            ),
-            "depth_parallax_reserve_source_face_count": len(
-                package.reserve_face_indices
-            ),
-            "depth_parallax_reserve_attachment_count": len(
-                package.reserve_surfaces
-            ),
+            "depth_parallax_front_source_face_count": len(package.front_face_indices),
+            "depth_parallax_reserve_source_face_count": len(package.reserve_face_indices),
+            "depth_parallax_reserve_attachment_count": len(package.reserve_surfaces),
             "depth_parallax_attachment_count": package.attachment_count,
             "depth_parallax_union_point_count": len(package.union_snapshot.vertices),
             "depth_parallax_view_ids": view_ids,
             "depth_parallax_maximum_accumulated_angle_radians": maximum_angle,
-            "depth_parallax_maximum_accumulated_angle_degrees": degrees(
-                maximum_angle
-            ),
+            "depth_parallax_maximum_accumulated_angle_degrees": degrees(maximum_angle),
         },
     )
 
@@ -299,8 +274,6 @@ def prepare_a1_depth_source_geometry(
     *,
     scene: Any | None = None,
 ) -> A1DepthSourceGeometryPreparationResult:
-    """Build front and angular reserve surfaces without mutating source geometry."""
-
     stage = A1SingleObjectStage.VALIDATE_REQUEST
     object_id: str | None = None
     warnings: Tuple[ExportIssue, ...] = ()
@@ -317,7 +290,6 @@ def prepare_a1_depth_source_geometry(
                 "projection_direction": A1ProjectionDirection.ACTIVE_CAMERA.value,
             },
         )
-
         stage = A1SingleObjectStage.READ_GEOMETRY
         source_snapshot, modifier_count, warnings, uv_report = _read_source_snapshot(
             source_obj,
@@ -326,7 +298,6 @@ def prepare_a1_depth_source_geometry(
             scene=request.scene,
             depsgraph=request.depsgraph,
         )
-
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
         normalized = _normalize_source_geometry(
             source_snapshot,
@@ -357,9 +328,7 @@ def prepare_a1_depth_source_geometry(
             uv_layer_name=settings.uv.layer_name,
             settings=settings.bake_execution.depth_projection,
         )
-        horizon_angle = (
-            settings.bake_execution.depth_parallax.horizon_angle_radians
-        )
+        horizon_angle = settings.bake_execution.depth_parallax.horizon_angle_radians
         reserve_views = resolve_depth_parallax_camera_views(
             request.scene,
             normalized.snapshot,
@@ -378,13 +347,9 @@ def prepare_a1_depth_source_geometry(
         )
         depth_package = _package_to_camera_distance(camera_z_package)
         depth = depth_package.front_result
-
         stage = A1SingleObjectStage.ASSIGN_Z_GROUPS
         z_groups = build_a1_z_group_assignment(depth_package.union_snapshot)
-
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
-        # The union owns one shared rig namespace. Individual front/reserve snapshots are
-        # projected into attachments later and deliberately retain union SourceVertexIds.
         geometry = prepare_a1_geometry_regions(
             depth_package.union_snapshot,
             request.geometry_settings,
@@ -397,10 +362,7 @@ def prepare_a1_depth_source_geometry(
                 camera_z_package.union_snapshot
             ),
             camera_projection_kind=frame.kind,
-            statistics=_parallax_statistics(
-                _depth_statistics({}, depth),
-                depth_package,
-            ),
+            statistics=_parallax_statistics(_depth_statistics({}, depth), depth_package),
         )
         statistics = _build_prepared_statistics(
             statistics,
