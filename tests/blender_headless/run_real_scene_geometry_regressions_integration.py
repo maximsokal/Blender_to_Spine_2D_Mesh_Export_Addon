@@ -5,9 +5,10 @@ The fixture reproduces both public multi-object PREPARE_OBJECTS failures:
 * ``Plane.008`` owns one slightly warped n-gon and an Array modifier with four copies.
   Evaluated provenance repeats legitimately and the n-gon centroid-plane residue matches
   the real scene failure magnitude.
-* ``banco`` owns one planar Blender n-gon. Depth projection triangulates it into two local
-  faces that share one historical SourceFaceId; geometry coverage must preserve both
-  occurrences without reporting an overlap.
+* ``banco`` owns a hidden reserve n-gon before a camera-visible front n-gon in evaluated
+  face order. Triangulation creates FRONT and reserve face-index collisions. The completed
+  parallax union must canonicalize those working IDs before geometry coverage and UV
+  propagation, while retaining the original reserve render-face ownership.
 
 Preparation must complete without mutating source objects, modifiers, materials, camera,
 selection, frame, or temporary Blender datablocks.
@@ -16,7 +17,7 @@ selection, frame, or temporary Blender datablocks.
 from __future__ import annotations
 
 from collections import Counter
-from math import radians
+from math import cos, radians, sin
 from pathlib import Path
 import sys
 import tempfile
@@ -87,6 +88,7 @@ _MULTI_STEM = "RealSceneGeometryRegressions"
 _COPY_COUNT = 4
 _WARP_HEIGHT = 0.0007581877679385422
 _HORIZON_ANGLE = radians(20.0)
+_RESERVE_FOLD_ANGLE = radians(15.0)
 
 
 def _create_emission_material(
@@ -153,17 +155,29 @@ def _create_mushrooms_source():
 
 
 def _create_flower_shop_source():
+    """Create reserve face 0 and front face 1 to force generated-ID collisions."""
+
+    flap_length = 0.75
+    folded_x = 0.9 - sin(_RESERVE_FOLD_ANGLE) * flap_length
+    folded_z = -cos(_RESERVE_FOLD_ANGLE) * flap_length
     source = _create_mesh_object(
         _FLOWER_SHOP_OBJECT_NAME,
         (
-            (-0.75, -0.65, 0.0),
-            (0.75, -0.65, 0.0),
-            (0.75, 0.65, 0.0),
-            (-0.75, 0.65, 0.0),
+            (-0.9, -0.9, 0.0),
+            (0.9, -0.9, 0.0),
+            (0.9, 0.9, 0.0),
+            (-0.9, 0.9, 0.0),
+            (folded_x, -0.9, folded_z),
+            (folded_x, 0.9, folded_z),
         ),
-        ((0, 1, 2, 3),),
+        (
+            # Historical evaluated source face 0: hidden reserve n-gon.
+            (1, 4, 5, 2),
+            # Historical evaluated source face 1: camera-visible front n-gon.
+            (0, 1, 2, 3),
+        ),
     )
-    source.location = (3.6, 0.0, 0.0)
+    source.location = (3.4, 0.0, 0.0)
     material = _create_emission_material(
         "FlowerShopBancoMaterial",
         (1.0, 0.32, 0.08, 1.0),
@@ -226,7 +240,10 @@ def _object_fingerprint(source, modifier=None) -> tuple[object, ...]:
         source.data.name,
         tuple(tuple(float(value) for value in row) for row in source.matrix_world),
         tuple(tuple(float(value) for value in vertex.co) for vertex in source.data.vertices),
-        tuple(tuple(int(value) for value in polygon.vertices) for polygon in source.data.polygons),
+        tuple(
+            tuple(int(value) for value in polygon.vertices)
+            for polygon in source.data.polygons
+        ),
         tuple(item.name for item in source.modifiers),
         tuple(
             material.name if material is not None else None
@@ -258,6 +275,38 @@ def _prepared_by_component(prepared) -> dict[str, PreparedDepthA1Object]:
         )
         result[source.component_id] = item
     return result
+
+
+def _assert_unique_working_lineage(
+    item: PreparedDepthA1Object,
+    *,
+    component_id: str,
+) -> None:
+    face_ids = tuple(face.source_id for face in item.source_snapshot.faces)
+    loop_ids = tuple(loop.source_id for loop in item.source_snapshot.loops)
+    _assert(
+        len(face_ids) == len(set(face_ids)),
+        f"{component_id} final union contains duplicate SourceFaceId values",
+    )
+    _assert(
+        len(loop_ids) == len(set(loop_ids)),
+        f"{component_id} final union contains duplicate SourceLoopId values",
+    )
+    union_vertices = {
+        vertex.source_id for vertex in item.source_snapshot.vertices
+    }
+    subsets = (
+        item.depth_parallax_package.front_snapshot,
+        *tuple(
+            surface.snapshot
+            for surface in item.depth_parallax_package.reserve_surfaces
+        ),
+    )
+    for subset in subsets:
+        _assert(
+            all(vertex.source_id in union_vertices for vertex in subset.vertices),
+            f"{component_id} subset lost canonical union vertex lineage",
+        )
 
 
 def _run() -> None:
@@ -348,26 +397,61 @@ def _run() -> None:
         ),
         "Plane.008 emitted no evaluated identity warning",
     )
+    _assert_unique_working_lineage(
+        mushrooms_item,
+        component_id=_MUSHROOMS_COMPONENT,
+    )
 
-    banco_lineage = Counter(
+    banco_package = banco_item.depth_parallax_package
+    _assert(
+        banco_package.front_face_indices == (2, 3),
+        f"banco front n-gon triangulation changed: {banco_package.front_face_indices}",
+    )
+    _assert(
+        banco_package.reserve_face_indices == (0, 1),
+        f"banco hidden reserve n-gon was not retained: "
+        f"{banco_package.reserve_face_indices}",
+    )
+    _assert(
+        len(banco_package.reserve_surfaces) >= 1,
+        "banco positive horizon created no reserve attachment",
+    )
+    reserve_owned_faces = tuple(
+        sorted(
+            {
+                face_index
+                for surface in banco_package.reserve_surfaces
+                for face_index in surface.source_face_indices
+            }
+        )
+    )
+    _assert(
+        reserve_owned_faces == (0, 1),
+        f"banco reserve render ownership changed: {reserve_owned_faces}",
+    )
+    _assert_unique_working_lineage(
+        banco_item,
+        component_id=_FLOWER_SHOP_COMPONENT,
+    )
+
+    banco_union_lineage = Counter(
         face.source_id for face in banco_item.source_snapshot.faces
     )
-    _assert(
-        len(banco_item.source_snapshot.faces) == 2,
-        "banco n-gon did not produce two local depth triangles",
-    )
-    _assert(
-        tuple(sorted(banco_lineage.values())) == (2,),
-        f"banco did not retain two occurrences of one SourceFaceId: {banco_lineage}",
-    )
-    prepared_banco_lineage = Counter(
+    banco_prepared_lineage = Counter(
         source_face_id
         for region in banco_item.geometry.regions
         for source_face_id in region.source_face_ids
     )
     _assert(
-        prepared_banco_lineage == banco_lineage,
-        "banco prepared regions changed SourceFaceId multiplicity",
+        banco_prepared_lineage == banco_union_lineage,
+        "banco prepared regions changed canonical SourceFaceId multiplicity",
+    )
+    _assert(
+        all(
+            region.transfer_report.complete
+            for region in banco_item.uv_regions.regions
+        ),
+        "banco canonical SourceLoopId values did not complete UV propagation",
     )
 
     _assert(_capture_context() == context_before, "selection or active context changed")
@@ -400,8 +484,8 @@ def _run() -> None:
     print(
         "[REAL-SCENE-GEOMETRY-REGRESSIONS] PASS "
         "mushrooms=Plane.008 warp=0.0001895469 array=4 "
-        "flower_shop=banco source_face_multiplicity=2 "
-        "pipeline=public-multi-object"
+        "flower_shop=banco source_face_collision=canonicalized "
+        "uv_lineage=unique pipeline=public-multi-object"
     )
 
 
