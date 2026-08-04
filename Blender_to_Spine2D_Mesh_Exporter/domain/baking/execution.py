@@ -14,6 +14,7 @@ from .contracts import (
     require_integer,
     require_non_empty_string,
 )
+from .depth_parallax import DepthParallaxSettings
 from .projection_coverage import ProjectionCoveragePolicy
 from .projection_layout import ProjectionContourMode
 from .projection_output import ProjectionOutputPolicy
@@ -70,6 +71,8 @@ class BakeExecutionSettings:
     depth_projection: DepthCameraProjectionSettings = (
         DepthCameraProjectionSettings()
     )
+    # Appended for 0.90.0. Zero preserves the complete 0.81.0 output contract.
+    depth_parallax: DepthParallaxSettings = DepthParallaxSettings()
 
     def __post_init__(self) -> None:
         require_non_empty_string(self.render_engine, "render_engine")
@@ -121,6 +124,8 @@ class BakeExecutionSettings:
             raise TypeError(
                 "depth_projection must be DepthCameraProjectionSettings"
             )
+        if not isinstance(self.depth_parallax, DepthParallaxSettings):
+            raise TypeError("depth_parallax must be DepthParallaxSettings")
 
 
 @dataclass(frozen=True, slots=True)
