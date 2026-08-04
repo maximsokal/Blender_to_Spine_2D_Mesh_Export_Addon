@@ -18,6 +18,11 @@ CAPTURED_PLANARITY_RUNNER = (
     / "blender_headless"
     / "run_mushrooms_cube012_planarity_integration.py"
 )
+FLOAT32_PLANARITY_TEST = (
+    ROOT
+    / "tests"
+    / "test_mushrooms_planarity_float32_roundtrip.py"
+)
 TRIANGULATION = (
     ROOT
     / "Blender_to_Spine2D_Mesh_Exporter"
@@ -93,6 +98,15 @@ def test_captured_mushrooms_runner_reproduces_both_traceback_metrics_publicly() 
     assert "_PLANE_CAPTURED_MAXIMUM_PLANE_DISTANCE = 9.477343601658832e-05" in source
     assert "_PLANE_CAPTURED_POLYGON_SCALE = 0.023314310303391664" in source
 
+    assert "_DISTANCE_ABS_TOLERANCE = 1.0e-11" in source
+    assert "_SCALE_ABS_TOLERANCE = 1.0e-8" in source
+    assert "def _propagated_normalized_warp_tolerance(" in source
+    assert "distance_term = _DISTANCE_ABS_TOLERANCE / lower_scale" in source
+    assert "scale_term = (" in source
+    assert "ratio_tolerance = _propagated_normalized_warp_tolerance(" in source
+    assert "propagated_tolerance={ratio_tolerance}" in source
+    assert "<= 1.0e-10" not in source
+
     assert "def _create_cube012_source(" in source
     assert "def _create_plane008_source(" in source
     assert "sources = (" in source
@@ -110,6 +124,23 @@ def test_captured_mushrooms_runner_reproduces_both_traceback_metrics_publicly() 
     assert "_temporary_datablock_names() == temporary_before" in source
     assert "[MUSHROOMS-CAPTURED-PLANARITY] PASS" in source
     assert '"triangles=2+2 sources=2 pipeline=public-multi-object"' in source
+    assert "import bmesh" not in source
+    assert "bpy.ops" not in source
+
+
+def test_float32_roundtrip_regression_locks_the_runner_failure() -> None:
+    source = _read(FLOAT32_PLANARITY_TEST)
+
+    assert 'unpack("<f", pack("<f", float(value)))[0]' in source
+    assert '_RETIRED_RATIO_ABS_TOLERANCE = 1.0e-10' in source
+    assert "def _propagated_ratio_tolerance(" in source
+    assert "distance_term = _DISTANCE_ABS_TOLERANCE / lower_scale" in source
+    assert "scale_term = (" in source
+    assert "plane_ratio_delta > _RETIRED_RATIO_ABS_TOLERANCE" in source
+    assert "triangulate_snapshot(snapshot)" in source
+    assert '"Cube.012"' in source
+    assert '"Plane.008"' in source
+    assert "import bpy" not in source
     assert "import bmesh" not in source
     assert "bpy.ops" not in source
 
