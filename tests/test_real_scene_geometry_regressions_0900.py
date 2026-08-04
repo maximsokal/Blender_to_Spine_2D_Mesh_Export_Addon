@@ -38,14 +38,24 @@ _MUSHROOMS_OBJECT_ID = "Plane.008"
 _MUSHROOMS_CUBE_OBJECT_ID = "Cube.012"
 _FLOWER_SHOP_OBJECT_ID = "banco"
 
-# One lifted corner on a unit quad yields the centroid-plane residue reported by the
-# evaluated Plane.008 polygon: approximately 0.00018954694198463555.
+# Earlier Plane.008 capture: one lifted corner on a unit quad yields the logged
+# centroid-plane residue approximately 0.00018954694198463555.
 _MUSHROOMS_WARP_HEIGHT = 0.0007581877679385422
 _CAPTURED_MAXIMUM_PLANE_DISTANCE = 0.00018954694198463555
 
+# Latest real Plane.008 traceback. The synthetic square reproduces both reported metrics
+# with the same Newell-plane and bounding-diagonal definitions as production.
+_PLANE008_SMALL_SIDE_LENGTH = 0.0164835268501562
+_PLANE008_SMALL_WARP_HEIGHT = 0.000379143881919382
+_PLANE008_SMALL_CAPTURED_MAXIMUM_PLANE_DISTANCE = 9.477343601658832e-05
+_PLANE008_SMALL_CAPTURED_POLYGON_SCALE = 0.023314310303391664
+_PLANE008_SMALL_CAPTURED_NORMALIZED_WARP = (
+    _PLANE008_SMALL_CAPTURED_MAXIMUM_PLANE_DISTANCE
+    / _PLANE008_SMALL_CAPTURED_POLYGON_SCALE
+)
+
 # Exact synthetic square dimensions reconstructed from the Cube.012 traceback. With
-# Newell plane + centroid measurement they reproduce both logged values to float error:
-# maximum distance 7.565148185365435e-05 and polygon scale 0.13120450643194492.
+# Newell plane + centroid measurement they reproduce both logged values to float error.
 _CUBE012_SIDE_LENGTH = 0.09277534946637461
 _CUBE012_WARP_HEIGHT = 0.00030260673225328884
 _CUBE012_CAPTURED_MAXIMUM_PLANE_DISTANCE = 7.565148185365435e-05
@@ -56,7 +66,9 @@ _CUBE012_CAPTURED_NORMALIZED_WARP = (
 )
 
 _MATERIAL_WARP_HEIGHT = 0.01
+_DEFAULT_ABSOLUTE_PLANARITY_TOLERANCE = 1.0e-4
 _DEFAULT_RELATIVE_PLANARITY_TOLERANCE = 1.0e-3
+_DEFAULT_MAXIMUM_RELATIVE_PLANARITY_WARP = 1.0e-2
 _RETIRED_TOO_NARROW_RELATIVE_TOLERANCE = 2.5e-4
 
 
@@ -154,7 +166,7 @@ def _quad_snapshot(
 
 
 def _captured_planarity_metrics(snapshot: MeshSnapshot) -> tuple[float, float]:
-    """Measure the fixture independently using the production geometric definition."""
+    """Measure one fixture independently using the production geometric definition."""
 
     MeshSnapshotValidator().validate_or_raise(snapshot)
     if len(snapshot.faces) != 1:
@@ -219,6 +231,45 @@ def test_mushrooms_plane_008_relative_warp_triangulates_deterministically() -> N
     )
 
 
+def test_mushrooms_plane_008_small_traceback_uses_bounded_absolute_floor() -> None:
+    source = _quad_snapshot(
+        _MUSHROOMS_OBJECT_ID,
+        warp_height=_PLANE008_SMALL_WARP_HEIGHT,
+        side_length=_PLANE008_SMALL_SIDE_LENGTH,
+    )
+    maximum_distance, polygon_scale = _captured_planarity_metrics(source)
+    settings = TriangulationSettings()
+
+    assert maximum_distance == pytest.approx(
+        _PLANE008_SMALL_CAPTURED_MAXIMUM_PLANE_DISTANCE,
+        rel=1.0e-12,
+        abs=1.0e-15,
+    )
+    assert polygon_scale == pytest.approx(
+        _PLANE008_SMALL_CAPTURED_POLYGON_SCALE,
+        rel=1.0e-12,
+        abs=1.0e-15,
+    )
+    assert maximum_distance > (
+        settings.relative_planarity_tolerance * polygon_scale
+    )
+    assert maximum_distance < settings.planarity_tolerance
+    assert _PLANE008_SMALL_CAPTURED_NORMALIZED_WARP == pytest.approx(
+        0.00406415863471256,
+        rel=1.0e-12,
+    )
+    assert (
+        _PLANE008_SMALL_CAPTURED_NORMALIZED_WARP
+        < settings.maximum_relative_planarity_warp
+    )
+
+    first = triangulate_snapshot(source)
+    second = triangulate_snapshot(source)
+    assert first == second
+    assert len(first.snapshot.faces) == 2
+    assert len(first.generated_edge_ids) == 1
+
+
 def test_mushrooms_cube_012_traceback_warp_triangulates_deterministically() -> None:
     source = _quad_snapshot(
         _MUSHROOMS_CUBE_OBJECT_ID,
@@ -261,8 +312,14 @@ def test_mushrooms_cube_012_traceback_warp_triangulates_deterministically() -> N
 
 def test_default_planarity_window_rejects_percent_level_warp() -> None:
     settings = TriangulationSettings()
+    assert settings.planarity_tolerance == pytest.approx(
+        _DEFAULT_ABSOLUTE_PLANARITY_TOLERANCE
+    )
     assert settings.relative_planarity_tolerance == pytest.approx(
         _DEFAULT_RELATIVE_PLANARITY_TOLERANCE
+    )
+    assert settings.maximum_relative_planarity_warp == pytest.approx(
+        _DEFAULT_MAXIMUM_RELATIVE_PLANARITY_WARP
     )
     assert settings.normal_alignment_tolerance_degrees == pytest.approx(1.0)
 
@@ -271,6 +328,25 @@ def test_default_planarity_window_rejects_percent_level_warp() -> None:
         warp_height=_MATERIAL_WARP_HEIGHT,
     )
     with pytest.raises(TriangulationError, match="Polygon is not planar"):
+        triangulate_snapshot(source, settings)
+
+
+def test_absolute_floor_cannot_accept_grossly_folded_tiny_polygon() -> None:
+    source = _quad_snapshot(
+        "TinyGrossFold",
+        side_length=1.0e-3,
+        warp_height=2.0e-4,
+    )
+    maximum_distance, polygon_scale = _captured_planarity_metrics(source)
+    settings = TriangulationSettings()
+
+    assert maximum_distance < settings.planarity_tolerance
+    assert (
+        maximum_distance / polygon_scale
+        > settings.maximum_relative_planarity_warp
+    )
+
+    with pytest.raises(TriangulationError, match="hard ceiling"):
         triangulate_snapshot(source, settings)
 
 
