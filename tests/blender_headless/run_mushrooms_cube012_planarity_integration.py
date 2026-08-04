@@ -1,10 +1,15 @@
-"""Real Blender 5.2 regression for the captured mushrooms ``Cube.012`` n-gon.
+"""Real Blender 5.2 regressions for captured mushrooms n-gon planarity failures.
 
-The real 0.90.0 scene failed before camera projection because one evaluated quad had a
-maximum Newell-plane residue of ``7.565148185365435e-05`` at polygon scale
-``0.13120450643194492``. The public multi-object Depth route must accept that
-sub-per-mille warp while processing at least two real export sources, and must not mutate
-objects, meshes, materials, selection, camera, Scene state, or temporary datablocks.
+The real 0.90.0 scene exposed two distinct evaluated quads:
+
+* ``Cube.012``: maximum Newell-plane residue ``7.565148185365435e-05`` at
+  polygon scale ``0.13120450643194492``;
+* ``Plane.008``: maximum residue ``9.477343601658832e-05`` at the much smaller
+  polygon scale ``0.023314310303391664``.
+
+The public two-object Depth route must accept both bounded evaluation residues without
+mutating objects, meshes, materials, selection, camera, Scene state, or temporary
+Blender datablocks.
 """
 
 from __future__ import annotations
@@ -53,70 +58,94 @@ from run_camera_projection_integration import (  # noqa: E402
 import run_depth_array_modifier_integration as depth_helpers  # noqa: E402
 
 
-_OBJECT_NAME = "Cube.012"
-_COMPONENT_ID = "object_1:Cube.012"
-_PREFIX = "MushroomsCube012"
-
-_CONTROL_OBJECT_NAME = "Cube012Control"
-_CONTROL_COMPONENT_ID = "object_2:Cube012Control"
-_CONTROL_PREFIX = "MushroomsCube012Control"
-
-_MULTI_STEM = "MushroomsCube012Multi"
-_SIDE_LENGTH = 0.09277534946637461
-_WARP_HEIGHT = 0.00030260673225328884
-_CAPTURED_MAXIMUM_PLANE_DISTANCE = 7.565148185365435e-05
-_CAPTURED_POLYGON_SCALE = 0.13120450643194492
-_CAPTURED_NORMALIZED_WARP = (
-    _CAPTURED_MAXIMUM_PLANE_DISTANCE / _CAPTURED_POLYGON_SCALE
+_CUBE_OBJECT_NAME = "Cube.012"
+_CUBE_COMPONENT_ID = "object_1:Cube.012"
+_CUBE_PREFIX = "MushroomsCube012"
+_CUBE_SIDE_LENGTH = 0.09277534946637461
+_CUBE_WARP_HEIGHT = 0.00030260673225328884
+_CUBE_CAPTURED_MAXIMUM_PLANE_DISTANCE = 7.565148185365435e-05
+_CUBE_CAPTURED_POLYGON_SCALE = 0.13120450643194492
+_CUBE_CAPTURED_NORMALIZED_WARP = (
+    _CUBE_CAPTURED_MAXIMUM_PLANE_DISTANCE
+    / _CUBE_CAPTURED_POLYGON_SCALE
 )
 
-# Scale the complete object uniformly only to give the 128 px headless camera enough
-# raster coverage. Uniform scaling preserves the normalized warp exactly.
-_WORLD_SCALE = 20.0
+_PLANE_OBJECT_NAME = "Plane.008"
+_PLANE_COMPONENT_ID = "object_2:Plane.008"
+_PLANE_PREFIX = "MushroomsPlane008Small"
+_PLANE_SIDE_LENGTH = 0.0164835268501562
+_PLANE_WARP_HEIGHT = 0.000379143881919382
+_PLANE_CAPTURED_MAXIMUM_PLANE_DISTANCE = 9.477343601658832e-05
+_PLANE_CAPTURED_POLYGON_SCALE = 0.023314310303391664
+_PLANE_CAPTURED_NORMALIZED_WARP = (
+    _PLANE_CAPTURED_MAXIMUM_PLANE_DISTANCE
+    / _PLANE_CAPTURED_POLYGON_SCALE
+)
+
+_MULTI_STEM = "MushroomsCapturedPlanarityMulti"
+_CAMERA_ORTHO_SCALE = 0.35
 
 
-def _create_source():
-    """Create the exact local-space Cube.012 planarity fixture."""
+def _create_warped_quad(
+    *,
+    object_name: str,
+    side_length: float,
+    warp_height: float,
+    location_x: float,
+    material_name: str,
+):
+    """Create one local-space square with one lifted corner and no modifiers."""
 
-    half = _SIDE_LENGTH / 2.0
+    if not isinstance(object_name, str) or not object_name.strip():
+        raise ValueError("object_name must be a non-empty string")
+    if isinstance(side_length, bool) or not isinstance(side_length, (int, float)):
+        raise TypeError("side_length must be numeric")
+    if isinstance(warp_height, bool) or not isinstance(warp_height, (int, float)):
+        raise TypeError("warp_height must be numeric")
+    if isinstance(location_x, bool) or not isinstance(location_x, (int, float)):
+        raise TypeError("location_x must be numeric")
+    if not isinstance(material_name, str) or not material_name.strip():
+        raise ValueError("material_name must be a non-empty string")
+
+    resolved_side = float(side_length)
+    if resolved_side <= 0.0:
+        raise ValueError("side_length must be positive")
+
+    half = resolved_side / 2.0
     source = _create_mesh_object(
-        _OBJECT_NAME,
+        object_name,
         (
             (-half, -half, 0.0),
             (half, -half, 0.0),
-            (half, half, _WARP_HEIGHT),
+            (half, half, float(warp_height)),
             (-half, half, 0.0),
         ),
         ((0, 1, 2, 3),),
     )
-    source.location = (2.25, 0.0, 0.0)
-    source.scale = (_WORLD_SCALE, _WORLD_SCALE, _WORLD_SCALE)
-    material = depth_helpers._create_emission_material(
-        "MushroomsCube012Material"
-    )
+    source.location = (float(location_x), 0.0, 0.0)
+    material = depth_helpers._create_emission_material(material_name)
     source.data.materials.append(material)
     return source, material
 
 
-def _create_control_source():
-    """Create the second public multi-object source required by the API contract."""
+def _create_cube012_source():
+    return _create_warped_quad(
+        object_name=_CUBE_OBJECT_NAME,
+        side_length=_CUBE_SIDE_LENGTH,
+        warp_height=_CUBE_WARP_HEIGHT,
+        location_x=2.17,
+        material_name="MushroomsCube012Material",
+    )
 
-    source = _create_mesh_object(
-        _CONTROL_OBJECT_NAME,
-        (
-            (-0.45, -0.45, 0.0),
-            (0.45, -0.45, 0.0),
-            (0.45, 0.45, 0.0),
-            (-0.45, 0.45, 0.0),
-        ),
-        ((0, 1, 2, 3),),
+
+def _create_plane008_source():
+    return _create_warped_quad(
+        object_name=_PLANE_OBJECT_NAME,
+        side_length=_PLANE_SIDE_LENGTH,
+        warp_height=_PLANE_WARP_HEIGHT,
+        location_x=2.34,
+        material_name="MushroomsPlane008SmallMaterial",
     )
-    source.location = (-0.25, 0.0, -0.15)
-    material = depth_helpers._create_emission_material(
-        "MushroomsCube012ControlMaterial"
-    )
-    source.data.materials.append(material)
-    return source, material
 
 
 def _settings(
@@ -124,7 +153,7 @@ def _settings(
     *,
     prefix: str,
 ):
-    """Return independent Depth settings for one multi-object component."""
+    """Return independent zero-horizon Depth settings for one component."""
 
     if not isinstance(output_directory, Path):
         raise TypeError("output_directory must be pathlib.Path")
@@ -144,13 +173,20 @@ def _settings(
     )
 
 
-def _local_planarity_metrics(source) -> tuple[float, float]:
-    """Measure the exact local-space metrics reported by the real traceback."""
+def _local_planarity_metrics(
+    source,
+    *,
+    label: str,
+) -> tuple[float, float]:
+    """Measure the local Newell-plane distance and bounding-box diagonal."""
+
+    if not isinstance(label, str) or not label.strip():
+        raise ValueError("label must be a non-empty string")
 
     polygons = tuple(source.data.polygons)
     _assert(
         len(polygons) == 1,
-        f"expected one Cube.012 polygon: {polygons}",
+        f"expected one {label} polygon: {polygons}",
     )
     polygon = polygons[0]
     points = tuple(
@@ -159,7 +195,7 @@ def _local_planarity_metrics(source) -> tuple[float, float]:
     )
     _assert(
         len(points) == 4,
-        f"Cube.012 must remain a quad: {points}",
+        f"{label} must remain a quad: {points}",
     )
 
     newell = [0.0, 0.0, 0.0]
@@ -183,7 +219,7 @@ def _local_planarity_metrics(source) -> tuple[float, float]:
     )
     _assert(
         magnitude > 0.0,
-        "Cube.012 Newell normal collapsed",
+        f"{label} Newell normal collapsed",
     )
     normal = tuple(component / magnitude for component in newell)
     centroid = tuple(
@@ -208,6 +244,36 @@ def _local_planarity_metrics(source) -> tuple[float, float]:
         sum(extent * extent for extent in extents)
     )
     return maximum_distance, polygon_scale
+
+
+def _assert_metrics(
+    source,
+    *,
+    label: str,
+    expected_maximum_distance: float,
+    expected_scale: float,
+    expected_normalized_warp: float,
+) -> None:
+    maximum_distance, polygon_scale = _local_planarity_metrics(
+        source,
+        label=label,
+    )
+    _assert(
+        abs(maximum_distance - expected_maximum_distance) <= 1.0e-11,
+        f"{label} maximum distance fixture drifted: {maximum_distance}",
+    )
+    _assert(
+        abs(polygon_scale - expected_scale) <= 1.0e-8,
+        f"{label} polygon scale fixture drifted: {polygon_scale}",
+    )
+    _assert(
+        abs(
+            maximum_distance / polygon_scale
+            - expected_normalized_warp
+        )
+        <= 1.0e-10,
+        f"{label} normalized warp fixture drifted",
+    )
 
 
 def _source_fingerprint(source) -> tuple[object, ...]:
@@ -259,6 +325,30 @@ def _prepared_by_component(prepared_multi) -> dict[str, PreparedDepthA1Object]:
     return result
 
 
+def _assert_prepared_quad(
+    prepared: PreparedDepthA1Object,
+    *,
+    label: str,
+) -> None:
+    _assert(
+        int(
+            prepared.statistics[
+                "depth_projection_source_triangle_count"
+            ]
+        )
+        == 2,
+        f"{label} n-gon did not produce two source triangles",
+    )
+    _assert(
+        len(prepared.depth_parallax_package.front_face_indices) == 2,
+        f"{label} camera-visible front did not retain both triangles",
+    )
+    _assert(
+        not prepared.depth_parallax_package.reserve_surfaces,
+        f"{label} zero-horizon unexpectedly created reserve surfaces",
+    )
+
+
 def _run() -> None:
     _clear_scene()
     _purge_orphan_scene_data()
@@ -267,76 +357,75 @@ def _run() -> None:
     bpy.context.scene.render.film_transparent = True
     bpy.context.scene.frame_set(1)
 
-    source, material = _create_source()
-    control, control_material = _create_control_source()
+    cube, cube_material = _create_cube012_source()
+    plane, plane_material = _create_plane008_source()
     camera = depth_helpers._create_orthographic_camera(
-        "MushroomsCube012Camera"
+        "MushroomsCapturedPlanarityCamera"
     )
+    camera.data.ortho_scale = _CAMERA_ORTHO_SCALE
+
     sentinel = _create_sentinel()
     sentinel.location = (20.0, 0.0, 0.0)
     _activate_only(sentinel)
-    source.select_set(False)
-    control.select_set(False)
+    cube.select_set(False)
+    plane.select_set(False)
     bpy.context.view_layer.update()
 
-    maximum_distance, polygon_scale = _local_planarity_metrics(source)
-    _assert(
-        abs(
-            maximum_distance
-            - _CAPTURED_MAXIMUM_PLANE_DISTANCE
-        )
-        <= 1.0e-11,
-        f"Cube.012 maximum distance fixture drifted: {maximum_distance}",
+    _assert_metrics(
+        cube,
+        label=_CUBE_OBJECT_NAME,
+        expected_maximum_distance=(
+            _CUBE_CAPTURED_MAXIMUM_PLANE_DISTANCE
+        ),
+        expected_scale=_CUBE_CAPTURED_POLYGON_SCALE,
+        expected_normalized_warp=_CUBE_CAPTURED_NORMALIZED_WARP,
     )
-    _assert(
-        abs(polygon_scale - _CAPTURED_POLYGON_SCALE) <= 1.0e-8,
-        f"Cube.012 polygon scale fixture drifted: {polygon_scale}",
-    )
-    _assert(
-        abs(
-            maximum_distance / polygon_scale
-            - _CAPTURED_NORMALIZED_WARP
-        )
-        <= 1.0e-10,
-        "Cube.012 normalized warp fixture drifted",
+    _assert_metrics(
+        plane,
+        label=_PLANE_OBJECT_NAME,
+        expected_maximum_distance=(
+            _PLANE_CAPTURED_MAXIMUM_PLANE_DISTANCE
+        ),
+        expected_scale=_PLANE_CAPTURED_POLYGON_SCALE,
+        expected_normalized_warp=_PLANE_CAPTURED_NORMALIZED_WARP,
     )
 
     context_before = _capture_context()
-    source_before = _source_fingerprint(source)
-    control_before = _source_fingerprint(control)
+    cube_before = _source_fingerprint(cube)
+    plane_before = _source_fingerprint(plane)
     camera_before = depth_helpers._camera_fingerprint(camera)
     materials_before = (
-        _material_fingerprint(material),
-        _material_fingerprint(control_material),
+        _material_fingerprint(cube_material),
+        _material_fingerprint(plane_material),
     )
     temporary_before = _temporary_datablock_names()
     frame_before = int(bpy.context.scene.frame_current)
 
     with tempfile.TemporaryDirectory(
-        prefix="spine2d_mushrooms_cube012_"
+        prefix="spine2d_mushrooms_captured_planarity_"
     ) as directory:
         output_directory = Path(directory)
         sources = (
             A1MultiObjectSource(
-                source_object=source,
-                component_id=_COMPONENT_ID,
+                source_object=cube,
+                component_id=_CUBE_COMPONENT_ID,
                 settings=_settings(
                     output_directory,
-                    prefix=_PREFIX,
+                    prefix=_CUBE_PREFIX,
                 ),
             ),
             A1MultiObjectSource(
-                source_object=control,
-                component_id=_CONTROL_COMPONENT_ID,
+                source_object=plane,
+                component_id=_PLANE_COMPONENT_ID,
                 settings=_settings(
                     output_directory,
-                    prefix=_CONTROL_PREFIX,
+                    prefix=_PLANE_PREFIX,
                 ),
             ),
         )
         _assert(
             len(sources) == 2,
-            "Cube.012 regression must exercise the public two-object contract",
+            "captured planarity regression must exercise two objects",
         )
 
         prepared_multi = prepare_a1_multi_object(
@@ -355,7 +444,7 @@ def _run() -> None:
                 for path in output_directory.rglob("*")
                 if path.is_file()
             ),
-            "Cube.012 preparation wrote output files",
+            "captured planarity preparation wrote output files",
         )
 
     _assert(
@@ -365,43 +454,17 @@ def _run() -> None:
     prepared_by_component = _prepared_by_component(prepared_multi)
     _assert(
         set(prepared_by_component)
-        == {_COMPONENT_ID, _CONTROL_COMPONENT_ID},
+        == {_CUBE_COMPONENT_ID, _PLANE_COMPONENT_ID},
         f"prepared component set changed: {prepared_by_component}",
     )
 
-    prepared = prepared_by_component[_COMPONENT_ID]
-    control_prepared = prepared_by_component[_CONTROL_COMPONENT_ID]
-
-    _assert(
-        int(
-            prepared.statistics[
-                "depth_projection_source_triangle_count"
-            ]
-        )
-        == 2,
-        "Cube.012 n-gon did not produce two source triangles",
+    _assert_prepared_quad(
+        prepared_by_component[_CUBE_COMPONENT_ID],
+        label=_CUBE_OBJECT_NAME,
     )
-    _assert(
-        len(prepared.depth_parallax_package.front_face_indices) == 2,
-        "Cube.012 camera-visible front did not retain both triangles",
-    )
-    _assert(
-        not prepared.depth_parallax_package.reserve_surfaces,
-        "Cube.012 zero-horizon unexpectedly created reserve surfaces",
-    )
-
-    _assert(
-        int(
-            control_prepared.statistics[
-                "depth_projection_source_triangle_count"
-            ]
-        )
-        == 2,
-        "control n-gon did not produce two source triangles",
-    )
-    _assert(
-        not control_prepared.depth_parallax_package.reserve_surfaces,
-        "control zero-horizon unexpectedly created reserve surfaces",
+    _assert_prepared_quad(
+        prepared_by_component[_PLANE_COMPONENT_ID],
+        label=_PLANE_OBJECT_NAME,
     )
 
     _assert(
@@ -409,12 +472,12 @@ def _run() -> None:
         "selection or active context changed",
     )
     _assert(
-        _source_fingerprint(source) == source_before,
+        _source_fingerprint(cube) == cube_before,
         "Cube.012 source changed",
     )
     _assert(
-        _source_fingerprint(control) == control_before,
-        "control source changed",
+        _source_fingerprint(plane) == plane_before,
+        "Plane.008 source changed",
     )
     _assert(
         depth_helpers._camera_fingerprint(camera) == camera_before,
@@ -422,8 +485,8 @@ def _run() -> None:
     )
     _assert(
         (
-            _material_fingerprint(material),
-            _material_fingerprint(control_material),
+            _material_fingerprint(cube_material),
+            _material_fingerprint(plane_material),
         )
         == materials_before,
         "source materials changed",
@@ -438,12 +501,12 @@ def _run() -> None:
     )
 
     print(
-        "[MUSHROOMS-CUBE012-PLANARITY] PASS "
-        "object=Cube.012 "
-        "maximum_plane_distance=7.565148185365435e-05 "
-        "polygon_scale=0.13120450643194492 "
-        "normalized_warp=0.0005765920996996728 "
-        "triangles=2 sources=2 pipeline=public-multi-object"
+        "[MUSHROOMS-CAPTURED-PLANARITY] PASS "
+        "cube=Cube.012 cube_max=7.565148185365435e-05 "
+        "cube_scale=0.13120450643194492 "
+        "plane=Plane.008 plane_max=9.477343601658832e-05 "
+        "plane_scale=0.023314310303391664 "
+        "triangles=2+2 sources=2 pipeline=public-multi-object"
     )
 
 
