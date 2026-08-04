@@ -470,10 +470,13 @@ def _run_smoke(output_root: Path) -> None:
         f"reserve texture does not reveal folded green surface: {reserve_green}",
     )
     _assert(
+        reserve_red < max(8, reserve_green // 50),
+        f"front material leaked into face-isolated reserve texture: red={reserve_red}",
+    )
+    _assert(
         front_size != reserve_size or front_pixels != reserve_pixels,
         "front and reserve camera renders are identical",
     )
-    _assert(reserve_red > 0, "reserve render unexpectedly lost the front surface entirely")
 
     document = json.loads(json_path.read_text(encoding="utf-8"))
     _assert(isinstance(document, dict), "serialized Spine document must be an object")
