@@ -103,7 +103,9 @@ reserve faces, lower the requested horizon angle, or create a second independent
 
 ### Parallax Horizon Angle
 
-Visible only for Depth Camera Projection.
+Visible only in the **Cut** foldout when **Depth Camera Projection** is selected. The
+setting belongs to Cut because it changes retained surface topology and reserve-view
+generation; it is not displayed in Rig.
 
 | Type | Hard range | Soft range | Default |
 | --- | --- | --- | --- |
@@ -194,7 +196,7 @@ zero and keeps every generated group offset non-negative toward the camera.
 
 Positive parallax does not create a second reserve rig. FRONT and reserve attachments are
 subsets of one union MeshSnapshot and use one shared Z-group assignment and generated
-vertex-bone namespace.
+vertex-bone namespace. The topology control itself is located in Cut.
 
 ### 2-Axis controls
 
@@ -244,8 +246,8 @@ textures or attachments until the user explicitly chooses a positive angle.
 
 Depth Camera Projection creates its own generated relief topology. Its discontinuities are
 controlled by Depth edge threshold, while horizon reserve growth is controlled by
-Parallax Horizon Angle. The Cut foldout displays an explanatory message instead of source
-seam controls for this mode.
+Parallax Horizon Angle. For this mode the Cut foldout replaces source seam controls with
+the generated-depth explanation and the Parallax reserve control.
 
 ### Seed angle limit
 
