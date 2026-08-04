@@ -1,4 +1,4 @@
-"""Finalize Depth Camera Projection texture crop without flattening its rig."""
+"""Finalize every Depth Camera Projection view without flattening its rig."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from ..domain.spine import (
     LegacyMeshAttachmentRequest,
     MeshAttachment,
     Skin,
-    SpineDocument,
     SpineValidator,
 )
 from .a1_object_preparation import PreparedA1Object
@@ -25,19 +24,20 @@ from .a1_object_preparation import PreparedA1Object
 
 logger = logging.getLogger(__name__)
 _UV_EPSILON = 1.0e-6
+_FRONT_VIEW_ID = "FRONT"
 
 
 class A1DepthProjectionFinalizationError(ValueError):
-    """Raised when render crop cannot represent the prepared depth surface."""
+    """Raised when one render crop cannot represent its prepared depth surface."""
 
 
 def _clamped_unit(value: float, field_name: str) -> float:
     resolved = float(value)
     if resolved < -_UV_EPSILON or resolved > 1.0 + _UV_EPSILON:
         raise A1DepthProjectionFinalizationError(
-            f"{field_name}={resolved} lies outside the camera render crop. The "
+            f"{field_name}={resolved} lies outside its camera render crop. The "
             "rendered alpha does not cover the generated depth surface; use opaque "
-            "source materials or reduce the depth surface extent."
+            "source materials or reduce Parallax Horizon Angle."
         )
     if resolved <= 0.0:
         return 0.0
@@ -80,7 +80,7 @@ def _remap_request(
             uv=_crop_uv(
                 vertex.uv,
                 layout,
-                field_name=f"request.vertices[{index}].uv",
+                field_name=f"request[{request.slot_name}].vertices[{index}].uv",
             ),
         )
         for index, vertex in enumerate(request.vertices)
@@ -129,15 +129,16 @@ def _remap_attachment(
 
 def _remap_skins(
     skins: tuple[Skin, ...],
-    layout: CameraProjectionLayout,
+    layout_by_slot: Mapping[str, CameraProjectionLayout],
 ) -> tuple[Skin, ...]:
     resolved: list[Skin] = []
     for skin in skins:
         groups: dict[str, dict[str, MeshAttachment | Mapping[str, object]]] = {}
         for slot_name, attachments in skin.attachments.items():
             group: dict[str, MeshAttachment | Mapping[str, object]] = {}
+            layout = layout_by_slot.get(slot_name)
             for attachment_name, attachment in attachments.items():
-                if isinstance(attachment, MeshAttachment):
+                if isinstance(attachment, MeshAttachment) and layout is not None:
                     group[attachment_name] = _remap_attachment(
                         attachment,
                         layout,
@@ -199,11 +200,65 @@ def _remap_projection_keys(
     )
 
 
+def _view_id_for_slot(prepared: PreparedA1Object, slot_name: str) -> str:
+    prefix = f"{prepared.prefix}_Parallax_"
+    if slot_name.startswith(prefix):
+        view_id = slot_name[len(prefix) :].strip().upper()
+        if not view_id:
+            raise A1DepthProjectionFinalizationError(
+                f"Reserve slot {slot_name!r} has no view id"
+            )
+        return view_id
+    return _FRONT_VIEW_ID
+
+
+def _resolved_view_layouts(
+    prepared: PreparedA1Object,
+    front_layout: CameraProjectionLayout | None,
+    reserve_layouts: Mapping[str, CameraProjectionLayout] | None,
+) -> Mapping[str, CameraProjectionLayout]:
+    if not isinstance(front_layout, CameraProjectionLayout):
+        raise A1DepthProjectionFinalizationError(
+            "Depth Camera Projection did not produce a FRONT camera render layout"
+        )
+    resolved: dict[str, CameraProjectionLayout] = {_FRONT_VIEW_ID: front_layout}
+    if reserve_layouts is not None:
+        if not isinstance(reserve_layouts, Mapping):
+            raise TypeError("reserve_layouts must be a mapping or None")
+        for raw_view_id, layout in reserve_layouts.items():
+            view_id = str(raw_view_id).strip().upper()
+            if not view_id or view_id == _FRONT_VIEW_ID:
+                raise ValueError(
+                    "reserve_layouts keys must be non-FRONT view identifiers"
+                )
+            if not isinstance(layout, CameraProjectionLayout):
+                raise TypeError(
+                    f"reserve_layouts[{view_id!r}] must be CameraProjectionLayout"
+                )
+            if view_id in resolved:
+                raise ValueError(f"duplicate camera layout for {view_id}")
+            resolved[view_id] = layout
+
+    required = {
+        _view_id_for_slot(prepared, projection.request.slot_name)
+        for projection in prepared.document_assembly.projections
+    }
+    missing = tuple(sorted(required - set(resolved)))
+    unknown = tuple(sorted(set(resolved) - required))
+    if missing or unknown:
+        raise A1DepthProjectionFinalizationError(
+            "Depth camera layout set does not match attachment views; "
+            f"missing={missing}, unknown={unknown}"
+        )
+    return MappingProxyType(resolved)
+
+
 def finalize_prepared_depth_camera_projection(
     prepared: PreparedA1Object,
     layout: CameraProjectionLayout | None,
+    reserve_layouts: Mapping[str, CameraProjectionLayout] | None = None,
 ) -> PreparedA1Object:
-    """Apply one camera-render crop while preserving every depth bone and triangle."""
+    """Apply each view crop while preserving every depth bone and triangle."""
 
     if not isinstance(prepared, PreparedA1Object):
         raise TypeError("prepared must be PreparedA1Object")
@@ -214,19 +269,23 @@ def finalize_prepared_depth_camera_projection(
         raise ValueError(
             "Depth projection finalization requires DEPTH_CAMERA_PROJECTION mode"
         )
-    if not isinstance(layout, CameraProjectionLayout):
-        raise A1DepthProjectionFinalizationError(
-            "Depth Camera Projection did not produce a camera render layout"
-        )
 
+    view_layouts = _resolved_view_layouts(prepared, layout, reserve_layouts)
     assembly = prepared.document_assembly
     build = assembly.document_build
-    remapped_skins = _remap_skins(build.skins, layout)
+    layout_by_slot = {
+        projection.request.slot_name: view_layouts[
+            _view_id_for_slot(prepared, projection.request.slot_name)
+        ]
+        for projection in assembly.projections
+    }
+    remapped_skins = _remap_skins(build.skins, layout_by_slot)
     remapped_components = []
     remapped_requests = []
     request_by_slot: dict[str, LegacyMeshAttachmentRequest] = {}
     for component_index, component in enumerate(build.components):
-        request = _remap_request(component.request, layout)
+        component_layout = layout_by_slot[component.request.slot_name]
+        request = _remap_request(component.request, component_layout)
         attachment = _attachment_from_skins(remapped_skins, request)
         remapped_components.append(
             replace(
@@ -264,43 +323,57 @@ def finalize_prepared_depth_camera_projection(
         _remap_projection_keys(
             projection,
             request_by_slot[projection.request.slot_name],
-            layout,
+            layout_by_slot[projection.request.slot_name],
         )
         for projection in assembly.projections
     )
+    front = view_layouts[_FRONT_VIEW_ID]
     remapped_assembly = replace(
         assembly,
         settings=replace(
             assembly.settings,
-            attachment_width=float(layout.cropped_width),
-            attachment_height=float(layout.cropped_height),
+            attachment_width=float(front.cropped_width),
+            attachment_height=float(front.cropped_height),
         ),
         projections=remapped_projections,
         document_build=remapped_build,
     )
-    statistics = MappingProxyType(
-        {
-            **dict(prepared.statistics),
-            "depth_projection_crop_minimum_x": layout.crop.minimum_x,
-            "depth_projection_crop_minimum_y": layout.crop.minimum_y,
-            "depth_projection_crop_maximum_x": layout.crop.maximum_x,
-            "depth_projection_crop_maximum_y": layout.crop.maximum_y,
-            "depth_projection_cropped_width": layout.cropped_width,
-            "depth_projection_cropped_height": layout.cropped_height,
-            "depth_projection_uv_remapped": 1,
-            "depth_projection_weighted_topology_preserved": 1,
-        }
-    )
+
+    statistics_values = {
+        **dict(prepared.statistics),
+        "depth_projection_crop_minimum_x": front.crop.minimum_x,
+        "depth_projection_crop_minimum_y": front.crop.minimum_y,
+        "depth_projection_crop_maximum_x": front.crop.maximum_x,
+        "depth_projection_crop_maximum_y": front.crop.maximum_y,
+        "depth_projection_cropped_width": front.cropped_width,
+        "depth_projection_cropped_height": front.cropped_height,
+        "depth_projection_uv_remapped": 1,
+        "depth_projection_weighted_topology_preserved": 1,
+        "depth_parallax_cropped_view_count": len(view_layouts),
+    }
+    for view_id, view_layout in sorted(view_layouts.items()):
+        key = view_id.lower()
+        statistics_values.update(
+            {
+                f"depth_parallax_{key}_crop_minimum_x": (
+                    view_layout.crop.minimum_x
+                ),
+                f"depth_parallax_{key}_crop_minimum_y": (
+                    view_layout.crop.minimum_y
+                ),
+                f"depth_parallax_{key}_cropped_width": (
+                    view_layout.cropped_width
+                ),
+                f"depth_parallax_{key}_cropped_height": (
+                    view_layout.cropped_height
+                ),
+            }
+        )
+    statistics = MappingProxyType(statistics_values)
     logger.debug(
-        "Finalized depth camera crop for %s: full=%dx%d crop=(%d,%d)-(%d,%d) "
-        "attachments=%d",
+        "Finalized depth camera crops for %s: views=%s attachments=%d",
         prepared.object_id,
-        layout.full_width,
-        layout.full_height,
-        layout.crop.minimum_x,
-        layout.crop.minimum_y,
-        layout.crop.maximum_x,
-        layout.crop.maximum_y,
+        tuple(sorted(view_layouts)),
         sum(
             len(attachments)
             for skin in remapped_skins
