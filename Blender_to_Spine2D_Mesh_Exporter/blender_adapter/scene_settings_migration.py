@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - real Blender always provides this decora
 
 
 logger = logging.getLogger(__name__)
-CURRENT_SETTINGS_SCHEMA_VERSION = 7
+CURRENT_SETTINGS_SCHEMA_VERSION = 8
 _REGISTERED = False
 _FILE_LOADING = False
 _SCHEMA_PROPERTY = "spine2d_settings_schema_version"
@@ -36,6 +36,7 @@ _DEPTH_DEFAULTS: tuple[tuple[str, object], ...] = (
     ("spine2d_depth_edge_threshold", 0.08),
     ("spine2d_depth_mesh_error_pixels", 4.0),
     ("spine2d_depth_max_points", 128),
+    ("spine2d_depth_parallax_horizon_angle", 0.0),
     (
         "spine2d_depth_base_mode",
         DepthProjectionBaseMode.FARTHEST_VISIBLE.value,
@@ -313,9 +314,9 @@ def migrate_scene_settings(scene: Any) -> bool:
     """Migrate one Scene once without overwriting established user choices.
 
     Schema 4 introduced selectable rig profiles. Schema 5 changed the fresh-Scene rig
-    default. Schema 6 added the Spine JSON target. Schema 7 adds the third public
-    `Depth Camera Projection` mode and initializes its quality controls while leaving
-    every established Normal / UV Segments and Camera Projection choice unchanged.
+    default. Schema 6 added the Spine JSON target. Schema 7 added Depth Camera Projection
+    quality controls. Schema 8 adds the Parallax Horizon Angle with a zero-degree default,
+    preserving every 0.81.0 front-only export until the user opts into reserve coverage.
     """
 
     if scene is None:
@@ -361,7 +362,7 @@ def migrate_scene_settings(scene: Any) -> bool:
         scene.spine2d_target_spine_version = spine_target.value
         initialized_depth = (
             _initialize_depth_defaults(scene, persisted_keys)
-            if current < 7
+            if current < 8
             else ()
         )
         scene.spine2d_settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION
