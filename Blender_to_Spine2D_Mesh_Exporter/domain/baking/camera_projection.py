@@ -105,8 +105,9 @@ class CameraProjectionPlan(BakePlan):
     """BakePlan subtype executed by the camera-render pipeline.
 
     ``view_id`` is ``FRONT`` for the active-camera render. Depth parallax reserve plans
-    append a stable view id, a camera-world override, and a fitted lens scale. The front
-    defaults preserve the complete pre-0.90.0 plan contract.
+    append a stable view id, a camera-world override, a fitted lens scale, and the exact
+    evaluated source-face indices assigned to that view. The front defaults preserve the
+    complete pre-0.90.0 plan contract.
     """
 
     projection_mode: CameraProjectionMode = CameraProjectionMode.FULL_FRAME_QUAD
@@ -115,6 +116,7 @@ class CameraProjectionPlan(BakePlan):
     view_id: str = "FRONT"
     camera_world_matrix_override: Tuple[float, ...] | None = None
     lens_scale: float = 1.0
+    source_face_indices: Tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
         # ``dataclass(slots=True)`` returns a replacement class object. Zero-argument
@@ -156,15 +158,39 @@ class CameraProjectionPlan(BakePlan):
         ):
             raise ValueError("lens_scale must be finite in (0, 1]")
         object.__setattr__(self, "lens_scale", resolved_lens_scale)
+
+        if self.source_face_indices is not None:
+            indices = self.source_face_indices
+            if not isinstance(indices, tuple) or not all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value >= 0
+                for value in indices
+            ):
+                raise TypeError(
+                    "source_face_indices must be a tuple of non-negative ints or None"
+                )
+            if not indices:
+                raise ValueError("source_face_indices cannot be empty")
+            if tuple(sorted(set(indices))) != indices:
+                raise ValueError("source_face_indices must be sorted and unique")
+
         if self.view_id == "FRONT":
             if self.camera_world_matrix_override is not None:
                 raise ValueError("FRONT plan cannot override the active camera matrix")
             if self.lens_scale != 1.0:
                 raise ValueError("FRONT plan must keep lens_scale=1")
-        elif self.camera_world_matrix_override is None:
-            raise ValueError(
-                "non-FRONT camera projection plans require a camera matrix override"
-            )
+            if self.source_face_indices is not None:
+                raise ValueError("FRONT plan cannot restrict source faces")
+        else:
+            if self.camera_world_matrix_override is None:
+                raise ValueError(
+                    "non-FRONT camera projection plans require a camera matrix override"
+                )
+            if self.source_face_indices is None:
+                raise ValueError(
+                    "non-FRONT camera projection plans require source_face_indices"
+                )
         if self.scene_context is None or self.scene_context.camera is None:
             raise ValueError("CameraProjectionPlan requires an active camera snapshot")
         if self.object_context is None:
@@ -259,8 +285,9 @@ def build_camera_projection_view_plan(
     view_id: str,
     camera_world_matrix: Tuple[float, ...],
     lens_scale: float,
+    source_face_indices: Tuple[int, ...],
 ) -> CameraProjectionPlan:
-    """Clone one front plan into a deterministic virtual-view output namespace."""
+    """Clone one front plan into one face-isolated virtual-view namespace."""
 
     if not isinstance(front_plan, CameraProjectionPlan):
         raise TypeError("front_plan must be CameraProjectionPlan")
@@ -271,6 +298,8 @@ def build_camera_projection_view_plan(
     normalized_view_id = view_id.strip().upper()
     if normalized_view_id == "FRONT":
         raise ValueError("reserve view_id cannot be FRONT")
+    if not isinstance(source_face_indices, tuple) or not source_face_indices:
+        raise TypeError("source_face_indices must be a non-empty tuple")
     suffix = sanitize_filename_stem(normalized_view_id)
     settings = replace(
         front_plan.settings,
@@ -285,6 +314,7 @@ def build_camera_projection_view_plan(
         view_id=normalized_view_id,
         camera_world_matrix_override=tuple(camera_world_matrix),
         lens_scale=lens_scale,
+        source_face_indices=source_face_indices,
     )
 
 
