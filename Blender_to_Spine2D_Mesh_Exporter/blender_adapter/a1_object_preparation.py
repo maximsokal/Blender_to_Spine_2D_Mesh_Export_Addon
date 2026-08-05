@@ -220,13 +220,19 @@ def _prepare_source_geometry(
     settings: A1SingleObjectExportSettings,
     *,
     scene: Any | None,
-    progress_callback: A1ExportProgressCallback | None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> Any:
     """Select the ordinary or depth-relief geometry source explicitly."""
 
     if progress_callback is not None and not callable(progress_callback):
         raise TypeError("progress_callback must be callable or None")
     if _depth_mode(settings):
+        if progress_callback is None:
+            return prepare_a1_depth_source_geometry(
+                source_obj,
+                settings,
+                scene=scene,
+            )
         return prepare_a1_depth_source_geometry(
             source_obj,
             settings,
