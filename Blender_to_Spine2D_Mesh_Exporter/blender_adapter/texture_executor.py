@@ -3,13 +3,13 @@
 Every entry point first builds one typed ``TextureExecutionRequest`` so invalid
 domain values fail before filesystem reservations or Blender Scene mutation. Depth
 parallax stages the front and every reserve view in one caller-owned transaction and
-retains an independent crop layout for each view.
+retains an independent crop layout and required UV envelope for each view.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Tuple
+from typing import Any, Mapping, Tuple
 
 from ..application import A1ExportProgressCallback
 from ..domain.baking import (
@@ -17,6 +17,7 @@ from ..domain.baking import (
     BakeExecutionSettings,
     BakePlan,
     CameraProjectionPlan,
+    ProjectionUvBounds,
 )
 from ..domain.baking.projection_layout import CameraProjectionLayout
 from ..domain.geometry import MeshSnapshot
@@ -34,6 +35,9 @@ from .semantic_bake_output import (
 )
 
 
+_FRONT_VIEW_ID = "FRONT"
+
+
 @dataclass(frozen=True, slots=True)
 class TextureExecutionRequest:
     """One validated texture execution request shared by all dispatch routes."""
@@ -42,6 +46,7 @@ class TextureExecutionRequest:
     target_snapshot: MeshSnapshot
     plan: BakePlan
     execution_settings: BakeExecutionSettings
+    required_uv_bounds: ProjectionUvBounds | None = None
 
     def __post_init__(self) -> None:
         if self.source_object is None:
@@ -56,6 +61,20 @@ class TextureExecutionRequest:
             raise ValueError(
                 "target_snapshot.source_object_id must match plan.source_object_id"
             )
+        if self.required_uv_bounds is not None and not isinstance(
+            self.required_uv_bounds,
+            ProjectionUvBounds,
+        ):
+            raise TypeError(
+                "required_uv_bounds must be ProjectionUvBounds or None"
+            )
+        if self.required_uv_bounds is not None and not isinstance(
+            self.plan,
+            CameraProjectionPlan,
+        ):
+            raise ValueError(
+                "required_uv_bounds require a CameraProjectionPlan"
+            )
 
     @classmethod
     def capture(
@@ -64,6 +83,8 @@ class TextureExecutionRequest:
         target_snapshot: MeshSnapshot,
         plan: BakePlan,
         execution_settings: BakeExecutionSettings | None = None,
+        *,
+        required_uv_bounds: ProjectionUvBounds | None = None,
     ) -> "TextureExecutionRequest":
         resolved_settings = (
             BakeExecutionSettings()
@@ -75,6 +96,7 @@ class TextureExecutionRequest:
             target_snapshot=target_snapshot,
             plan=plan,
             execution_settings=resolved_settings,
+            required_uv_bounds=required_uv_bounds,
         )
 
 
@@ -177,7 +199,7 @@ class TextureStageResult:
     def view_layouts(self) -> dict[str, CameraProjectionLayout]:
         layouts = {}
         if self.projection_layout is not None:
-            layouts["FRONT"] = self.projection_layout
+            layouts[_FRONT_VIEW_ID] = self.projection_layout
         layouts.update(
             {stage.view_id: stage.layout for stage in self.reserve_projection_stages}
         )
@@ -188,6 +210,45 @@ def _require_transaction(value: Any) -> AtomicFileTransaction:
     if not isinstance(value, AtomicFileTransaction):
         raise TypeError("output_transaction must be AtomicFileTransaction")
     return value
+
+
+def _projection_uv_bounds(
+    values: Mapping[str, ProjectionUvBounds] | None,
+    *,
+    expected_view_ids: tuple[str, ...],
+) -> Mapping[str, ProjectionUvBounds]:
+    if values is None:
+        return {}
+    if not isinstance(values, Mapping):
+        raise TypeError(
+            "projection_uv_bounds_by_view must be a mapping or None"
+        )
+    resolved: dict[str, ProjectionUvBounds] = {}
+    for raw_view_id, bounds in values.items():
+        view_id = str(raw_view_id).strip().upper()
+        if not view_id:
+            raise ValueError(
+                "projection_uv_bounds_by_view contains an empty view id"
+            )
+        if not isinstance(bounds, ProjectionUvBounds):
+            raise TypeError(
+                f"projection_uv_bounds_by_view[{view_id!r}] must be ProjectionUvBounds"
+            )
+        if view_id in resolved:
+            raise ValueError(
+                f"projection_uv_bounds_by_view contains duplicate view {view_id}"
+            )
+        resolved[view_id] = bounds
+
+    expected = set(expected_view_ids)
+    missing = tuple(sorted(expected - set(resolved)))
+    unknown = tuple(sorted(set(resolved) - expected))
+    if missing or unknown:
+        raise ValueError(
+            "projection UV view bounds do not match camera plans; "
+            f"missing={missing}, unknown={unknown}"
+        )
+    return resolved
 
 
 def _stage_camera_plan(
@@ -205,6 +266,7 @@ def _stage_camera_plan(
         request.plan,
         transaction,
         request.execution_settings,
+        required_uv_bounds=request.required_uv_bounds,
         context=context,
         scene=scene,
         progress_callback=progress_callback,
@@ -225,23 +287,33 @@ def stage_texture_plan_outputs(
     execution_settings: BakeExecutionSettings | None = None,
     *,
     reserve_plans: Tuple[CameraProjectionPlan, ...] = (),
+    projection_uv_bounds_by_view: Mapping[str, ProjectionUvBounds] | None = None,
     context: Any | None = None,
     scene: Any | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
 ) -> TextureStageResult:
     """Stage a primary texture plan and optional parallax reserve views."""
 
-    request = TextureExecutionRequest.capture(
-        source_obj,
-        target_snapshot,
-        plan,
-        execution_settings,
-    )
     transaction = _require_transaction(output_transaction)
     if not isinstance(reserve_plans, tuple) or not all(
         isinstance(item, CameraProjectionPlan) for item in reserve_plans
     ):
         raise TypeError("reserve_plans must contain CameraProjectionPlan values")
+
+    expected_view_ids = (_FRONT_VIEW_ID,) + tuple(
+        plan.view_id.strip().upper() for plan in reserve_plans
+    )
+    bounds_by_view = _projection_uv_bounds(
+        projection_uv_bounds_by_view,
+        expected_view_ids=expected_view_ids,
+    )
+    request = TextureExecutionRequest.capture(
+        source_obj,
+        target_snapshot,
+        plan,
+        execution_settings,
+        required_uv_bounds=bounds_by_view.get(_FRONT_VIEW_ID),
+    )
 
     if isinstance(request.plan, CameraProjectionPlan):
         if request.plan.virtual_view:
@@ -261,11 +333,13 @@ def stage_texture_plan_outputs(
                 raise ValueError(
                     "reserve plan source_object_id must match the primary plan"
                 )
+            view_id = reserve_plan.view_id.strip().upper()
             reserve_request = TextureExecutionRequest.capture(
                 source_obj,
                 target_snapshot,
                 reserve_plan,
                 request.execution_settings,
+                required_uv_bounds=bounds_by_view.get(view_id),
             )
             reserve_stages.append(
                 _stage_camera_plan(
@@ -292,6 +366,10 @@ def stage_texture_plan_outputs(
         raise ValueError(
             "Parallax reserve plans require a CameraProjectionPlan primary route"
         )
+    if bounds_by_view:
+        raise ValueError(
+            "projection UV view bounds require a CameraProjectionPlan route"
+        )
     reservations = stage_object_bake_outputs(
         request.source_object,
         request.target_snapshot,
@@ -311,6 +389,7 @@ def execute_bake_plan(
     plan: BakePlan,
     execution_settings: BakeExecutionSettings | None = None,
     *,
+    required_uv_bounds: ProjectionUvBounds | None = None,
     context: Any | None = None,
     scene: Any | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
@@ -322,12 +401,14 @@ def execute_bake_plan(
         target_snapshot,
         plan,
         execution_settings,
+        required_uv_bounds=required_uv_bounds,
     )
     if isinstance(request.plan, CameraProjectionPlan):
         return execute_camera_projection_plan(
             request.source_object,
             request.plan,
             request.execution_settings,
+            required_uv_bounds=request.required_uv_bounds,
             context=context,
             scene=scene,
             progress_callback=progress_callback,
