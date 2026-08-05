@@ -1,29 +1,20 @@
 """Run Depth preparation directly against the real mushrooms ``.blend`` asset.
 
-This runner never creates replacement geometry. Blender must open the caller-supplied
-``mushrooms.blend`` before the script starts. The runner then:
+Blender must open the caller-supplied asset before this script starts. No replacement
+geometry is created. Every evaluated polygon from ``Plane.008`` and ``Cube.012`` is read
+through the production adapter, normalized, triangulated, and checked for exact source-face
+coverage before the same objects enter the public multi-object Depth pipeline.
 
-1. verifies the exact loaded file path;
-2. reads and normalizes the evaluated meshes of ``Plane.008`` and ``Cube.012`` through
-   the same internal preparation stages used by production;
-3. scans every evaluated n-gon and reports all planarity-policy violations together;
-4. triangulates every normalized source snapshot;
-5. runs both real objects through the public multi-object Depth preparation route;
-6. verifies that source objects, meshes, modifiers, camera, selection, frame, and
-   temporary datablocks remain unchanged.
-
-Usage:
-
-    blender --background E:\\test_BtSe\\mushrooms\\mushrooms.blend \
-        --python tests/blender_headless/run_mushrooms_real_blend_integration.py -- \
-        --expected-blend E:\\test_BtSe\\mushrooms\\mushrooms.blend
+Non-planar quads are valid curved-surface geometry. Their strict planarity metrics are
+reported as diagnostics, never used to delete or skip faces in the default export path.
 """
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
-from math import sqrt
+from collections import Counter
+from dataclasses import dataclass, replace
+from math import isfinite, sqrt
 import os
 from pathlib import Path
 import sys
@@ -62,6 +53,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_source_geometry_prepara
 from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import (  # noqa: E402
     MeshSnapshot,
     MeshSnapshotValidator,
+    NonPlanarPolygonPolicy,
     TriangulationSettings,
     triangulate_snapshot,
 )
@@ -75,15 +67,47 @@ import run_depth_array_modifier_integration as depth_helpers  # noqa: E402
 
 _OBJECT_NAMES = ("Plane.008", "Cube.012")
 _MULTI_STEM = "MushroomsRealBlendRegression"
+_NORMAL_LENGTH_TOLERANCE = 1.0e-6
 
 
 class RealBlendRegressionError(RuntimeError):
     """Raised when the loaded mushrooms asset violates a regression contract."""
 
 
-def _parse_arguments() -> argparse.Namespace:
-    """Parse arguments following Blender's ``--`` separator."""
+@dataclass(frozen=True, slots=True)
+class SnapshotTriangulationScan:
+    object_name: str
+    source_face_count: int
+    ngon_count: int
+    strict_planarity_violation_count: int
+    expected_triangle_count: int
+    actual_triangle_count: int
+    maximum_absolute_warp: float
+    maximum_normalized_warp: float
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.object_name, str) or not self.object_name.strip():
+            raise ValueError("object_name must be a non-empty string")
+        for field_name in (
+            "source_face_count",
+            "ngon_count",
+            "strict_planarity_violation_count",
+            "expected_triangle_count",
+            "actual_triangle_count",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"{field_name} must be a non-negative integer")
+        for field_name in (
+            "maximum_absolute_warp",
+            "maximum_normalized_warp",
+        ):
+            value = float(getattr(self, field_name))
+            if not isfinite(value) or value < 0.0:
+                raise ValueError(f"{field_name} must be finite and non-negative")
+
+
+def _parse_arguments() -> argparse.Namespace:
     arguments = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     parser = argparse.ArgumentParser(
         description="Run the Spine exporter against the real mushrooms blend asset."
@@ -97,15 +121,11 @@ def _parse_arguments() -> argparse.Namespace:
 
 
 def _canonical_path(value: str | Path) -> str:
-    """Return a case-normalized absolute path suitable for Windows comparison."""
-
     resolved = Path(value).expanduser().resolve(strict=False)
     return os.path.normcase(os.path.normpath(str(resolved)))
 
 
 def _require_loaded_blend(expected_blend: str) -> Path:
-    """Require Blender to be running the exact requested asset, not a synthetic scene."""
-
     expected = Path(expected_blend).expanduser().resolve(strict=False)
     if not expected.is_file():
         raise RealBlendRegressionError(
@@ -128,8 +148,6 @@ def _require_loaded_blend(expected_blend: str) -> Path:
 
 
 def _require_source_objects() -> tuple[object, ...]:
-    """Resolve the two actual Mesh objects by their names in the loaded asset."""
-
     resolved: list[object] = []
     for name in _OBJECT_NAMES:
         source = bpy.data.objects.get(name)
@@ -146,8 +164,6 @@ def _require_source_objects() -> tuple[object, ...]:
 
 
 def _settings(output_directory: Path, *, prefix: str):
-    """Return zero-horizon Depth settings for one real component."""
-
     if not isinstance(output_directory, Path):
         raise TypeError("output_directory must be pathlib.Path")
     if not isinstance(prefix, str) or not prefix.strip():
@@ -167,8 +183,6 @@ def _settings(output_directory: Path, *, prefix: str):
 
 
 def _object_fingerprint(source) -> tuple[object, ...]:
-    """Capture persistent source state without evaluating or modifying the object."""
-
     modifiers = tuple(
         (
             modifier.name,
@@ -196,8 +210,6 @@ def _object_fingerprint(source) -> tuple[object, ...]:
 
 
 def _camera_fingerprint() -> tuple[object, ...]:
-    """Capture the active Scene camera and its persistent projection state."""
-
     camera = bpy.context.scene.camera
     if camera is None or camera.type != "CAMERA" or camera.data is None:
         raise RealBlendRegressionError(
@@ -217,8 +229,6 @@ def _camera_fingerprint() -> tuple[object, ...]:
 
 
 def _read_normalized_snapshot(source, settings) -> MeshSnapshot:
-    """Execute the exact production read, identity, and world-normalization stages."""
-
     validated_settings = _normal_camera_request_settings(settings)
     request = _resolve_source_request(
         source,
@@ -254,8 +264,6 @@ def _face_planarity_metrics(
     snapshot: MeshSnapshot,
     face,
 ) -> tuple[float, float, float]:
-    """Measure one n-gon with the same Newell-plane definition as production."""
-
     loop_map = snapshot.loop_by_id()
     vertex_map = snapshot.vertex_by_id()
     points = tuple(
@@ -282,7 +290,7 @@ def _face_planarity_metrics(
         )
 
     magnitude = sqrt(sum(component * component for component in newell))
-    if magnitude <= 0.0:
+    if not isfinite(magnitude) or magnitude <= 0.0:
         raise RealBlendRegressionError(
             f"{snapshot.object_name} face {face.id.index} has a collapsed Newell normal"
         )
@@ -306,76 +314,113 @@ def _face_planarity_metrics(
         for axis in range(3)
     )
     polygon_scale = sqrt(sum(extent * extent for extent in extents))
-    if polygon_scale <= 0.0:
+    if not isfinite(polygon_scale) or polygon_scale <= 0.0:
         raise RealBlendRegressionError(
             f"{snapshot.object_name} face {face.id.index} has zero polygon scale"
         )
     return maximum_distance, polygon_scale, maximum_distance / polygon_scale
 
 
-def _scan_snapshot_planarity(
-    snapshot: MeshSnapshot,
-) -> tuple[tuple[object, ...], ...]:
-    """Scan every n-gon and fail once with the complete policy-violation set."""
+def _expected_source_face_multiplicity(snapshot: MeshSnapshot) -> Counter:
+    return Counter(
+        {
+            face.source_id: max(1, len(face.loop_ids) - 2)
+            for face in snapshot.faces
+        }
+    )
 
-    settings = TriangulationSettings()
-    records: list[tuple[object, ...]] = []
-    violations: list[tuple[object, ...]] = []
+
+def _scan_snapshot_triangulation(
+    snapshot: MeshSnapshot,
+) -> SnapshotTriangulationScan:
+    """Triangulate every face and require exact N-2 lineage coverage."""
+
+    default_settings = TriangulationSettings()
+    if (
+        default_settings.non_planar_policy
+        is not NonPlanarPolygonPolicy.TRIANGULATE
+    ):
+        raise RealBlendRegressionError(
+            "Default export triangulation policy is not TRIANGULATE"
+        )
+
+    strict_violation_count = 0
+    maximum_absolute_warp = 0.0
+    maximum_normalized_warp = 0.0
+    ngon_count = 0
 
     for face in sorted(snapshot.faces, key=lambda item: item.id.index):
         if len(face.loop_ids) <= 3:
             continue
+        ngon_count += 1
         maximum, scale, normalized = _face_planarity_metrics(snapshot, face)
         effective = max(
-            settings.planarity_tolerance,
-            settings.relative_planarity_tolerance * scale,
+            default_settings.planarity_tolerance,
+            default_settings.relative_planarity_tolerance * scale,
         )
-        record = (
-            int(face.id.index),
-            int(face.source_id.face_index),
-            len(face.loop_ids),
-            maximum,
-            scale,
-            normalized,
-            effective,
-        )
-        records.append(record)
+        maximum_absolute_warp = max(maximum_absolute_warp, maximum)
+        maximum_normalized_warp = max(maximum_normalized_warp, normalized)
         if (
             maximum > effective
-            or normalized > settings.maximum_relative_planarity_warp
+            or normalized
+            > default_settings.maximum_relative_planarity_warp
         ):
-            violations.append(record)
+            strict_violation_count += 1
 
-    records.sort(key=lambda item: (float(item[3]), float(item[5])), reverse=True)
-    violations.sort(
-        key=lambda item: (float(item[3]), float(item[5])),
-        reverse=True,
+    expected_counts = _expected_source_face_multiplicity(snapshot)
+    expected_triangle_count = sum(expected_counts.values())
+    triangulated = triangulate_snapshot(snapshot, default_settings)
+    actual_counts = Counter(
+        face.source_id
+        for face in triangulated.snapshot.faces
     )
 
-    if violations:
-        details = "\n".join(
-            (
-                f"  object={snapshot.object_name} local_face={record[0]} "
-                f"source_face={record[1]} corners={record[2]} "
-                f"maximum={record[3]} scale={record[4]} "
-                f"normalized={record[5]} effective={record[6]}"
-            )
-            for record in violations
-        )
+    if actual_counts != expected_counts:
+        missing = expected_counts - actual_counts
+        excess = actual_counts - expected_counts
         raise RealBlendRegressionError(
-            "Real mushrooms n-gon planarity scan found all blockers:\n"
-            f"{details}"
+            "Real mushrooms triangulation changed SourceFaceId multiplicity; "
+            f"object={snapshot.object_name}, missing={tuple(missing.items())}, "
+            f"excess={tuple(excess.items())}"
+        )
+    if len(triangulated.snapshot.faces) != expected_triangle_count:
+        raise RealBlendRegressionError(
+            "Real mushrooms triangulation did not produce exact N-2 coverage; "
+            f"object={snapshot.object_name}, expected={expected_triangle_count}, "
+            f"actual={len(triangulated.snapshot.faces)}"
+        )
+    if any(len(face.loop_ids) != 3 for face in triangulated.snapshot.faces):
+        raise RealBlendRegressionError(
+            f"{snapshot.object_name} triangulation retained a non-triangle face"
         )
 
-    # This catches self-intersection, declared-normal drift, reversed generated triangles,
-    # and other deterministic triangulation errors after planarity has been scanned fully.
-    triangulate_snapshot(snapshot)
-    return tuple(records)
+    for face in triangulated.snapshot.faces:
+        normal_length = sqrt(
+            sum(float(component) ** 2 for component in face.normal)
+        )
+        if (
+            not isfinite(normal_length)
+            or abs(normal_length - 1.0) > _NORMAL_LENGTH_TOLERANCE
+        ):
+            raise RealBlendRegressionError(
+                "Generated triangle normal is invalid; "
+                f"object={snapshot.object_name}, face={face.id.index}, "
+                f"normal={face.normal}, length={normal_length}"
+            )
+
+    return SnapshotTriangulationScan(
+        object_name=snapshot.object_name,
+        source_face_count=len(snapshot.faces),
+        ngon_count=ngon_count,
+        strict_planarity_violation_count=strict_violation_count,
+        expected_triangle_count=expected_triangle_count,
+        actual_triangle_count=len(triangulated.snapshot.faces),
+        maximum_absolute_warp=maximum_absolute_warp,
+        maximum_normalized_warp=maximum_normalized_warp,
+    )
 
 
 def _prepared_by_component(prepared_multi) -> dict[str, PreparedDepthA1Object]:
-    """Resolve public results by component identity instead of tuple position."""
-
     result: dict[str, PreparedDepthA1Object] = {}
     for source, prepared in zip(
         prepared_multi.sources,
@@ -411,13 +456,13 @@ def _run(expected_blend: str) -> None:
     ) as directory:
         output_directory = Path(directory)
         component_sources: list[A1MultiObjectSource] = []
-        scan_records: dict[str, tuple[tuple[object, ...], ...]] = {}
+        scans: dict[str, SnapshotTriangulationScan] = {}
 
         for index, source in enumerate(sources, start=1):
             prefix = f"MushroomsReal_{source.name.replace('.', '_')}"
             settings = _settings(output_directory, prefix=prefix)
             normalized = _read_normalized_snapshot(source, settings)
-            scan_records[source.name] = _scan_snapshot_planarity(normalized)
+            scans[source.name] = _scan_snapshot_triangulation(normalized)
             component_sources.append(
                 A1MultiObjectSource(
                     source_object=source,
@@ -460,7 +505,8 @@ def _run(expected_blend: str) -> None:
     if set(prepared_by_component) != expected_components:
         raise RealBlendRegressionError(
             "Prepared component set changed: "
-            f"actual={set(prepared_by_component)}, expected={expected_components}"
+            f"actual={set(prepared_by_component)}, "
+            f"expected={expected_components}"
         )
 
     for component_id, prepared in prepared_by_component.items():
@@ -499,16 +545,20 @@ def _run(expected_blend: str) -> None:
 
     scan_summary = " ".join(
         (
-            f"{name}_ngons={len(records)} "
-            f"{name}_max_abs={max((record[3] for record in records), default=0.0)} "
-            f"{name}_max_norm={max((record[5] for record in records), default=0.0)}"
+            f"{name}_faces={scan.source_face_count} "
+            f"{name}_ngons={scan.ngon_count} "
+            f"{name}_triangles={scan.actual_triangle_count} "
+            f"{name}_strict_warp={scan.strict_planarity_violation_count} "
+            f"{name}_max_abs={scan.maximum_absolute_warp} "
+            f"{name}_max_norm={scan.maximum_normalized_warp}"
         )
-        for name, records in scan_records.items()
+        for name, scan in scans.items()
     )
     print(
         "[MUSHROOMS-REAL-BLEND] PASS "
         f"blend={loaded_blend} objects=Plane.008,Cube.012 "
-        f"{scan_summary} pipeline=public-multi-object"
+        f"{scan_summary} face_loss=0 policy=TRIANGULATE "
+        "pipeline=public-multi-object"
     )
 
 
