@@ -23,6 +23,7 @@ from .shader_capability_policy import (
     SCENE_DEPENDENCIES,
     normalise_render_target,
 )
+from .shader_graph_issue_policy import classify_shader_graph_issue
 
 
 def audit_material_graph_capabilities(
@@ -30,7 +31,13 @@ def audit_material_graph_capabilities(
     *,
     render_target: str,
 ) -> MaterialCapabilityAudit:
-    """Return a deterministic capability report for one renderer-specific graph."""
+    """Return a deterministic capability report for one renderer-specific graph.
+
+    Traversal diagnostics are classified before they affect export capability. A
+    conservative muted-node fallback has already visited every input and therefore
+    remains an advisory on the material analysis. Diagnostics that can omit executable
+    group behavior remain ``UNSUPPORTED`` and fail closed.
+    """
 
     if not isinstance(graph, MaterialGraphSnapshot):
         raise TypeError("graph must be MaterialGraphSnapshot")
@@ -46,11 +53,14 @@ def audit_material_graph_capabilities(
             )
         )
     for issue in graph.issues:
+        classification = classify_shader_graph_issue(issue)
+        if not classification.blocks_export:
+            continue
         findings.append(
             build_finding(
                 ShaderBakeCapability.UNSUPPORTED,
-                "GRAPH_ANALYSIS_INCOMPLETE",
-                issue,
+                classification.capability_code,
+                classification.issue,
             )
         )
 
