@@ -38,6 +38,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.geometry.depth_parallax import (
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.geometry.depth_parallax_budgeted import (
     _build_screen_grid,
+    _merge_view_assignments,
     _proxy_records_for_view,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.geometry.depth_parallax_identity import (
@@ -167,9 +168,11 @@ def _front_snapshot(*, snapshot_id: str = "BudgetedFront") -> MeshSnapshot:
     return snapshot
 
 
-def _view() -> DepthParallaxCameraView:
+def _view(
+    view_id: DepthParallaxViewId = DepthParallaxViewId.RIGHT,
+) -> DepthParallaxCameraView:
     return DepthParallaxCameraView(
-        view_id=DepthParallaxViewId.RIGHT,
+        view_id=view_id,
         yaw_radians=0.2,
         pitch_radians=0.0,
         frame=_frame(),
@@ -207,29 +210,33 @@ def _face_geometry() -> tuple[_FaceGeometry, ...]:
     )
 
 
-def test_proxy_records_reuse_front_vertices_and_do_not_increase_union_budget() -> None:
+def test_proxy_records_add_isolated_vertices_within_reserved_budget() -> None:
     front = _front_snapshot()
     records = _proxy_records_for_view(
-        front,
         _face_geometry(),
         _view(),
         _frame(),
         A1ProjectedPoint(u=0.0, v=0.0, depth=-5.0),
         128.0,
+        point_count=4,
+        generated_source_vertex_base=4,
+        source_object_id=_OBJECT_ID,
     )
 
-    front_positions = {vertex.position for vertex in front.vertices}
-    front_source_ids = {vertex.source_id for vertex in front.vertices}
-    assert records
-    assert all(
-        position in front_positions
-        for record in records
-        for position in record.positions
-    )
-    assert all(
-        source_id in front_source_ids
+    assert len(records) == 2
+    proxy_source_ids = {
+        source_id
         for record in records
         for source_id in record.source_vertex_ids
+    }
+    assert proxy_source_ids == {
+        SourceVertexId(_OBJECT_ID, 4),
+        SourceVertexId(_OBJECT_ID, 5),
+        SourceVertexId(_OBJECT_ID, 6),
+        SourceVertexId(_OBJECT_ID, 7),
+    }
+    assert proxy_source_ids.isdisjoint(
+        {vertex.source_id for vertex in front.vertices}
     )
 
     union = _snapshot_from_records(
@@ -239,9 +246,62 @@ def test_proxy_records_reuse_front_vertices_and_do_not_increase_union_budget() -
         snapshot_suffix="parallax-budget-proxy",
         preserve_source_vertex_ids=False,
     )
-    assert len(union.vertices) == len(front.vertices)
-    assert len(union.vertices) == 4
+    assert len(union.vertices) == len(front.vertices) + 4
+    assert len(union.vertices) == 8
     assert {face.material_index for face in union.faces} == {0, 1}
+
+    loops = union.loop_by_id()
+    front_indices = {
+        loops[loop_id].vertex_id.index
+        for face in union.faces
+        if face.material_index == 0
+        for loop_id in face.loop_ids
+    }
+    reserve_indices = {
+        loops[loop_id].vertex_id.index
+        for face in union.faces
+        if face.material_index == 1
+        for loop_id in face.loop_ids
+    }
+    assert front_indices
+    assert reserve_indices
+    assert front_indices.isdisjoint(reserve_indices)
+
+
+def test_three_point_proxy_uses_one_triangle() -> None:
+    records = _proxy_records_for_view(
+        _face_geometry(),
+        _view(),
+        _frame(),
+        A1ProjectedPoint(u=0.0, v=0.0, depth=-5.0),
+        128.0,
+        point_count=3,
+        generated_source_vertex_base=100,
+        source_object_id=_OBJECT_ID,
+    )
+
+    assert len(records) == 1
+    assert len(set(records[0].source_vertex_ids)) == 3
+    assert len(set(records[0].positions)) == 3
+
+
+def test_low_budget_view_assignments_merge_to_nearest_retained_direction() -> None:
+    assigned = {
+        DepthParallaxViewId.RIGHT: (1, 2, 3, 4),
+        DepthParallaxViewId.UP: (5,),
+        DepthParallaxViewId.LEFT: (6, 7, 8),
+        DepthParallaxViewId.DOWN: (9,),
+    }
+
+    merged = _merge_view_assignments(assigned, maximum_view_count=2)
+
+    assert tuple(merged) == (
+        DepthParallaxViewId.RIGHT,
+        DepthParallaxViewId.LEFT,
+    )
+    assert set(merged[DepthParallaxViewId.RIGHT]) == {1, 2, 3, 4, 5, 9}
+    assert set(merged[DepthParallaxViewId.LEFT]) == {6, 7, 8}
+    assert set().union(*(set(values) for values in merged.values())) == set(range(1, 10))
 
 
 def test_budget_proxy_identity_uses_explicit_complete_render_ownership() -> None:
