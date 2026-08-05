@@ -43,8 +43,7 @@ _FLOWER_SHOP_OBJECT_ID = "banco"
 _MUSHROOMS_WARP_HEIGHT = 0.0007581877679385422
 _CAPTURED_MAXIMUM_PLANE_DISTANCE = 0.00018954694198463555
 
-# Latest real Plane.008 traceback. The synthetic square reproduces both reported metrics
-# with the same Newell-plane and bounding-diagonal definitions as production.
+# Earlier small Plane.008 traceback.
 _PLANE008_SMALL_SIDE_LENGTH = 0.0164835268501562
 _PLANE008_SMALL_WARP_HEIGHT = 0.000379143881919382
 _PLANE008_SMALL_CAPTURED_MAXIMUM_PLANE_DISTANCE = 9.477343601658832e-05
@@ -52,6 +51,18 @@ _PLANE008_SMALL_CAPTURED_POLYGON_SCALE = 0.023314310303391664
 _PLANE008_SMALL_CAPTURED_NORMALIZED_WARP = (
     _PLANE008_SMALL_CAPTURED_MAXIMUM_PLANE_DISTANCE
     / _PLANE008_SMALL_CAPTURED_POLYGON_SCALE
+)
+
+# Exact metrics from the real E:\test_BtSe\mushrooms\mushrooms.blend failure on
+# Plane.008 evaluated source face 15. The square fixture reproduces the reported Newell
+# plane distance and bounding-box diagonal without object-name-specific production logic.
+_PLANE008_FACE15_SIDE_LENGTH = 0.01813398508349017
+_PLANE008_FACE15_WARP_HEIGHT = 0.00060171214277301
+_PLANE008_FACE15_CAPTURED_MAXIMUM_PLANE_DISTANCE = 0.0001503866471090267
+_PLANE008_FACE15_CAPTURED_POLYGON_SCALE = 0.025652385610684413
+_PLANE008_FACE15_CAPTURED_NORMALIZED_WARP = (
+    _PLANE008_FACE15_CAPTURED_MAXIMUM_PLANE_DISTANCE
+    / _PLANE008_FACE15_CAPTURED_POLYGON_SCALE
 )
 
 # Exact synthetic square dimensions reconstructed from the Cube.012 traceback. With
@@ -66,7 +77,7 @@ _CUBE012_CAPTURED_NORMALIZED_WARP = (
 )
 
 _MATERIAL_WARP_HEIGHT = 0.01
-_DEFAULT_ABSOLUTE_PLANARITY_TOLERANCE = 1.0e-4
+_DEFAULT_ABSOLUTE_PLANARITY_TOLERANCE = 2.0e-4
 _DEFAULT_RELATIVE_PLANARITY_TOLERANCE = 1.0e-3
 _DEFAULT_MAXIMUM_RELATIVE_PLANARITY_WARP = 1.0e-2
 _RETIRED_TOO_NARROW_RELATIVE_TOLERANCE = 2.5e-4
@@ -260,6 +271,46 @@ def test_mushrooms_plane_008_small_traceback_uses_bounded_absolute_floor() -> No
     )
     assert (
         _PLANE008_SMALL_CAPTURED_NORMALIZED_WARP
+        < settings.maximum_relative_planarity_warp
+    )
+
+    first = triangulate_snapshot(source)
+    second = triangulate_snapshot(source)
+    assert first == second
+    assert len(first.snapshot.faces) == 2
+    assert len(first.generated_edge_ids) == 1
+
+
+def test_real_mushrooms_plane008_face15_uses_bounded_absolute_floor() -> None:
+    source = _quad_snapshot(
+        _MUSHROOMS_OBJECT_ID,
+        warp_height=_PLANE008_FACE15_WARP_HEIGHT,
+        side_length=_PLANE008_FACE15_SIDE_LENGTH,
+    )
+    maximum_distance, polygon_scale = _captured_planarity_metrics(source)
+    settings = TriangulationSettings()
+
+    assert maximum_distance == pytest.approx(
+        _PLANE008_FACE15_CAPTURED_MAXIMUM_PLANE_DISTANCE,
+        rel=1.0e-12,
+        abs=1.0e-15,
+    )
+    assert polygon_scale == pytest.approx(
+        _PLANE008_FACE15_CAPTURED_POLYGON_SCALE,
+        rel=1.0e-12,
+        abs=1.0e-15,
+    )
+    assert _PLANE008_FACE15_CAPTURED_NORMALIZED_WARP == pytest.approx(
+        0.005862481930194809,
+        rel=1.0e-12,
+    )
+    assert maximum_distance > 1.0e-4
+    assert maximum_distance < settings.planarity_tolerance
+    assert maximum_distance > (
+        settings.relative_planarity_tolerance * polygon_scale
+    )
+    assert (
+        _PLANE008_FACE15_CAPTURED_NORMALIZED_WARP
         < settings.maximum_relative_planarity_warp
     )
 
