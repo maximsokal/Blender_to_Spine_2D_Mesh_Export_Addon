@@ -48,7 +48,7 @@ from .depth_parallax import (
     DepthParallaxReserveSurface,
     DepthParallaxViewId,
 )
-from .depth_parallax_budgeted import build_depth_parallax_geometry_package
+from .depth_parallax_optimized import build_depth_parallax_geometry_package
 from .disk_region import DiskRegionAddition, DiskRegionState, DiskTopologyIndex
 from .fingerprint import build_mesh_fingerprint
 from .ids import (
