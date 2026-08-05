@@ -104,6 +104,7 @@ from .topology import (
     is_simple_disk,
 )
 from .triangulation import (
+    NonPlanarPolygonPolicy,
     TriangulatedFaceInfo,
     TriangulationError,
     TriangulationResult,
@@ -174,6 +175,7 @@ __all__ = [
     "MeshWorldTransformResult",
     "MissingSourceLoopError",
     "ModifierLineagePolicy",
+    "NonPlanarPolygonPolicy",
     "RegionTopologyError",
     "SegmentBoundaryEdge",
     "SegmentBoundaryReason",
