@@ -27,6 +27,7 @@ from .validator import MeshSnapshotValidator
 
 
 logger = logging.getLogger(__name__)
+_BUDGET_PROXY_MARKER = ":parallax-budget-proxy:"
 
 
 def _evaluated_render_face_indices(
@@ -34,16 +35,29 @@ def _evaluated_render_face_indices(
 ) -> tuple[int, ...]:
     """Resolve original evaluated polygon indices from reserve provenance.
 
-    ``surface.source_face_indices`` may still contain triangulated working indices from
-    horizon expansion. The reserve snapshot itself retains SourceFaceId values copied
-    from evaluated Blender polygons, including legal repetition when one n-gon emitted
-    several triangles. Those historical values are the only valid indices for BMesh face
-    isolation on the temporary evaluated render proxy.
+    Exact reserve snapshots retain ``SourceFaceId`` values copied from evaluated Blender
+    polygons, including legal repetition when one n-gon emitted several triangles.
+
+    A budgeted proxy intentionally contains only a few rig triangles and therefore cannot
+    encode every render owner in those triangle ``SourceFaceId`` values. Its snapshot ID
+    carries the private ``parallax-budget-proxy`` marker and its
+    ``surface.source_face_indices`` already contains the complete sorted evaluated-polygon
+    ownership produced by the budgeted parallax owner.
     """
 
     if not isinstance(surface, DepthParallaxReserveSurface):
         raise TypeError("surface must be DepthParallaxReserveSurface")
     MeshSnapshotValidator().validate_or_raise(surface.snapshot)
+
+    if _BUDGET_PROXY_MARKER in surface.snapshot.snapshot_id:
+        resolved = tuple(sorted(set(surface.source_face_indices)))
+        if not resolved:
+            raise ValueError(
+                f"Budgeted reserve view {surface.view.view_id.value} has no evaluated "
+                "face ownership"
+            )
+        return resolved
+
     resolved = tuple(
         sorted(
             {
