@@ -145,8 +145,6 @@ def _snapshot(
 
 
 def _low_density_bent_flap() -> MeshSnapshot:
-    # The front quad occludes a 45-degree flap folded behind its right edge. The flap
-    # therefore enters only through accumulated shared-edge horizon expansion.
     return _snapshot(
         (
             (-0.5, -0.5, 0.0),
@@ -166,8 +164,6 @@ def _low_density_bent_flap() -> MeshSnapshot:
 
 
 def _high_density_bent_flap() -> MeshSnapshot:
-    # Same physical 45-degree flap, split into two coplanar strips. Polygon density must
-    # not change the angle required to retain its far edge.
     return _snapshot(
         (
             (-0.5, -0.5, 0.0),
@@ -313,9 +309,13 @@ def test_combined_front_and_reserve_points_obey_max_depth_points() -> None:
 
     with pytest.raises(
         DepthCameraProjectionError,
-        match="Parallax Horizon Angle exceeds Max Depth Points",
-    ):
+        match="Positive Parallax Horizon has no reserve point budget after FRONT",
+    ) as error:
         _package(source, 50.0, max_points=5)
+
+    message = str(error.value)
+    assert "front_points=4" in message
+    assert "max_points=5" in message
 
 
 def test_parallax_geometry_package_is_deterministic() -> None:
