@@ -13,7 +13,9 @@ from ..domain.baking import (
     BakeSettings,
     CameraProjectionPlan,
     GroupedCameraProjectionPlan,
+    ProjectionUvBounds,
     ResolvedProjectionOutputPolicy,
+    expand_projection_layout_to_uv_bounds,
 )
 from ..domain.baking.projection_layout import (
     CameraProjectionLayout,
@@ -47,6 +49,7 @@ class ProjectionPostprocessRequest:
     frame_tasks: Tuple[BakeFrameTask, ...]
     execution_settings: BakeExecutionSettings
     output_policy: ResolvedProjectionOutputPolicy
+    required_uv_bounds: ProjectionUvBounds | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.owner_id, str) or not self.owner_id.strip():
@@ -99,6 +102,13 @@ class ProjectionPostprocessRequest:
             raise CameraProjectionExecutionError(
                 "resolved output policy texture format does not match "
                 "projection settings"
+            )
+        if self.required_uv_bounds is not None and not isinstance(
+            self.required_uv_bounds,
+            ProjectionUvBounds,
+        ):
+            raise TypeError(
+                "required_uv_bounds must be ProjectionUvBounds or None"
             )
 
         resolved_paths: list[Path] = []
@@ -154,11 +164,19 @@ def validate_projection_postprocess_reservations(
 
 def build_camera_projection_postprocess_request(
     runtime: CameraProjectionRuntime,
+    required_uv_bounds: ProjectionUvBounds | None = None,
 ) -> ProjectionPostprocessRequest:
     """Adapt one validated camera runtime to the shared postprocess request."""
 
     if not isinstance(runtime, CameraProjectionRuntime):
         raise TypeError("runtime must be CameraProjectionRuntime")
+    if required_uv_bounds is not None and not isinstance(
+        required_uv_bounds,
+        ProjectionUvBounds,
+    ):
+        raise TypeError(
+            "required_uv_bounds must be ProjectionUvBounds or None"
+        )
     return ProjectionPostprocessRequest(
         owner_id=runtime.plan.source_object_id,
         bpy_module=runtime.bpy_module,
@@ -167,6 +185,7 @@ def build_camera_projection_postprocess_request(
         frame_tasks=runtime.plan.frame_tasks,
         execution_settings=runtime.execution_settings,
         output_policy=runtime.output_policy,
+        required_uv_bounds=required_uv_bounds,
     )
 
 
@@ -214,7 +233,8 @@ def log_projection_layout(
         "raw_nonzero=%d strong=%d final_visible=%d components=%d->%d "
         "removed=%d filled_holes=%d weak_only=%s frames=%d union_bytes=%d "
         "fringe_threshold=%.8f core_threshold=%.8f simplify_tolerance=%.4f "
-        "dynamic_range=%s tone_mapping=%s alpha=%s color_depth=%s",
+        "dynamic_range=%s tone_mapping=%s alpha=%s color_depth=%s "
+        "geometry_uv_bounds=%r",
         request.owner_id,
         layout.full_width,
         layout.full_height,
@@ -247,6 +267,7 @@ def log_projection_layout(
         request.output_policy.tone_mapping.value,
         request.output_policy.alpha_representation.value,
         request.output_policy.color_depth,
+        request.required_uv_bounds,
     )
 
 
@@ -290,9 +311,28 @@ def process_projection_outputs(
         )
 
     try:
-        layout = accumulator.build_layout()
+        alpha_layout = accumulator.build_layout()
+        layout = expand_projection_layout_to_uv_bounds(
+            alpha_layout,
+            request.required_uv_bounds,
+        )
     except CameraProjectionLayoutError as exc:
         raise CameraProjectionExecutionError(str(exc)) from exc
+
+    if layout.crop != alpha_layout.crop:
+        logger.info(
+            "Expanded projection crop '%s' for prepared attachment UVs: "
+            "alpha=(%d,%d)-(%d,%d), final=(%d,%d)-(%d,%d)",
+            request.owner_id,
+            alpha_layout.crop.minimum_x,
+            alpha_layout.crop.minimum_y,
+            alpha_layout.crop.maximum_x,
+            alpha_layout.crop.maximum_y,
+            layout.crop.minimum_x,
+            layout.crop.minimum_y,
+            layout.crop.maximum_x,
+            layout.crop.maximum_y,
+        )
 
     for reservation in resolved:
         rewrite_staged_image_with_crop(
