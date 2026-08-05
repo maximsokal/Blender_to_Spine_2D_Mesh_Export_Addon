@@ -1,4 +1,4 @@
-"""Collect per-view UV envelopes before camera images are physically cropped."""
+"""Collect reserve-view UV envelopes before camera images are physically cropped."""
 
 from __future__ import annotations
 
@@ -72,10 +72,12 @@ def _attachment_uvs(
 def depth_projection_required_uv_bounds(
     prepared: PreparedA1Object,
 ) -> Mapping[str, ProjectionUvBounds] | None:
-    """Return exact full-frame UV bounds for every prepared Depth camera view.
+    """Return exact UV bounds for reserve views without changing FRONT-only output.
 
-    Non-Depth objects return ``None`` so existing Normal UV and flat camera projection
-    routes remain byte-for-byte independent of this contract.
+    Non-Depth objects and Depth objects without reserve plans return ``None``. The active
+    FRONT view therefore retains the established alpha-only crop, including the complete
+    zero-horizon compatibility path. Positive parallax views receive geometry-required
+    bounds because compact proxy UV envelopes can legitimately exceed rendered alpha.
     """
 
     if not isinstance(prepared, PreparedA1Object):
@@ -83,7 +85,15 @@ def depth_projection_required_uv_bounds(
     if not isinstance(prepared, PreparedDepthA1Object):
         return None
 
-    resolved: dict[str, ProjectionUvBounds] = {}
+    expected_all = {_FRONT_VIEW_ID}
+    expected_reserve = {
+        plan.view_id.strip().upper()
+        for plan in prepared.reserve_bake_plans
+    }
+    expected_all.update(expected_reserve)
+
+    resolved_all: set[str] = set()
+    resolved_reserve: dict[str, ProjectionUvBounds] = {}
     for projection_index, projection in enumerate(
         prepared.document_assembly.projections
     ):
@@ -92,10 +102,14 @@ def depth_projection_required_uv_bounds(
             prepared.prefix,
             request.slot_name,
         )
-        if view_id in resolved:
+        if view_id in resolved_all:
             raise A1DepthProjectionCropRequirementError(
                 f"Prepared Depth document contains duplicate projection view {view_id}"
             )
+        resolved_all.add(view_id)
+
+        if view_id == _FRONT_VIEW_ID:
+            continue
 
         values: list[tuple[float, float]] = [
             (float(vertex.uv[0]), float(vertex.uv[1]))
@@ -113,23 +127,29 @@ def depth_projection_required_uv_bounds(
                 attachment_name=request.attachment_name,
             )
         )
-        resolved[view_id] = ProjectionUvBounds.from_uvs(
+        resolved_reserve[view_id] = ProjectionUvBounds.from_uvs(
             values,
             field_name=(
                 f"projections[{projection_index}].{view_id}.required_uvs"
             ),
         )
 
-    expected = {_FRONT_VIEW_ID}
-    expected.update(plan.view_id.strip().upper() for plan in prepared.reserve_bake_plans)
-    missing = tuple(sorted(expected - set(resolved)))
-    unknown = tuple(sorted(set(resolved) - expected))
+    missing = tuple(sorted(expected_all - resolved_all))
+    unknown = tuple(sorted(resolved_all - expected_all))
     if missing or unknown:
         raise A1DepthProjectionCropRequirementError(
             "Prepared Depth projection views do not match texture plans; "
             f"missing={missing}, unknown={unknown}"
         )
-    return MappingProxyType(resolved)
+    if set(resolved_reserve) != expected_reserve:
+        raise A1DepthProjectionCropRequirementError(
+            "Prepared Depth reserve UV bounds do not match reserve plans; "
+            f"required={tuple(sorted(expected_reserve))}, "
+            f"resolved={tuple(sorted(resolved_reserve))}"
+        )
+    if not resolved_reserve:
+        return None
+    return MappingProxyType(resolved_reserve)
 
 
 __all__ = [
