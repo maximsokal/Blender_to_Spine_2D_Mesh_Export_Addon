@@ -50,6 +50,7 @@ from run_bake_integration import (  # noqa: E402
 )
 from run_mushrooms_real_blend_integration import (  # noqa: E402
     _camera_fingerprint,
+    _loaded_scene_render_engine,
     _object_fingerprint,
     _require_loaded_blend,
     _require_source_objects,
@@ -144,6 +145,7 @@ def _run(expected_blend: str) -> None:
 
     context_before = _capture_context()
     frame_before = int(bpy.context.scene.frame_current)
+    render_engine_before = _loaded_scene_render_engine()
     camera_before = _camera_fingerprint()
     object_before = {
         source.name: _object_fingerprint(source)
@@ -156,21 +158,31 @@ def _run(expected_blend: str) -> None:
         prefix="spine2d_mushrooms_parallax_budget_"
     ) as directory:
         output_directory = Path(directory)
-        component_sources = tuple(
-            A1MultiObjectSource(
-                source_object=source,
-                component_id=f"object_{index}:{source.name}",
-                settings=_positive_parallax_settings(
-                    output_directory,
-                    prefix=f"MushroomsBudget_{source.name.replace('.', '_')}",
+        component_sources: list[A1MultiObjectSource] = []
+        for index, source in enumerate(sources, start=1):
+            settings = _positive_parallax_settings(
+                output_directory,
+                prefix=f"MushroomsBudget_{source.name.replace('.', '_')}",
+            )
+            _assert(
+                settings.bake_execution.render_engine == render_engine_before,
+                (
+                    f"{source.name} request renderer differs from loaded Scene: "
+                    f"requested={settings.bake_execution.render_engine}, "
+                    f"scene={render_engine_before}"
                 ),
             )
-            for index, source in enumerate(sources, start=1)
-        )
+            component_sources.append(
+                A1MultiObjectSource(
+                    source_object=source,
+                    component_id=f"object_{index}:{source.name}",
+                    settings=settings,
+                )
+            )
 
         started = perf_counter()
         prepared_multi = prepare_a1_multi_object(
-            component_sources,
+            tuple(component_sources),
             A1MultiObjectExportSettings(
                 output_directory=output_directory,
                 output_stem=_MULTI_STEM,
@@ -256,6 +268,10 @@ def _run(expected_blend: str) -> None:
         "real blend Scene frame changed",
     )
     _assert(
+        _loaded_scene_render_engine() == render_engine_before,
+        "real blend render engine changed",
+    )
+    _assert(
         _camera_fingerprint() == camera_before,
         "real blend active camera changed",
     )
@@ -279,6 +295,7 @@ def _run(expected_blend: str) -> None:
     print(
         "[MUSHROOMS-REAL-PARALLAX-BUDGET] PASS "
         f"blend={loaded} horizon={_HORIZON_DEGREES}deg max_points={_MAX_POINTS} "
+        f"render_engine={render_engine_before} "
         f"plane_union={len(plane_package.union_snapshot.vertices)} "
         f"plane_reserve_owners={plane_owner_count} "
         f"plane_views={len(plane_package.reserve_surfaces)} "
