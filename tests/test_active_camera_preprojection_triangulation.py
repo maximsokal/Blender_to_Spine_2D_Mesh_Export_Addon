@@ -23,11 +23,13 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import (
     MeshLoop,
     MeshSnapshot,
     MeshVertex,
+    NonPlanarPolygonPolicy,
     SourceEdgeId,
     SourceFaceId,
     SourceLoopId,
     SourceVertexId,
     TriangulationError,
+    TriangulationSettings,
     VertexId,
     project_a1_mesh_snapshot_camera,
     triangulate_snapshot,
@@ -55,7 +57,11 @@ _IDENTITY = (
 )
 
 
-def _translation_matrix(x: float, y: float, z: float) -> tuple[float, ...]:
+def _translation_matrix(
+    x: float,
+    y: float,
+    z: float,
+) -> tuple[float, ...]:
     return (
         1.0,
         0.0,
@@ -130,7 +136,11 @@ def _tilted_planar_quad() -> MeshSnapshot:
         (-1.0, 1.0, 0.5),
     )
     magnitude = sqrt(1.0 + 0.25 * 0.25 + 0.25 * 0.25)
-    normal = (-0.25 / magnitude, -0.25 / magnitude, 1.0 / magnitude)
+    normal = (
+        -0.25 / magnitude,
+        -0.25 / magnitude,
+        1.0 / magnitude,
+    )
 
     vertices = tuple(
         MeshVertex(
@@ -145,7 +155,10 @@ def _tilted_planar_quad() -> MeshSnapshot:
         MeshEdge(
             id=EdgeId(index),
             source_id=SourceEdgeId(_OBJECT_ID, index),
-            vertex_ids=(VertexId(index), VertexId((index + 1) % 4)),
+            vertex_ids=(
+                VertexId(index),
+                VertexId((index + 1) % 4),
+            ),
         )
         for index in range(4)
     )
@@ -186,8 +199,16 @@ def test_perspective_projection_before_triangulation_reproduces_nonplanarity() -
         uniform_scale=100.0,
     )
 
-    with pytest.raises(TriangulationError, match="Polygon is not planar"):
-        triangulate_snapshot(projected.snapshot)
+    with pytest.raises(
+        TriangulationError,
+        match="Polygon is not planar",
+    ):
+        triangulate_snapshot(
+            projected.snapshot,
+            TriangulationSettings(
+                non_planar_policy=NonPlanarPolygonPolicy.REJECT,
+            ),
+        )
 
 
 def test_world_triangulation_then_camera_projection_preserves_regions_and_lineage() -> None:
@@ -215,9 +236,17 @@ def test_world_triangulation_then_camera_projection_preserves_regions_and_lineag
     projected_region = projected_geometry.regions[0]
     assert len(world_region.snapshot.faces) == 2
     assert len(projected_region.snapshot.faces) == 2
-    assert all(len(face.loop_ids) == 3 for face in projected_region.snapshot.faces)
-    assert projected_region.source_face_ids == (SourceFaceId(_OBJECT_ID, 0),)
-    assert projected_region.triangulation.faces == world_region.triangulation.faces
+    assert all(
+        len(face.loop_ids) == 3
+        for face in projected_region.snapshot.faces
+    )
+    assert projected_region.source_face_ids == (
+        SourceFaceId(_OBJECT_ID, 0),
+    )
+    assert (
+        projected_region.triangulation.faces
+        == world_region.triangulation.faces
+    )
     assert (
         projected_region.triangulation.generated_edge_ids
         == world_region.triangulation.generated_edge_ids
@@ -235,11 +264,22 @@ def test_world_triangulation_then_camera_projection_preserves_regions_and_lineag
     for source_id, expected in expected_by_source.items():
         actual = actual_by_source[source_id]
         assert all(
-            isclose(actual_value, expected_value, abs_tol=1.0e-12)
-            for actual_value, expected_value in zip(actual, expected, strict=True)
+            isclose(
+                actual_value,
+                expected_value,
+                abs_tol=1.0e-12,
+            )
+            for actual_value, expected_value in zip(
+                actual,
+                expected,
+                strict=True,
+            )
         )
 
-    assert projected_region.snapshot.world_matrix == direct_projection.snapshot.world_matrix
+    assert (
+        projected_region.snapshot.world_matrix
+        == direct_projection.snapshot.world_matrix
+    )
     assert tuple(vertex.position for vertex in source.vertices) == (
         (-1.0, -1.0, 0.0),
         (1.0, -1.0, 0.5),
