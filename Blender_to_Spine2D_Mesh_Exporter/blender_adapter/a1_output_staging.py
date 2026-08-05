@@ -14,6 +14,9 @@ from ..application import (
     scale_a1_export_progress_callback,
 )
 from ..infrastructure import AtomicFileTransaction, AtomicOutputReservation
+from .a1_depth_projection_crop_requirements import (
+    depth_projection_required_uv_bounds,
+)
 from .a1_multi_object_contracts import (
     PreparedA1MultiObject,
     record_object_statistics,
@@ -110,6 +113,9 @@ def stage_and_finalize_a1_objects(
             reserve_plans = tuple(
                 getattr(item, "reserve_bake_plans", ())
             )
+            projection_uv_bounds_by_view = (
+                depth_projection_required_uv_bounds(item)
+            )
             staged = stage_texture_plan_outputs(
                 item.source_object,
                 item.bake_target_snapshot,
@@ -117,6 +123,7 @@ def stage_and_finalize_a1_objects(
                 transaction,
                 item.settings.bake_execution,
                 reserve_plans=reserve_plans,
+                projection_uv_bounds_by_view=projection_uv_bounds_by_view,
                 context=context,
                 scene=scene,
                 progress_callback=object_progress,
