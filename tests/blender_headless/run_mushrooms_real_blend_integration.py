@@ -7,6 +7,8 @@ coverage before the same objects enter the public multi-object Depth pipeline.
 
 Non-planar quads are valid curved-surface geometry. Their strict planarity metrics are
 reported as diagnostics, never used to delete or skip faces in the default export path.
+The request renderer is resolved from the loaded Scene so this direct asset regression
+never imports a synthetic fixture's Cycles default into an Eevee-authored file.
 """
 
 from __future__ import annotations
@@ -49,6 +51,9 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_source_geometry_prepara
     _normalize_source_geometry,
     _read_source_snapshot,
     _resolve_source_request,
+)
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.render_engine_contract import (  # noqa: E402
+    render_engine_contract,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import (  # noqa: E402
     MeshSnapshot,
@@ -163,7 +168,28 @@ def _require_source_objects() -> tuple[object, ...]:
     return tuple(resolved)
 
 
+def _loaded_scene_render_engine() -> str:
+    """Return the canonical engine of the currently loaded real Scene."""
+
+    scene = getattr(bpy.context, "scene", None)
+    render = getattr(scene, "render", None)
+    value = getattr(render, "engine", None)
+    if not isinstance(value, str) or not value.strip():
+        raise RealBlendRegressionError(
+            "The loaded mushrooms Scene has no valid render engine"
+        )
+    try:
+        return render_engine_contract(value).blender_engine
+    except Exception as exc:
+        raise RealBlendRegressionError(
+            "The loaded mushrooms Scene uses an unsupported render engine: "
+            f"{value!r}"
+        ) from exc
+
+
 def _settings(output_directory: Path, *, prefix: str):
+    """Build real-asset settings without importing a synthetic renderer default."""
+
     if not isinstance(output_directory, Path):
         raise TypeError("output_directory must be pathlib.Path")
     if not isinstance(prefix, str) or not prefix.strip():
@@ -178,6 +204,10 @@ def _settings(output_directory: Path, *, prefix: str):
         export=replace(
             base.export,
             output_directory=output_directory,
+        ),
+        bake_execution=replace(
+            base.bake_execution,
+            render_engine=_loaded_scene_render_engine(),
         ),
     )
 
@@ -444,6 +474,7 @@ def _run(expected_blend: str) -> None:
     sources = _require_source_objects()
     context_before = _capture_context()
     frame_before = int(bpy.context.scene.frame_current)
+    render_engine_before = _loaded_scene_render_engine()
     camera_before = _camera_fingerprint()
     object_before = {
         source.name: _object_fingerprint(source)
@@ -461,6 +492,12 @@ def _run(expected_blend: str) -> None:
         for index, source in enumerate(sources, start=1):
             prefix = f"MushroomsReal_{source.name.replace('.', '_')}"
             settings = _settings(output_directory, prefix=prefix)
+            if settings.bake_execution.render_engine != render_engine_before:
+                raise RealBlendRegressionError(
+                    "Real-asset request renderer differs from loaded Scene; "
+                    f"requested={settings.bake_execution.render_engine}, "
+                    f"scene={render_engine_before}"
+                )
             normalized = _read_normalized_snapshot(source, settings)
             scans[source.name] = _scan_snapshot_triangulation(normalized)
             component_sources.append(
@@ -527,6 +564,10 @@ def _run(expected_blend: str) -> None:
         "real blend Scene frame changed",
     )
     _assert(
+        _loaded_scene_render_engine() == render_engine_before,
+        "real blend render engine changed",
+    )
+    _assert(
         _camera_fingerprint() == camera_before,
         "real blend active camera changed",
     )
@@ -557,8 +598,8 @@ def _run(expected_blend: str) -> None:
     print(
         "[MUSHROOMS-REAL-BLEND] PASS "
         f"blend={loaded_blend} objects=Plane.008,Cube.012 "
-        f"{scan_summary} face_loss=0 policy=TRIANGULATE "
-        "pipeline=public-multi-object"
+        f"render_engine={render_engine_before} {scan_summary} "
+        "face_loss=0 policy=TRIANGULATE pipeline=public-multi-object"
     )
 
 
