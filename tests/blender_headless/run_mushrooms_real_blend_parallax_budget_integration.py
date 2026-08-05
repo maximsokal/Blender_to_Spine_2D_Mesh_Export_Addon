@@ -98,6 +98,11 @@ class _ProgressRecorder:
     def __call__(self, update: A1ExportProgressUpdate) -> None:
         if not isinstance(update, A1ExportProgressUpdate):
             raise TypeError("progress update must be A1ExportProgressUpdate")
+        # Child Depth updates carry the Blender object id while outer stages carry the
+        # multi-object component id. Normalize only this known real object so one timing
+        # stream remains queryable without changing production progress semantics.
+        if update.object_id == "Plane.008":
+            update = replace(update, object_id=_PLANE_COMPONENT_ID)
         elapsed = perf_counter() - self._started
         event = _TimedProgressEvent(elapsed, update)
         self._events.append(event)
