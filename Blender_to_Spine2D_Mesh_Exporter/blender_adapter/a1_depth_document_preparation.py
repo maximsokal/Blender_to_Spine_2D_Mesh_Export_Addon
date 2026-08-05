@@ -13,10 +13,15 @@ from ..domain.baking import A1TextureExportMode, CameraProjectionPlan
 from ..domain.geometry import DepthParallaxGeometryPackage, DepthProjectionBaseMode
 from ..domain.spine.legacy_rig_contracts import (
     LegacyRigBuildRequest,
+    LegacyZGroup,
     LegacyZGroupOriginMode,
+    UniformScaleMode,
 )
 from ..domain.spine.rig_builder import build_rig
-from ..domain.spine.rig_profiles import resolve_a1_rig_profile
+from ..domain.spine.rig_profiles import (
+    A1RigSetupPoseMode,
+    resolve_a1_rig_profile,
+)
 from .a1_depth_document_assembly import (
     assemble_and_finalize_a1_depth_document,
 )
@@ -44,6 +49,58 @@ def _resolve_depth_z_group_origin_mode(
     }:
         return LegacyZGroupOriginMode.OBJECT_ORIGIN
     raise AssertionError(f"Unhandled depth base mode: {base_mode}")
+
+
+def _build_depth_rig_request(
+    *,
+    prefix: str,
+    texture_width: int,
+    texture_height: int,
+    z_groups: tuple[LegacyZGroup, ...],
+    main_position_pixels: tuple[float, float] | None,
+    scale_mode: UniformScaleMode,
+    base_mode: DepthProjectionBaseMode,
+) -> LegacyRigBuildRequest:
+    """Build the only setup-pose contract valid for a camera-depth surface.
+
+    Depth Camera Projection has already converted every generated vertex to screen X/Y
+    and absolute positive camera distance. Reusing the ordinary model-space setup adds
+    the historical -134.67 and -17.43 degree offsets before the user touches a control,
+    which rotates the setup mesh away from the rendered camera view. The dedicated mode
+    keeps all per-vertex depth groups, but makes the camera-facing setup neutral.
+    """
+
+    if not isinstance(prefix, str) or not prefix.strip():
+        raise ValueError("prefix must be a non-empty string")
+    if isinstance(texture_width, bool) or not isinstance(texture_width, int):
+        raise TypeError("texture_width must be int")
+    if isinstance(texture_height, bool) or not isinstance(texture_height, int):
+        raise TypeError("texture_height must be int")
+    if not isinstance(z_groups, tuple) or not z_groups:
+        raise ValueError("z_groups must be a non-empty tuple")
+    if not all(isinstance(group, LegacyZGroup) for group in z_groups):
+        raise TypeError("z_groups must contain LegacyZGroup values")
+    if main_position_pixels is not None:
+        if (
+            not isinstance(main_position_pixels, tuple)
+            or len(main_position_pixels) != 2
+        ):
+            raise TypeError(
+                "main_position_pixels must contain two values or be None"
+            )
+    if not isinstance(scale_mode, UniformScaleMode):
+        raise TypeError("scale_mode must be UniformScaleMode")
+
+    return LegacyRigBuildRequest(
+        prefix=prefix,
+        texture_width=texture_width,
+        texture_height=texture_height,
+        z_groups=z_groups,
+        main_position_pixels=main_position_pixels,
+        scale_mode=scale_mode,
+        setup_pose_mode=A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE,
+        z_group_origin_mode=_resolve_depth_z_group_origin_mode(base_mode),
+    )
 
 
 def _resolve_depth_document_inputs(
@@ -101,9 +158,6 @@ def prepare_a1_depth_document(
             source.settings.export.rig_profile
         )
         depth_settings = source.settings.bake_execution.depth_projection
-        z_origin_mode = _resolve_depth_z_group_origin_mode(
-            depth_settings.base_mode
-        )
         main_position = calculate_a1_object_bake_main_position_pixels(
             source.source_snapshot,
             source.settings,
@@ -113,17 +167,17 @@ def prepare_a1_depth_document(
                 "Depth Camera Projection lost projected Object Origin placement"
             )
 
+        rig_request = _build_depth_rig_request(
+            prefix=source.prefix,
+            texture_width=source.settings.export.texture_width,
+            texture_height=source.settings.export.texture_height,
+            z_groups=source.z_groups.groups,
+            main_position_pixels=main_position,
+            scale_mode=source.settings.rig_scale_mode,
+            base_mode=depth_settings.base_mode,
+        )
         rig = build_rig(
-            LegacyRigBuildRequest(
-                prefix=source.prefix,
-                texture_width=source.settings.export.texture_width,
-                texture_height=source.settings.export.texture_height,
-                z_groups=source.z_groups.groups,
-                main_position_pixels=main_position,
-                scale_mode=source.settings.rig_scale_mode,
-                setup_pose_mode=source.settings.rig_setup_pose_mode,
-                z_group_origin_mode=z_origin_mode,
-            ),
+            rig_request,
             resolved_profile,
             spine_target=source.settings.export.spine_target,
         )
@@ -137,6 +191,11 @@ def prepare_a1_depth_document(
             raise ValueError(
                 f"Depth rig lost camera-distance ordering: offsets={offsets}"
             )
+        if rig.request.setup_pose_mode is not A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE:
+            raise ValueError(
+                "Depth Camera Projection did not receive its neutral multi-depth "
+                f"setup mode: {rig.request.setup_pose_mode.value}"
+            )
 
         statistics = freeze_statistics(
             statistics,
@@ -144,10 +203,14 @@ def prepare_a1_depth_document(
                 "base_rig_bone_count": len(rig.bones),
                 "rig_profile": rig.profile.profile_id,
                 "rig_setup_pose_mode": rig.request.setup_pose_mode.value,
+                "requested_rig_setup_pose_mode": (
+                    source.settings.rig_setup_pose_mode.value
+                ),
                 "z_group_origin_mode": rig.request.z_group_origin_mode.value,
                 "depth_camera_vertex_rig": 1,
                 "depth_camera_global_camera_zero": 1,
                 "depth_camera_absolute_distance_retained": 1,
+                "depth_camera_neutral_setup_pose": 1,
                 "depth_camera_relief_base_mode": depth_settings.base_mode.value,
                 "depth_camera_minimum_rig_offset": min(offsets),
                 "depth_camera_maximum_rig_offset": max(offsets),
@@ -257,6 +320,7 @@ def prepare_a1_depth_document(
 
 
 __all__ = [
+    "_build_depth_rig_request",
     "_resolve_depth_document_inputs",
     "_resolve_depth_z_group_origin_mode",
     "prepare_a1_depth_document",
