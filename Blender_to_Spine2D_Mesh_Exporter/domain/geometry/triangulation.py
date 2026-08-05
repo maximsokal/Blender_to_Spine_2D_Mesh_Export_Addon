@@ -29,10 +29,10 @@ class TriangulationSettings:
     epsilon: float = 1e-10
 
     # Blender's evaluated float mesh can contain sub-millimetre n-gon residue even when
-    # the polygon is still safe to triangulate. This absolute floor accepts the captured
-    # small Plane.008 polygon without weakening the scale-relative rule for normal-sized
-    # geometry.
-    planarity_tolerance: float = 1.0e-4
+    # the polygon is still safe to triangulate. The 0.0002 absolute floor accepts all
+    # captured Plane.008 faces from the real mushrooms asset, including source face 15,
+    # without weakening the independent 1% normalized-warp hard ceiling.
+    planarity_tolerance: float = 2.0e-4
 
     # Normal-sized polygons may use at most 0.1% of their bounding-box diagonal as the
     # ordinary planarity window.
