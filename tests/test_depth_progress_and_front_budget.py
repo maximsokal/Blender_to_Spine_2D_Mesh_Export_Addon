@@ -76,17 +76,24 @@ def test_positive_horizon_rejects_impossible_shared_budget_before_geometry_work(
         )
 
 
-def test_object_orchestrator_threads_progress_callback_into_depth_preparation() -> None:
+def test_object_orchestrator_threads_progress_without_breaking_legacy_callers() -> None:
     source = OBJECT_PREPARATION.read_text(encoding="utf-8")
 
-    assert "progress_callback: A1ExportProgressCallback | None," in source
+    assert "progress_callback: A1ExportProgressCallback | None = None," in source
+    assert "if progress_callback is None:" in source
+    assert source.count("return prepare_a1_depth_source_geometry(") == 2
     assert "progress_callback=progress_callback," in source
-    assert "prepare_a1_depth_source_geometry(" in source
-    depth_call = source.split("return prepare_a1_depth_source_geometry(", 1)[1].split(
-        ")",
+
+    no_callback_branch = source.split("if progress_callback is None:", 1)[1].split(
+        "return prepare_a1_depth_source_geometry(",
         1,
-    )[0]
-    assert "progress_callback=progress_callback" in depth_call
+    )[1].split(")", 1)[0]
+    callback_branch = source.rsplit(
+        "return prepare_a1_depth_source_geometry(",
+        1,
+    )[1].split(")", 1)[0]
+    assert "progress_callback=" not in no_callback_branch
+    assert "progress_callback=progress_callback" in callback_branch
 
 
 def test_depth_preparation_emits_intermediate_progress_and_reserves_front_budget() -> None:
