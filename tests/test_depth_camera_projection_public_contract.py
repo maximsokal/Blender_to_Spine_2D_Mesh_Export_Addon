@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 import tomllib
 
@@ -75,6 +76,48 @@ def _profile(mode: A1TextureExportMode) -> _SceneExportProfile:
         texture_export_mode=mode,
         projection_direction=A1ProjectionDirection.NEGATIVE_X,
     )
+
+
+def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
+    return next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    )
+
+
+def _call_name(call: ast.Call) -> str | None:
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    return None
+
+
+def _attribute_path(node: ast.AST) -> tuple[str, ...] | None:
+    parts: list[str] = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return None
+    parts.append(current.id)
+    return tuple(reversed(parts))
+
+
+def _depth_z_group_source_path() -> tuple[str, ...]:
+    tree = ast.parse(_read(DEPTH_SOURCE), filename=DEPTH_SOURCE.name)
+    public = _function(tree, "prepare_a1_depth_source_geometry")
+    calls = tuple(
+        node
+        for node in ast.walk(public)
+        if isinstance(node, ast.Call)
+        and _call_name(node) == "build_a1_z_group_assignment"
+    )
+    assert len(calls) == 1
+    assert len(calls[0].args) == 1
+    path = _attribute_path(calls[0].args[0])
+    assert path is not None
+    return path
 
 
 def test_public_texture_mode_enum_contains_exactly_three_choices() -> None:
@@ -163,7 +206,11 @@ def test_depth_route_uses_shared_camera_distance_and_compensated_view_attachment
     assert "build_depth_parallax_geometry_package(" in source
     assert "_package_to_camera_distance(" in source
     assert "convert_depth_snapshot_to_camera_distance(" in source
-    assert "build_a1_z_group_assignment(depth_package.union_snapshot)" in source
+    assert _depth_z_group_source_path() == (
+        "projection_stage",
+        "depth_package",
+        "union_snapshot",
+    )
     assert "positive distances from shared camera zero" in source
     assert "LegacyZGroupOriginMode.OBJECT_ORIGIN" in document
     assert "LegacyZGroupOriginMode.MINIMUM_Z" not in document
