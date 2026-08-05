@@ -11,6 +11,7 @@ from .legacy_rig_contracts import (
 )
 from .legacy_rig_plan import LegacyRigBuildPlan
 from .model import IKConstraint, TransformConstraint
+from .rig_profiles import A1RigSetupPoseMode
 
 
 def build_legacy_constraints(
@@ -18,7 +19,12 @@ def build_legacy_constraints(
     profile: LegacyRigProfile,
     info: LegacyRigInfo,
 ) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
-    """Compatibility-shaped constraint builder using resolved immutable metadata."""
+    """Compatibility-shaped constraint builder using resolved immutable metadata.
+
+    Ordinary model-space exports retain every historical setup offset. Depth Camera
+    Projection is already camera-facing and uses ``CAMERA_DEPTH_SURFACE`` so its setup
+    remains neutral while the X/Y/Z controls continue to drive the same constraints.
+    """
 
     if not isinstance(request, LegacyRigBuildRequest):
         raise TypeError("request must be LegacyRigBuildRequest")
@@ -27,6 +33,9 @@ def build_legacy_constraints(
     if not isinstance(info, LegacyRigInfo):
         raise TypeError("info must be LegacyRigInfo")
 
+    neutral_camera_setup = (
+        request.setup_pose_mode is A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE
+    )
     prefix = request.prefix
     control_x, control_y, control_z = info.control_bone_names
     constraint_bone, _, constraint_rotate_ik, constraint_ik = (
@@ -50,7 +59,7 @@ def build_legacy_constraints(
             bones=info.sub_bone_scale_names + (info.base_bone_name,),
             target=control_x,
             extras={
-                "rotation": 90,
+                "rotation": 0.0 if neutral_camera_setup else 90,
                 "local": True,
                 "relative": True,
                 "x": -(info.uniform_scale * 2.0),
@@ -93,7 +102,7 @@ def build_legacy_constraints(
             bones=info.sub_bone_scale_names,
             target=constraint_bone,
             extras={
-                "scaleX": -1,
+                "scaleX": 0.0 if neutral_camera_setup else -1,
                 "mixRotate": 0,
                 "mixX": 0,
                 "mixShearY": 0,
