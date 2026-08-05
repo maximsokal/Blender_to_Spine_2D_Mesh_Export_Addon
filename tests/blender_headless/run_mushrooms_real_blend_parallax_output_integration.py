@@ -13,7 +13,6 @@ import argparse
 from dataclasses import replace
 import json
 from math import radians
-import os
 from pathlib import Path
 import sys
 import tempfile
@@ -44,10 +43,10 @@ from run_bake_integration import (  # noqa: E402
     PNG_SIGNATURE,
     _assert,
     _capture_context,
+    _capture_scene_bake_state,
     _temporary_datablock_names,
 )
 from run_camera_projection_integration import (  # noqa: E402
-    _capture_scene_bake_state,
     _scene_render_fingerprint,
 )
 from run_mushrooms_real_blend_integration import (  # noqa: E402
