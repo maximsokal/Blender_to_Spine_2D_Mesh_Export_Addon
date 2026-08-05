@@ -85,6 +85,11 @@ from .projection_coverage import (
     ProjectionCoverageResult,
     build_projection_coverage_mask,
 )
+from .projection_crop_requirements import (
+    ProjectionCropRequirementError,
+    ProjectionUvBounds,
+    expand_projection_layout_to_uv_bounds,
+)
 from .projection_layout import (
     CameraProjectionLayout,
     CameraProjectionLayoutError,
@@ -184,12 +189,14 @@ __all__ = [
     "ProjectionCoveragePolicy",
     "ProjectionCoverageResult",
     "ProjectionCropBounds",
+    "ProjectionCropRequirementError",
     "ProjectionDynamicRange",
     "ProjectionOutputPolicy",
     "ProjectionOutputPolicyError",
     "ProjectionPixelPoint",
     "ProjectionToneMapping",
     "ProjectionTriangle",
+    "ProjectionUvBounds",
     "ResolvedProjectionOutputPolicy",
     "SEQUENCE_TIME_DECIMALS",
     "SceneBakeContext",
@@ -213,6 +220,7 @@ __all__ = [
     "build_texture_plan",
     "convert_rgba_alpha_representation",
     "convex_hull",
+    "expand_projection_layout_to_uv_bounds",
     "grouped_projection_output_paths",
     "predict_bake_output_paths",
     "requires_camera_projection",
