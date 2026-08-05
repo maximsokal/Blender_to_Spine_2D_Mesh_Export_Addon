@@ -56,11 +56,19 @@ class A1RigSetupPoseMode(str, Enum):
     group drives layer motion. ``A1CameraLayerProjectionKind`` determines whether
     depth-dependent whole-layer scaling is Perspective or disabled for Orthographic.
     It must never be used with per-vertex depth groups or ordinary model-space geometry.
+
+    ``CAMERA_DEPTH_SURFACE`` is the multi-depth companion used only by Depth Camera
+    Projection. The mesh is already camera-facing in setup, but each generated vertex
+    retains an absolute camera-distance group for pseudo-3D deformation. Consequently,
+    the historical model-space hierarchy is retained while legacy non-zero setup
+    rotations and scale offsets are removed. This mode must not be used for ordinary
+    Normal / UV Segments geometry or a rigid one-group camera layer.
     """
 
     NORMALIZED_SINGLE = "NORMALIZED_SINGLE"
     PRESERVE_COMPOSITION = "PRESERVE_COMPOSITION"
     PREPROJECTED_SCREEN = "PREPROJECTED_SCREEN"
+    CAMERA_DEPTH_SURFACE = "CAMERA_DEPTH_SURFACE"
 
 
 def resolve_a1_rig_profile(value: object) -> A1RigProfile:
