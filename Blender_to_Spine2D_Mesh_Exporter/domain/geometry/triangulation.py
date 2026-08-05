@@ -1,17 +1,24 @@
-"""Deterministic ear-clipping triangulation for immutable mesh snapshots.
+"""Deterministic triangulation for immutable mesh snapshots.
 
-Each generated triangle retains the original face and corner lineage. Existing
-boundary edges keep their source IDs and flags; generated diagonals explicitly use
-``source_id=None``. Blender n-gons may contain small evaluated warp, so planarity is
-validated against bounded absolute, scale-relative, and normalized-warp tolerances.
-Declared face normals must also remain coherent with the geometric polygon plane.
-Self-intersecting, strongly folded, projection-distorted, and degenerate polygons remain
-hard errors.
+Every generated triangle retains the original face and corner lineage. Existing boundary
+edges keep their source IDs and flags; generated diagonals explicitly use ``source_id=None``.
+
+Blender meshes commonly contain curved surfaces represented by non-planar quads. The
+export default therefore triangulates valid ordered polygons instead of rejecting them by
+an arbitrary size-dependent planarity threshold. Strict planarity rejection remains
+available as an explicit diagnostic policy.
+
+Quads evaluate both possible diagonals and choose the valid split with the most coherent
+triangle normals. Larger n-gons use deterministic ear clipping in the dominant Newell
+projection. Self-intersecting boundaries, repeated vertices, zero-area triangles,
+reversed winding, non-finite coordinates, and numerically collapsed polygons remain hard
+errors.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from math import acos, isfinite, pi, sqrt
 from typing import Iterable, Tuple
 
@@ -24,25 +31,48 @@ class TriangulationError(ValueError):
     """Raised when a polygon cannot be triangulated without ambiguity."""
 
 
+class NonPlanarPolygonPolicy(str, Enum):
+    """Control whether valid non-planar polygons are triangulated or rejected."""
+
+    TRIANGULATE = "TRIANGULATE"
+    REJECT = "REJECT"
+
+
+def _resolve_non_planar_policy(
+    value: NonPlanarPolygonPolicy | str,
+) -> NonPlanarPolygonPolicy:
+    if isinstance(value, NonPlanarPolygonPolicy):
+        return value
+    if not isinstance(value, str):
+        raise TypeError(
+            "non_planar_policy must be NonPlanarPolygonPolicy or str"
+        )
+    try:
+        return NonPlanarPolygonPolicy(value.strip().upper())
+    except ValueError as exc:
+        supported = tuple(policy.value for policy in NonPlanarPolygonPolicy)
+        raise ValueError(
+            f"Unsupported non-planar polygon policy {value!r}; "
+            f"supported={supported}"
+        ) from exc
+
+
 @dataclass(frozen=True, slots=True)
 class TriangulationSettings:
     epsilon: float = 1e-10
 
-    # Blender's evaluated float mesh can contain sub-millimetre n-gon residue even when
-    # the polygon is still safe to triangulate. The 0.0002 absolute floor accepts all
-    # captured Plane.008 faces from the real mushrooms asset, including source face 15,
-    # without weakening the independent 1% normalized-warp hard ceiling.
+    # These three fields define the explicit strict diagnostic window. They do not delete
+    # or simplify geometry in the default TRIANGULATE policy.
     planarity_tolerance: float = 2.0e-4
-
-    # Normal-sized polygons may use at most 0.1% of their bounding-box diagonal as the
-    # ordinary planarity window.
     relative_planarity_tolerance: float = 1.0e-3
-
-    # The absolute floor must never swallow a genuinely folded tiny polygon. Regardless
-    # of absolute size, more than 1% normalized warp remains a hard error.
     maximum_relative_planarity_warp: float = 1.0e-2
-
     normal_alignment_tolerance_degrees: float = 1.0
+
+    # Blender export must preserve curved quad surfaces. REJECT remains available for
+    # diagnostics and for detecting invalid non-affine pre-projection ordering.
+    non_planar_policy: NonPlanarPolygonPolicy = (
+        NonPlanarPolygonPolicy.TRIANGULATE
+    )
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -63,9 +93,13 @@ class TriangulationSettings:
             object.__setattr__(self, field_name, numeric)
 
         if self.relative_planarity_tolerance > 1.0:
-            raise ValueError("relative_planarity_tolerance cannot exceed 1.0")
+            raise ValueError(
+                "relative_planarity_tolerance cannot exceed 1.0"
+            )
         if self.maximum_relative_planarity_warp > 1.0:
-            raise ValueError("maximum_relative_planarity_warp cannot exceed 1.0")
+            raise ValueError(
+                "maximum_relative_planarity_warp cannot exceed 1.0"
+            )
         if (
             self.relative_planarity_tolerance
             > self.maximum_relative_planarity_warp
@@ -78,6 +112,12 @@ class TriangulationSettings:
             raise ValueError(
                 "normal_alignment_tolerance_degrees cannot exceed 90 degrees"
             )
+
+        object.__setattr__(
+            self,
+            "non_planar_policy",
+            _resolve_non_planar_policy(self.non_planar_policy),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +139,15 @@ class TriangulationResult:
 class _FaceTriangle:
     source_face: MeshFace
     corner_indices: Tuple[int, int, int]
+    normal: Vector3
+
+
+@dataclass(frozen=True, slots=True)
+class _PlanarityMetrics:
+    maximum_distance: float
+    polygon_scale: float
+    normalized_warp: float
+    effective_tolerance: float
 
 
 def _subtract(first: Vector3, second: Vector3) -> Vector3:
@@ -125,25 +174,54 @@ def _length(value: Vector3) -> float:
     return sqrt(_dot(value, value))
 
 
+def _distance_squared(first: Vector3, second: Vector3) -> float:
+    delta = _subtract(first, second)
+    return _dot(delta, delta)
+
+
 def _newell_normal(points: Tuple[Vector3, ...]) -> Vector3:
     x = y = z = 0.0
     for index, current in enumerate(points):
         following = points[(index + 1) % len(points)]
-        x += (current[1] - following[1]) * (current[2] + following[2])
-        y += (current[2] - following[2]) * (current[0] + following[0])
-        z += (current[0] - following[0]) * (current[1] + following[1])
+        x += (current[1] - following[1]) * (
+            current[2] + following[2]
+        )
+        y += (current[2] - following[2]) * (
+            current[0] + following[0]
+        )
+        z += (current[0] - following[0]) * (
+            current[1] + following[1]
+        )
     return (x, y, z)
 
 
 def _normalized(value: Vector3, epsilon: float) -> Vector3:
     magnitude = _length(value)
-    if magnitude <= epsilon:
-        raise TriangulationError("Polygon normal is zero or numerically unstable")
+    if not isfinite(magnitude) or magnitude <= epsilon:
+        raise TriangulationError(
+            "Polygon normal is zero or numerically unstable"
+        )
     return (
         value[0] / magnitude,
         value[1] / magnitude,
         value[2] / magnitude,
     )
+
+
+def _validate_finite_points(points: Tuple[Vector3, ...]) -> None:
+    if not isinstance(points, tuple) or len(points) < 3:
+        raise TriangulationError(
+            "Polygon must contain at least three ordered points"
+        )
+    for point_index, point in enumerate(points):
+        if not isinstance(point, tuple) or len(point) != 3:
+            raise TriangulationError(
+                f"Polygon point {point_index} is not a Vector3 tuple"
+            )
+        if any(not isfinite(float(value)) for value in point):
+            raise TriangulationError(
+                f"Polygon point {point_index} contains non-finite coordinates"
+            )
 
 
 def _centroid(points: Tuple[Vector3, ...]) -> Vector3:
@@ -158,7 +236,7 @@ def _centroid(points: Tuple[Vector3, ...]) -> Vector3:
 
 
 def _polygon_scale(points: Tuple[Vector3, ...]) -> float:
-    """Return the deterministic bounding-box diagonal used for relative tolerance."""
+    """Return the deterministic bounding-box diagonal."""
 
     extents = tuple(
         max(point[axis] for point in points)
@@ -168,29 +246,17 @@ def _polygon_scale(points: Tuple[Vector3, ...]) -> float:
     return sqrt(sum(extent * extent for extent in extents))
 
 
-def _validate_planarity(
+def _planarity_metrics(
     points: Tuple[Vector3, ...],
     normal: Vector3,
-    *,
-    absolute_tolerance: float,
-    relative_tolerance: float,
-    maximum_relative_warp: float,
-    epsilon: float,
-) -> None:
-    """Reject warp outside both the practical window and the hard relative ceiling.
-
-    Blender stores n-gons as ordered boundaries and may evaluate them with small
-    non-planarity. Measuring from the centroid avoids dependence on the first corner.
-
-    ``max(absolute, relative * scale)`` accepts small float/evaluation residue. A second
-    normalized-warp ceiling prevents that absolute floor from accepting a severely folded
-    polygon merely because the whole polygon is tiny.
-    """
-
+    settings: TriangulationSettings,
+) -> _PlanarityMetrics:
     origin = _centroid(points)
     scale = _polygon_scale(points)
-    if not isfinite(scale) or scale <= epsilon:
-        raise TriangulationError("Polygon extent is zero or numerically unstable")
+    if not isfinite(scale) or scale <= settings.epsilon:
+        raise TriangulationError(
+            "Polygon extent is zero or numerically unstable"
+        )
 
     distances = tuple(
         abs(_dot(_subtract(point, origin), normal))
@@ -199,21 +265,35 @@ def _validate_planarity(
     maximum = max(distances)
     normalized_warp = maximum / scale
     effective_tolerance = max(
-        float(absolute_tolerance),
-        float(relative_tolerance) * scale,
+        settings.planarity_tolerance,
+        settings.relative_planarity_tolerance * scale,
+    )
+    return _PlanarityMetrics(
+        maximum_distance=maximum,
+        polygon_scale=scale,
+        normalized_warp=normalized_warp,
+        effective_tolerance=effective_tolerance,
     )
 
+
+def _require_strict_planarity(
+    metrics: _PlanarityMetrics,
+    settings: TriangulationSettings,
+) -> None:
     if (
-        maximum > effective_tolerance
-        or normalized_warp > maximum_relative_warp
+        metrics.maximum_distance > metrics.effective_tolerance
+        or metrics.normalized_warp
+        > settings.maximum_relative_planarity_warp
     ):
         raise TriangulationError(
             "Polygon is not planar within deterministic tolerance: "
-            f"maximum plane distance {maximum} exceeds effective tolerance "
-            f"{effective_tolerance} or normalized warp {normalized_warp} exceeds "
-            f"hard ceiling {maximum_relative_warp} "
-            f"(absolute={absolute_tolerance}, relative={relative_tolerance}, "
-            f"polygon_scale={scale})"
+            f"maximum plane distance {metrics.maximum_distance} exceeds "
+            f"effective tolerance {metrics.effective_tolerance} or normalized "
+            f"warp {metrics.normalized_warp} exceeds hard ceiling "
+            f"{settings.maximum_relative_planarity_warp} "
+            f"(absolute={settings.planarity_tolerance}, "
+            f"relative={settings.relative_planarity_tolerance}, "
+            f"polygon_scale={metrics.polygon_scale})"
         )
 
 
@@ -224,18 +304,13 @@ def _validate_declared_normal_alignment(
     tolerance_degrees: float,
     epsilon: float,
 ) -> None:
-    """Reject polygons whose stored face normal no longer describes their plane.
-
-    Perspective projection is not an affine transform in XYZ. Projecting an n-gon before
-    triangulation can therefore leave a face normal inherited from source space while the
-    generated points describe another plane. Small Blender evaluation residue is accepted;
-    a material orientation mismatch remains a hard error so callers must triangulate in
-    source/world space before non-affine projection.
-    """
+    """Reject strict-mode polygons whose declared normal no longer fits the plane."""
 
     declared_length = _length(declared_normal)
     if not isfinite(declared_length):
-        raise TriangulationError("Declared face normal contains non-finite values")
+        raise TriangulationError(
+            "Declared face normal contains non-finite values"
+        )
     if declared_length <= epsilon:
         return
 
@@ -246,7 +321,9 @@ def _validate_declared_normal_alignment(
     )
     cosine = abs(_dot(normalized_declared, geometric_normal))
     if not isfinite(cosine):
-        raise TriangulationError("Declared face-normal alignment became non-finite")
+        raise TriangulationError(
+            "Declared face-normal alignment became non-finite"
+        )
     clamped = min(1.0, max(0.0, cosine))
     deviation_degrees = acos(clamped) * 180.0 / pi
     if deviation_degrees > tolerance_degrees:
@@ -257,30 +334,79 @@ def _validate_declared_normal_alignment(
         )
 
 
+def _triangle_geometry(
+    points: Tuple[Vector3, ...],
+    triangle: Tuple[int, int, int],
+    reference_normal: Vector3,
+    *,
+    area_tolerance: float,
+) -> tuple[Vector3, float, float]:
+    first, second, third = (points[index] for index in triangle)
+    cross = _cross_3d(
+        _subtract(second, first),
+        _subtract(third, first),
+    )
+    magnitude = _length(cross)
+    signed_area = _dot(cross, reference_normal)
+
+    if (
+        not isfinite(magnitude)
+        or not isfinite(signed_area)
+        or magnitude <= area_tolerance
+        or signed_area <= area_tolerance
+    ):
+        raise TriangulationError(
+            "Polygon produced a collapsed or reversed 3D triangle; "
+            f"corners={triangle}, area={magnitude}, "
+            f"oriented_area={signed_area}, tolerance={area_tolerance}"
+        )
+
+    normal = (
+        cross[0] / magnitude,
+        cross[1] / magnitude,
+        cross[2] / magnitude,
+    )
+    reference_alignment = _dot(normal, reference_normal)
+    if not isfinite(reference_alignment) or reference_alignment <= 0.0:
+        raise TriangulationError(
+            "Generated triangle normal is not aligned with polygon winding; "
+            f"corners={triangle}, alignment={reference_alignment}"
+        )
+    return normal, magnitude, reference_alignment
+
+
+def _triangle_area_tolerance(
+    points: Tuple[Vector3, ...],
+    epsilon: float,
+) -> float:
+    scale = _polygon_scale(points)
+    if not isfinite(scale) or scale <= epsilon:
+        raise TriangulationError(
+            "Polygon extent is zero or numerically unstable"
+        )
+    return max(epsilon, scale * scale * epsilon)
+
+
 def _validate_triangle_orientation(
     points: Tuple[Vector3, ...],
     triangles: Tuple[Tuple[int, int, int], ...],
     reference_normal: Vector3,
     *,
     epsilon: float,
-) -> None:
-    """Require every generated 3D triangle to follow one coherent winding."""
+) -> Tuple[Vector3, ...]:
+    """Require every generated triangle to be finite, non-zero, and coherently wound."""
 
-    scale = _polygon_scale(points)
-    area_tolerance = max(epsilon, scale * scale * epsilon)
-    for triangle_index, triangle in enumerate(triangles):
-        first, second, third = (points[index] for index in triangle)
-        cross = _cross_3d(
-            _subtract(second, first),
-            _subtract(third, first),
+    area_tolerance = _triangle_area_tolerance(points, epsilon)
+    normals: list[Vector3] = []
+    for triangle in triangles:
+        normal, _area, _alignment = _triangle_geometry(
+            points,
+            triangle,
+            reference_normal,
+            area_tolerance=area_tolerance,
         )
-        signed_area = _dot(cross, reference_normal)
-        if not isfinite(signed_area) or signed_area <= area_tolerance:
-            raise TriangulationError(
-                "Warped polygon produced a collapsed or reversed 3D triangle; "
-                f"triangle={triangle_index}, corners={triangle}, "
-                f"oriented_area={signed_area}, tolerance={area_tolerance}"
-            )
+        normals.append(normal)
+    return tuple(normals)
 
 
 def _projection_axis(normal: Vector3) -> int:
@@ -305,8 +431,13 @@ def _cross_2d(first: Vector2, second: Vector2, third: Vector2) -> float:
 
 def _signed_area(points: Tuple[Vector2, ...]) -> float:
     return 0.5 * sum(
-        current[0] * following[1] - following[0] * current[1]
-        for current, following in zip(points, points[1:] + points[:1], strict=True)
+        current[0] * following[1]
+        - following[0] * current[1]
+        for current, following in zip(
+            points,
+            points[1:] + points[:1],
+            strict=True,
+        )
     )
 
 
@@ -358,7 +489,12 @@ def _segments_intersect(
     return any(
         (
             orientation == 0
-            and _point_on_segment(point, segment_start, segment_end, epsilon)
+            and _point_on_segment(
+                point,
+                segment_start,
+                segment_end,
+                epsilon,
+            )
         )
         for orientation, point, segment_start, segment_end in (
             (o1, b1, a1, a2),
@@ -369,7 +505,10 @@ def _segments_intersect(
     )
 
 
-def _validate_simple_polygon(points: Tuple[Vector2, ...], epsilon: float) -> None:
+def _validate_simple_polygon(
+    points: Tuple[Vector2, ...],
+    epsilon: float,
+) -> None:
     count = len(points)
     for first_index in range(count):
         first_next = (first_index + 1) % count
@@ -392,7 +531,8 @@ def _validate_simple_polygon(points: Tuple[Vector2, ...], epsilon: float) -> Non
             ):
                 raise TriangulationError(
                     "Polygon boundary self-intersects between edges "
-                    f"{first_index}-{first_next} and {second_index}-{second_next}"
+                    f"{first_index}-{first_next} and "
+                    f"{second_index}-{second_next}"
                 )
 
 
@@ -410,6 +550,45 @@ def _point_in_triangle(
         _cross_2d(third, first, point) * orientation_sign,
     )
     return all(value >= -epsilon for value in values)
+
+
+def _validate_projected_triangulation(
+    points: Tuple[Vector2, ...],
+    triangles: Tuple[Tuple[int, int, int], ...],
+    epsilon: float,
+) -> None:
+    """Require triangle areas to cover the simple projected polygon exactly once."""
+
+    polygon_area = _signed_area(points)
+    if abs(polygon_area) <= epsilon:
+        raise TriangulationError("Projected polygon area is zero")
+    orientation_sign = 1 if polygon_area > 0.0 else -1
+    polygon_double_area = abs(polygon_area) * 2.0
+
+    covered_double_area = 0.0
+    for triangle in triangles:
+        first, second, third = (points[index] for index in triangle)
+        oriented_area = (
+            _cross_2d(first, second, third) * orientation_sign
+        )
+        if not isfinite(oriented_area) or oriented_area <= epsilon:
+            raise TriangulationError(
+                "Projected triangulation contains a collapsed or reversed triangle; "
+                f"corners={triangle}, oriented_area={oriented_area}"
+            )
+        covered_double_area += oriented_area
+
+    coverage_tolerance = max(
+        epsilon,
+        polygon_double_area * 1.0e-9,
+    )
+    if abs(covered_double_area - polygon_double_area) > coverage_tolerance:
+        raise TriangulationError(
+            "Projected triangulation does not cover the polygon exactly once; "
+            f"polygon_double_area={polygon_double_area}, "
+            f"triangles_double_area={covered_double_area}, "
+            f"tolerance={coverage_tolerance}"
+        )
 
 
 def _ear_clip(
@@ -467,7 +646,122 @@ def _ear_clip(
     if final_area <= epsilon:
         raise TriangulationError("Final triangle is degenerate")
     triangles.append((final[0], final[1], final[2]))
-    return tuple(triangles)
+    result = tuple(triangles)
+    _validate_projected_triangulation(points, result, epsilon)
+    return result
+
+
+def _quad_candidate_score(
+    points_3d: Tuple[Vector3, ...],
+    points_2d: Tuple[Vector2, ...],
+    triangles: Tuple[Tuple[int, int, int], ...],
+    reference_normal: Vector3,
+    *,
+    epsilon: float,
+) -> tuple[float, float, float, float]:
+    """Score one valid quad split by normal coherence and geometric stability."""
+
+    _validate_projected_triangulation(points_2d, triangles, epsilon)
+    area_tolerance = _triangle_area_tolerance(points_3d, epsilon)
+
+    normals: list[Vector3] = []
+    areas: list[float] = []
+    alignments: list[float] = []
+    for triangle in triangles:
+        normal, area, alignment = _triangle_geometry(
+            points_3d,
+            triangle,
+            reference_normal,
+            area_tolerance=area_tolerance,
+        )
+        normals.append(normal)
+        areas.append(area)
+        alignments.append(alignment)
+
+    coherence = _dot(normals[0], normals[1])
+    if not isfinite(coherence):
+        raise TriangulationError(
+            "Quad triangle-normal coherence became non-finite"
+        )
+
+    shared = set(triangles[0]).intersection(triangles[1])
+    if len(shared) != 2:
+        raise TriangulationError(
+            "Quad candidate does not contain one shared diagonal"
+        )
+    first_diagonal, second_diagonal = sorted(shared)
+    diagonal_length_squared = _distance_squared(
+        points_3d[first_diagonal],
+        points_3d[second_diagonal],
+    )
+
+    return (
+        coherence,
+        min(alignments),
+        min(areas),
+        -diagonal_length_squared,
+    )
+
+
+def _triangulate_quad(
+    points_3d: Tuple[Vector3, ...],
+    points_2d: Tuple[Vector2, ...],
+    reference_normal: Vector3,
+    *,
+    epsilon: float,
+) -> tuple[Tuple[Tuple[int, int, int], ...], Tuple[Vector3, ...]]:
+    """Choose the best valid split among both quad diagonals."""
+
+    candidates = (
+        # Preserve the historical deterministic split when both candidates are equal.
+        ((3, 0, 1), (1, 2, 3)),
+        ((0, 1, 2), (0, 2, 3)),
+    )
+    valid: list[
+        tuple[
+            tuple[float, float, float, float],
+            int,
+            Tuple[Tuple[int, int, int], ...],
+        ]
+    ] = []
+    failures: list[str] = []
+
+    for candidate_index, candidate in enumerate(candidates):
+        try:
+            score = _quad_candidate_score(
+                points_3d,
+                points_2d,
+                candidate,
+                reference_normal,
+                epsilon=epsilon,
+            )
+        except TriangulationError as exc:
+            failures.append(
+                f"candidate={candidate_index}, triangles={candidate}: {exc}"
+            )
+            continue
+        valid.append((score, candidate_index, candidate))
+
+    if not valid:
+        raise TriangulationError(
+            "Neither quad diagonal produced a valid triangulation; "
+            + " | ".join(failures)
+        )
+
+    _score, _candidate_index, triangles = max(
+        valid,
+        key=lambda item: (
+            *item[0],
+            -item[1],
+        ),
+    )
+    normals = _validate_triangle_orientation(
+        points_3d,
+        triangles,
+        reference_normal,
+        epsilon=epsilon,
+    )
+    return triangles, normals
 
 
 def _triangulate_face(
@@ -476,9 +770,17 @@ def _triangulate_face(
     settings: TriangulationSettings,
 ) -> Tuple[_FaceTriangle, ...]:
     if len(face.loop_ids) == 3:
-        return (_FaceTriangle(face, (0, 1, 2)),)
+        return (
+            _FaceTriangle(
+                source_face=face,
+                corner_indices=(0, 1, 2),
+                normal=face.normal,
+            ),
+        )
     if len(face.loop_ids) < 3:
-        raise TriangulationError(f"Face {face.id.index} has fewer than three corners")
+        raise TriangulationError(
+            f"Face {face.id.index} has fewer than three corners"
+        )
 
     loop_map = snapshot.loop_by_id()
     vertex_map = snapshot.vertex_by_id()
@@ -489,39 +791,72 @@ def _triangulate_face(
             f"Face {face.id.index} repeats a local vertex and is not a simple polygon"
         )
 
-    points_3d = tuple(vertex_map[vertex_id].position for vertex_id in vertex_ids)
+    points_3d = tuple(
+        vertex_map[vertex_id].position
+        for vertex_id in vertex_ids
+    )
+    _validate_finite_points(points_3d)
+
     newell = _newell_normal(points_3d)
-    newell_length = _length(newell)
-    normal = _normalized(
-        newell if newell_length > settings.epsilon else face.normal,
-        settings.epsilon,
-    )
-    _validate_planarity(
+    reference_normal = _normalized(newell, settings.epsilon)
+    metrics = _planarity_metrics(
         points_3d,
-        normal,
-        absolute_tolerance=settings.planarity_tolerance,
-        relative_tolerance=settings.relative_planarity_tolerance,
-        maximum_relative_warp=settings.maximum_relative_planarity_warp,
-        epsilon=settings.epsilon,
+        reference_normal,
+        settings,
     )
-    if newell_length > settings.epsilon:
+
+    if settings.non_planar_policy is NonPlanarPolygonPolicy.REJECT:
+        _require_strict_planarity(metrics, settings)
         _validate_declared_normal_alignment(
             face.normal,
-            normal,
-            tolerance_degrees=settings.normal_alignment_tolerance_degrees,
+            reference_normal,
+            tolerance_degrees=(
+                settings.normal_alignment_tolerance_degrees
+            ),
             epsilon=settings.epsilon,
         )
-    axis = _projection_axis(normal)
-    points_2d = tuple(_project(point, axis) for point in points_3d)
-    _validate_simple_polygon(points_2d, settings.epsilon)
-    triangles = _ear_clip(points_2d, settings.epsilon)
-    _validate_triangle_orientation(
-        points_3d,
-        triangles,
-        normal,
-        epsilon=settings.epsilon,
+
+    axis = _projection_axis(reference_normal)
+    points_2d = tuple(
+        _project(point, axis)
+        for point in points_3d
     )
-    return tuple(_FaceTriangle(face, triangle) for triangle in triangles)
+    _validate_simple_polygon(points_2d, settings.epsilon)
+
+    if len(points_3d) == 4:
+        triangles, normals = _triangulate_quad(
+            points_3d,
+            points_2d,
+            reference_normal,
+            epsilon=settings.epsilon,
+        )
+    else:
+        triangles = _ear_clip(points_2d, settings.epsilon)
+        normals = _validate_triangle_orientation(
+            points_3d,
+            triangles,
+            reference_normal,
+            epsilon=settings.epsilon,
+        )
+
+    if len(triangles) != len(points_3d) - 2:
+        raise TriangulationError(
+            "Triangulation did not produce N-2 triangles; "
+            f"corners={len(points_3d)}, triangles={len(triangles)}"
+        )
+
+    return tuple(
+        _FaceTriangle(
+            source_face=face,
+            corner_indices=triangle,
+            normal=normal,
+        )
+        for triangle, normal in zip(
+            triangles,
+            normals,
+            strict=True,
+        )
+    )
 
 
 def _edge_key(first: VertexId, second: VertexId) -> tuple[int, int]:
@@ -549,10 +884,16 @@ def triangulate_snapshot(
     if not isinstance(resolved_settings, TriangulationSettings):
         raise TypeError("settings must be TriangulationSettings")
 
-    face_triangles: list[tuple[MeshFace, Tuple[_FaceTriangle, ...]]] = []
+    face_triangles: list[
+        tuple[MeshFace, Tuple[_FaceTriangle, ...]]
+    ] = []
     for face in sorted(snapshot.faces, key=lambda item: item.id.index):
         try:
-            triangles = _triangulate_face(snapshot, face, resolved_settings)
+            triangles = _triangulate_face(
+                snapshot,
+                face,
+                resolved_settings,
+            )
         except TriangulationError as exc:
             raise TriangulationError(
                 f"Unable to triangulate face {face.id.index} "
@@ -561,30 +902,42 @@ def triangulate_snapshot(
         face_triangles.append((face, triangles))
 
     original_edge_by_key = {
-        _edge_key(*edge.vertex_ids): edge for edge in snapshot.edges
+        _edge_key(*edge.vertex_ids): edge
+        for edge in snapshot.edges
     }
     used_edge_keys: set[tuple[int, int]] = set()
     source_loop_map = snapshot.loop_by_id()
     for _, triangles in face_triangles:
         for triangle in triangles:
             source_loops = tuple(
-                source_loop_map[triangle.source_face.loop_ids[index]]
+                source_loop_map[
+                    triangle.source_face.loop_ids[index]
+                ]
                 for index in triangle.corner_indices
             )
             for index, loop in enumerate(source_loops):
                 following = source_loops[(index + 1) % 3]
-                used_edge_keys.add(_edge_key(loop.vertex_id, following.vertex_id))
+                used_edge_keys.add(
+                    _edge_key(loop.vertex_id, following.vertex_id)
+                )
 
     existing_keys = tuple(
         sorted(
-            (key for key in used_edge_keys if key in original_edge_by_key),
+            (
+                key
+                for key in used_edge_keys
+                if key in original_edge_by_key
+            ),
             key=lambda key: original_edge_by_key[key].id.index,
         )
     )
-    generated_keys = tuple(sorted(used_edge_keys - set(existing_keys)))
+    generated_keys = tuple(
+        sorted(used_edge_keys - set(existing_keys))
+    )
     ordered_edge_keys = existing_keys + generated_keys
     edge_id_by_key = {
-        key: EdgeId(index) for index, key in enumerate(ordered_edge_keys)
+        key: EdgeId(index)
+        for index, key in enumerate(ordered_edge_keys)
     }
     edges = tuple(
         MeshEdge(
@@ -619,13 +972,18 @@ def triangulate_snapshot(
         output_face_ids: list[FaceId] = []
         for triangle in triangles:
             source_loops = tuple(
-                source_loop_map[original_face.loop_ids[index]]
+                source_loop_map[
+                    original_face.loop_ids[index]
+                ]
                 for index in triangle.corner_indices
             )
             triangle_loop_ids: list[LoopId] = []
             for corner_index, source_loop in enumerate(source_loops):
                 following_loop = source_loops[(corner_index + 1) % 3]
-                edge_key = _edge_key(source_loop.vertex_id, following_loop.vertex_id)
+                edge_key = _edge_key(
+                    source_loop.vertex_id,
+                    following_loop.vertex_id,
+                )
                 loop_id = LoopId(next_loop_index)
                 next_loop_index += 1
                 triangle_loop_ids.append(loop_id)
@@ -648,7 +1006,7 @@ def triangulate_snapshot(
                     source_id=original_face.source_id,
                     loop_ids=tuple(triangle_loop_ids),
                     material_index=original_face.material_index,
-                    normal=original_face.normal,
+                    normal=triangle.normal,
                     smooth=original_face.smooth,
                 )
             )
@@ -661,7 +1019,10 @@ def triangulate_snapshot(
         )
 
     output = MeshSnapshot(
-        snapshot_id=snapshot_id or f"{snapshot.snapshot_id}:triangulated",
+        snapshot_id=(
+            snapshot_id
+            or f"{snapshot.snapshot_id}:triangulated"
+        ),
         source_object_id=snapshot.source_object_id,
         object_name=snapshot.object_name,
         vertices=snapshot.vertices,
@@ -675,7 +1036,8 @@ def triangulate_snapshot(
     )
     MeshSnapshotValidator().validate_or_raise(output)
     generated_edge_ids = tuple(
-        edge_id_by_key[key] for key in generated_keys
+        edge_id_by_key[key]
+        for key in generated_keys
     )
     return TriangulationResult(
         source_snapshot_id=snapshot.snapshot_id,
