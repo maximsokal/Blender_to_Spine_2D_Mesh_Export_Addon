@@ -3,7 +3,8 @@
 Blender must open ``E:\\test_BtSe\\mushrooms\\mushrooms.blend`` (or the exact caller
 path) before executing this script. The regression reproduces the manual failure with a
 50 degree horizon and ``Max Depth Points = 128``. Dense reserve ownership must survive a
-budgeted proxy without mutating the loaded scene or taking unbounded time.
+budgeted proxy without mutating the loaded scene, taking unbounded time, or leaving the
+user-facing progress indicator frozen at the first geometry percentage.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
         sys.path.insert(0, str(path))
 
 from Blender_to_Spine2D_Mesh_Exporter.application import (  # noqa: E402
+    A1ExportProgressUpdate,
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
 )
@@ -59,6 +61,12 @@ _MAX_POINTS = 128
 _HORIZON_DEGREES = 50.0
 _MAX_PREPARATION_SECONDS = 120.0
 _MULTI_STEM = "MushroomsRealParallaxBudget"
+_REQUIRED_DEPTH_PROGRESS_MESSAGES = (
+    "Projecting active-camera front surface",
+    "Resolving virtual parallax camera views",
+    "Expanding and budgeting parallax reserve",
+    "Preparing Depth regions and UV lineage",
+)
 
 
 def _parse_arguments() -> argparse.Namespace:
@@ -112,6 +120,20 @@ def _prepared_by_component(prepared_multi) -> dict[str, PreparedDepthA1Object]:
     return result
 
 
+def _require_responsive_depth_progress(
+    updates: tuple[A1ExportProgressUpdate, ...],
+) -> None:
+    if not updates:
+        raise AssertionError("positive parallax emitted no progress updates")
+    for message in _REQUIRED_DEPTH_PROGRESS_MESSAGES:
+        matches = tuple(update for update in updates if message in update.message)
+        _assert(matches, f"missing Depth progress message: {message}")
+        _assert(
+            any(update.percent > 12 for update in matches),
+            f"Depth progress did not advance beyond 12% for: {message}",
+        )
+
+
 def _run(expected_blend: str) -> None:
     loaded = _require_loaded_blend(expected_blend)
     _assert(
@@ -128,6 +150,7 @@ def _run(expected_blend: str) -> None:
         for source in sources
     }
     temporary_before = _temporary_datablock_names()
+    progress_updates: list[A1ExportProgressUpdate] = []
 
     with tempfile.TemporaryDirectory(
         prefix="spine2d_mushrooms_parallax_budget_"
@@ -155,6 +178,7 @@ def _run(expected_blend: str) -> None:
             ),
             context=bpy.context,
             scene=bpy.context.scene,
+            progress_callback=progress_updates.append,
         )
         elapsed = perf_counter() - started
 
@@ -175,6 +199,7 @@ def _run(expected_blend: str) -> None:
             f"elapsed={elapsed:.3f}s, limit={_MAX_PREPARATION_SECONDS}s"
         ),
     )
+    _require_responsive_depth_progress(tuple(progress_updates))
 
     prepared = _prepared_by_component(prepared_multi)
     plane = prepared["object_1:Plane.008"]
@@ -258,7 +283,8 @@ def _run(expected_blend: str) -> None:
         f"plane_reserve_owners={plane_owner_count} "
         f"plane_views={len(plane_package.reserve_surfaces)} "
         f"cube_union={len(cube_package.union_snapshot.vertices)} "
-        f"elapsed={elapsed:.3f}s mode=PROXY_OR_EXACT pipeline=public-multi-object"
+        f"progress_events={len(progress_updates)} elapsed={elapsed:.3f}s "
+        "mode=PROXY_OR_EXACT pipeline=public-multi-object"
     )
 
 
