@@ -21,12 +21,17 @@ def build_two_axis_scale_constraints(
     """Build the exact five-phase schedule generalized from the reference rig.
 
     Ordinary model-space documents retain the historical setup offsets and scale target
-    set. Camera-relative documents place X and Y orbital transforms above the projected
-    Object Origin. Their independent Scale control targets only ``base`` below that
-    placement, so resizing the object cannot change its distance from camera zero.
+    set. Rigid camera-relative documents place X and Y orbital transforms above the
+    projected Object Origin. Their independent Scale control targets only ``base`` below
+    that placement, so resizing the object cannot change its distance from camera zero.
 
-    Perspective retains whole-layer depth foreshortening. Orthographic disables the
-    automatic depth-scale channel while preserving rigid camera-relative translation.
+    Depth Camera Projection retains multiple per-vertex camera-distance groups and the
+    established model-space hierarchy, but its geometry is already camera-facing. Its
+    setup therefore uses zero X/Y rotation offsets and a neutral depth-scale offset. The
+    controls remain fully active because only their setup offsets are neutralized.
+
+    Perspective rigid layers retain whole-layer depth foreshortening. Orthographic rigid
+    layers disable automatic depth scale while preserving camera-relative translation.
     """
 
     if not isinstance(plan, LegacyRigBuildPlan):
@@ -40,6 +45,10 @@ def build_two_axis_scale_constraints(
     preprojected_screen = (
         plan.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
     )
+    camera_depth_surface = (
+        plan.request.setup_pose_mode is A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE
+    )
+    neutral_camera_setup = preprojected_screen or camera_depth_surface
     orthographic_camera_layer = (
         preprojected_screen
         and plan.request.camera_layer_projection_kind
@@ -75,7 +84,7 @@ def build_two_axis_scale_constraints(
         "mixShearY": 0,
         "rotation": (
             0.0
-            if preprojected_screen
+            if neutral_camera_setup
             else profile.rotation_x_setup_degrees
         ),
     }
@@ -89,14 +98,14 @@ def build_two_axis_scale_constraints(
         "mixShearY": 0,
         "rotation": (
             0.0
-            if preprojected_screen
+            if neutral_camera_setup
             else profile.rotation_y_setup_degrees
         ),
     }
     depth_extras = {
         "rotation": -90,
-        "x": 0.0 if preprojected_screen else layout.minimum_depth_y,
-        "scaleX": 0.0 if preprojected_screen else -1,
+        "x": 0.0 if neutral_camera_setup else layout.minimum_depth_y,
+        "scaleX": 0.0 if neutral_camera_setup else -1,
         "mixRotate": 0,
         "mixX": 0,
         "mixShearY": 0,
