@@ -13,6 +13,7 @@ from ..domain.baking import (
     BakeExecutionResult,
     BakeExecutionSettings,
     CameraProjectionPlan,
+    ProjectionUvBounds,
 )
 from ..domain.baking.projection_layout import CameraProjectionLayout
 from ..infrastructure import (
@@ -99,6 +100,7 @@ def _stage_validated_camera_projection(
     runtime: CameraProjectionRuntime,
     transaction: AtomicFileTransaction,
     *,
+    required_uv_bounds: ProjectionUvBounds | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
 ) -> CameraProjectionStageResult:
     """Reserve, render, restore state, derive crop, and rewrite staged frames."""
@@ -107,6 +109,13 @@ def _stage_validated_camera_projection(
         raise TypeError("runtime must be CameraProjectionRuntime")
     if not isinstance(transaction, AtomicFileTransaction):
         raise TypeError("transaction must be AtomicFileTransaction")
+    if required_uv_bounds is not None and not isinstance(
+        required_uv_bounds,
+        ProjectionUvBounds,
+    ):
+        raise TypeError(
+            "required_uv_bounds must be ProjectionUvBounds or None"
+        )
 
     reservations = _reserve_camera_projection_outputs(
         runtime.plan,
@@ -117,7 +126,10 @@ def _stage_validated_camera_projection(
         reservations,
         progress_callback=progress_callback,
     )
-    request = build_camera_projection_postprocess_request(runtime)
+    request = build_camera_projection_postprocess_request(
+        runtime,
+        required_uv_bounds,
+    )
     layout = process_projection_outputs(
         request,
         rendered,
@@ -134,6 +146,7 @@ def stage_camera_projection_outputs_detailed(
     output_transaction: AtomicFileTransaction,
     execution_settings: BakeExecutionSettings | None = None,
     *,
+    required_uv_bounds: ProjectionUvBounds | None = None,
     context: Any | None = None,
     scene: Any | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
@@ -152,6 +165,7 @@ def stage_camera_projection_outputs_detailed(
         return _stage_validated_camera_projection(
             runtime,
             transaction,
+            required_uv_bounds=required_uv_bounds,
             progress_callback=progress_callback,
         )
     except CameraProjectionExecutionError:
@@ -223,6 +237,7 @@ def execute_camera_projection_plan(
     plan: CameraProjectionPlan,
     execution_settings: BakeExecutionSettings | None = None,
     *,
+    required_uv_bounds: ProjectionUvBounds | None = None,
     context: Any | None = None,
     scene: Any | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
@@ -243,6 +258,7 @@ def execute_camera_projection_plan(
             staged = _stage_validated_camera_projection(
                 runtime,
                 transaction,
+                required_uv_bounds=required_uv_bounds,
                 progress_callback=progress_callback,
             )
             expected_commit_order = tuple(
