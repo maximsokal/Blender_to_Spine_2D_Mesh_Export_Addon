@@ -1,10 +1,16 @@
 """Export the real mushrooms asset through render, crop, UV remap, and commit.
 
-This runner owns the regression for a valid full-frame reserve UV becoming approximately
-``-9.795`` after an alpha-only crop. Blender must open the caller-supplied mushrooms file
-before this script starts. The public multi-object export must render FRONT plus all
-reserve views, expand each crop to prepared attachment UVs, serialize unit-square mesh
-UVs, and leave the loaded scene unchanged.
+This runner owns two real-asset regressions:
+
+* a valid full-frame reserve UV becoming approximately ``-9.795`` after an
+  alpha-only crop;
+* camera-projected Depth geometry being rotated by historical model-space setup
+  offsets in the emitted Spine JSON.
+
+Blender must open the caller-supplied mushrooms file before this script starts.
+The public multi-object export must render FRONT plus all reserve views, expand
+each reserve crop to prepared attachment UVs, serialize unit-square mesh UVs,
+emit a neutral camera-depth setup pose, and leave the loaded scene unchanged.
 """
 
 from __future__ import annotations
@@ -12,7 +18,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 import json
-from math import radians
+from math import isfinite, radians
 from pathlib import Path
 import sys
 import tempfile
@@ -64,6 +70,7 @@ _HORIZON_DEGREES = 50.0
 _MAX_EXPORT_SECONDS = 300.0
 _MULTI_STEM = "MushroomsRealParallaxOutput"
 _PLANE_COMPONENT = "object_1:Plane.008"
+_DEPTH_PREFIXES = ("Plane.008", "Cube.012")
 _EXPECTED_PLANE_VIEWS = (
     "FRONT",
     "RIGHT",
@@ -75,6 +82,7 @@ _EXPECTED_PLANE_VIEWS = (
     "DOWN",
     "DOWN_RIGHT",
 )
+_NEUTRAL_TOLERANCE = 1.0e-9
 
 
 def _parse_arguments() -> argparse.Namespace:
@@ -136,6 +144,136 @@ def _assert_serialized_uvs(document: object) -> int:
         stream_count += 1
     _assert(stream_count > 0, "serialized document contains no mesh UV streams")
     return stream_count
+
+
+def _transform_constraints_by_name(document: object) -> dict[str, dict[str, object]]:
+    _assert(isinstance(document, dict), "serialized Spine document must be an object")
+    raw_constraints = document.get("transform")
+    _assert(
+        isinstance(raw_constraints, list),
+        "serialized Spine document contains no transform constraint array",
+    )
+
+    resolved: dict[str, dict[str, object]] = {}
+    for index, raw_constraint in enumerate(raw_constraints):
+        _assert(
+            isinstance(raw_constraint, dict),
+            f"transform[{index}] must be an object: {raw_constraint!r}",
+        )
+        name = raw_constraint.get("name")
+        _assert(
+            isinstance(name, str) and bool(name.strip()),
+            f"transform[{index}].name must be a non-empty string",
+        )
+        _assert(name not in resolved, f"duplicate transform constraint name: {name}")
+        resolved[name] = raw_constraint
+    return resolved
+
+
+def _finite_number(
+    mapping: dict[str, object],
+    key: str,
+    *,
+    default: float,
+    path: str,
+) -> float:
+    raw = mapping.get(key, default)
+    _assert(
+        isinstance(raw, (int, float)) and not isinstance(raw, bool),
+        f"{path}.{key} must be numeric: {raw!r}",
+    )
+    value = float(raw)
+    _assert(isfinite(value), f"{path}.{key} must be finite: {value}")
+    return value
+
+
+def _assert_neutral_depth_setup_pose(document: object) -> int:
+    """Require neutral setup offsets in the final serialized Spine document.
+
+    Spine omits fields that equal schema defaults. Therefore every inspected value
+    is read with the corresponding default instead of requiring the key to exist.
+    """
+
+    constraints = _transform_constraints_by_name(document)
+    checked = 0
+
+    for prefix in _DEPTH_PREFIXES:
+        expected = {
+            "rotation_x": f"{prefix}_rotation_X_constraint",
+            "rotation_y": f"{prefix}_rotation_Y",
+            "depth_scale": f"{prefix}_scale_rotate_X_constraint",
+        }
+        for role, name in expected.items():
+            _assert(
+                name in constraints,
+                f"missing {role} transform constraint for {prefix}: {name}",
+            )
+
+        rotation_x = constraints[expected["rotation_x"]]
+        rotation_y = constraints[expected["rotation_y"]]
+        depth_scale = constraints[expected["depth_scale"]]
+
+        for role, constraint in (
+            ("rotation_x", rotation_x),
+            ("rotation_y", rotation_y),
+        ):
+            path = f"transform[{constraint['name']}]"
+            rotation = _finite_number(
+                constraint,
+                "rotation",
+                default=0.0,
+                path=path,
+            )
+            mix_rotate = _finite_number(
+                constraint,
+                "mixRotate",
+                default=1.0,
+                path=path,
+            )
+            _assert(
+                abs(rotation) <= _NEUTRAL_TOLERANCE,
+                (
+                    f"{prefix} {role} retained a model-space setup rotation: "
+                    f"rotation={rotation}"
+                ),
+            )
+            _assert(
+                abs(mix_rotate - 1.0) <= _NEUTRAL_TOLERANCE,
+                (
+                    f"{prefix} {role} disabled the rotation control: "
+                    f"mixRotate={mix_rotate}"
+                ),
+            )
+            checked += 1
+
+        depth_path = f"transform[{depth_scale['name']}]"
+        depth_x = _finite_number(
+            depth_scale,
+            "x",
+            default=0.0,
+            path=depth_path,
+        )
+        depth_scale_x = _finite_number(
+            depth_scale,
+            "scaleX",
+            default=0.0,
+            path=depth_path,
+        )
+        _assert(
+            abs(depth_x) <= _NEUTRAL_TOLERANCE,
+            f"{prefix} retained a depth setup translation: x={depth_x}",
+        )
+        _assert(
+            abs(depth_scale_x) <= _NEUTRAL_TOLERANCE,
+            f"{prefix} retained a depth setup scale offset: scaleX={depth_scale_x}",
+        )
+        checked += 1
+
+    _assert(
+        checked == len(_DEPTH_PREFIXES) * 3,
+        f"unexpected neutral setup check count: {checked}",
+    )
+    return checked
 
 
 def _plane_view_from_filename(path: Path) -> str | None:
@@ -233,6 +371,7 @@ def _run(expected_blend: str) -> None:
 
         document = json.loads(json_files[0].read_text(encoding="utf-8"))
         uv_stream_count = _assert_serialized_uvs(document)
+        neutral_constraint_count = _assert_neutral_depth_setup_pose(document)
         remaining_stages = tuple(
             path
             for path in output_directory.rglob("*")
@@ -270,7 +409,9 @@ def _run(expected_blend: str) -> None:
             f"horizon={_HORIZON_DEGREES}deg max_points={_MAX_POINTS} "
             f"outputs={len(output_files)} png={len(png_files)} "
             f"plane_views={len(plane_views)} uv_streams={uv_stream_count} "
-            f"elapsed={elapsed:.3f}s transaction=committed crop=alpha-union-geometry",
+            f"neutral_constraints={neutral_constraint_count} "
+            f"elapsed={elapsed:.3f}s transaction=committed "
+            "crop=alpha-union-geometry setup=camera-depth-surface",
             flush=True,
         )
 
