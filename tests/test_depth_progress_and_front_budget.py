@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from math import radians
 from pathlib import Path
 
@@ -36,6 +37,40 @@ def _settings(max_points: int) -> DepthCameraProjectionSettings:
         edge_threshold_fraction=1.0,
         mesh_error_pixels=4.0,
         max_points=max_points,
+    )
+
+
+def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
+    return next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    )
+
+
+def _direct_call_name(call: ast.Call) -> str | None:
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    return None
+
+
+def _attribute_path(node: ast.AST) -> tuple[str, ...] | None:
+    parts: list[str] = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return None
+    parts.append(current.id)
+    return tuple(reversed(parts))
+
+
+def _keyword(call: ast.Call, name: str) -> ast.keyword:
+    return next(
+        keyword
+        for keyword in call.keywords
+        if keyword.arg == name
     )
 
 
@@ -114,5 +149,50 @@ def test_depth_preparation_emits_intermediate_progress_and_reserves_front_budget
     assert "def _depth_front_projection_settings(" in source
     assert "shared_budget // 4" in source
     assert "_MAXIMUM_RESERVE_POINT_ALLOCATION = 32" in source
-    assert "settings=front_projection_settings" in source
-    assert "max_points=settings.bake_execution.depth_projection.max_points" in source
+
+    tree = ast.parse(source, filename=DEPTH_PREPARATION.name)
+    projection_stage = _function(tree, "_prepare_depth_projection_stage")
+
+    budget_assignments = tuple(
+        node
+        for node in ast.walk(projection_stage)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Call)
+        and _direct_call_name(node.value) == "_depth_front_projection_settings"
+    )
+    assert len(budget_assignments) == 1
+
+    assignment = budget_assignments[0]
+    assert len(assignment.targets) == 1
+    assert isinstance(assignment.targets[0], ast.Name)
+    front_budget_name = assignment.targets[0].id
+    assert _attribute_path(assignment.value.args[0]) == (
+        "settings",
+        "bake_execution",
+        "depth_projection",
+    )
+
+    surface_calls = tuple(
+        node
+        for node in ast.walk(projection_stage)
+        if isinstance(node, ast.Call)
+        and _direct_call_name(node) == "build_depth_camera_projection_surface"
+    )
+    assert len(surface_calls) == 1
+    surface_settings = _keyword(surface_calls[0], "settings").value
+    assert isinstance(surface_settings, ast.Name)
+    assert surface_settings.id == front_budget_name
+
+    parallax_calls = tuple(
+        node
+        for node in ast.walk(projection_stage)
+        if isinstance(node, ast.Call)
+        and _direct_call_name(node) == "build_depth_parallax_geometry_package"
+    )
+    assert len(parallax_calls) == 1
+    assert _attribute_path(_keyword(parallax_calls[0], "max_points").value) == (
+        "settings",
+        "bake_execution",
+        "depth_projection",
+        "max_points",
+    )
