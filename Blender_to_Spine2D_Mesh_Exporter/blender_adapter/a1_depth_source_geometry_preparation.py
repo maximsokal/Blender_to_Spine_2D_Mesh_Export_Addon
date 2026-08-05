@@ -9,9 +9,11 @@ from typing import Any, Mapping, Tuple
 
 from ..application import (
     A1ExportProgressCallback,
+    A1GeometryPreparationResult,
     A1SingleObjectExportSettings,
     A1SingleObjectStage,
     A1SourceGeometryMode,
+    A1ZGroupAssignmentPlan,
     ExportIssue,
     build_a1_z_group_assignment,
     emit_a1_export_progress,
@@ -51,7 +53,9 @@ from .a1_preparation_contracts import (
 )
 from .a1_source_geometry_preparation import (
     A1SourceGeometryPreparationResult,
+    _NormalizedSourceGeometry,
     _ProjectionPreparation,
+    _ResolvedSourceRequest,
     _build_prepared_statistics,
     _log_prepared_source,
     _normalize_source_geometry,
@@ -60,6 +64,7 @@ from .a1_source_geometry_preparation import (
 )
 from .active_camera_projection import resolve_a1_active_camera_projection_frame
 from .depth_parallax_camera_views import resolve_depth_parallax_camera_views
+from .source_uv_integrity import SourceUvIntegrityReport
 
 
 logger = logging.getLogger(__name__)
@@ -84,6 +89,42 @@ class A1DepthSourceGeometryPreparationResult(A1SourceGeometryPreparationResult):
             raise ValueError(
                 "Depth source_snapshot must be the parallax union snapshot"
             )
+
+
+@dataclass(frozen=True, slots=True)
+class _DepthProjectionPreparation:
+    """Camera-Z and camera-distance packages produced by the projection stage."""
+
+    camera_z_package: DepthParallaxGeometryPackage
+    depth_package: DepthParallaxGeometryPackage
+    depth: DepthCameraProjectionResult
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.camera_z_package, DepthParallaxGeometryPackage):
+            raise TypeError("camera_z_package must be DepthParallaxGeometryPackage")
+        if not isinstance(self.depth_package, DepthParallaxGeometryPackage):
+            raise TypeError("depth_package must be DepthParallaxGeometryPackage")
+        if not isinstance(self.depth, DepthCameraProjectionResult):
+            raise TypeError("depth must be DepthCameraProjectionResult")
+        if self.depth is not self.depth_package.front_result:
+            raise ValueError("depth must be depth_package.front_result")
+
+
+@dataclass(frozen=True, slots=True)
+class _DepthGeometryFinalization:
+    """Prepared regions, projection diagnostics and frozen statistics."""
+
+    geometry: A1GeometryPreparationResult
+    projection: _ProjectionPreparation
+    statistics: Mapping[str, StatisticsValue]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.geometry, A1GeometryPreparationResult):
+            raise TypeError("geometry must be A1GeometryPreparationResult")
+        if not isinstance(self.projection, _ProjectionPreparation):
+            raise TypeError("projection must be _ProjectionPreparation")
+        if not isinstance(self.statistics, Mapping):
+            raise TypeError("statistics must be a mapping")
 
 
 def _depth_progress(
@@ -443,6 +484,206 @@ def _parallax_statistics(
     )
 
 
+def _prepare_depth_projection_stage(
+    request: _ResolvedSourceRequest,
+    normalized: _NormalizedSourceGeometry,
+    settings: A1SingleObjectExportSettings,
+    progress_callback: A1ExportProgressCallback | None,
+) -> _DepthProjectionPreparation:
+    """Build FRONT, virtual-view reserve and camera-distance packages."""
+
+    if not isinstance(request, _ResolvedSourceRequest):
+        raise TypeError("request must be _ResolvedSourceRequest")
+    if not isinstance(normalized, _NormalizedSourceGeometry):
+        raise TypeError("normalized must be _NormalizedSourceGeometry")
+    if not isinstance(settings, A1SingleObjectExportSettings):
+        raise TypeError("settings must be A1SingleObjectExportSettings")
+    if request.scene is None or request.depsgraph is None:
+        raise ValueError(
+            "Depth Camera Projection lost its evaluated Scene or dependency graph"
+        )
+
+    frame = resolve_a1_active_camera_projection_frame(
+        request.scene,
+        texture_width=settings.export.texture_width,
+        texture_height=settings.export.texture_height,
+        depsgraph=request.depsgraph,
+    )
+    uniform_scale = calculate_uniform_scale(
+        settings.export.texture_width,
+        settings.export.texture_height,
+        settings.rig_scale_mode,
+    )
+    horizon_angle = settings.bake_execution.depth_parallax.horizon_angle_radians
+    front_settings = _depth_front_projection_settings(
+        settings.bake_execution.depth_projection,
+        horizon_angle_radians=horizon_angle,
+    )
+    _depth_progress(
+        progress_callback,
+        percent=18,
+        message=(
+            "Projecting active-camera front surface "
+            f"({front_settings.max_points}/"
+            f"{settings.bake_execution.depth_projection.max_points} points)"
+        ),
+        object_id=request.object_id,
+    )
+    projected_front = build_depth_camera_projection_surface(
+        normalized.snapshot,
+        frame,
+        uniform_scale=uniform_scale,
+        uv_layer_name=settings.uv.layer_name,
+        settings=front_settings,
+    )
+
+    _depth_progress(
+        progress_callback,
+        percent=26,
+        message="Resolving virtual parallax camera views",
+        object_id=request.object_id,
+    )
+    reserve_views = resolve_depth_parallax_camera_views(
+        request.scene,
+        normalized.snapshot,
+        frame,
+        horizon_angle_radians=horizon_angle,
+        depsgraph=request.depsgraph,
+    )
+    _depth_progress(
+        progress_callback,
+        percent=30,
+        message="Expanding and budgeting parallax reserve",
+        object_id=request.object_id,
+    )
+    camera_z_package = build_depth_parallax_geometry_package(
+        normalized.snapshot,
+        projected_front,
+        reserve_views,
+        uniform_scale=uniform_scale,
+        uv_layer_name=settings.uv.layer_name,
+        horizon_angle_radians=horizon_angle,
+        max_points=settings.bake_execution.depth_projection.max_points,
+    )
+    camera_z_package = canonicalize_depth_parallax_package_identity(
+        camera_z_package,
+        uv_layer_name=settings.uv.layer_name,
+    )
+    depth_package = _package_to_camera_distance(camera_z_package)
+    return _DepthProjectionPreparation(
+        camera_z_package=camera_z_package,
+        depth_package=depth_package,
+        depth=depth_package.front_result,
+    )
+
+
+def _finalize_depth_geometry_stage(
+    request: _ResolvedSourceRequest,
+    normalized: _NormalizedSourceGeometry,
+    settings: A1SingleObjectExportSettings,
+    projection_stage: _DepthProjectionPreparation,
+    z_groups: A1ZGroupAssignmentPlan,
+    *,
+    modifier_count: int,
+    uv_report: SourceUvIntegrityReport,
+    statistics: Mapping[str, StatisticsValue],
+) -> _DepthGeometryFinalization:
+    """Build regions, projection diagnostics and complete immutable statistics."""
+
+    if not isinstance(projection_stage, _DepthProjectionPreparation):
+        raise TypeError("projection_stage must be _DepthProjectionPreparation")
+    if not isinstance(z_groups, A1ZGroupAssignmentPlan):
+        raise TypeError("z_groups must be A1ZGroupAssignmentPlan")
+    if isinstance(modifier_count, bool) or not isinstance(modifier_count, int):
+        raise TypeError("modifier_count must be int")
+    if modifier_count < 0:
+        raise ValueError("modifier_count must be non-negative")
+    if not isinstance(uv_report, SourceUvIntegrityReport):
+        raise TypeError("uv_report must be SourceUvIntegrityReport")
+    if not isinstance(statistics, Mapping):
+        raise TypeError("statistics must be a mapping")
+
+    depth_package = projection_stage.depth_package
+    depth = projection_stage.depth
+    geometry = prepare_a1_geometry_regions(
+        depth_package.union_snapshot,
+        request.geometry_settings,
+    )
+    projection = _ProjectionPreparation(
+        snapshot=depth_package.union_snapshot,
+        geometry=geometry,
+        projected_origin=depth.projected_origin,
+        depth_range=calculate_a1_projected_snapshot_depth_range(
+            projection_stage.camera_z_package.union_snapshot
+        ),
+        camera_projection_kind=depth.frame.kind,
+        statistics=_parallax_statistics(
+            _depth_statistics({}, depth),
+            depth_package,
+        ),
+    )
+    resolved_statistics = _build_prepared_statistics(
+        statistics,
+        modifier_count=modifier_count,
+        uv_report=uv_report,
+        normalized=normalized,
+        projection=projection,
+        z_groups=z_groups,
+        geometry=geometry,
+    )
+    resolved_statistics = _parallax_statistics(
+        _depth_statistics(resolved_statistics, depth),
+        depth_package,
+    )
+    _log_prepared_source(
+        request,
+        settings,
+        normalized,
+        projection,
+        geometry,
+        uv_report,
+    )
+    return _DepthGeometryFinalization(
+        geometry=geometry,
+        projection=projection,
+        statistics=resolved_statistics,
+    )
+
+
+def _log_depth_projection_summary(
+    request: _ResolvedSourceRequest,
+    projection_stage: _DepthProjectionPreparation,
+) -> None:
+    """Emit one bounded summary after Depth projection and region preparation."""
+
+    if not isinstance(request, _ResolvedSourceRequest):
+        raise TypeError("request must be _ResolvedSourceRequest")
+    if not isinstance(projection_stage, _DepthProjectionPreparation):
+        raise TypeError("projection_stage must be _DepthProjectionPreparation")
+
+    package = projection_stage.depth_package
+    depth = projection_stage.depth
+    camera_distances = tuple(
+        float(vertex.position[2]) for vertex in package.union_snapshot.vertices
+    )
+    if not camera_distances:
+        raise ValueError("Depth package contains no camera-distance vertices")
+    logger.info(
+        "Prepared Depth Camera Projection source '%s': front_triangles=%d "
+        "front_points=%d reserve_faces=%d reserve_attachments=%d "
+        "union_points=%d horizon=%sdeg camera_distance=[%s, %s]",
+        request.object_id,
+        depth.source_triangle_count,
+        depth.sampled_point_count,
+        len(package.reserve_face_indices),
+        len(package.reserve_surfaces),
+        len(package.union_snapshot.vertices),
+        degrees(package.horizon_angle_radians),
+        min(camera_distances),
+        max(camera_distances),
+    )
+
+
 def prepare_a1_depth_source_geometry(
     source_obj: Any,
     settings: A1SingleObjectExportSettings,
@@ -450,6 +691,8 @@ def prepare_a1_depth_source_geometry(
     scene: Any | None = None,
     progress_callback: A1ExportProgressCallback | None = None,
 ) -> A1DepthSourceGeometryPreparationResult:
+    """Validate and orchestrate the explicit Depth geometry stages."""
+
     stage = A1SingleObjectStage.VALIDATE_REQUEST
     object_id: str | None = None
     warnings: Tuple[ExportIssue, ...] = ()
@@ -486,16 +729,13 @@ def prepare_a1_depth_source_geometry(
             scene=request.scene,
             depsgraph=request.depsgraph,
         )
-        (
-            source_snapshot,
-            warnings,
-            statistics,
-            _identity_rebase,
-        ) = _canonicalize_depth_evaluated_identity(
-            source_snapshot,
-            warnings,
-            statistics,
-            object_id=request.object_id,
+        source_snapshot, warnings, statistics, _identity_rebase = (
+            _canonicalize_depth_evaluated_identity(
+                source_snapshot,
+                warnings,
+                statistics,
+                object_id=request.object_id,
+            )
         )
 
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
@@ -506,78 +746,12 @@ def prepare_a1_depth_source_geometry(
             object_id=request.object_id,
         )
         warnings = normalized.warnings
-        if request.scene is None or request.depsgraph is None:
-            raise ValueError(
-                "Depth Camera Projection lost its evaluated Scene or dependency graph"
-            )
-        frame = resolve_a1_active_camera_projection_frame(
-            request.scene,
-            texture_width=settings.export.texture_width,
-            texture_height=settings.export.texture_height,
-            depsgraph=request.depsgraph,
-        )
-        uniform_scale = calculate_uniform_scale(
-            settings.export.texture_width,
-            settings.export.texture_height,
-            settings.rig_scale_mode,
-        )
-        horizon_angle = settings.bake_execution.depth_parallax.horizon_angle_radians
-        front_projection_settings = _depth_front_projection_settings(
-            settings.bake_execution.depth_projection,
-            horizon_angle_radians=horizon_angle,
-        )
-        _depth_progress(
+        projection_stage = _prepare_depth_projection_stage(
+            request,
+            normalized,
+            settings,
             progress_callback,
-            percent=18,
-            message=(
-                "Projecting active-camera front surface "
-                f"({front_projection_settings.max_points}/"
-                f"{settings.bake_execution.depth_projection.max_points} points)"
-            ),
-            object_id=object_id,
         )
-        projected_front = build_depth_camera_projection_surface(
-            normalized.snapshot,
-            frame,
-            uniform_scale=uniform_scale,
-            uv_layer_name=settings.uv.layer_name,
-            settings=front_projection_settings,
-        )
-
-        _depth_progress(
-            progress_callback,
-            percent=26,
-            message="Resolving virtual parallax camera views",
-            object_id=object_id,
-        )
-        reserve_views = resolve_depth_parallax_camera_views(
-            request.scene,
-            normalized.snapshot,
-            frame,
-            horizon_angle_radians=horizon_angle,
-            depsgraph=request.depsgraph,
-        )
-        _depth_progress(
-            progress_callback,
-            percent=30,
-            message="Expanding and budgeting parallax reserve",
-            object_id=object_id,
-        )
-        camera_z_package = build_depth_parallax_geometry_package(
-            normalized.snapshot,
-            projected_front,
-            reserve_views,
-            uniform_scale=uniform_scale,
-            uv_layer_name=settings.uv.layer_name,
-            horizon_angle_radians=horizon_angle,
-            max_points=settings.bake_execution.depth_projection.max_points,
-        )
-        camera_z_package = canonicalize_depth_parallax_package_identity(
-            camera_z_package,
-            uv_layer_name=settings.uv.layer_name,
-        )
-        depth_package = _package_to_camera_distance(camera_z_package)
-        depth = depth_package.front_result
 
         _depth_progress(
             progress_callback,
@@ -586,61 +760,23 @@ def prepare_a1_depth_source_geometry(
             object_id=object_id,
         )
         stage = A1SingleObjectStage.ASSIGN_Z_GROUPS
-        z_groups = build_a1_z_group_assignment(depth_package.union_snapshot)
+        z_groups = build_a1_z_group_assignment(
+            projection_stage.depth_package.union_snapshot
+        )
+
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
-        geometry = prepare_a1_geometry_regions(
-            depth_package.union_snapshot,
-            request.geometry_settings,
-        )
-        projection = _ProjectionPreparation(
-            snapshot=depth_package.union_snapshot,
-            geometry=geometry,
-            projected_origin=depth.projected_origin,
-            depth_range=calculate_a1_projected_snapshot_depth_range(
-                camera_z_package.union_snapshot
-            ),
-            camera_projection_kind=frame.kind,
-            statistics=_parallax_statistics(_depth_statistics({}, depth), depth_package),
-        )
-        statistics = _build_prepared_statistics(
-            statistics,
+        finalization = _finalize_depth_geometry_stage(
+            request,
+            normalized,
+            settings,
+            projection_stage,
+            z_groups,
             modifier_count=modifier_count,
             uv_report=uv_report,
-            normalized=normalized,
-            projection=projection,
-            z_groups=z_groups,
-            geometry=geometry,
+            statistics=statistics,
         )
-        statistics = _parallax_statistics(
-            _depth_statistics(statistics, depth),
-            depth_package,
-        )
-        _log_prepared_source(
-            request,
-            settings,
-            normalized,
-            projection,
-            geometry,
-            uv_report,
-        )
-        camera_distances = tuple(
-            float(vertex.position[2])
-            for vertex in depth_package.union_snapshot.vertices
-        )
-        logger.info(
-            "Prepared Depth Camera Projection source '%s': front_triangles=%d "
-            "front_points=%d reserve_faces=%d reserve_attachments=%d "
-            "union_points=%d horizon=%sdeg camera_distance=[%s, %s]",
-            request.object_id,
-            depth.source_triangle_count,
-            depth.sampled_point_count,
-            len(depth_package.reserve_face_indices),
-            len(depth_package.reserve_surfaces),
-            len(depth_package.union_snapshot.vertices),
-            degrees(depth_package.horizon_angle_radians),
-            min(camera_distances),
-            max(camera_distances),
-        )
+        statistics = finalization.statistics
+        _log_depth_projection_summary(request, projection_stage)
         _depth_progress(
             progress_callback,
             percent=43,
@@ -654,13 +790,13 @@ def prepare_a1_depth_source_geometry(
             settings=settings,
             output_paths=request.output_paths,
             renderer=request.renderer,
-            source_snapshot=depth_package.union_snapshot,
+            source_snapshot=projection_stage.depth_package.union_snapshot,
             z_groups=z_groups,
-            geometry=geometry,
+            geometry=finalization.geometry,
             warnings=warnings,
             statistics=statistics,
-            camera_projection_kind=frame.kind,
-            parallax_package=depth_package,
+            camera_projection_kind=projection_stage.depth.frame.kind,
+            parallax_package=projection_stage.depth_package,
         )
     except A1ObjectPreparationError:
         raise
