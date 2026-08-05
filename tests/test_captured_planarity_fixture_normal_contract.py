@@ -1,4 +1,4 @@
-"""Static contract separating captured planarity from stale-normal regressions."""
+"""Static contract separating export triangulation from strict normal diagnostics."""
 
 from __future__ import annotations
 
@@ -24,11 +24,15 @@ def test_captured_planarity_fixture_uses_geometric_normal_by_default() -> None:
     assert "return _newell_unit_normal(positions)" in source
 
 
-def test_stale_flat_normal_remains_an_explicit_negative_fixture() -> None:
+def test_stale_flat_normal_remains_an_explicit_strict_negative_fixture() -> None:
     source = CAPTURED_REGRESSIONS.read_text(encoding="utf-8")
 
-    assert "def test_face15_with_explicit_stale_flat_normal_remains_rejected(" in source
+    assert (
+        "def test_face15_with_explicit_stale_flat_normal_remains_rejected_in_strict_mode("
+        in source
+    )
     assert "face_normal=(0.0, 0.0, 1.0)" in source
+    assert "triangulate_snapshot(source, _strict_settings())" in source
     assert 'match="declared face normal"' in source
     assert '"exceeds tolerance 1.0 degrees"' in source
 
@@ -36,7 +40,23 @@ def test_stale_flat_normal_remains_an_explicit_negative_fixture() -> None:
 def test_quad_helper_does_not_unconditionally_stamp_a_flat_face_normal() -> None:
     source = CAPTURED_REGRESSIONS.read_text(encoding="utf-8")
     helper_start = source.index("def _quad_snapshot(")
-    helper_end = source.index("\ndef _captured_planarity_metrics(", helper_start)
+    helper_end = source.index(
+        "\ndef _captured_planarity_metrics(",
+        helper_start,
+    )
     helper = source[helper_start:helper_end]
 
     assert "normal=(0.0, 0.0, 1.0)" not in helper
+
+
+def test_default_and_strict_policies_are_both_locked() -> None:
+    source = CAPTURED_REGRESSIONS.read_text(encoding="utf-8")
+
+    assert "NonPlanarPolygonPolicy" in source
+    assert "def _strict_settings(" in source
+    assert '"non_planar_policy": NonPlanarPolygonPolicy.REJECT' in source
+    assert (
+        "test_default_policy_preserves_grossly_folded_tiny_quad_as_two_triangles"
+        in source
+    )
+    assert "test_strict_hard_ceiling_rejects_grossly_folded_tiny_polygon" in source
