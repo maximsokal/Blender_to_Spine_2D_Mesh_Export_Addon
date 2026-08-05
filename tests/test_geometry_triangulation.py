@@ -18,6 +18,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import (
     MeshSnapshot,
     MeshSnapshotValidator,
     MeshVertex,
+    NonPlanarPolygonPolicy,
     SourceEdgeId,
     SourceFaceId,
     SourceLoopId,
@@ -36,7 +37,12 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
 )
 
 
-def build_polygon_snapshot(points, *, name="Polygon", normal=(0.0, 0.0, 1.0)):
+def build_polygon_snapshot(
+    points,
+    *,
+    name="Polygon",
+    normal=(0.0, 0.0, 1.0),
+):
     source = name
     vertices = tuple(
         MeshVertex(
@@ -51,7 +57,10 @@ def build_polygon_snapshot(points, *, name="Polygon", normal=(0.0, 0.0, 1.0)):
         MeshEdge(
             id=EdgeId(index),
             source_id=SourceEdgeId(source, index),
-            vertex_ids=(VertexId(index), VertexId((index + 1) % len(points))),
+            vertex_ids=(
+                VertexId(index),
+                VertexId((index + 1) % len(points)),
+            ),
         )
         for index in range(len(points))
     )
@@ -61,7 +70,15 @@ def build_polygon_snapshot(points, *, name="Polygon", normal=(0.0, 0.0, 1.0)):
             source_id=SourceLoopId(source, 0, index),
             vertex_id=VertexId(index),
             edge_id=EdgeId(index),
-            uvs=(LoopUV("UVMap", (float(point[0]) / 2.0, float(point[1]) / 2.0)),),
+            uvs=(
+                LoopUV(
+                    "UVMap",
+                    (
+                        float(point[0]) / 2.0,
+                        float(point[1]) / 2.0,
+                    ),
+                ),
+            ),
         )
         for index, point in enumerate(points)
     )
@@ -90,14 +107,22 @@ def build_polygon_snapshot(points, *, name="Polygon", normal=(0.0, 0.0, 1.0)):
 def triangle_vertex_indices(snapshot):
     loop_map = snapshot.loop_by_id()
     return tuple(
-        tuple(loop_map[loop_id].vertex_id.index for loop_id in face.loop_ids)
+        tuple(
+            loop_map[loop_id].vertex_id.index
+            for loop_id in face.loop_ids
+        )
         for face in snapshot.faces
     )
 
 
 def test_convex_quad_triangulates_deterministically_with_one_generated_edge():
     source = build_polygon_snapshot(
-        ((0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 2.0, 0.0), (0.0, 2.0, 0.0)),
+        (
+            (0.0, 0.0, 0.0),
+            (2.0, 0.0, 0.0),
+            (2.0, 2.0, 0.0),
+            (0.0, 2.0, 0.0),
+        ),
         name="Quad",
     )
 
@@ -105,20 +130,34 @@ def test_convex_quad_triangulates_deterministically_with_one_generated_edge():
     second = triangulate_snapshot(source)
 
     assert first == second
-    assert triangle_vertex_indices(first.snapshot) == ((3, 0, 1), (1, 2, 3))
+    assert triangle_vertex_indices(first.snapshot) == (
+        (3, 0, 1),
+        (1, 2, 3),
+    )
     assert len(first.snapshot.faces) == 2
     assert len(first.snapshot.edges) == 5
     assert len(first.generated_edge_ids) == 1
     generated = first.snapshot.edge_by_id()[first.generated_edge_ids[0]]
     assert generated.source_id is None
-    assert generated.vertex_ids == (VertexId(1), VertexId(3))
-    assert all(face.source_id == SourceFaceId("Quad", 0) for face in first.snapshot.faces)
+    assert generated.vertex_ids == (
+        VertexId(1),
+        VertexId(3),
+    )
+    assert all(
+        face.source_id == SourceFaceId("Quad", 0)
+        for face in first.snapshot.faces
+    )
     MeshSnapshotValidator().validate_or_raise(first.snapshot)
 
 
 def test_source_loop_lineage_is_reused_for_generated_triangles():
     source = build_polygon_snapshot(
-        ((0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 2.0, 0.0), (0.0, 2.0, 0.0)),
+        (
+            (0.0, 0.0, 0.0),
+            (2.0, 0.0, 0.0),
+            (2.0, 2.0, 0.0),
+            (0.0, 2.0, 0.0),
+        ),
         name="Quad",
     )
     result = triangulate_snapshot(source)
@@ -132,7 +171,10 @@ def test_source_loop_lineage_is_reused_for_generated_triangles():
         SourceLoopId("Quad", 0, 2),
         SourceLoopId("Quad", 0, 3),
     )
-    assert tuple(loop.uv("UVMap") for loop in result.snapshot.loops) == (
+    assert tuple(
+        loop.uv("UVMap")
+        for loop in result.snapshot.loops
+    ) == (
         (0.0, 1.0),
         (0.0, 0.0),
         (1.0, 0.0),
@@ -156,7 +198,10 @@ def test_concave_polygon_produces_n_minus_two_non_degenerate_triangles():
     result = triangulate_snapshot(source)
 
     assert len(result.snapshot.faces) == 3
-    assert all(len(face.loop_ids) == 3 for face in result.snapshot.faces)
+    assert all(
+        len(face.loop_ids) == 3
+        for face in result.snapshot.faces
+    )
     assert len(result.faces[0].output_face_ids) == 3
     assert result.faces[0].original_corner_count == 5
     MeshSnapshotValidator().validate_or_raise(result.snapshot)
@@ -176,7 +221,7 @@ def test_self_intersecting_polygon_is_rejected():
         triangulate_snapshot(source)
 
 
-def test_non_planar_ngon_is_rejected_by_explicit_tolerance():
+def test_non_planar_quad_is_triangulated_by_default_without_face_loss():
     source = build_polygon_snapshot(
         (
             (0.0, 0.0, 0.0),
@@ -184,18 +229,91 @@ def test_non_planar_ngon_is_rejected_by_explicit_tolerance():
             (2.0, 2.0, 0.1),
             (0.0, 2.0, 0.0),
         ),
-        name="NonPlanar",
+        name="NonPlanarDefault",
+    )
+
+    result = triangulate_snapshot(source)
+
+    assert len(result.snapshot.faces) == 2
+    assert len(result.generated_edge_ids) == 1
+    assert all(
+        len(face.loop_ids) == 3
+        for face in result.snapshot.faces
+    )
+    assert tuple(
+        face.source_id
+        for face in result.snapshot.faces
+    ) == (
+        SourceFaceId("NonPlanarDefault", 0),
+        SourceFaceId("NonPlanarDefault", 0),
+    )
+    assert all(
+        sum(component * component for component in face.normal)
+        == pytest.approx(1.0)
+        for face in result.snapshot.faces
+    )
+
+
+def test_non_planar_ngon_is_rejected_by_explicit_strict_policy():
+    source = build_polygon_snapshot(
+        (
+            (0.0, 0.0, 0.0),
+            (2.0, 0.0, 0.0),
+            (2.0, 2.0, 0.1),
+            (0.0, 2.0, 0.0),
+        ),
+        name="NonPlanarStrict",
     )
     with pytest.raises(TriangulationError, match="not planar"):
         triangulate_snapshot(
             source,
-            TriangulationSettings(planarity_tolerance=1e-5),
+            TriangulationSettings(
+                planarity_tolerance=1e-5,
+                non_planar_policy=NonPlanarPolygonPolicy.REJECT,
+            ),
         )
+
+
+def test_warped_quad_selects_more_coherent_diagonal_deterministically():
+    source = build_polygon_snapshot(
+        (
+            (0.0, 0.0, 2.0),
+            (2.0, 0.0, 2.0),
+            (2.0, 2.0, 1.0),
+            (0.0, 2.0, -2.0),
+        ),
+        name="WarpedDiagonalChoice",
+    )
+
+    first = triangulate_snapshot(source)
+    second = triangulate_snapshot(source)
+
+    assert first == second
+    assert triangle_vertex_indices(first.snapshot) == (
+        (0, 1, 2),
+        (0, 2, 3),
+    )
+    generated = first.snapshot.edge_by_id()[first.generated_edge_ids[0]]
+    assert generated.vertex_ids == (
+        VertexId(0),
+        VertexId(2),
+    )
+    assert first.snapshot.faces[0].normal != first.snapshot.faces[1].normal
+
+
+def test_non_planar_policy_accepts_case_insensitive_string_values():
+    settings = TriangulationSettings(non_planar_policy="reject")
+    assert settings.non_planar_policy is NonPlanarPolygonPolicy.REJECT
 
 
 def test_triangulated_quad_projects_and_builds_spine_attachment():
     source = build_polygon_snapshot(
-        ((0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 2.0, 0.0), (0.0, 2.0, 0.0)),
+        (
+            (0.0, 0.0, 0.0),
+            (2.0, 0.0, 0.0),
+            (2.0, 2.0, 0.0),
+            (0.0, 2.0, 0.0),
+        ),
         name="Quad",
     )
     triangulated = triangulate_snapshot(source).snapshot
@@ -204,7 +322,9 @@ def test_triangulated_quad_projects_and_builds_spine_attachment():
             prefix="Quad",
             texture_width=100,
             texture_height=100,
-            z_groups=(LegacyZGroup(0.0, height_real_pixels=0.0),),
+            z_groups=(
+                LegacyZGroup(0.0, height_real_pixels=0.0),
+            ),
         )
     )
     projection = project_triangulated_disk_attachment(
@@ -221,7 +341,8 @@ def test_triangulated_quad_projects_and_builds_spine_attachment():
             center_x=1.0,
             center_y=1.0,
             z_bindings=tuple(
-                A1VertexZBinding(VertexId(index), 1) for index in range(4)
+                A1VertexZBinding(VertexId(index), 1)
+                for index in range(4)
             ),
         ),
     )
