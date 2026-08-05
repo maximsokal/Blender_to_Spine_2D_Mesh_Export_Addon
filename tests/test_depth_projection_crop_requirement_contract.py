@@ -37,14 +37,22 @@ def test_crop_requirement_pipeline_expands_before_physical_image_rewrite() -> No
     assert "class ProjectionUvBounds:" in domain
     assert "def expand_projection_layout_to_uv_bounds(" in domain
     assert "return replace(layout, crop=merged)" in domain
+
     assert "def depth_projection_required_uv_bounds(" in collector
+    assert "expected_reserve = {" in collector
+    assert "expected_all.update(expected_reserve)" in collector
+    assert "if view_id == _FRONT_VIEW_ID:" in collector
     assert "projection.ordered_vertex_keys" in collector
     assert "attachment.uvs" in collector
-    assert "expected.update(plan.view_id" in collector
+    assert "if not resolved_reserve:" in collector
+    assert "return MappingProxyType(resolved_reserve)" in collector
 
     assert "depth_projection_required_uv_bounds(item)" in output_staging
     assert "projection_uv_bounds_by_view=projection_uv_bounds_by_view" in output_staging
     assert "projection_uv_bounds_by_view:" in texture_executor
+    assert "expected_reserve_view_ids = tuple(" in texture_executor
+    assert "required_uv_bounds=bounds_by_view.get(view_id)" in texture_executor
+    assert "required_uv_bounds=bounds_by_view.get(_FRONT_VIEW_ID)" not in texture_executor
     assert "required_uv_bounds=request.required_uv_bounds" in texture_executor
     assert "required_uv_bounds: ProjectionUvBounds | None" in camera_output
     assert "build_camera_projection_postprocess_request(" in camera_output
@@ -53,6 +61,17 @@ def test_crop_requirement_pipeline_expands_before_physical_image_rewrite() -> No
     expand_index = postprocess.index("expand_projection_layout_to_uv_bounds(")
     rewrite_index = postprocess.index("rewrite_staged_image_with_crop(")
     assert expand_index < rewrite_index
+
+
+def test_front_crop_compatibility_is_preserved_without_reserve_bounds() -> None:
+    collector = _read(COLLECTOR)
+    texture_executor = _read(TEXTURE_EXECUTOR)
+
+    assert "if not resolved_reserve:" in collector
+    assert "return None" in collector
+    assert "expected_reserve_view_ids" in texture_executor
+    assert "required_uv_bounds=bounds_by_view.get(view_id)" in texture_executor
+    assert "required_uv_bounds=bounds_by_view.get(_FRONT_VIEW_ID)" not in texture_executor
 
 
 def test_finalization_remains_strict_and_never_clamps_large_crop_errors() -> None:
