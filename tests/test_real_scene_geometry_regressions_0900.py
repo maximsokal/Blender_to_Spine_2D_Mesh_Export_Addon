@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import replace
-from math import sqrt
+from math import isfinite, sqrt
 
 import pytest
 
@@ -33,6 +33,8 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import (
     triangulate_snapshot,
 )
 
+
+Vector3 = tuple[float, float, float]
 
 _MUSHROOMS_OBJECT_ID = "Plane.008"
 _MUSHROOMS_CUBE_OBJECT_ID = "Cube.012"
@@ -83,31 +85,116 @@ _DEFAULT_MAXIMUM_RELATIVE_PLANARITY_WARP = 1.0e-2
 _RETIRED_TOO_NARROW_RELATIVE_TOLERANCE = 2.5e-4
 
 
+def _newell_unit_normal(points: tuple[Vector3, ...]) -> Vector3:
+    """Return the geometric unit normal Blender-style n-gon fixtures should declare."""
+
+    if not isinstance(points, tuple) or len(points) < 3:
+        raise ValueError("points must contain at least three ordered vertices")
+    if any(
+        not isinstance(point, tuple)
+        or len(point) != 3
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(float(value))
+            for value in point
+        )
+        for point in points
+    ):
+        raise TypeError("points must contain finite numeric Vector3 tuples")
+
+    newell = [0.0, 0.0, 0.0]
+    for index, current in enumerate(points):
+        following = points[(index + 1) % len(points)]
+        newell[0] += (
+            (float(current[1]) - float(following[1]))
+            * (float(current[2]) + float(following[2]))
+        )
+        newell[1] += (
+            (float(current[2]) - float(following[2]))
+            * (float(current[0]) + float(following[0]))
+        )
+        newell[2] += (
+            (float(current[0]) - float(following[0]))
+            * (float(current[1]) + float(following[1]))
+        )
+
+    magnitude = sqrt(sum(component * component for component in newell))
+    if not isfinite(magnitude) or magnitude <= 0.0:
+        raise ValueError("polygon Newell normal is zero or non-finite")
+    return tuple(component / magnitude for component in newell)
+
+
+def _resolved_face_normal(
+    positions: tuple[Vector3, ...],
+    face_normal: Vector3 | None,
+) -> Vector3:
+    """Use Blender-like geometric normal unless a test explicitly injects stale data."""
+
+    if face_normal is None:
+        return _newell_unit_normal(positions)
+    if (
+        not isinstance(face_normal, tuple)
+        or len(face_normal) != 3
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(float(value))
+            for value in face_normal
+        )
+    ):
+        raise TypeError("face_normal must be None or a finite numeric Vector3")
+
+    magnitude = sqrt(sum(float(value) ** 2 for value in face_normal))
+    if magnitude <= 0.0:
+        raise ValueError("face_normal cannot be zero")
+    return tuple(float(value) / magnitude for value in face_normal)
+
+
 def _quad_snapshot(
     object_id: str,
     *,
     warp_height: float = 0.0,
     side_length: float = 1.0,
+    face_normal: Vector3 | None = None,
 ) -> MeshSnapshot:
-    """Build one ordered Blender-style n-gon with complete boundary lineage."""
+    """Build one ordered Blender-style n-gon with complete boundary lineage.
+
+    Blender calculates ``MeshPolygon.normal`` from the polygon vertices. Captured
+    planarity fixtures therefore declare their Newell normal by default. Tests that need
+    to reproduce stale or projection-inherited normal data must request it explicitly via
+    ``face_normal``.
+    """
 
     if not isinstance(object_id, str) or not object_id.strip():
         raise ValueError("object_id must be a non-empty string")
-    if isinstance(warp_height, bool) or not isinstance(warp_height, (int, float)):
+    if isinstance(warp_height, bool) or not isinstance(
+        warp_height,
+        (int, float),
+    ):
         raise TypeError("warp_height must be numeric")
-    if isinstance(side_length, bool) or not isinstance(side_length, (int, float)):
+    if isinstance(side_length, bool) or not isinstance(
+        side_length,
+        (int, float),
+    ):
         raise TypeError("side_length must be numeric")
+
     resolved_side = float(side_length)
-    if resolved_side <= 0.0:
-        raise ValueError("side_length must be positive")
+    resolved_warp = float(warp_height)
+    if not isfinite(resolved_side) or resolved_side <= 0.0:
+        raise ValueError("side_length must be finite and positive")
+    if not isfinite(resolved_warp):
+        raise ValueError("warp_height must be finite")
 
     half = resolved_side / 2.0
-    positions = (
+    positions: tuple[Vector3, ...] = (
         (-half, -half, 0.0),
         (half, -half, 0.0),
-        (half, half, float(warp_height)),
+        (half, half, resolved_warp),
         (-half, half, 0.0),
     )
+    declared_normal = _resolved_face_normal(positions, face_normal)
+
     edge_pairs = (
         (0, 1),
         (1, 2),
@@ -115,7 +202,8 @@ def _quad_snapshot(
         (0, 3),
     )
     edge_id_by_pair = {
-        pair: EdgeId(index) for index, pair in enumerate(edge_pairs)
+        pair: EdgeId(index)
+        for index, pair in enumerate(edge_pairs)
     }
 
     vertices = tuple(
@@ -123,14 +211,17 @@ def _quad_snapshot(
             id=VertexId(index),
             source_id=SourceVertexId(object_id, index),
             position=position,
-            normal=(0.0, 0.0, 1.0),
+            normal=declared_normal,
         )
         for index, position in enumerate(positions)
     )
     edges = tuple(
         MeshEdge(
             id=edge_id_by_pair[pair],
-            source_id=SourceEdgeId(object_id, edge_id_by_pair[pair].index),
+            source_id=SourceEdgeId(
+                object_id,
+                edge_id_by_pair[pair].index,
+            ),
             vertex_ids=(VertexId(pair[0]), VertexId(pair[1])),
         )
         for pair in edge_pairs
@@ -147,7 +238,9 @@ def _quad_snapshot(
                     sorted(
                         (
                             vertex_index,
-                            face_vertices[(corner_index + 1) % len(face_vertices)],
+                            face_vertices[
+                                (corner_index + 1) % len(face_vertices)
+                            ],
                         )
                     )
                 )
@@ -160,7 +253,7 @@ def _quad_snapshot(
         source_id=SourceFaceId(object_id, 0),
         loop_ids=tuple(loop.id for loop in loops),
         material_index=0,
-        normal=(0.0, 0.0, 1.0),
+        normal=declared_normal,
         smooth=True,
     )
     snapshot = MeshSnapshot(
@@ -176,7 +269,9 @@ def _quad_snapshot(
     return snapshot
 
 
-def _captured_planarity_metrics(snapshot: MeshSnapshot) -> tuple[float, float]:
+def _captured_planarity_metrics(
+    snapshot: MeshSnapshot,
+) -> tuple[float, float]:
     """Measure one fixture independently using the production geometric definition."""
 
     MeshSnapshotValidator().validate_or_raise(snapshot)
@@ -190,18 +285,7 @@ def _captured_planarity_metrics(snapshot: MeshSnapshot) -> tuple[float, float]:
         vertex_map[loop_map[loop_id].vertex_id].position
         for loop_id in face.loop_ids
     )
-
-    newell = [0.0, 0.0, 0.0]
-    for index, current in enumerate(points):
-        following = points[(index + 1) % len(points)]
-        newell[0] += (current[1] - following[1]) * (current[2] + following[2])
-        newell[1] += (current[2] - following[2]) * (current[0] + following[0])
-        newell[2] += (current[0] - following[0]) * (current[1] + following[1])
-
-    normal_length = sqrt(sum(component * component for component in newell))
-    if normal_length <= 0.0:
-        raise ValueError("captured polygon normal collapsed")
-    normal = tuple(component / normal_length for component in newell)
+    normal = _newell_unit_normal(points)
     centroid = tuple(
         sum(point[axis] for point in points) / float(len(points))
         for axis in range(3)
@@ -220,7 +304,9 @@ def _captured_planarity_metrics(snapshot: MeshSnapshot) -> tuple[float, float]:
         - min(point[axis] for point in points)
         for axis in range(3)
     )
-    polygon_scale = sqrt(sum(extent * extent for extent in extents))
+    polygon_scale = sqrt(
+        sum(extent * extent for extent in extents)
+    )
     return maximum_distance, polygon_scale
 
 
@@ -321,6 +407,24 @@ def test_real_mushrooms_plane008_face15_uses_bounded_absolute_floor() -> None:
     assert len(first.generated_edge_ids) == 1
 
 
+def test_face15_with_explicit_stale_flat_normal_remains_rejected() -> None:
+    source = _quad_snapshot(
+        _MUSHROOMS_OBJECT_ID,
+        warp_height=_PLANE008_FACE15_WARP_HEIGHT,
+        side_length=_PLANE008_FACE15_SIDE_LENGTH,
+        face_normal=(0.0, 0.0, 1.0),
+    )
+
+    with pytest.raises(
+        TriangulationError,
+        match="declared face normal",
+    ) as captured:
+        triangulate_snapshot(source)
+
+    assert "normal deviation" in str(captured.value)
+    assert "exceeds tolerance 1.0 degrees" in str(captured.value)
+
+
 def test_mushrooms_cube_012_traceback_warp_triangulates_deterministically() -> None:
     source = _quad_snapshot(
         _MUSHROOMS_CUBE_OBJECT_ID,
@@ -378,7 +482,10 @@ def test_default_planarity_window_rejects_percent_level_warp() -> None:
         _MUSHROOMS_OBJECT_ID,
         warp_height=_MATERIAL_WARP_HEIGHT,
     )
-    with pytest.raises(TriangulationError, match="Polygon is not planar"):
+    with pytest.raises(
+        TriangulationError,
+        match="Polygon is not planar",
+    ):
         triangulate_snapshot(source, settings)
 
 
@@ -397,7 +504,10 @@ def test_absolute_floor_cannot_accept_grossly_folded_tiny_polygon() -> None:
         > settings.maximum_relative_planarity_warp
     )
 
-    with pytest.raises(TriangulationError, match="hard ceiling"):
+    with pytest.raises(
+        TriangulationError,
+        match="hard ceiling",
+    ):
         triangulate_snapshot(source, settings)
 
 
@@ -437,14 +547,22 @@ def test_flower_shop_banco_repeated_source_face_lineage_is_valid_coverage() -> N
         for face in region.snapshot.faces
     )
     assert len(local_faces) == 2
-    expected_lineage = Counter(face.source_id for face in triangulated.faces)
+    expected_lineage = Counter(
+        face.source_id
+        for face in triangulated.faces
+    )
     prepared_lineage = Counter(
         source_face_id
         for region in prepared.regions
         for source_face_id in region.source_face_ids
     )
     assert prepared_lineage == expected_lineage
-    assert prepared_lineage[SourceFaceId(_FLOWER_SHOP_OBJECT_ID, 0)] == 2
+    assert (
+        prepared_lineage[
+            SourceFaceId(_FLOWER_SHOP_OBJECT_ID, 0)
+        ]
+        == 2
+    )
 
 
 def test_flower_shop_coverage_still_rejects_lost_lineage_occurrence() -> None:
@@ -458,7 +576,10 @@ def test_flower_shop_coverage_still_rejects_lost_lineage_occurrence() -> None:
         first,
         source_face_ids=first.source_face_ids[:-1],
     )
-    damaged_regions = (damaged_first, *prepared.regions[1:])
+    damaged_regions = (
+        damaged_first,
+        *prepared.regions[1:],
+    )
 
     with pytest.raises(
         A1GeometryPreparationError,
