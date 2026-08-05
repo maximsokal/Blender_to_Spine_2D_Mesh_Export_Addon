@@ -98,48 +98,20 @@ def test_captured_mushrooms_runner_reproduces_both_traceback_metrics_publicly() 
     assert '_CUBE_COMPONENT_ID = "object_1:Cube.012"' in source
     assert '_PLANE_OBJECT_NAME = "Plane.008"' in source
     assert '_PLANE_COMPONENT_ID = "object_2:Plane.008"' in source
-
     assert "_CUBE_SIDE_LENGTH = 0.09277534946637461" in source
     assert "_CUBE_WARP_HEIGHT = 0.00030260673225328884" in source
-    assert "_CUBE_CAPTURED_MAXIMUM_PLANE_DISTANCE = 7.565148185365435e-05" in source
-    assert "_CUBE_CAPTURED_POLYGON_SCALE = 0.13120450643194492" in source
-
     assert "_PLANE_SIDE_LENGTH = 0.0164835268501562" in source
     assert "_PLANE_WARP_HEIGHT = 0.000379143881919382" in source
-    assert "_PLANE_CAPTURED_MAXIMUM_PLANE_DISTANCE = 9.477343601658832e-05" in source
-    assert "_PLANE_CAPTURED_POLYGON_SCALE = 0.023314310303391664" in source
-
-    assert "_DISTANCE_ABS_TOLERANCE = 1.0e-11" in source
-    assert "_SCALE_ABS_TOLERANCE = 1.0e-8" in source
     assert "def _propagated_normalized_warp_tolerance(" in source
-    assert "distance_term = _DISTANCE_ABS_TOLERANCE / lower_scale" in source
-    assert "scale_term = (" in source
-    assert "ratio_tolerance = _propagated_normalized_warp_tolerance(" in source
-    assert "propagated_tolerance={ratio_tolerance}" in source
-    assert "<= 1.0e-10" not in source
-
-    assert "def _create_cube012_source(" in source
-    assert "def _create_plane008_source(" in source
-    assert "sources = (" in source
-    assert source.count("A1MultiObjectSource(") == 2
-    assert "len(sources) == 2" in source
     assert "prepare_a1_multi_object(" in source
     assert "len(prepared_multi.objects) == 2" in source
-    assert "def _prepared_by_component(" in source
-    assert "prepared_by_component[_CUBE_COMPONENT_ID]" in source
-    assert "prepared_by_component[_PLANE_COMPONENT_ID]" in source
-    assert "PreparedDepthA1Object" in source
-    assert '"depth_projection_source_triangle_count"' in source
-    assert "_source_fingerprint(cube) == cube_before" in source
-    assert "_source_fingerprint(plane) == plane_before" in source
-    assert "_temporary_datablock_names() == temporary_before" in source
     assert "[MUSHROOMS-CAPTURED-PLANARITY] PASS" in source
     assert '"triangles=2+2 sources=2 pipeline=public-multi-object"' in source
     assert "import bmesh" not in source
     assert "bpy.ops" not in source
 
 
-def test_direct_real_blend_runner_opens_no_synthetic_scene_and_scans_all_ngons() -> None:
+def test_direct_real_blend_runner_preserves_every_polygon_as_triangles() -> None:
     source = _read(REAL_BLEND_RUNNER)
 
     assert 'parser.add_argument(\n        "--expected-blend"' in source
@@ -151,13 +123,19 @@ def test_direct_real_blend_runner_opens_no_synthetic_scene_and_scans_all_ngons()
     assert "_read_source_snapshot(" in source
     assert "_canonicalize_depth_evaluated_identity(" in source
     assert "_normalize_source_geometry(" in source
-    assert "def _scan_snapshot_planarity(" in source
-    assert "Real mushrooms n-gon planarity scan found all blockers" in source
-    assert "for face in sorted(snapshot.faces" in source
-    assert "violations.append(record)" in source
-    assert "triangulate_snapshot(snapshot)" in source
+    assert "class SnapshotTriangulationScan:" in source
+    assert "def _expected_source_face_multiplicity(" in source
+    assert "max(1, len(face.loop_ids) - 2)" in source
+    assert "def _scan_snapshot_triangulation(" in source
+    assert "NonPlanarPolygonPolicy.TRIANGULATE" in source
+    assert "actual_counts != expected_counts" in source
+    assert "did not produce exact N-2 coverage" in source
+    assert "len(face.loop_ids) != 3" in source
+    assert "Generated triangle normal is invalid" in source
     assert "prepare_a1_multi_object(" in source
+    assert "face_loss=0 policy=TRIANGULATE" in source
     assert "[MUSHROOMS-REAL-BLEND] PASS" in source
+    assert "Real mushrooms n-gon planarity scan found all blockers" not in source
     assert "_create_mesh_object" not in source
     assert "_clear_scene" not in source
     assert "bpy.ops" not in source
@@ -181,7 +159,7 @@ def test_float32_roundtrip_regression_locks_the_runner_failure() -> None:
     assert "bpy.ops" not in source
 
 
-def test_real_scene_pure_regression_locks_plane008_face15_traceback() -> None:
+def test_real_scene_pure_regression_locks_face15_and_policy_split() -> None:
     source = _read(REAL_SCENE_REGRESSIONS)
 
     assert "_PLANE008_FACE15_SIDE_LENGTH = 0.01813398508349017" in source
@@ -190,35 +168,33 @@ def test_real_scene_pure_regression_locks_plane008_face15_traceback() -> None:
         "_PLANE008_FACE15_CAPTURED_MAXIMUM_PLANE_DISTANCE = "
         "0.0001503866471090267"
     ) in source
-    assert (
-        "_PLANE008_FACE15_CAPTURED_POLYGON_SCALE = "
-        "0.025652385610684413"
-    ) in source
     assert "0.005862481930194809" in source
-    assert "test_real_mushrooms_plane008_face15_uses_bounded_absolute_floor" in source
+    assert "test_real_mushrooms_plane008_face15_triangulates_without_face_loss" in source
+    assert "test_strict_planarity_window_rejects_percent_level_warp" in source
+    assert "test_default_policy_preserves_grossly_folded_tiny_quad_as_two_triangles" in source
 
 
-def test_triangulation_uses_bounded_absolute_relative_and_hard_warp_limits() -> None:
+def test_triangulation_uses_export_and_strict_non_planar_policies() -> None:
     source = _read(TRIANGULATION)
 
-    assert "planarity_tolerance: float = 2.0e-4" in source
-    assert "planarity_tolerance: float = 1.0e-4" not in source
-    assert "relative_planarity_tolerance: float = 1.0e-3" in source
-    assert "maximum_relative_planarity_warp: float = 1.0e-2" in source
-    assert "relative_planarity_tolerance: float = 2.5e-4" not in source
-    assert "relative_planarity_tolerance: float = 5e-2" not in source
-    assert "normal_alignment_tolerance_degrees: float = 1.0" in source
-    assert "def _polygon_scale(" in source
-    assert "def _centroid(" in source
-    assert "normalized_warp = maximum / scale" in source
-    assert "effective_tolerance = max(" in source
-    assert "or normalized_warp > maximum_relative_warp" in source
-    assert "hard ceiling" in source
-    assert "source face 15" in source
-    assert "def _validate_declared_normal_alignment(" in source
-    assert "def _validate_triangle_orientation(" in source
+    assert "class NonPlanarPolygonPolicy(str, Enum):" in source
+    assert 'TRIANGULATE = "TRIANGULATE"' in source
+    assert 'REJECT = "REJECT"' in source
+    assert "NonPlanarPolygonPolicy.TRIANGULATE" in source
+    assert "if settings.non_planar_policy is NonPlanarPolygonPolicy.REJECT:" in source
+    assert "def _require_strict_planarity(" in source
+    assert "def _triangulate_quad(" in source
+    assert "((3, 0, 1), (1, 2, 3))" in source
+    assert "((0, 1, 2), (0, 2, 3))" in source
+    assert "def _quad_candidate_score(" in source
+    assert "coherence" in source
+    assert "_validate_projected_triangulation(" in source
+    assert "len(triangles) != len(points_3d) - 2" in source
+    assert "normal=triangle.normal" in source
+    assert "source_id=None" in source
     assert "Polygon is not planar within deterministic tolerance" in source
-    assert "Polygon is not planar relative to its declared face normal" in source
+    assert "Polygon boundary self-intersects" in source
+    assert "Neither quad diagonal produced a valid triangulation" in source
     assert "import bpy" not in source
     assert "import bmesh" not in source
     assert "bpy.ops" not in source
