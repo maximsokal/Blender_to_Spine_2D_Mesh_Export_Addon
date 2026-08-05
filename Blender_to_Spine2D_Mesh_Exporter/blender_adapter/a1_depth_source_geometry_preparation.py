@@ -8,14 +8,19 @@ import logging
 from typing import Any, Mapping, Tuple
 
 from ..application import (
+    A1ExportProgressCallback,
     A1SingleObjectExportSettings,
     A1SingleObjectStage,
     A1SourceGeometryMode,
     ExportIssue,
     build_a1_z_group_assignment,
+    emit_a1_export_progress,
     prepare_a1_geometry_regions,
 )
-from ..domain.baking import A1TextureExportMode
+from ..domain.baking import (
+    A1TextureExportMode,
+    DepthCameraProjectionSettings,
+)
 from ..domain.geometry import (
     DepthCameraProjectionResult,
     DepthParallaxGeometryPackage,
@@ -59,6 +64,10 @@ from .depth_parallax_camera_views import resolve_depth_parallax_camera_views
 
 logger = logging.getLogger(__name__)
 _LINEAGE_POSITION_TOLERANCE = 1.0e-9
+_DEPTH_PROGRESS_STAGE = A1SingleObjectStage.READ_GEOMETRY
+_MINIMUM_FRONT_POINTS = 4
+_MINIMUM_RESERVE_POINTS = 3
+_MAXIMUM_RESERVE_POINT_ALLOCATION = 32
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -75,6 +84,75 @@ class A1DepthSourceGeometryPreparationResult(A1SourceGeometryPreparationResult):
             raise ValueError(
                 "Depth source_snapshot must be the parallax union snapshot"
             )
+
+
+def _depth_progress(
+    callback: A1ExportProgressCallback | None,
+    *,
+    percent: int,
+    message: str,
+    object_id: str | None,
+) -> None:
+    """Emit one advisory progress update inside the long Depth geometry stage."""
+
+    emit_a1_export_progress(
+        callback,
+        percent=percent,
+        stage=_DEPTH_PROGRESS_STAGE,
+        message=message,
+        object_id=object_id,
+    )
+
+
+def _depth_front_projection_settings(
+    settings: DepthCameraProjectionSettings,
+    *,
+    horizon_angle_radians: float,
+) -> DepthCameraProjectionSettings:
+    """Reserve a bounded part of the shared point budget for positive parallax.
+
+    Zero horizon preserves the complete user-selected front budget. Positive parallax
+    reserves at most one quarter of the global budget, capped at 32 points (four proxy
+    corners for each of eight virtual views). This prevents the front relief from
+    consuming every point before reserve topology is considered.
+    """
+
+    if not isinstance(settings, DepthCameraProjectionSettings):
+        raise TypeError("settings must be DepthCameraProjectionSettings")
+    if isinstance(horizon_angle_radians, bool) or not isinstance(
+        horizon_angle_radians,
+        (int, float),
+    ):
+        raise TypeError("horizon_angle_radians must be numeric")
+    angle = float(horizon_angle_radians)
+    if angle <= 1.0e-12:
+        return settings
+
+    shared_budget = settings.max_points
+    minimum_total = _MINIMUM_FRONT_POINTS + _MINIMUM_RESERVE_POINTS
+    if shared_budget < minimum_total:
+        raise ValueError(
+            "Positive Parallax Horizon requires at least seven Max Depth Points: "
+            f"front_min={_MINIMUM_FRONT_POINTS}, "
+            f"reserve_min={_MINIMUM_RESERVE_POINTS}, "
+            f"max_points={shared_budget}"
+        )
+
+    reserve_budget = min(
+        _MAXIMUM_RESERVE_POINT_ALLOCATION,
+        max(_MINIMUM_RESERVE_POINTS, shared_budget // 4),
+    )
+    front_budget = shared_budget - reserve_budget
+    if front_budget < _MINIMUM_FRONT_POINTS:
+        front_budget = _MINIMUM_FRONT_POINTS
+        reserve_budget = shared_budget - front_budget
+    if reserve_budget < _MINIMUM_RESERVE_POINTS:
+        raise ValueError(
+            "Positive Parallax Horizon cannot reserve a valid surface within "
+            f"Max Depth Points={shared_budget}"
+        )
+
+    return replace(settings, max_points=front_budget)
 
 
 def _normal_camera_request_settings(
@@ -370,12 +448,15 @@ def prepare_a1_depth_source_geometry(
     settings: A1SingleObjectExportSettings,
     *,
     scene: Any | None = None,
+    progress_callback: A1ExportProgressCallback | None = None,
 ) -> A1DepthSourceGeometryPreparationResult:
     stage = A1SingleObjectStage.VALIDATE_REQUEST
     object_id: str | None = None
     warnings: Tuple[ExportIssue, ...] = ()
     statistics: Mapping[str, StatisticsValue] = {}
     try:
+        if progress_callback is not None and not callable(progress_callback):
+            raise TypeError("progress_callback must be callable or None")
         validated_settings = _normal_camera_request_settings(settings)
         request = _resolve_source_request(source_obj, validated_settings, scene)
         object_id = request.object_id
@@ -390,7 +471,14 @@ def prepare_a1_depth_source_geometry(
                 ),
             },
         )
+
         stage = A1SingleObjectStage.READ_GEOMETRY
+        _depth_progress(
+            progress_callback,
+            percent=13,
+            message="Reading evaluated Depth geometry",
+            object_id=object_id,
+        )
         source_snapshot, modifier_count, warnings, uv_report = _read_source_snapshot(
             source_obj,
             request.object_id,
@@ -409,6 +497,7 @@ def prepare_a1_depth_source_geometry(
             statistics,
             object_id=request.object_id,
         )
+
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
         normalized = _normalize_source_geometry(
             source_snapshot,
@@ -432,20 +521,47 @@ def prepare_a1_depth_source_geometry(
             settings.export.texture_height,
             settings.rig_scale_mode,
         )
+        horizon_angle = settings.bake_execution.depth_parallax.horizon_angle_radians
+        front_projection_settings = _depth_front_projection_settings(
+            settings.bake_execution.depth_projection,
+            horizon_angle_radians=horizon_angle,
+        )
+        _depth_progress(
+            progress_callback,
+            percent=18,
+            message=(
+                "Projecting active-camera front surface "
+                f"({front_projection_settings.max_points}/"
+                f"{settings.bake_execution.depth_projection.max_points} points)"
+            ),
+            object_id=object_id,
+        )
         projected_front = build_depth_camera_projection_surface(
             normalized.snapshot,
             frame,
             uniform_scale=uniform_scale,
             uv_layer_name=settings.uv.layer_name,
-            settings=settings.bake_execution.depth_projection,
+            settings=front_projection_settings,
         )
-        horizon_angle = settings.bake_execution.depth_parallax.horizon_angle_radians
+
+        _depth_progress(
+            progress_callback,
+            percent=26,
+            message="Resolving virtual parallax camera views",
+            object_id=object_id,
+        )
         reserve_views = resolve_depth_parallax_camera_views(
             request.scene,
             normalized.snapshot,
             frame,
             horizon_angle_radians=horizon_angle,
             depsgraph=request.depsgraph,
+        )
+        _depth_progress(
+            progress_callback,
+            percent=30,
+            message="Expanding and budgeting parallax reserve",
+            object_id=object_id,
         )
         camera_z_package = build_depth_parallax_geometry_package(
             normalized.snapshot,
@@ -462,6 +578,13 @@ def prepare_a1_depth_source_geometry(
         )
         depth_package = _package_to_camera_distance(camera_z_package)
         depth = depth_package.front_result
+
+        _depth_progress(
+            progress_callback,
+            percent=38,
+            message="Preparing Depth regions and UV lineage",
+            object_id=object_id,
+        )
         stage = A1SingleObjectStage.ASSIGN_Z_GROUPS
         z_groups = build_a1_z_group_assignment(depth_package.union_snapshot)
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
@@ -518,6 +641,12 @@ def prepare_a1_depth_source_geometry(
             min(camera_distances),
             max(camera_distances),
         )
+        _depth_progress(
+            progress_callback,
+            percent=43,
+            message="Depth source geometry prepared",
+            object_id=object_id,
+        )
         return A1DepthSourceGeometryPreparationResult(
             source_object=source_obj,
             object_id=request.object_id,
@@ -548,6 +677,7 @@ def prepare_a1_depth_source_geometry(
 __all__ = [
     "A1DepthSourceGeometryPreparationResult",
     "_canonicalize_depth_evaluated_identity",
+    "_depth_front_projection_settings",
     "_depth_statistics",
     "prepare_a1_depth_source_geometry",
 ]
