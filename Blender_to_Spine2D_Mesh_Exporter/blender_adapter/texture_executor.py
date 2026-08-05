@@ -3,7 +3,7 @@
 Every entry point first builds one typed ``TextureExecutionRequest`` so invalid
 domain values fail before filesystem reservations or Blender Scene mutation. Depth
 parallax stages the front and every reserve view in one caller-owned transaction and
-retains an independent crop layout and required UV envelope for each view.
+retains an independent crop layout and required UV envelope for each reserve view.
 """
 
 from __future__ import annotations
@@ -245,7 +245,7 @@ def _projection_uv_bounds(
     unknown = tuple(sorted(set(resolved) - expected))
     if missing or unknown:
         raise ValueError(
-            "projection UV view bounds do not match camera plans; "
+            "projection UV view bounds do not match reserve camera plans; "
             f"missing={missing}, unknown={unknown}"
         )
     return resolved
@@ -300,19 +300,19 @@ def stage_texture_plan_outputs(
     ):
         raise TypeError("reserve_plans must contain CameraProjectionPlan values")
 
-    expected_view_ids = (_FRONT_VIEW_ID,) + tuple(
-        plan.view_id.strip().upper() for plan in reserve_plans
+    expected_reserve_view_ids = tuple(
+        reserve_plan.view_id.strip().upper()
+        for reserve_plan in reserve_plans
     )
     bounds_by_view = _projection_uv_bounds(
         projection_uv_bounds_by_view,
-        expected_view_ids=expected_view_ids,
+        expected_view_ids=expected_reserve_view_ids,
     )
     request = TextureExecutionRequest.capture(
         source_obj,
         target_snapshot,
         plan,
         execution_settings,
-        required_uv_bounds=bounds_by_view.get(_FRONT_VIEW_ID),
     )
 
     if isinstance(request.plan, CameraProjectionPlan):
