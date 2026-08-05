@@ -16,6 +16,11 @@ from .depth_camera_projection_bounded import (
     _projected_triangles,
     build_depth_camera_projection_surface as _build_bounded_surface,
 )
+from .depth_camera_projection_component_envelope import (
+    _ComponentEnvelopeUnavailable,
+    _build_component_envelope_surface,
+    is_sparse_lattice_failure,
+)
 from .depth_camera_projection_visible_topology import (
     _LocalTopologyUnavailable,
     _build_visible_topology_surface,
@@ -53,6 +58,49 @@ def _crosses_camera_frame(
     )
 
 
+def _build_full_frame_surface(
+    snapshot: MeshSnapshot,
+    frame: A1CameraProjectionFrame,
+    *,
+    uniform_scale: float,
+    uv_layer_name: str,
+    settings: DepthCameraProjectionSettings,
+) -> DepthCameraProjectionResult:
+    """Build full-frame geometry and repair only sparse-lattice failures."""
+
+    try:
+        return _build_bounded_surface(
+            snapshot,
+            frame,
+            uniform_scale=uniform_scale,
+            uv_layer_name=uv_layer_name,
+            settings=settings,
+        )
+    except DepthCameraProjectionError as lattice_error:
+        if not is_sparse_lattice_failure(lattice_error):
+            raise
+
+        logger.warning(
+            "Depth lattice for '%s' could not retain a connected sparse surface: "
+            "%s; using budgeted component envelopes",
+            snapshot.source_object_id,
+            lattice_error,
+        )
+        try:
+            return _build_component_envelope_surface(
+                snapshot,
+                frame,
+                uniform_scale=uniform_scale,
+                uv_layer_name=uv_layer_name,
+                settings=settings,
+            )
+        except _ComponentEnvelopeUnavailable as envelope_error:
+            raise DepthCameraProjectionError(
+                "depth lattice and component-envelope fallback both failed; "
+                f"lattice={lattice_error}; envelope={envelope_error}"
+            ) from lattice_error
+
+
 def build_depth_camera_projection_surface(
     snapshot: MeshSnapshot,
     frame: A1CameraProjectionFrame,
@@ -84,7 +132,7 @@ def build_depth_camera_projection_surface(
         )
 
     if not _crosses_camera_frame(snapshot, frame):
-        return _build_bounded_surface(
+        return _build_full_frame_surface(
             snapshot,
             frame,
             uniform_scale=resolved_scale,
