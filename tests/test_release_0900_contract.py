@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 import tomllib
 
@@ -22,6 +23,9 @@ RENDER_PROXY = (
     PACKAGE / "blender_adapter" / "depth_camera_projection_render_proxy.py"
 )
 DOCUMENT = PACKAGE / "blender_adapter" / "a1_depth_document_assembly.py"
+DEPTH_SOURCE = (
+    PACKAGE / "blender_adapter" / "a1_depth_source_geometry_preparation.py"
+)
 STAGING = PACKAGE / "blender_adapter" / "texture_executor.py"
 FINALIZATION = (
     PACKAGE / "blender_adapter" / "a1_depth_projection_finalization.py"
@@ -39,6 +43,48 @@ def _normalized(value: str) -> str:
     return " ".join(
         value.lower().replace("-", " ").replace("`", " ").split()
     )
+
+
+def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
+    return next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    )
+
+
+def _call_name(call: ast.Call) -> str | None:
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    return None
+
+
+def _attribute_path(node: ast.AST) -> tuple[str, ...] | None:
+    parts: list[str] = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return None
+    parts.append(current.id)
+    return tuple(reversed(parts))
+
+
+def _depth_z_group_source_path() -> tuple[str, ...]:
+    tree = ast.parse(_read(DEPTH_SOURCE), filename=DEPTH_SOURCE.name)
+    public = _function(tree, "prepare_a1_depth_source_geometry")
+    calls = tuple(
+        node
+        for node in ast.walk(public)
+        if isinstance(node, ast.Call)
+        and _call_name(node) == "build_a1_z_group_assignment"
+    )
+    assert len(calls) == 1
+    assert len(calls[0].args) == 1
+    path = _attribute_path(calls[0].args[0])
+    assert path is not None
+    return path
 
 
 def test_current_manifest_and_scene_schema_are_0900() -> None:
@@ -139,8 +185,10 @@ def test_reserve_attachments_share_rig_and_remain_below_front() -> None:
     assert "for surface in package.reserve_surfaces" in document
     assert "projections.append(" in document
     assert "front_name = rig.profile.segment_slot(source.prefix, 0)" in document
-    assert "build_a1_z_group_assignment(depth_package.union_snapshot)" in _read(
-        PACKAGE / "blender_adapter" / "a1_depth_source_geometry_preparation.py"
+    assert _depth_z_group_source_path() == (
+        "projection_stage",
+        "depth_package",
+        "union_snapshot",
     )
     assert "optimize_shared_vertex_bones" in document
 
