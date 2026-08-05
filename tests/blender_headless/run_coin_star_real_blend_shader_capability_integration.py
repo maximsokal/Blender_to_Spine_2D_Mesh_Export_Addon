@@ -4,6 +4,8 @@ Blender must open the exact caller-provided ``coin_star.blend`` before this scri
 The regression reproduces the BlendKit ``Gold coin`` material that contains a muted
 ``Add Shader`` with two same-named inputs. Recursive traversal conservatively visits all
 inputs, so that advisory must not mask the material's genuine camera-render requirement.
+Fresnel and Generated coordinates remain reproducible by the source-object bake context;
+the two Glossy BSDF nodes are the concrete Normal-mode blockers.
 """
 
 from __future__ import annotations
@@ -311,12 +313,20 @@ def _run(expected_blend: str) -> None:
         f"Normal-mode guidance does not identify supported camera routes: {guidance}",
     )
     _assert(
-        "BSDF_GLOSSY" in guidance,
-        f"Normal-mode guidance hides the Glossy blocker: {guidance}",
+        guidance.count("BSDF_GLOSSY") == 2,
+        f"Normal-mode guidance must expose both Glossy blockers exactly once: {guidance}",
     )
     _assert(
-        "Generated" in guidance,
-        f"Normal-mode guidance hides the Generated-coordinate blocker: {guidance}",
+        "Generated" not in guidance,
+        f"Normal-mode guidance misclassified supported Generated coordinates: {guidance}",
+    )
+    _assert(
+        "FRESNEL" not in guidance,
+        f"Normal-mode guidance misclassified supported Fresnel context: {guidance}",
+    )
+    _assert(
+        "GRAPH_CAMERA_DEPENDENCY" not in guidance,
+        f"Normal-mode guidance duplicated the aggregate camera finding: {guidance}",
     )
 
     _assert(_scene_fingerprint() == scene_before, "coin audit changed Blender context")
@@ -331,7 +341,8 @@ def _run(expected_blend: str) -> None:
         f"blend={loaded} object={source.name_full!r} material={_EXPECTED_MATERIAL_NAME!r} "
         f"nodes={len(graph.reachable_nodes)} links={len(graph.reachable_links)} "
         f"findings={len(findings)} capability={capability.value} "
-        "muted_fallback=advisory normal_mode=camera-required scene=unchanged",
+        "muted_fallback=advisory source_context=FRESNEL+Generated "
+        "blockers=2xBSDF_GLOSSY normal_mode=camera-required scene=unchanged",
         flush=True,
     )
 
