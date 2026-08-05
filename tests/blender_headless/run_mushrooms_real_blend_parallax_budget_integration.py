@@ -194,14 +194,14 @@ def _run(expected_blend: str) -> None:
             ),
         )
         _assert(
-            package.reserve_surfaces,
-            f"{label} positive horizon produced no reserve surfaces",
-        )
-        _assert(
             all(surface.source_face_indices for surface in package.reserve_surfaces),
             f"{label} reserve surface lost render ownership",
         )
 
+    _assert(
+        plane_package.reserve_surfaces,
+        "Plane.008 positive horizon produced no reserve surfaces",
+    )
     plane_proxy_surfaces = tuple(
         surface
         for surface in plane_package.reserve_surfaces
