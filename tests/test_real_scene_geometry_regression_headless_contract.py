@@ -18,10 +18,21 @@ CAPTURED_PLANARITY_RUNNER = (
     / "blender_headless"
     / "run_mushrooms_cube012_planarity_integration.py"
 )
+REAL_BLEND_RUNNER = (
+    ROOT
+    / "tests"
+    / "blender_headless"
+    / "run_mushrooms_real_blend_integration.py"
+)
 FLOAT32_PLANARITY_TEST = (
     ROOT
     / "tests"
     / "test_mushrooms_planarity_float32_roundtrip.py"
+)
+REAL_SCENE_REGRESSIONS = (
+    ROOT
+    / "tests"
+    / "test_real_scene_geometry_regressions_0900.py"
 )
 TRIANGULATION = (
     ROOT
@@ -128,6 +139,31 @@ def test_captured_mushrooms_runner_reproduces_both_traceback_metrics_publicly() 
     assert "bpy.ops" not in source
 
 
+def test_direct_real_blend_runner_opens_no_synthetic_scene_and_scans_all_ngons() -> None:
+    source = _read(REAL_BLEND_RUNNER)
+
+    assert 'parser.add_argument(\n        "--expected-blend"' in source
+    assert "bpy.data.filepath" in source
+    assert '_OBJECT_NAMES = ("Plane.008", "Cube.012")' in source
+    assert "def _require_loaded_blend(" in source
+    assert "def _require_source_objects(" in source
+    assert "def _read_normalized_snapshot(" in source
+    assert "_read_source_snapshot(" in source
+    assert "_canonicalize_depth_evaluated_identity(" in source
+    assert "_normalize_source_geometry(" in source
+    assert "def _scan_snapshot_planarity(" in source
+    assert "Real mushrooms n-gon planarity scan found all blockers" in source
+    assert "for face in sorted(snapshot.faces" in source
+    assert "violations.append(record)" in source
+    assert "triangulate_snapshot(snapshot)" in source
+    assert "prepare_a1_multi_object(" in source
+    assert "[MUSHROOMS-REAL-BLEND] PASS" in source
+    assert "_create_mesh_object" not in source
+    assert "_clear_scene" not in source
+    assert "bpy.ops" not in source
+    assert "import bmesh" not in source
+
+
 def test_float32_roundtrip_regression_locks_the_runner_failure() -> None:
     source = _read(FLOAT32_PLANARITY_TEST)
 
@@ -145,10 +181,28 @@ def test_float32_roundtrip_regression_locks_the_runner_failure() -> None:
     assert "bpy.ops" not in source
 
 
+def test_real_scene_pure_regression_locks_plane008_face15_traceback() -> None:
+    source = _read(REAL_SCENE_REGRESSIONS)
+
+    assert "_PLANE008_FACE15_SIDE_LENGTH = 0.01813398508349017" in source
+    assert "_PLANE008_FACE15_WARP_HEIGHT = 0.00060171214277301" in source
+    assert (
+        "_PLANE008_FACE15_CAPTURED_MAXIMUM_PLANE_DISTANCE = "
+        "0.0001503866471090267"
+    ) in source
+    assert (
+        "_PLANE008_FACE15_CAPTURED_POLYGON_SCALE = "
+        "0.025652385610684413"
+    ) in source
+    assert "0.005862481930194809" in source
+    assert "test_real_mushrooms_plane008_face15_uses_bounded_absolute_floor" in source
+
+
 def test_triangulation_uses_bounded_absolute_relative_and_hard_warp_limits() -> None:
     source = _read(TRIANGULATION)
 
-    assert "planarity_tolerance: float = 1.0e-4" in source
+    assert "planarity_tolerance: float = 2.0e-4" in source
+    assert "planarity_tolerance: float = 1.0e-4" not in source
     assert "relative_planarity_tolerance: float = 1.0e-3" in source
     assert "maximum_relative_planarity_warp: float = 1.0e-2" in source
     assert "relative_planarity_tolerance: float = 2.5e-4" not in source
@@ -160,6 +214,7 @@ def test_triangulation_uses_bounded_absolute_relative_and_hard_warp_limits() -> 
     assert "effective_tolerance = max(" in source
     assert "or normalized_warp > maximum_relative_warp" in source
     assert "hard ceiling" in source
+    assert "source face 15" in source
     assert "def _validate_declared_normal_alignment(" in source
     assert "def _validate_triangle_orientation(" in source
     assert "Polygon is not planar within deterministic tolerance" in source
