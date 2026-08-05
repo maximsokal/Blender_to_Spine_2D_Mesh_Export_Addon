@@ -1,4 +1,4 @@
-"""Static contract for the real render/crop/remap mushrooms regression."""
+"""Static contract for the real render/crop/remap/setup mushrooms regression."""
 
 from __future__ import annotations
 
@@ -28,11 +28,20 @@ def test_runner_executes_complete_real_output_not_preparation_only() -> None:
     assert '"DOWN_RIGHT"' in source
     assert "path.read_bytes().startswith(PNG_SIGNATURE)" in source
     assert "_assert_serialized_uvs(document)" in source
+    assert "_assert_neutral_depth_setup_pose(document)" in source
+    assert 'f"{prefix}_rotation_X_constraint"' in source
+    assert 'f"{prefix}_rotation_Y"' in source
+    assert 'f"{prefix}_scale_rotate_X_constraint"' in source
+    assert "abs(rotation) <= _NEUTRAL_TOLERANCE" in source
+    assert "abs(depth_x) <= _NEUTRAL_TOLERANCE" in source
+    assert "abs(depth_scale_x) <= _NEUTRAL_TOLERANCE" in source
     assert '"spine2d-stage-v3" in path.name' in source
     assert "depth_parallax_cropped_view_count" in source
     assert "parallax_texture_output_count" in source
     assert "[MUSHROOMS-REAL-PARALLAX-OUTPUT] PASS" in source
+    assert "neutral_constraints={neutral_constraint_count}" in source
     assert "crop=alpha-union-geometry" in source
+    assert "setup=camera-depth-surface" in source
 
 
 def test_runner_never_synthesizes_or_mutates_the_real_asset() -> None:
