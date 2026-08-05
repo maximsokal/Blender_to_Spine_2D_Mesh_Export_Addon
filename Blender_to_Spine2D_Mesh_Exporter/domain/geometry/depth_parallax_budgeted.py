@@ -1,18 +1,18 @@
 """Budget-aware parallax owner for dense Blender geometry.
 
-The legacy parallax builder is exact when the complete front plus reserve topology fits
-``Max Depth Points``. Dense assets may contain hundreds of tiny reserve faces while the
-front surface already consumes the point budget. Failing after materializing that complete
-union is both slow and unhelpful.
+The exact parallax builder is retained whenever front plus reserve topology fits the
+shared ``Max Depth Points`` limit. Dense assets may contain hundreds of tiny reserve
+faces while the front relief already consumes most of that budget. In that case every
+active virtual view receives an isolated three- or four-point screen-space proxy.
 
-This owner keeps the exact path when it fits. Otherwise each active reserve view receives
-a deterministic screen-space proxy built from existing front vertices. The proxy adds no
-new union points, while ``DepthParallaxReserveSurface.source_face_indices`` retains every
-original evaluated polygon that must be isolated for the reserve texture render.
+Proxy vertices are generated in a separate topology domain; they never reuse FRONT
+vertices or edges. The proxy therefore cannot create coplanar duplicate faces or edges
+with more than two owners. ``DepthParallaxReserveSurface.source_face_indices`` retains
+all evaluated Blender polygons that must be isolated for the reserve texture render.
 
-Front-most face discovery uses a projected screen grid instead of comparing every probe
-against every triangle. The result is exact with respect to the same barycentric depth
-predicate, but candidate lookup is local for dense meshes.
+Front-most source-face discovery uses a deterministic projected screen grid instead of
+comparing every probe against every triangle. Shared-edge dihedral values are cached once
+for horizon expansion. The module is Blender-independent and emits timing diagnostics.
 """
 
 from __future__ import annotations
@@ -20,11 +20,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from heapq import heappop, heappush
 import logging
-from math import atan2, floor, isfinite, sqrt
+from math import floor, isfinite, pi, sqrt
 from time import perf_counter
 from typing import Mapping, Sequence
 
-from ..camera_projection import A1CameraProjectionFrame, A1CameraProjectionKind
+from ..camera_projection import A1CameraProjectionFrame
+from ..projection import A1ProjectedPoint
 from .depth_camera_projection import (
     DepthCameraProjectionError,
     DepthCameraProjectionResult,
@@ -47,7 +48,6 @@ from .depth_parallax import (
     _FaceGeometry,
     _FaceRecord,
     _VIEW_ORDER,
-    _accumulated_horizon_costs,
     _dihedral_angle,
     _face_adjacency,
     _face_geometry,
@@ -59,7 +59,7 @@ from .depth_parallax import (
     _view_for_face,
 )
 from .ids import SourceVertexId
-from .model import MeshSnapshot, MeshVertex
+from .model import MeshSnapshot
 from .validator import MeshSnapshotValidator
 
 
@@ -67,7 +67,9 @@ logger = logging.getLogger(__name__)
 
 _GRID_TARGET_OCCUPANCY = 12
 _GRID_MAX_AXIS = 96
-_PROXY_AREA_EPSILON = 1.0e-14
+_PROXY_MINIMUM_POINTS = 3
+_PROXY_MAXIMUM_POINTS = 4
+_COORDINATE_EPSILON = 1.0e-12
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +85,23 @@ class _ScreenGrid:
     triangle_by_face: Mapping[int, _ProjectedTriangle]
     buckets: Mapping[tuple[int, int], tuple[int, ...]]
 
+    def __post_init__(self) -> None:
+        for field_name in (
+            "minimum_x",
+            "minimum_y",
+            "cell_width",
+            "cell_height",
+        ):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{field_name} must be numeric")
+            if not isfinite(float(value)):
+                raise ValueError(f"{field_name} must be finite")
+        if self.cell_width <= 0.0 or self.cell_height <= 0.0:
+            raise ValueError("screen-grid cell dimensions must be positive")
+        if self.columns < 1 or self.rows < 1:
+            raise ValueError("screen-grid dimensions must be positive")
+
     def _cell(self, x: float, y: float) -> tuple[int, int]:
         column = int(floor((x - self.minimum_x) / self.cell_width))
         row = int(floor((y - self.minimum_y) / self.cell_height))
@@ -92,7 +111,7 @@ class _ScreenGrid:
         )
 
     def candidates(self, x: float, y: float) -> tuple[_ProjectedTriangle, ...]:
-        column, row = self._cell(x, y)
+        column, row = self._cell(float(x), float(y))
         face_indices: set[int] = set()
         for candidate_row in range(max(0, row - 1), min(self.rows, row + 2)):
             for candidate_column in range(
@@ -115,26 +134,38 @@ def _build_screen_grid(
     polygons: Mapping[int, Sequence[object]],
     frame: A1CameraProjectionFrame,
 ) -> _ScreenGrid:
+    """Index each clipped polygon into every screen cell touched by its bounds."""
+
+    if not isinstance(frame, A1CameraProjectionFrame):
+        raise TypeError("frame must be A1CameraProjectionFrame")
     if not triangles:
         raise DepthCameraProjectionError("parallax visibility grid needs triangles")
 
     triangle_by_face = {triangle.face_index: triangle for triangle in triangles}
     count = max(1, len(polygons))
-    axis = max(1, min(_GRID_MAX_AXIS, int(sqrt(count / _GRID_TARGET_OCCUPANCY)) + 1))
+    base_axis = max(
+        1,
+        min(
+            _GRID_MAX_AXIS,
+            int(sqrt(count / _GRID_TARGET_OCCUPANCY)) + 1,
+        ),
+    )
     aspect = float(frame.texture_width) / float(frame.texture_height)
-    if aspect >= 1.0:
-        columns = max(1, min(_GRID_MAX_AXIS, int(round(axis * sqrt(aspect)))))
-        rows = max(1, min(_GRID_MAX_AXIS, int(round(axis / sqrt(aspect)))))
-    else:
-        columns = max(1, min(_GRID_MAX_AXIS, int(round(axis * sqrt(aspect)))))
-        rows = max(1, min(_GRID_MAX_AXIS, int(round(axis / sqrt(aspect)))))
+    columns = max(
+        1,
+        min(_GRID_MAX_AXIS, int(round(base_axis * sqrt(aspect)))),
+    )
+    rows = max(
+        1,
+        min(_GRID_MAX_AXIS, int(round(base_axis / sqrt(aspect)))),
+    )
 
     minimum_x = -float(frame.texture_width) / 2.0
     maximum_x = float(frame.texture_width) / 2.0
     minimum_y = -float(frame.texture_height) / 2.0
     maximum_y = float(frame.texture_height) / 2.0
-    cell_width = max((maximum_x - minimum_x) / float(columns), 1.0e-12)
-    cell_height = max((maximum_y - minimum_y) / float(rows), 1.0e-12)
+    cell_width = max((maximum_x - minimum_x) / columns, _COORDINATE_EPSILON)
+    cell_height = max((maximum_y - minimum_y) / rows, _COORDINATE_EPSILON)
 
     pending: dict[tuple[int, int], set[int]] = {}
     for face_index, polygon in polygons.items():
@@ -165,10 +196,6 @@ def _build_screen_grid(
             for column in range(first_column, last_column + 1):
                 pending.setdefault((column, row), set()).add(face_index)
 
-    buckets = {
-        key: tuple(sorted(values))
-        for key, values in sorted(pending.items())
-    }
     return _ScreenGrid(
         minimum_x=minimum_x,
         minimum_y=minimum_y,
@@ -177,7 +204,10 @@ def _build_screen_grid(
         columns=columns,
         rows=rows,
         triangle_by_face=triangle_by_face,
-        buckets=buckets,
+        buckets={
+            key: tuple(sorted(values))
+            for key, values in sorted(pending.items())
+        },
     )
 
 
@@ -185,7 +215,7 @@ def _front_visible_face_indices_fast(
     snapshot: MeshSnapshot,
     frame: A1CameraProjectionFrame,
 ) -> tuple[int, ...]:
-    """Resolve exact probe visibility with local projected candidates."""
+    """Resolve exact probe visibility using local projected candidates."""
 
     origin = _translation_only_origin(snapshot.world_matrix)
     triangulated, _projected, triangles = _projected_triangles(
@@ -274,7 +304,7 @@ def _accumulated_horizon_costs_cached(
     seeds: Sequence[int],
     limit: float,
 ) -> Mapping[int, float]:
-    """Dijkstra expansion with one cached dihedral value per shared edge."""
+    """Run Dijkstra expansion with one cached dihedral value per shared edge."""
 
     resolved_seeds = tuple(sorted(set(seeds)))
     if not resolved_seeds:
@@ -314,102 +344,113 @@ def _accumulated_horizon_costs_cached(
     return costs
 
 
-def _signed_area_xy(vertices: Sequence[MeshVertex]) -> float:
-    return 0.5 * sum(
-        float(vertex.position[0]) * float(vertices[(index + 1) % len(vertices)].position[1])
-        - float(vertices[(index + 1) % len(vertices)].position[0])
-        * float(vertex.position[1])
-        for index, vertex in enumerate(vertices)
+def _circular_view_distance(
+    first: DepthParallaxViewId,
+    second: DepthParallaxViewId,
+) -> int:
+    distance = abs(first.ordinal - second.ordinal)
+    return min(distance, len(_VIEW_ORDER) - distance)
+
+
+def _merge_view_assignments(
+    assigned: Mapping[DepthParallaxViewId, Sequence[int]],
+    *,
+    maximum_view_count: int,
+) -> Mapping[DepthParallaxViewId, tuple[int, ...]]:
+    """Merge low-budget directions into the nearest retained virtual views."""
+
+    if isinstance(maximum_view_count, bool) or not isinstance(maximum_view_count, int):
+        raise TypeError("maximum_view_count must be int")
+    if maximum_view_count < 1:
+        raise ValueError("maximum_view_count must be positive")
+
+    active = tuple(
+        view_id
+        for view_id in _VIEW_ORDER
+        if tuple(assigned.get(view_id, ()))
     )
+    if not active:
+        return {}
+    if len(active) <= maximum_view_count:
+        return {
+            view_id: tuple(sorted(set(assigned[view_id])))
+            for view_id in active
+        }
 
-
-def _proxy_vertices(
-    front: MeshSnapshot,
-    targets: Sequence[tuple[float, float]],
-) -> tuple[MeshVertex, ...]:
-    """Choose distinct existing front vertices nearest the requested envelope corners."""
-
-    available = tuple(front.vertices)
-    if len(available) < 3:
-        raise DepthCameraProjectionError(
-            "parallax proxy requires at least three front vertices"
-        )
-
-    selected: list[MeshVertex] = []
-    used: set[int] = set()
-    for target_x, target_y in targets:
-        candidates = tuple(
-            vertex
-            for vertex in available
-            if vertex.id.index not in used
-        )
-        if not candidates:
-            break
-        vertex = min(
-            candidates,
-            key=lambda item: (
-                (float(item.position[0]) - target_x) ** 2
-                + (float(item.position[1]) - target_y) ** 2,
-                item.id.index,
-            ),
-        )
-        selected.append(vertex)
-        used.add(vertex.id.index)
-
-    if len(selected) < 3:
-        center_x = sum(float(vertex.position[0]) for vertex in available) / len(available)
-        center_y = sum(float(vertex.position[1]) for vertex in available) / len(available)
-        for vertex in sorted(
-            available,
-            key=lambda item: (
-                -(
-                    (float(item.position[0]) - center_x) ** 2
-                    + (float(item.position[1]) - center_y) ** 2
+    retained = tuple(
+        sorted(
+            sorted(
+                active,
+                key=lambda view_id: (
+                    -len(tuple(assigned[view_id])),
+                    view_id.ordinal,
                 ),
-                item.id.index,
-            ),
-        ):
-            if vertex.id.index in used:
-                continue
-            selected.append(vertex)
-            used.add(vertex.id.index)
-            if len(selected) >= 3:
-                break
-
-    center_x = sum(float(vertex.position[0]) for vertex in selected) / len(selected)
-    center_y = sum(float(vertex.position[1]) for vertex in selected) / len(selected)
-    ordered = sorted(
-        selected,
-        key=lambda item: (
-            atan2(
-                float(item.position[1]) - center_y,
-                float(item.position[0]) - center_x,
-            ),
-            item.id.index,
-        ),
-    )
-    area = _signed_area_xy(ordered)
-    if abs(area) <= _PROXY_AREA_EPSILON:
-        raise DepthCameraProjectionError(
-            "parallax proxy front vertices are collinear"
+            )[:maximum_view_count],
+            key=lambda view_id: view_id.ordinal,
         )
-    if area < 0.0:
-        ordered.reverse()
-    return tuple(ordered)
+    )
+    merged: dict[DepthParallaxViewId, set[int]] = {
+        view_id: set() for view_id in retained
+    }
+    for source_view in active:
+        target = min(
+            retained,
+            key=lambda candidate: (
+                _circular_view_distance(source_view, candidate),
+                candidate.ordinal,
+            ),
+        )
+        merged[target].update(assigned[source_view])
+    return {
+        view_id: tuple(sorted(values))
+        for view_id, values in sorted(
+            merged.items(),
+            key=lambda item: item[0].ordinal,
+        )
+        if values
+    }
+
+
+def _nearest_depth(
+    points: Sequence[tuple[float, float, float]],
+    x: float,
+    y: float,
+) -> float:
+    if not points:
+        raise DepthCameraProjectionError("parallax proxy has no depth samples")
+    return float(
+        min(
+            points,
+            key=lambda point: (
+                (point[0] - x) ** 2 + (point[1] - y) ** 2,
+                point[2],
+            ),
+        )[2]
+    )
 
 
 def _proxy_records_for_view(
-    front: MeshSnapshot,
     faces: Sequence[_FaceGeometry],
     view: DepthParallaxCameraView,
     front_frame: A1CameraProjectionFrame,
-    projected_origin: object,
+    projected_origin: A1ProjectedPoint,
     uniform_scale: float,
+    *,
+    point_count: int,
+    generated_source_vertex_base: int,
+    source_object_id: str,
 ) -> tuple[_FaceRecord, ...]:
-    """Build one view-owned proxy using only existing front vertex positions."""
+    """Build an isolated envelope proxy with three or four generated vertices."""
 
+    if point_count not in (_PROXY_MINIMUM_POINTS, _PROXY_MAXIMUM_POINTS):
+        raise ValueError("point_count must be three or four")
+    if generated_source_vertex_base < 0:
+        raise ValueError("generated_source_vertex_base must be non-negative")
+    if not isinstance(source_object_id, str) or not source_object_id.strip():
+        raise ValueError("source_object_id must be a non-empty string")
     if not faces:
         return ()
+
     front_points: list[tuple[float, float, float]] = []
     reserve_uvs: list[tuple[float, float]] = []
     for face in faces:
@@ -426,9 +467,9 @@ def _proxy_records_for_view(
             )
             front_points.append(
                 (
-                    (float(projected_front.u) - float(getattr(projected_origin, "u")))
+                    (float(projected_front.u) - float(projected_origin.u))
                     / uniform_scale,
-                    -(float(projected_front.v) - float(getattr(projected_origin, "v")))
+                    -(float(projected_front.v) - float(projected_origin.v))
                     / uniform_scale,
                     float(projected_front.depth),
                 )
@@ -439,6 +480,17 @@ def _proxy_records_for_view(
             v = 1.0 - (
                 float(projected_reserve.v) + float(view.frame.texture_height) / 2.0
             ) / float(view.frame.texture_height)
+            tolerance = 1.0e-7
+            if (
+                u < -tolerance
+                or u > 1.0 + tolerance
+                or v < -tolerance
+                or v > 1.0 + tolerance
+            ):
+                raise DepthCameraProjectionError(
+                    "virtual parallax camera did not frame budget proxy ownership; "
+                    f"view={view.view_id.value}, face={face.face_index}, uv={(u, v)}"
+                )
             reserve_uvs.append(
                 (min(1.0, max(0.0, u)), min(1.0, max(0.0, v)))
             )
@@ -447,73 +499,80 @@ def _proxy_records_for_view(
     maximum_x = max(point[0] for point in front_points)
     minimum_y = min(point[1] for point in front_points)
     maximum_y = max(point[1] for point in front_points)
-    if maximum_x - minimum_x <= 1.0e-12 or maximum_y - minimum_y <= 1.0e-12:
+    width = maximum_x - minimum_x
+    height = maximum_y - minimum_y
+    if width <= _COORDINATE_EPSILON or height <= _COORDINATE_EPSILON:
         raise DepthCameraProjectionError(
             f"parallax proxy view {view.view_id.value} has collapsed front bounds"
         )
+
     minimum_u = min(uv[0] for uv in reserve_uvs)
     maximum_u = max(uv[0] for uv in reserve_uvs)
     minimum_v = min(uv[1] for uv in reserve_uvs)
     maximum_v = max(uv[1] for uv in reserve_uvs)
 
-    selected = _proxy_vertices(
-        front,
-        (
+    if point_count == 4:
+        targets = (
             (minimum_x, minimum_y),
             (maximum_x, minimum_y),
             (maximum_x, maximum_y),
             (minimum_x, maximum_y),
-        ),
-    )
-    width = maximum_x - minimum_x
-    height = maximum_y - minimum_y
-    vertex_uv: dict[int, tuple[float, float]] = {}
-    for vertex in selected:
-        factor_x = min(
-            1.0,
-            max(0.0, (float(vertex.position[0]) - minimum_x) / width),
         )
-        factor_y = min(
-            1.0,
-            max(0.0, (float(vertex.position[1]) - minimum_y) / height),
+        target_uvs = (
+            (minimum_u, minimum_v),
+            (maximum_u, minimum_v),
+            (maximum_u, maximum_v),
+            (minimum_u, maximum_v),
         )
-        vertex_uv[vertex.id.index] = (
-            minimum_u + (maximum_u - minimum_u) * factor_x,
-            minimum_v + (maximum_v - minimum_v) * factor_y,
+        triangles = ((0, 1, 2), (0, 2, 3))
+    else:
+        center_x = (minimum_x + maximum_x) / 2.0
+        targets = (
+            (minimum_x, minimum_y),
+            (maximum_x, minimum_y),
+            (center_x, maximum_y + height),
         )
+        target_uvs = (
+            (minimum_u, minimum_v),
+            (maximum_u, minimum_v),
+            ((minimum_u + maximum_u) / 2.0, maximum_v),
+        )
+        triangles = ((0, 1, 2),)
 
-    owner = min(face.source_face_index for face in faces)
-    triangles = tuple(
-        (selected[0], selected[index], selected[index + 1])
-        for index in range(1, len(selected) - 1)
+    positions = tuple(
+        (x, y, _nearest_depth(front_points, x, y))
+        for x, y in targets
     )
-    records = tuple(
+    source_ids = tuple(
+        SourceVertexId(
+            source_object_id,
+            generated_source_vertex_base + index,
+        )
+        for index in range(point_count)
+    )
+    owner = min(face.source_face_index for face in faces)
+    return tuple(
         _FaceRecord(
             material_index=view.material_index,
             source_face_index=owner,
             source_vertex_ids=(
-                triangle[0].source_id,
-                triangle[1].source_id,
-                triangle[2].source_id,
+                source_ids[triangle[0]],
+                source_ids[triangle[1]],
+                source_ids[triangle[2]],
             ),
             positions=(
-                tuple(float(value) for value in triangle[0].position),
-                tuple(float(value) for value in triangle[1].position),
-                tuple(float(value) for value in triangle[2].position),
+                positions[triangle[0]],
+                positions[triangle[1]],
+                positions[triangle[2]],
             ),
             uvs=(
-                vertex_uv[triangle[0].id.index],
-                vertex_uv[triangle[1].id.index],
-                vertex_uv[triangle[2].id.index],
+                target_uvs[triangle[0]],
+                target_uvs[triangle[1]],
+                target_uvs[triangle[2]],
             ),
         )
         for triangle in triangles
     )
-    if not records:
-        raise DepthCameraProjectionError(
-            f"parallax proxy view {view.view_id.value} produced no triangles"
-        )
-    return records
 
 
 def _evaluated_owner_indices(
@@ -535,7 +594,7 @@ def build_depth_parallax_geometry_package(
     horizon_angle_radians: float,
     max_points: int,
 ) -> DepthParallaxGeometryPackage:
-    """Build exact reserve topology when possible and front-shared proxies otherwise."""
+    """Build exact reserve topology or an isolated budgeted proxy package."""
 
     started = perf_counter()
     if not isinstance(source, MeshSnapshot):
@@ -555,7 +614,7 @@ def build_depth_parallax_geometry_package(
     ):
         raise TypeError("horizon_angle_radians must be numeric")
     angle = float(horizon_angle_radians)
-    if not isfinite(angle) or angle < 0.0 or angle >= 1.5707963267948966:
+    if not isfinite(angle) or angle < 0.0 or angle >= pi / 2.0:
         raise ValueError("horizon_angle_radians must be finite in [0, pi/2)")
     if isinstance(max_points, bool) or not isinstance(max_points, int):
         raise TypeError("max_points must be int")
@@ -564,16 +623,18 @@ def build_depth_parallax_geometry_package(
 
     MeshSnapshotValidator().validate_or_raise(source)
     MeshSnapshotValidator().validate_or_raise(front_result.snapshot)
-    if len(front_result.snapshot.vertices) > max_points:
+    front_point_count = len(front_result.snapshot.vertices)
+    if front_point_count > max_points:
         raise DepthCameraProjectionError(
             "front depth surface already exceeds Max Depth Points; "
-            f"front={len(front_result.snapshot.vertices)}, max_points={max_points}"
+            f"front={front_point_count}, max_points={max_points}"
         )
 
     visibility_started = perf_counter()
     front_faces = _front_visible_face_indices_fast(source, front_result.frame)
     logger.info(
-        "Depth parallax visibility for '%s': source_faces=%d front_faces=%d elapsed=%.3fs",
+        "Depth parallax visibility for '%s': source_faces=%d front_faces=%d "
+        "elapsed=%.3fs",
         source.source_object_id,
         len(source.faces),
         len(front_faces),
@@ -617,7 +678,8 @@ def build_depth_parallax_geometry_package(
     )
     reserve_indices = tuple(sorted(set(costs) - set(front_faces)))
     logger.info(
-        "Depth parallax horizon for '%s': geometry_faces=%d reserve_faces=%d elapsed=%.3fs",
+        "Depth parallax horizon for '%s': geometry_faces=%d reserve_faces=%d "
+        "elapsed=%.3fs",
         source.source_object_id,
         len(geometry),
         len(reserve_indices),
@@ -648,37 +710,83 @@ def build_depth_parallax_geometry_package(
         for face_index in reserve_indices
         for source_id in geometry[face_index].source_vertex_ids
     }
-    exact_upper_bound = len(front_result.snapshot.vertices) + len(unique_reserve_vertices)
+    exact_upper_bound = front_point_count + len(unique_reserve_vertices)
+    compacted = exact_upper_bound > max_points
     projected_origin = front_result.projected_origin
     records = list(front_records)
-    compacted = exact_upper_bound > max_points
+    resolved_assignments: Mapping[DepthParallaxViewId, tuple[int, ...]]
 
     if not compacted:
+        resolved_assignments = {
+            view_id: tuple(sorted(indices))
+            for view_id, indices in assigned.items()
+            if indices
+        }
         for view_id in _VIEW_ORDER:
-            view = available[view_id]
-            for face_index in assigned[view_id]:
+            for face_index in resolved_assignments.get(view_id, ()):
                 records.append(
                     _reserve_record(
                         geometry[face_index],
-                        view,
+                        available[view_id],
                         front_result.frame,
                         projected_origin,
                         scale,
                     )
                 )
     else:
-        for view_id in _VIEW_ORDER:
-            face_indices = tuple(sorted(assigned[view_id]))
-            if not face_indices:
-                continue
+        reserve_budget = max_points - front_point_count
+        maximum_view_count = reserve_budget // _PROXY_MINIMUM_POINTS
+        if maximum_view_count < 1:
+            raise DepthCameraProjectionError(
+                "Positive Parallax Horizon has no reserve point budget after FRONT; "
+                f"front_points={front_point_count}, max_points={max_points}. "
+                "Lower FRONT quality or increase Max Depth Points."
+            )
+        resolved_assignments = _merge_view_assignments(
+            assigned,
+            maximum_view_count=maximum_view_count,
+        )
+        view_count = len(resolved_assignments)
+        if view_count < 1:
+            raise DepthCameraProjectionError(
+                "parallax reserve proxy retained no virtual view"
+            )
+        points_per_view = (
+            _PROXY_MAXIMUM_POINTS
+            if reserve_budget >= _PROXY_MAXIMUM_POINTS * view_count
+            else _PROXY_MINIMUM_POINTS
+        )
+        required_points = points_per_view * view_count
+        if required_points > reserve_budget:
+            raise DepthCameraProjectionError(
+                "parallax reserve proxy cannot fit the remaining point budget; "
+                f"required={required_points}, available={reserve_budget}, "
+                f"views={view_count}"
+            )
+        highest_source_index = max(
+            (
+                vertex.source_id.vertex_index
+                for vertex in front_result.snapshot.vertices
+            ),
+            default=-1,
+        )
+        generated_base = highest_source_index + 1
+        for output_index, view_id in enumerate(
+            sorted(resolved_assignments, key=lambda value: value.ordinal)
+        ):
+            face_indices = resolved_assignments[view_id]
             records.extend(
                 _proxy_records_for_view(
-                    front_result.snapshot,
                     tuple(geometry[index] for index in face_indices),
                     available[view_id],
                     front_result.frame,
                     projected_origin,
                     scale,
+                    point_count=points_per_view,
+                    generated_source_vertex_base=(
+                        generated_base + output_index * points_per_view
+                    ),
+                    source_object_id=source.source_object_id,
                 )
             )
 
@@ -705,8 +813,8 @@ def build_depth_parallax_geometry_package(
         suffix="parallax-front",
     )
     surfaces: list[DepthParallaxReserveSurface] = []
-    for view_id in _VIEW_ORDER:
-        face_indices = tuple(sorted(assigned[view_id]))
+    for view_id in sorted(resolved_assignments, key=lambda value: value.ordinal):
+        face_indices = resolved_assignments[view_id]
         if not face_indices:
             continue
         surface = _subset_material(
@@ -728,13 +836,15 @@ def build_depth_parallax_geometry_package(
 
     logger.info(
         "Depth parallax package for '%s': mode=%s front_points=%d exact_upper=%d "
-        "union_points=%d reserve_faces=%d views=%d elapsed=%.3fs",
+        "union_points=%d reserve_faces=%d source_views=%d output_views=%d "
+        "elapsed=%.3fs",
         source.source_object_id,
         "PROXY" if compacted else "EXACT",
-        len(front_result.snapshot.vertices),
+        front_point_count,
         exact_upper_bound,
         len(union.vertices),
         len(reserve_indices),
+        sum(1 for indices in assigned.values() if indices),
         len(surfaces),
         perf_counter() - started,
     )
@@ -749,4 +859,12 @@ def build_depth_parallax_geometry_package(
     )
 
 
-__all__ = ["build_depth_parallax_geometry_package"]
+__all__ = [
+    "_ScreenGrid",
+    "_accumulated_horizon_costs_cached",
+    "_build_screen_grid",
+    "_front_visible_face_indices_fast",
+    "_merge_view_assignments",
+    "_proxy_records_for_view",
+    "build_depth_parallax_geometry_package",
+]
