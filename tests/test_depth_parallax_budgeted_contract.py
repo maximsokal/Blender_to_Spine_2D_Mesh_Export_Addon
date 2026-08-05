@@ -27,6 +27,7 @@ IDENTITY = (
     / "geometry"
     / "depth_parallax_identity.py"
 )
+FUNCTIONAL = ROOT / "tests" / "test_depth_parallax_budgeted.py"
 
 
 def _read(path: Path) -> str:
@@ -36,14 +37,17 @@ def _read(path: Path) -> str:
 def test_public_geometry_route_uses_budgeted_parallax_owner() -> None:
     source = _read(GEOMETRY_INIT)
 
-    assert "from .depth_parallax_budgeted import build_depth_parallax_geometry_package" in source
+    assert (
+        "from .depth_parallax_budgeted import "
+        "build_depth_parallax_geometry_package"
+    ) in source
     assert "build_depth_parallax_geometry_package," not in source.split(
         "from .depth_parallax import (",
         1,
     )[1].split(")", 1)[0]
 
 
-def test_budgeted_owner_uses_local_visibility_and_front_shared_proxy_vertices() -> None:
+def test_budgeted_owner_uses_local_visibility_and_isolated_proxy_vertices() -> None:
     source = _read(BUDGETED)
 
     assert "class _ScreenGrid:" in source
@@ -51,9 +55,12 @@ def test_budgeted_owner_uses_local_visibility_and_front_shared_proxy_vertices() 
     assert "for candidate in grid.candidates(x, y):" in source
     assert "def _accumulated_horizon_costs_cached(" in source
     assert "edge_costs: dict[tuple[int, int], float]" in source
-    assert "exact_upper_bound > max_points" in source
+    assert "def _merge_view_assignments(" in source
+    assert "maximum_view_count = reserve_budget // _PROXY_MINIMUM_POINTS" in source
     assert "def _proxy_records_for_view(" in source
-    assert "front_source_ids" not in source
+    assert "generated_source_vertex_base" in source
+    assert "SourceVertexId(" in source
+    assert "points_per_view * view_count" in source
     assert '"parallax-budget-proxy" if compacted else "parallax-union"' in source
     assert "len(union.vertices) > max_points" in source
     assert "source_face_indices=_evaluated_owner_indices(geometry, face_indices)" in source
@@ -62,6 +69,16 @@ def test_budgeted_owner_uses_local_visibility_and_front_shared_proxy_vertices() 
     assert "import bpy" not in source
     assert "import bmesh" not in source
     assert "bpy.ops" not in source
+
+
+def test_functional_proxy_does_not_share_front_topology() -> None:
+    source = _read(FUNCTIONAL)
+
+    assert "test_proxy_records_add_isolated_vertices_within_reserved_budget" in source
+    assert "len(union.vertices) == len(front.vertices) + 4" in source
+    assert "front_indices.isdisjoint(reserve_indices)" in source
+    assert "test_three_point_proxy_uses_one_triangle" in source
+    assert "test_low_budget_view_assignments_merge_to_nearest_retained_direction" in source
 
 
 def test_identity_uses_explicit_render_owners_only_for_marked_budget_proxy() -> None:
