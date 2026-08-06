@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 
 import pytest
 
@@ -13,8 +14,12 @@ from Blender_to_Spine2D_Mesh_Exporter.application.a1_attachment_projection_servi
     project_triangulated_disk_attachment,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
+    SpineJsonTarget,
     SpineValidator,
     build_legacy_mesh_attachment,
+)
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_codecs import (
+    serialize_spine_document,
 )
 
 from test_a1_attachment_projection import make_rig, make_settings
@@ -82,6 +87,33 @@ def _collapsed_triangle_indices(projection) -> tuple[int, ...]:
     return tuple(collapsed)
 
 
+def _serialized_mesh_attachments(value: object) -> tuple[dict[str, object], ...]:
+    """Collect concrete serialized mesh attachments without assuming skin names."""
+
+    if isinstance(value, dict):
+        current = (
+            (value,)
+            if value.get("type") == "mesh"
+            and isinstance(value.get("uvs"), list)
+            and isinstance(value.get("triangles"), list)
+            and isinstance(value.get("vertices"), list)
+            else ()
+        )
+        children = tuple(
+            attachment
+            for child in value.values()
+            for attachment in _serialized_mesh_attachments(child)
+        )
+        return current + children
+    if isinstance(value, list):
+        return tuple(
+            attachment
+            for child in value
+            for attachment in _serialized_mesh_attachments(child)
+        )
+    return ()
+
+
 def test_model_space_normal_preserves_fully_edge_on_disk_attachment() -> None:
     rig = make_rig()
     snapshot = _edge_on_square_snapshot()
@@ -101,6 +133,17 @@ def test_model_space_normal_preserves_fully_edge_on_disk_attachment() -> None:
     assert built.attachment.triangles == result.request.triangles
     assert built.attachment.hull == result.request.hull
     assert SpineValidator().validate(built.document) == ()
+
+    serialized = json.loads(
+        serialize_spine_document(
+            built.document,
+            SpineJsonTarget.SPINE_4_2,
+        )
+    )
+    attachments = _serialized_mesh_attachments(serialized)
+    assert len(attachments) == 1
+    assert tuple(attachments[0]["triangles"]) == result.request.triangles
+    assert attachments[0]["hull"] == result.request.hull
 
 
 def test_strict_physical_hull_normalization_still_rejects_edge_on_disk() -> None:
