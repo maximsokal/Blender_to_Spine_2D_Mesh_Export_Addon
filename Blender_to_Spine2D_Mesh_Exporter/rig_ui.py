@@ -53,7 +53,7 @@ def _draw_projection_direction(
         )
         return
 
-    if direction is A1ProjectionDirection.ACTIVE_CAMERA:
+    if direction.active_camera:
         layout.label(
             text="Projects UV-segment geometry through the active camera",
             icon="CAMERA_DATA",
@@ -62,6 +62,24 @@ def _draw_projection_direction(
             text="Perspective and Orthographic cameras are supported",
             icon="INFO",
         )
+        if direction.camera_root:
+            layout.label(
+                text="Main bone pivot: active camera / camera-space zero",
+                icon="CON_PIVOT",
+            )
+            layout.label(
+                text="Projected Object Origin is stored inside one rigid depth layer",
+                icon="BONE_DATA",
+            )
+        else:
+            layout.label(
+                text="Main bone pivot: each object's Blender Object Origin",
+                icon="OBJECT_ORIGIN",
+            )
+            layout.label(
+                text="Per-vertex camera depth remains available to the rig",
+                icon="BONE_DATA",
+            )
         return
 
     layout.label(
@@ -141,8 +159,22 @@ def draw_rig_settings(
         description.label(text="Depth geometry and rig depth use the active camera")
         description.label(text="Main bone matches projected Blender Object Origin")
     else:
-        description.label(text="Main bone matches projected Blender Object Origin")
-        description.label(text="Depth uses the selected axis or active camera")
+        try:
+            direction = resolve_a1_projection_direction(
+                getattr(
+                    scene,
+                    "spine2d_projection_direction",
+                    A1ProjectionDirection.POSITIVE_Z.value,
+                )
+            )
+        except (TypeError, ValueError):
+            direction = A1ProjectionDirection.POSITIVE_Z
+        if direction.camera_root:
+            description.label(text="Main bone uses active-camera space as its pivot")
+            description.label(text="Object placement is stored below one rigid layer")
+        else:
+            description.label(text="Main bone matches projected Blender Object Origin")
+            description.label(text="Depth uses the selected axis or active camera")
 
     layout.separator()
     row = layout.row(align=True)
