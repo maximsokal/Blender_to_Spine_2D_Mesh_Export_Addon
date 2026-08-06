@@ -48,7 +48,14 @@ class A1RigSetupPoseMode(str, Enum):
     placement into internal rig coordinates.
 
     ``PRESERVE_COMPOSITION`` retains the historical model-space setup used by ordinary
-    Normal / UV Segments exports and connected composition.
+    signed-axis Normal / UV Segments exports and connected composition.
+
+    ``CAMERA_VIEW_NORMAL`` is used only when Normal / UV Segments takes its setup view
+    from Blender's active camera. The geometry has already been oriented and projected
+    around Blender Object Origin, so historical non-zero setup rotation and depth-scale
+    offsets must be neutral. Unlike ``PREPROJECTED_SCREEN``, this mode keeps the ordinary
+    model-space hierarchy, the Object Origin pivot, and every per-vertex depth group.
+    Live X/Y/scale controls remain active after setup.
 
     ``PREPROJECTED_SCREEN`` is reserved for camera-projected geometry. It represents one
     complete object as a rigid camera-relative layer: camera space is zero, projected
@@ -67,6 +74,7 @@ class A1RigSetupPoseMode(str, Enum):
 
     NORMALIZED_SINGLE = "NORMALIZED_SINGLE"
     PRESERVE_COMPOSITION = "PRESERVE_COMPOSITION"
+    CAMERA_VIEW_NORMAL = "CAMERA_VIEW_NORMAL"
     PREPROJECTED_SCREEN = "PREPROJECTED_SCREEN"
     CAMERA_DEPTH_SURFACE = "CAMERA_DEPTH_SURFACE"
 
