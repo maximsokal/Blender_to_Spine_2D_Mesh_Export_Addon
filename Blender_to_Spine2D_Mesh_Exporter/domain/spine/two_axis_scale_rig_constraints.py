@@ -27,10 +27,18 @@ def build_two_axis_scale_constraints(
     camera zero.
 
     Active Camera Normal and Depth Camera Projection both arrive with camera-facing setup
-    geometry. Their setup rotation and depth-scale offsets are therefore neutral, while
-    their ordinary model-space hierarchy, per-depth groups and live controls remain
-    active. Only ``PREPROJECTED_SCREEN`` changes hierarchy and scale ownership to a rigid
-    camera-relative layer.
+    geometry, so their historical X/Y setup rotations are neutral. Their depth treatment
+    is intentionally different:
+
+    * ``CAMERA_VIEW_NORMAL`` remains an ordinary Object Root rig. Its per-vertex camera
+      depth groups still require the standard minimum-depth translation and ``scaleX=-1``
+      setup compensation used by signed-axis Normal. Removing that compensation adds each
+      depth group's hidden-axis offset to its setup position and visibly stretches the
+      projected mesh.
+    * ``CAMERA_DEPTH_SURFACE`` owns already-solved depth-surface placement and therefore
+      keeps neutral depth-scale setup values.
+    * ``PREPROJECTED_SCREEN`` changes hierarchy and scale ownership to one rigid
+      camera-relative layer and also keeps neutral depth-scale setup values.
 
     Perspective rigid layers retain whole-layer depth foreshortening. Orthographic rigid
     layers disable automatic depth scale while preserving camera-relative translation.
@@ -52,8 +60,12 @@ def build_two_axis_scale_constraints(
         A1RigSetupPoseMode.CAMERA_VIEW_NORMAL,
         A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE,
     }
-    neutral_camera_setup = (
+    neutral_rotation_setup = (
         preprojected_screen or neutral_model_space_camera_setup
+    )
+    neutral_depth_setup = (
+        preprojected_screen
+        or setup_pose_mode is A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE
     )
     orthographic_camera_layer = (
         preprojected_screen
@@ -90,7 +102,7 @@ def build_two_axis_scale_constraints(
         "mixShearY": 0,
         "rotation": (
             0.0
-            if neutral_camera_setup
+            if neutral_rotation_setup
             else profile.rotation_x_setup_degrees
         ),
     }
@@ -104,14 +116,14 @@ def build_two_axis_scale_constraints(
         "mixShearY": 0,
         "rotation": (
             0.0
-            if neutral_camera_setup
+            if neutral_rotation_setup
             else profile.rotation_y_setup_degrees
         ),
     }
     depth_extras = {
         "rotation": -90,
-        "x": 0.0 if neutral_camera_setup else layout.minimum_depth_y,
-        "scaleX": 0.0 if neutral_camera_setup else -1,
+        "x": 0.0 if neutral_depth_setup else layout.minimum_depth_y,
+        "scaleX": 0.0 if neutral_depth_setup else -1,
         "mixRotate": 0,
         "mixX": 0,
         "mixShearY": 0,
