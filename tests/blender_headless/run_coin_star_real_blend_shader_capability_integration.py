@@ -3,9 +3,9 @@
 Blender must open the exact caller-provided ``coin_star.blend`` before this script runs.
 The regression reproduces the BlendKit ``Gold coin`` material that contains a muted
 ``Add Shader`` with two same-named inputs. Recursive traversal conservatively visits all
-inputs, so that advisory must not mask the material's genuine camera-render requirement.
-Fresnel and Generated coordinates remain reproducible by the source-object bake context;
-the two Glossy BSDF nodes are the concrete Normal-mode blockers.
+inputs, so that advisory must not mask the material's genuine camera-context findings.
+Fresnel, Generated coordinates, and Glossy surface contribution are all resolved by the
+Normal UV Cycles COMBINED object-bake route.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.production_shader_capabili
     audit_object_material_capabilities,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.production_shader_capability_routing import (  # noqa: E402
-    normal_mode_camera_requirement_message,
+    _normal_uv_blocking_camera_findings,
     strongest_object_capability,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
@@ -307,26 +307,10 @@ def _run(expected_blend: str) -> None:
         "real coin lost the Generated-coordinate camera-context finding",
     )
 
-    guidance = normal_mode_camera_requirement_message(audits)
+    blockers = _normal_uv_blocking_camera_findings(audits)
     _assert(
-        "Camera Projection or Depth Camera Projection" in guidance,
-        f"Normal-mode guidance does not identify supported camera routes: {guidance}",
-    )
-    _assert(
-        guidance.count("BSDF_GLOSSY") == 2,
-        f"Normal-mode guidance must expose both Glossy blockers exactly once: {guidance}",
-    )
-    _assert(
-        "Generated" not in guidance,
-        f"Normal-mode guidance misclassified supported Generated coordinates: {guidance}",
-    )
-    _assert(
-        "FRESNEL" not in guidance,
-        f"Normal-mode guidance misclassified supported Fresnel context: {guidance}",
-    )
-    _assert(
-        "GRAPH_CAMERA_DEPENDENCY" not in guidance,
-        f"Normal-mode guidance duplicated the aggregate camera finding: {guidance}",
+        not blockers,
+        f"real coin still blocks Normal UV object baking: {blockers}",
     )
 
     _assert(_scene_fingerprint() == scene_before, "coin audit changed Blender context")
@@ -341,8 +325,8 @@ def _run(expected_blend: str) -> None:
         f"blend={loaded} object={source.name_full!r} material={_EXPECTED_MATERIAL_NAME!r} "
         f"nodes={len(graph.reachable_nodes)} links={len(graph.reachable_links)} "
         f"findings={len(findings)} capability={capability.value} "
-        "muted_fallback=advisory source_context=FRESNEL+Generated "
-        "blockers=2xBSDF_GLOSSY normal_mode=camera-required scene=unchanged",
+        "muted_fallback=advisory source_context=FRESNEL+Generated+2xBSDF_GLOSSY "
+        "blockers=none normal_mode=object-bake scene=unchanged",
         flush=True,
     )
 
