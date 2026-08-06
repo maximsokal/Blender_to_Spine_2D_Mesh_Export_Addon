@@ -30,14 +30,31 @@ def test_active_camera_normal_keeps_object_pivot_and_vertex_depth():
         "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/"
         "a1_document_preparation.py"
     )
+    profiles = _read(
+        "Blender_to_Spine2D_Mesh_Exporter/domain/spine/rig_profiles.py"
+    )
+    two_axis = _read(
+        "Blender_to_Spine2D_Mesh_Exporter/domain/spine/"
+        "two_axis_scale_rig_constraints.py"
+    )
+    legacy = _read(
+        "Blender_to_Spine2D_Mesh_Exporter/domain/spine/"
+        "legacy_rig_constraints.py"
+    )
 
     assert "projected_world.depth - projected_origin.depth" in projection
     assert "origin.depth / uniform_scale" in projection
-    assert "resolved_setup_pose_mode = source.settings.rig_setup_pose_mode" in document
+    assert 'CAMERA_VIEW_NORMAL = "CAMERA_VIEW_NORMAL"' in profiles
+    assert "A1RigSetupPoseMode.CAMERA_VIEW_NORMAL" in document
+    assert "if active_camera_normal" in document
     assert "camera_layer_projection_kind=None" in document
     assert "compensate_depth_setup_y=False" in document
+    assert '"normal_active_camera_setup_neutral": int(active_camera_normal)' in document
     assert '"camera_relative_depth_group_count": 0' in document
     assert '"depth_setup_y_compensated": 0' in document
+    assert "A1RigSetupPoseMode.CAMERA_VIEW_NORMAL" in two_axis
+    assert "neutral_model_space_camera_setup" in two_axis
+    assert "A1RigSetupPoseMode.CAMERA_VIEW_NORMAL" in legacy
 
 
 def test_normal_material_bake_uses_unprojected_source_geometry():
@@ -71,12 +88,14 @@ def test_real_coin_projection_parity_gate_covers_all_three_regressions():
     for marker in (
         "[COIN-NORMAL-PROJECTION-PARITY] PASS",
         "segments=",
-        "setup=PRESERVE_COMPOSITION",
+        "neutral_constraints=",
+        "setup=CAMERA_VIEW_NORMAL",
         "pivot=OBJECT_ORIGIN",
         "material_geometry=projection-independent",
         "Normal projection direction changed source-material bake geometry",
         "real coin parity gate did not retain expected side regions",
-        "Active Camera Normal changed to camera-zero setup pose",
+        "Active Camera Normal did not use neutral object-pivot setup",
+        "Active Camera Normal retained setup rotation",
         "Normal projection changed material brightness beyond tolerance",
     ):
         assert marker in source
