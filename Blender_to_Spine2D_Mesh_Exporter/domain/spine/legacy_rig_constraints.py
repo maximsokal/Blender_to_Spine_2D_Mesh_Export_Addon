@@ -21,9 +21,10 @@ def build_legacy_constraints(
 ) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
     """Compatibility-shaped constraint builder using resolved immutable metadata.
 
-    Ordinary model-space exports retain every historical setup offset. Depth Camera
-    Projection is already camera-facing and uses ``CAMERA_DEPTH_SURFACE`` so its setup
-    remains neutral while the X/Y/Z controls continue to drive the same constraints.
+    Ordinary signed-axis model-space exports retain every historical setup offset.
+    Active Camera Normal and Depth Camera Projection are already camera-facing, so their
+    setup rotation and depth-scale offsets are neutral while the ordinary hierarchy,
+    per-depth groups and live X/Y/Z controls remain unchanged.
     """
 
     if not isinstance(request, LegacyRigBuildRequest):
@@ -33,9 +34,10 @@ def build_legacy_constraints(
     if not isinstance(info, LegacyRigInfo):
         raise TypeError("info must be LegacyRigInfo")
 
-    neutral_camera_setup = (
-        request.setup_pose_mode is A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE
-    )
+    neutral_camera_setup = request.setup_pose_mode in {
+        A1RigSetupPoseMode.CAMERA_VIEW_NORMAL,
+        A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE,
+    }
     prefix = request.prefix
     control_x, control_y, control_z = info.control_bone_names
     constraint_bone, _, constraint_rotate_ik, constraint_ik = (
