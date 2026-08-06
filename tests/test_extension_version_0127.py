@@ -1,4 +1,4 @@
-"""Release-version contract for the Object Root setup compensation fix."""
+"""Release-version contract for Active Camera Object Root inverse setup."""
 
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ MANIFEST = (
 )
 
 
-def test_extension_manifest_uses_version_0_127_0() -> None:
+def test_extension_manifest_uses_version_0_128_0() -> None:
     with MANIFEST.open("rb") as stream:
         manifest = tomllib.load(stream)
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.127.0"
+    assert manifest["version"] == "0.128.0"
