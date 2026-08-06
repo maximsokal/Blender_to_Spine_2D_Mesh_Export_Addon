@@ -25,8 +25,12 @@ from ..domain.baking.normal_uv_camera_context import (
 from .render_engine_contract import RenderEngineContract
 
 
+# These nodes need the original source-object/camera evaluation context, but Blender's
+# Cycles COMBINED object bake can still resolve them directly into the generated Spine UV
+# layout. They therefore do not require the exported geometry to become Camera Projection.
 _NORMAL_UV_SOURCE_CONTEXT_NODE_TYPES = frozenset(
     {
+        "BSDF_GLOSSY",
         "FRESNEL",
         "LAYER_WEIGHT",
         "VECT_TRANSFORM",
