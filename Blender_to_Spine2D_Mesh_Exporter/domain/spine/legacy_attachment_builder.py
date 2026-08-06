@@ -1,13 +1,14 @@
 """Build A1 vertex bones and weighted mesh attachments without tolerance matching.
 
-The legacy exporter creates one vertex bone for every exported mesh vertex and
-binds that vertex to the new bone with one full-weight influence at local (0, 0).
-This module preserves that external Spine contract while requiring an explicit
-Z-group index and already-transformed pixel position for every vertex.
+The exporter creates one Spine bone for every attachment vertex and binds the weighted
+mesh vertex to that bone with one full-weight influence at local ``(0, 0)``. Every input
+vertex therefore carries an explicit depth-group index and an already-resolved pixel
+position.
 
-Single- and multi-attachment documents share the same component builder. Bone
-indices are assigned against the final in-memory bone order, so no serialized JSON
-merge or weighted-index remap is required.
+Active Camera Object Root uses the ordinary deformable depth rig, but each depth pair has
+an additional inverse-setup child. Vertex bones are parented through that child so the
+camera-facing setup pose is exact while later X/Y control changes still deform the mesh.
+All other setup modes preserve their historical parenting contracts.
 """
 
 from __future__ import annotations
@@ -81,7 +82,7 @@ def _require_finite_pair(value: object, field_name: str) -> Tuple[float, float]:
 
 @dataclass(frozen=True, slots=True)
 class LegacyAttachmentVertex:
-    """One exported Spine mesh vertex and its exact legacy vertex-bone binding."""
+    """One exported Spine mesh vertex and its exact vertex-bone binding."""
 
     index: int
     uv: Tuple[float, float]
@@ -131,7 +132,7 @@ class LegacyAttachmentSequence:
 
 @dataclass(frozen=True, slots=True)
 class LegacyMeshAttachmentRequest:
-    """Complete typed input for one legacy weighted mesh attachment."""
+    """Complete typed input for one weighted mesh attachment."""
 
     slot_name: str
     attachment_name: str
@@ -157,6 +158,7 @@ class LegacyMeshAttachmentRequest:
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field_name} must be a non-empty string")
+
         _require_finite_number(
             self.width,
             "width",
@@ -173,8 +175,9 @@ class LegacyMeshAttachmentRequest:
             raise ValueError("vertices must be a non-empty tuple")
         if not all(isinstance(vertex, LegacyAttachmentVertex) for vertex in self.vertices):
             raise TypeError("vertices must contain LegacyAttachmentVertex values")
-        actual_indices = tuple(vertex.index for vertex in self.vertices)
-        if actual_indices != tuple(range(len(self.vertices))):
+        if tuple(vertex.index for vertex in self.vertices) != tuple(
+            range(len(self.vertices))
+        ):
             raise ValueError("vertex indices must be ordered and dense from zero")
         if not isinstance(self.triangles, tuple) or len(self.triangles) % 3 != 0:
             raise ValueError("triangles must be a tuple divisible into triples")
@@ -189,7 +192,8 @@ class LegacyMeshAttachmentRequest:
             maximum=len(self.vertices),
         )
         if self.sequence is not None and not isinstance(
-            self.sequence, LegacyAttachmentSequence
+            self.sequence,
+            LegacyAttachmentSequence,
         ):
             raise TypeError("sequence must be LegacyAttachmentSequence or None")
 
@@ -208,17 +212,17 @@ class LegacyMeshAttachmentRequest:
 
         triangle_keys: set[tuple[int, int, int]] = set()
         referenced_vertices: set[int] = set()
-        for triangle_index in range(0, len(self.triangles), 3):
-            triangle = self.triangles[triangle_index : triangle_index + 3]
+        for offset in range(0, len(self.triangles), 3):
+            triangle = self.triangles[offset : offset + 3]
             if len(set(triangle)) != 3:
                 raise ValueError(
-                    f"triangles[{triangle_index // 3}] is degenerate: {triangle}"
+                    f"triangles[{offset // 3}] is degenerate: {triangle}"
                 )
             normalized = tuple(sorted(triangle))
             if normalized in triangle_keys:
                 raise ValueError(
                     "triangles contain duplicate geometry at triangle "
-                    f"{triangle_index // 3}: {triangle}"
+                    f"{offset // 3}: {triangle}"
                 )
             triangle_keys.add(normalized)
             referenced_vertices.update(triangle)
@@ -233,18 +237,17 @@ class LegacyMeshAttachmentRequest:
             )
 
         edge_keys: set[tuple[int, int]] = set()
-        for edge_index in range(0, len(self.edges), 2):
-            first = self.edges[edge_index]
-            second = self.edges[edge_index + 1]
+        for offset in range(0, len(self.edges), 2):
+            first, second = self.edges[offset : offset + 2]
             if first == second:
                 raise ValueError(
-                    f"edges[{edge_index // 2}] is a self-edge for vertex {first}"
+                    f"edges[{offset // 2}] is a self-edge for vertex {first}"
                 )
             normalized = (first, second) if first < second else (second, first)
             if normalized in edge_keys:
                 raise ValueError(
                     "edges contain duplicate undirected pair at edge "
-                    f"{edge_index // 2}: {(first, second)}"
+                    f"{offset // 2}: {(first, second)}"
                 )
             edge_keys.add(normalized)
 
@@ -310,18 +313,34 @@ def _resolved_image_path(request: LegacyMeshAttachmentRequest) -> str:
 
 
 def _z_parent_by_index(rig: LegacyRigBuildResult) -> dict[int, str]:
-    """Resolve vertex parents for model-space or rigid camera-layer documents."""
+    """Resolve the exact vertex parent for every supported setup hierarchy."""
 
     if not isinstance(rig, LegacyRigBuildResult):
         raise TypeError("rig must be LegacyRigBuildResult")
+
     if rig.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN:
         if len(rig.info.z_groups) != 1:
             raise LegacyMeshAttachmentBuildError(
                 "PREPROJECTED_SCREEN requires exactly one camera depth group"
             )
-        return {
-            rig.info.z_groups[0].index: rig.info.base_bone_name,
-        }
+        return {rig.info.z_groups[0].index: rig.info.base_bone_name}
+
+    if rig.request.setup_pose_mode is A1RigSetupPoseMode.CAMERA_VIEW_NORMAL:
+        available_bones = {bone.name for bone in rig.bones}
+        mapping: dict[int, str] = {}
+        for group in rig.info.z_groups:
+            parent_name = rig.profile.z_camera_setup_bone(
+                rig.info.prefix,
+                group.index,
+            )
+            if parent_name not in available_bones:
+                raise LegacyMeshAttachmentBuildError(
+                    "CAMERA_VIEW_NORMAL rig is missing inverse setup parent "
+                    f"{parent_name!r} for z_group_index={group.index}"
+                )
+            mapping[group.index] = parent_name
+        return mapping
+
     return {group.index: group.bone_name for group in rig.info.z_groups}
 
 
@@ -434,7 +453,9 @@ def _validate_request_set(
         "vertex_prefix": tuple(request.vertex_prefix for request in requests),
     }
     for field_name, values in checks.items():
-        duplicates = tuple(sorted({value for value in values if values.count(value) > 1}))
+        duplicates = tuple(
+            sorted({value for value in values if values.count(value) > 1})
+        )
         if duplicates:
             raise LegacyMeshAttachmentBuildError(
                 f"Duplicate {field_name} values are not allowed: {duplicates}"
@@ -459,7 +480,7 @@ def _build_skins(
 ) -> Tuple[Skin, ...]:
     skin_order: list[str] = []
     attachments_by_skin: dict[str, dict[str, dict[str, MeshAttachment]]] = {}
-    for request, component in zip(requests, components):
+    for request, component in zip(requests, components, strict=True):
         if request.skin_name not in attachments_by_skin:
             skin_order.append(request.skin_name)
             attachments_by_skin[request.skin_name] = {}
@@ -523,8 +544,14 @@ def build_legacy_mesh_document(
             raise TypeError("skeleton_metadata must be a mapping or None")
         skeleton = dict(skeleton_metadata)
         skeleton.setdefault("spine", rig.profile.spine_version)
-        skeleton.setdefault("width", max(float(request.width) for request in requests))
-        skeleton.setdefault("height", max(float(request.height) for request in requests))
+        skeleton.setdefault(
+            "width",
+            max(float(request.width) for request in requests),
+        )
+        skeleton.setdefault(
+            "height",
+            max(float(request.height) for request in requests),
+        )
 
     vertex_bones = tuple(
         bone for component in resolved_components for bone in component.vertex_bones
