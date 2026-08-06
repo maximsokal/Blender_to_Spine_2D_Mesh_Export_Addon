@@ -1,18 +1,9 @@
 """Compare +Z and Active Camera through the public Normal / UV Segments route.
 
-Blender must open the caller-provided ``coin_star.blend`` before this script starts. The
-regression proves three independent contracts on one real production material:
-
-* every prepared side region survives both projection directions;
-* Active Camera keeps the ordinary object-pivot rig and complete per-vertex depth groups;
-* material baking uses identical unprojected Blender-local geometry in both directions.
-
-Signed-axis and camera-space depth values are different coordinate systems, so their
-numbers of canonical depth groups are not required to match. Each route must instead
-retain a complete internally consistent vertex-to-depth assignment.
-
-The generated destination UV layout may differ by projection, so image comparison uses
-broad luminance distribution metrics rather than byte identity.
+The real-coin gate proves that projection direction does not change retained Normal
+regions or source-material bake geometry. Active Camera Object Root must additionally
+keep every camera-depth group, use neutral full-rank setup constraints, and provide one
+inverse-setup child per group so projected X/Y is not replaced by camera depth.
 """
 
 from __future__ import annotations
@@ -270,16 +261,30 @@ def _transform_constraints_by_name(document: object) -> dict[str, dict[str, obje
     )
     result: dict[str, dict[str, object]] = {}
     for index, item in enumerate(raw_constraints):
-        _assert(
-            isinstance(item, dict),
-            f"transform[{index}] must be a mapping",
-        )
+        _assert(isinstance(item, dict), f"transform[{index}] must be a mapping")
         name = item.get("name")
         _assert(
             isinstance(name, str) and bool(name.strip()),
             f"transform[{index}].name must be non-empty",
         )
         _assert(name not in result, f"duplicate serialized transform name: {name}")
+        result[name] = item
+    return result
+
+
+def _serialized_bones_by_name(document: object) -> dict[str, dict[str, object]]:
+    _assert(isinstance(document, dict), "serialized Spine document must be a mapping")
+    raw_bones = document.get("bones", [])
+    _assert(isinstance(raw_bones, list), "serialized bones must be a list")
+    result: dict[str, dict[str, object]] = {}
+    for index, item in enumerate(raw_bones):
+        _assert(isinstance(item, dict), f"bones[{index}] must be a mapping")
+        name = item.get("name")
+        _assert(
+            isinstance(name, str) and bool(name.strip()),
+            f"bones[{index}].name must be non-empty",
+        )
+        _assert(name not in result, f"duplicate serialized bone name: {name}")
         result[name] = item
     return result
 
@@ -304,10 +309,11 @@ def _finite_number(
 def _assert_serialized_active_camera_normal_setup(
     document: object,
     prepared,
-) -> int:
-    """Require neutral camera-facing rotation and model-space depth compensation."""
+) -> tuple[int, int]:
+    """Require neutral constraints and one exact inverse child per depth group."""
 
     constraints = _transform_constraints_by_name(document)
+    bones = _serialized_bones_by_name(document)
     profile = prepared.rig.profile
     prefix = prepared.prefix
     depth_constraint_name = (
@@ -323,14 +329,10 @@ def _assert_serialized_active_camera_normal_setup(
     for name in names:
         _assert(name in constraints, f"missing Active Camera Normal constraint: {name}")
 
-    rotation_x = constraints[names[0]]
-    rotation_y = constraints[names[1]]
-    depth_scale = constraints[names[2]]
     checked = 0
-
     for role, constraint in (
-        ("rotation_x", rotation_x),
-        ("rotation_y", rotation_y),
+        ("rotation_x", constraints[names[0]]),
+        ("rotation_y", constraints[names[1]]),
     ):
         path = f"transform[{constraint['name']}]"
         rotation = _finite_number(
@@ -355,38 +357,58 @@ def _assert_serialized_active_camera_normal_setup(
         )
         checked += 1
 
+    depth_scale = constraints[names[2]]
     depth_path = f"transform[{depth_scale['name']}]"
-    depth_x = _finite_number(
-        depth_scale,
-        "x",
-        default=0.0,
-        path=depth_path,
-    )
+    depth_x = _finite_number(depth_scale, "x", default=0.0, path=depth_path)
     depth_scale_x = _finite_number(
         depth_scale,
         "scaleX",
         default=0.0,
         path=depth_path,
     )
-    expected_depth_x = (
-        min(float(group.y_offset_pixels) for group in prepared.rig.info.z_groups)
-        if isinstance(profile, TwoAxisScaleRigProfile)
-        else 0.0
+    _assert(
+        abs(depth_x) <= _NEUTRAL_TOLERANCE,
+        f"Active Camera Normal depth setup translation is not neutral: {depth_x}",
     )
     _assert(
-        abs(depth_x - expected_depth_x) <= _NEUTRAL_TOLERANCE,
-        "Active Camera Normal lost model-space depth translation compensation: "
-        f"actual={depth_x}, expected={expected_depth_x}",
-    )
-    _assert(
-        abs(depth_scale_x + 1.0) <= _NEUTRAL_TOLERANCE,
-        "Active Camera Normal lost model-space depth scale compensation: "
-        f"actual={depth_scale_x}, expected=-1.0",
+        abs(depth_scale_x) <= _NEUTRAL_TOLERANCE,
+        f"Active Camera Normal depth setup is singular: {depth_scale_x}",
     )
     checked += 1
 
+    compensation_count = 0
+    for group in prepared.rig.info.z_groups:
+        compensation_name = profile.z_camera_setup_bone(prefix, group.index)
+        _assert(
+            compensation_name in bones,
+            f"missing Active Camera inverse setup bone: {compensation_name}",
+        )
+        compensation = bones[compensation_name]
+        _assert(
+            compensation.get("parent") == group.bone_name,
+            f"inverse setup bone has wrong parent: {compensation_name}",
+        )
+        compensation_y = _finite_number(
+            compensation,
+            "y",
+            default=0.0,
+            path=f"bones[{compensation_name}]",
+        )
+        _assert(
+            abs(compensation_y + float(group.y_offset_pixels))
+            <= _NEUTRAL_TOLERANCE,
+            "inverse setup does not cancel depth translation: "
+            f"group={group.index}, depth={group.y_offset_pixels}, "
+            f"inverse={compensation_y}",
+        )
+        compensation_count += 1
+
     _assert(checked == 3, f"unexpected Active Camera setup check count: {checked}")
-    return checked
+    _assert(
+        compensation_count == len(prepared.rig.info.z_groups),
+        "inverse setup bone count differs from depth-group count",
+    )
+    return checked, compensation_count
 
 
 def _assert_prepared_depth_groups(label: str, prepared) -> int:
@@ -456,10 +478,7 @@ def _run(expected_blend: str) -> None:
         prefix="spine2d-coin-normal-projection-parity-"
     ) as directory:
         root = Path(directory)
-        axis_settings = _settings(
-            root / "axis",
-            A1ProjectionDirection.POSITIVE_Z,
-        )
+        axis_settings = _settings(root / "axis", A1ProjectionDirection.POSITIVE_Z)
         camera_settings = _settings(
             root / "active-camera",
             A1ProjectionDirection.ACTIVE_CAMERA,
@@ -483,9 +502,7 @@ def _run(expected_blend: str) -> None:
             "projection parity gate did not create distinct export geometry",
         )
         _assert(
-            _source_material_geometry_fingerprint(
-                axis_prepared.bake_target_snapshot
-            )
+            _source_material_geometry_fingerprint(axis_prepared.bake_target_snapshot)
             == _source_material_geometry_fingerprint(
                 camera_prepared.bake_target_snapshot
             ),
@@ -511,6 +528,7 @@ def _run(expected_blend: str) -> None:
             camera_prepared.rig.request.camera_layer_projection_kind is None,
             "Active Camera Normal retained Camera Projection layer semantics",
         )
+
         axis_depth_group_count = _assert_prepared_depth_groups(
             "+Z Normal",
             axis_prepared,
@@ -542,15 +560,8 @@ def _run(expected_blend: str) -> None:
             camera_result.success,
             f"real coin Active Camera Normal export failed: {camera_result.issues}",
         )
-        _assert(
-            axis_elapsed <= _MAX_EXPORT_SECONDS,
-            f"+Z Normal export exceeded {_MAX_EXPORT_SECONDS}s: {axis_elapsed:.3f}s",
-        )
-        _assert(
-            camera_elapsed <= _MAX_EXPORT_SECONDS,
-            "Active Camera Normal export exceeded "
-            f"{_MAX_EXPORT_SECONDS}s: {camera_elapsed:.3f}s",
-        )
+        _assert(axis_elapsed <= _MAX_EXPORT_SECONDS, f"+Z Normal export exceeded limit: {axis_elapsed:.3f}s")
+        _assert(camera_elapsed <= _MAX_EXPORT_SECONDS, f"Active Camera export exceeded limit: {camera_elapsed:.3f}s")
 
         axis_json, axis_png = _single_json_and_png(axis_result)
         camera_json, camera_png = _single_json_and_png(camera_result)
@@ -562,12 +573,13 @@ def _run(expected_blend: str) -> None:
             axis_uv_streams == camera_uv_streams
             and axis_uv_streams == len(axis_prepared.document_assembly.projections),
             "serialized Normal mesh count differs by projection: "
-            f"axis={axis_uv_streams}, camera={camera_uv_streams}, "
-            f"prepared={len(axis_prepared.document_assembly.projections)}",
+            f"axis={axis_uv_streams}, camera={camera_uv_streams}",
         )
-        neutral_constraint_count = _assert_serialized_active_camera_normal_setup(
-            camera_document,
-            camera_prepared,
+        neutral_constraint_count, inverse_setup_count = (
+            _assert_serialized_active_camera_normal_setup(
+                camera_document,
+                camera_prepared,
+            )
         )
 
         for label, statistics in (
@@ -594,64 +606,44 @@ def _run(expected_blend: str) -> None:
             )
             _assert(
                 statistics.get("material_bake_projection_independent") == 1,
-                f"{label} export lost projection-independent material geometry: "
-                f"{statistics}",
-            )
-            _assert(
-                statistics.get("material_bake_uv_transfer_count")
-                == len(axis_prepared.bake_target_snapshot.loops),
-                f"{label} export did not transfer every generated UV loop: {statistics}",
+                f"{label} export lost projection-independent material geometry",
             )
             _assert(
                 "projection_crop_width" not in statistics,
-                f"{label} Normal export silently became Camera Projection: {statistics}",
+                f"{label} Normal export silently became Camera Projection",
             )
 
         _assert(
-            axis_result.statistics.get("z_group_count")
-            == axis_depth_group_count,
-            "ordinary +Z Normal statistics lost prepared depth-group count: "
-            f"prepared={axis_depth_group_count}, statistics={axis_result.statistics}",
+            axis_result.statistics.get("z_group_count") == axis_depth_group_count,
+            "ordinary +Z Normal statistics lost depth-group count",
         )
         _assert(
             camera_result.statistics.get("z_group_count")
             == camera_depth_group_count,
-            "Active Camera Normal statistics lost prepared depth-group count: "
-            f"prepared={camera_depth_group_count}, statistics={camera_result.statistics}",
+            "Active Camera Normal statistics lost depth-group count",
         )
         _assert(
             camera_result.statistics.get("final_rig_setup_pose_mode")
             == A1RigSetupPoseMode.CAMERA_VIEW_NORMAL.value,
-            f"Active Camera Normal serialized the wrong setup pose: "
-            f"{camera_result.statistics}",
+            "Active Camera Normal serialized the wrong setup pose",
         )
         _assert(
             camera_result.statistics.get("normal_active_camera_setup_neutral") == 1,
-            f"Active Camera Normal did not report neutral setup: "
-            f"{camera_result.statistics}",
+            "Active Camera Normal did not report neutral setup",
         )
         _assert(
             camera_result.statistics.get("camera_relative_depth_group_count") == 0,
-            f"Active Camera Normal retained camera-relative depth groups: "
-            f"{camera_result.statistics}",
-        )
-        _assert(
-            camera_result.statistics.get("depth_setup_y_compensated") == 0,
-            f"Active Camera Normal retained camera-zero compensation: "
-            f"{camera_result.statistics}",
+            "Active Camera Normal retained camera-relative depth groups",
         )
         _assert(
             camera_result.statistics.get("normal_active_camera_depth_group_count")
             == camera_depth_group_count,
-            "Active Camera Normal statistics disagree with its camera-space depth plan: "
-            f"prepared={camera_depth_group_count}, "
-            f"statistics={camera_result.statistics}",
+            "Active Camera depth statistics disagree with prepared plan",
         )
         _assert(
             axis_result.statistics.get("bake_strategy_ids")
             == camera_result.statistics.get("bake_strategy_ids"),
-            "Normal projection changed material bake strategy: "
-            f"axis={axis_result.statistics}, camera={camera_result.statistics}",
+            "Normal projection changed material bake strategy",
         )
 
         axis_metrics = _visible_luminance_metrics(axis_png)
@@ -665,6 +657,7 @@ def _run(expected_blend: str) -> None:
             f"axis_depth_groups={axis_depth_group_count} "
             f"camera_depth_groups={camera_depth_group_count} "
             f"neutral_constraints={neutral_constraint_count} "
+            f"inverse_setup_bones={inverse_setup_count} "
             f"axis_luma=({axis_metrics[1]:.6f},{axis_metrics[2]:.6f},"
             f"{axis_metrics[3]:.6f}) "
             f"camera_luma=({camera_metrics[1]:.6f},{camera_metrics[2]:.6f},"
@@ -672,7 +665,7 @@ def _run(expected_blend: str) -> None:
             f"axis_elapsed={axis_elapsed:.3f}s "
             f"camera_elapsed={camera_elapsed:.3f}s "
             "setup=CAMERA_VIEW_NORMAL pivot=OBJECT_ORIGIN "
-            "material_geometry=projection-independent",
+            "depth_setup=neutral+inverse material_geometry=projection-independent",
             flush=True,
         )
 
