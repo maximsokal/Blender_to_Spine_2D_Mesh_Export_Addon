@@ -55,26 +55,51 @@ def test_positive_z_preserves_current_world_xyz_orientation() -> None:
 
 
 @pytest.mark.parametrize(
-    ("direction", "label", "axis_aligned"),
+    ("direction", "label", "axis_aligned", "active_camera", "camera_root"),
     (
-        (A1ProjectionDirection.POSITIVE_X, "+X", True),
-        (A1ProjectionDirection.NEGATIVE_X, "-X", True),
-        (A1ProjectionDirection.POSITIVE_Y, "+Y", True),
-        (A1ProjectionDirection.NEGATIVE_Y, "-Y", True),
-        (A1ProjectionDirection.POSITIVE_Z, "+Z", True),
-        (A1ProjectionDirection.NEGATIVE_Z, "-Z", True),
-        (A1ProjectionDirection.ACTIVE_CAMERA, "Active Camera", False),
+        (A1ProjectionDirection.POSITIVE_X, "+X", True, False, False),
+        (A1ProjectionDirection.NEGATIVE_X, "-X", True, False, False),
+        (A1ProjectionDirection.POSITIVE_Y, "+Y", True, False, False),
+        (A1ProjectionDirection.NEGATIVE_Y, "-Y", True, False, False),
+        (A1ProjectionDirection.POSITIVE_Z, "+Z", True, False, False),
+        (A1ProjectionDirection.NEGATIVE_Z, "-Z", True, False, False),
+        (
+            A1ProjectionDirection.ACTIVE_CAMERA,
+            "Active Camera — Object Root Bone",
+            False,
+            True,
+            False,
+        ),
+        (
+            A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT,
+            "Active Camera — Camera Root Bone",
+            False,
+            True,
+            True,
+        ),
     ),
 )
 def test_projection_direction_has_stable_label_and_kind(
     direction: A1ProjectionDirection,
     label: str,
     axis_aligned: bool,
+    active_camera: bool,
+    camera_root: bool,
 ) -> None:
     assert direction.label == label
     assert direction.axis_aligned is axis_aligned
+    assert direction.active_camera is active_camera
+    assert direction.camera_root is camera_root
     assert resolve_a1_projection_direction(direction.value) is direction
     assert resolve_a1_projection_direction(f"  {direction.value.lower()}  ") is direction
+
+
+def test_existing_active_camera_identifier_remains_object_root_compatible() -> None:
+    resolved = resolve_a1_projection_direction("ACTIVE_CAMERA")
+
+    assert resolved is A1ProjectionDirection.ACTIVE_CAMERA
+    assert resolved.active_camera is True
+    assert resolved.camera_root is False
 
 
 def test_projection_direction_rejects_invalid_values_without_fallback() -> None:
@@ -88,9 +113,18 @@ def test_projection_direction_rejects_invalid_values_without_fallback() -> None:
         resolve_a1_projection_direction("TOP")
 
 
-def test_active_camera_cannot_be_resolved_as_axis_basis() -> None:
+@pytest.mark.parametrize(
+    "direction",
+    (
+        A1ProjectionDirection.ACTIVE_CAMERA,
+        A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT,
+    ),
+)
+def test_active_camera_modes_cannot_be_resolved_as_axis_basis(
+    direction: A1ProjectionDirection,
+) -> None:
     with pytest.raises(A1ProjectionError, match="evaluated Blender camera"):
-        resolve_a1_axis_projection_basis(A1ProjectionDirection.ACTIVE_CAMERA)
+        resolve_a1_axis_projection_basis(direction)
 
 
 def test_projected_point_localizes_against_projected_object_origin() -> None:
@@ -183,13 +217,17 @@ def test_axis_basis_rejects_non_orthonormal_or_left_handed_axes() -> None:
             depth_axis=(0.0, 0.0, -1.0),
         )
 
-    with pytest.raises(ValueError, match="ACTIVE_CAMERA"):
-        A1AxisProjectionBasis(
-            direction=A1ProjectionDirection.ACTIVE_CAMERA,
-            u_axis=(1.0, 0.0, 0.0),
-            v_axis=(0.0, 1.0, 0.0),
-            depth_axis=(0.0, 0.0, 1.0),
-        )
+    for camera_direction in (
+        A1ProjectionDirection.ACTIVE_CAMERA,
+        A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT,
+    ):
+        with pytest.raises(ValueError, match="Active Camera"):
+            A1AxisProjectionBasis(
+                direction=camera_direction,
+                u_axis=(1.0, 0.0, 0.0),
+                v_axis=(0.0, 1.0, 0.0),
+                depth_axis=(0.0, 0.0, 1.0),
+            )
 
 
 def test_projection_contracts_are_immutable() -> None:
