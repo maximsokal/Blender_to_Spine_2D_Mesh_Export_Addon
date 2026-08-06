@@ -98,6 +98,7 @@ def test_direct_camera_root_settings_normalize_at_application_boundary() -> None
             texture_width=256,
             texture_height=256,
             output_directory=Path("exports"),
+            rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
         ),
         bake_execution=BakeExecutionSettings(
             texture_export_mode=A1TextureExportMode.NORMAL_UV_SEGMENTS,
@@ -116,6 +117,7 @@ def test_direct_camera_root_rejects_non_normal_texture_route() -> None:
                 texture_width=256,
                 texture_height=256,
                 output_directory=Path("exports"),
+                rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
             ),
             bake_execution=BakeExecutionSettings(
                 texture_export_mode=A1TextureExportMode.CAMERA_PROJECTION,
@@ -188,17 +190,19 @@ def test_prepared_object_publishes_assembled_z_group_plan() -> None:
 
 
 def test_ui_exposes_both_root_modes_without_migrating_existing_id() -> None:
+    projection = _read(
+        "Blender_to_Spine2D_Mesh_Exporter/domain/projection.py"
+    )
     properties = _read(
         "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/scene_properties.py"
     )
     ui = _read("Blender_to_Spine2D_Mesh_Exporter/rig_ui.py")
 
-    assert 'ACTIVE_CAMERA = "ACTIVE_CAMERA"' in _read(
-        "Blender_to_Spine2D_Mesh_Exporter/domain/projection.py"
-    )
-    assert "ACTIVE_CAMERA_CAMERA_ROOT" in properties
-    assert "Object Root Bone" in properties
-    assert "Camera Root Bone" in properties
+    assert 'ACTIVE_CAMERA = "ACTIVE_CAMERA"' in projection
+    assert "ACTIVE_CAMERA_CAMERA_ROOT" in projection
+    assert "Active Camera — Object Root Bone" in projection
+    assert "Active Camera — Camera Root Bone" in projection
+    assert "A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT" in properties
     assert "direction.camera_root" in ui
     assert "Main bone pivot: active camera / camera-space zero" in ui
     assert "Main bone pivot: each object's Blender Object Origin" in ui
