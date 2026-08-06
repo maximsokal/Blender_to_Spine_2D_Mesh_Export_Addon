@@ -37,6 +37,17 @@ class LegacyRigProfile:
             raise ValueError("prefix cannot be empty")
         return normalized
 
+    def _require_z_index(self, index: int) -> int:
+        if (
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or index < self.z_index_base
+        ):
+            raise ValueError(
+                f"index must be an integer >= z_index_base ({self.z_index_base})"
+            )
+        return index
+
     def root_bone(self) -> str:
         return self.root_name
 
@@ -119,26 +130,23 @@ class LegacyRigProfile:
         )
 
     def z_scale_bone(self, prefix: str, index: int) -> str:
-        if (
-            isinstance(index, bool)
-            or not isinstance(index, int)
-            or index < self.z_index_base
-        ):
-            raise ValueError(
-                f"index must be an integer >= z_index_base ({self.z_index_base})"
-            )
-        return f"{self._require_prefix(prefix)}_{index}_scale"
+        resolved_index = self._require_z_index(index)
+        return f"{self._require_prefix(prefix)}_{resolved_index}_scale"
 
     def z_bone(self, prefix: str, index: int) -> str:
-        if (
-            isinstance(index, bool)
-            or not isinstance(index, int)
-            or index < self.z_index_base
-        ):
-            raise ValueError(
-                f"index must be an integer >= z_index_base ({self.z_index_base})"
-            )
-        return f"{self._require_prefix(prefix)}_{index}"
+        resolved_index = self._require_z_index(index)
+        return f"{self._require_prefix(prefix)}_{resolved_index}"
+
+    def z_camera_setup_bone(self, prefix: str, index: int) -> str:
+        """Name the inverse-setup child used by Active Camera Object Root.
+
+        The ordinary depth pair keeps its full-rank setup transform. This child stores
+        the inverse setup translation so vertex bones begin exactly in projected X/Y,
+        while later depth-pair changes still deform the object relative to that setup.
+        """
+
+        resolved_index = self._require_z_index(index)
+        return f"{self._require_prefix(prefix)}_{resolved_index}_camera_setup"
 
     def segment_slot(self, prefix: str, segment_index: int) -> str:
         if (
