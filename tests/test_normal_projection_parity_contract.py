@@ -114,6 +114,8 @@ def test_real_coin_projection_parity_gate_covers_all_three_regressions():
     for marker in (
         "[COIN-NORMAL-PROJECTION-PARITY] PASS",
         "segments=",
+        "axis_depth_groups=",
+        "camera_depth_groups=",
         "neutral_constraints=",
         "setup=CAMERA_VIEW_NORMAL",
         "pivot=OBJECT_ORIGIN",
@@ -134,3 +136,12 @@ def test_real_coin_projection_parity_gate_covers_all_three_regressions():
     assert "retained setup depth translation" in source
     assert "abs(depth_scale_x) <= _NEUTRAL_TOLERANCE" in source
     assert "retained setup depth scale" in source
+
+    assert "def _assert_prepared_depth_groups(" in source
+    assert "rig_group_count == plan_group_count" in source
+    assert "tuple(rig.request.z_groups) == tuple(plan.groups)" in source
+    assert "binding_count == vertex_count" in source
+    assert "bound_group_indices == expected_group_indices" in source
+    assert "== camera_depth_group_count" in source
+    assert "== len(axis_prepared.rig.info.z_groups)" not in source
+    assert '== axis_result.statistics.get("z_group_count")' not in source
