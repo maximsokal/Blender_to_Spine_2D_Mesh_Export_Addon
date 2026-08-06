@@ -15,7 +15,11 @@ from ..application import (
     propagate_texturing_uv_to_regions,
 )
 from ..domain.baking import A1TextureExportMode
-from ..domain.geometry import MeshSnapshot, transfer_uv_by_source_loop
+from ..domain.geometry import (
+    MeshSnapshot,
+    UvTransferReport,
+    transfer_uv_by_source_loop,
+)
 from ..domain.projection import A1ProjectionDirection
 from ..domain.uv import (
     UvRangePolicy,
@@ -129,40 +133,40 @@ def _depth_camera_uv_result(
     )
 
 
-def _normal_material_bake_snapshot(
-    source: A1SourceGeometryPreparationResult,
-    unwrap_result: UvUnwrapResult,
-) -> tuple[MeshSnapshot, int]:
-    """Transfer generated output UVs onto unprojected material-evaluation geometry.
+def transfer_normal_uv_to_material_bake_snapshot(
+    projected_uv_snapshot: MeshSnapshot,
+    material_snapshot: MeshSnapshot,
+    *,
+    layer_name: str,
+) -> tuple[MeshSnapshot, UvTransferReport]:
+    """Copy only generated destination UVs to source-material geometry.
 
-    Geometry positions, normals, topology, source UV roles, and ``matrix_world`` come
-    from the original/evaluated Blender-local snapshot. Only the generated destination
-    UV layer is copied by exact ``SourceLoopId`` correspondence.
+    The two snapshots must share exact ``SourceLoopId`` lineage. Export projection may
+    change positions, normals and ``matrix_world`` on ``projected_uv_snapshot``; none of
+    those values are allowed to leak into the returned material snapshot.
     """
 
-    if not isinstance(source, A1SourceGeometryPreparationResult):
-        raise TypeError("source must be A1SourceGeometryPreparationResult")
-    if not isinstance(unwrap_result, UvUnwrapResult):
-        raise TypeError("unwrap_result must be UvUnwrapResult")
+    if not isinstance(projected_uv_snapshot, MeshSnapshot):
+        raise TypeError("projected_uv_snapshot must be MeshSnapshot")
+    if not isinstance(material_snapshot, MeshSnapshot):
+        raise TypeError("material_snapshot must be MeshSnapshot")
+    if not isinstance(layer_name, str) or not layer_name.strip():
+        raise ValueError("layer_name must be a non-empty string")
+    resolved_layer_name = layer_name.strip()
 
-    target = source.material_bake_snapshot
-    if not isinstance(target, MeshSnapshot):
-        raise TypeError(
-            "source.material_bake_snapshot must be MeshSnapshot after validation"
-        )
-    layer_name = source.settings.uv.layer_name
     updated, report = transfer_uv_by_source_loop(
-        unwrap_result.snapshot,
-        target,
-        source_layer_name=layer_name,
-        target_layer_name=layer_name,
+        projected_uv_snapshot,
+        material_snapshot,
+        source_layer_name=resolved_layer_name,
+        target_layer_name=resolved_layer_name,
         require_complete=True,
         duplicate_tolerance=0.0,
     )
-    if report.updated_loop_count != len(target.loops):
+    if report.updated_loop_count != len(material_snapshot.loops):
         raise ValueError(
             "Generated material-bake UV transfer did not update every target loop; "
-            f"updated={report.updated_loop_count}, target_loops={len(target.loops)}"
+            f"updated={report.updated_loop_count}, "
+            f"target_loops={len(material_snapshot.loops)}"
         )
     if report.missing_source_loop_ids:
         raise ValueError(
@@ -176,17 +180,41 @@ def _normal_material_bake_snapshot(
         )
 
     # Transfer must never alter source-material evaluation geometry.
-    if updated.vertices != target.vertices:
+    if updated.vertices != material_snapshot.vertices:
         raise ValueError("Material-bake UV transfer changed vertex geometry")
-    if updated.edges != target.edges:
+    if updated.edges != material_snapshot.edges:
         raise ValueError("Material-bake UV transfer changed edge topology")
-    if updated.faces != target.faces:
+    if updated.faces != material_snapshot.faces:
         raise ValueError("Material-bake UV transfer changed face topology")
-    if updated.world_matrix != target.world_matrix:
+    if updated.world_matrix != material_snapshot.world_matrix:
         raise ValueError("Material-bake UV transfer changed matrix_world")
-    if updated.render_uv_layer != target.render_uv_layer:
+    if updated.render_uv_layer != material_snapshot.render_uv_layer:
         raise ValueError("Material-bake UV transfer changed source render UV role")
 
+    return updated, report
+
+
+def _normal_material_bake_snapshot(
+    source: A1SourceGeometryPreparationResult,
+    unwrap_result: UvUnwrapResult,
+) -> tuple[MeshSnapshot, int]:
+    """Transfer generated output UVs onto unprojected material-evaluation geometry."""
+
+    if not isinstance(source, A1SourceGeometryPreparationResult):
+        raise TypeError("source must be A1SourceGeometryPreparationResult")
+    if not isinstance(unwrap_result, UvUnwrapResult):
+        raise TypeError("unwrap_result must be UvUnwrapResult")
+
+    target = source.material_bake_snapshot
+    if not isinstance(target, MeshSnapshot):
+        raise TypeError(
+            "source.material_bake_snapshot must be MeshSnapshot after validation"
+        )
+    updated, report = transfer_normal_uv_to_material_bake_snapshot(
+        unwrap_result.snapshot,
+        target,
+        layer_name=source.settings.uv.layer_name,
+    )
     return updated, report.updated_loop_count
 
 
@@ -357,4 +385,8 @@ def prepare_a1_uv(
         ) from exc
 
 
-__all__ = ["A1UvPreparationResult", "prepare_a1_uv"]
+__all__ = [
+    "A1UvPreparationResult",
+    "prepare_a1_uv",
+    "transfer_normal_uv_to_material_bake_snapshot",
+]
