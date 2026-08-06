@@ -53,7 +53,12 @@ def _versioned_json_output_stem(
 def _effective_projection_direction(
     scene: _SceneExportProfile,
 ) -> A1ProjectionDirection:
-    """Return the direction owned by the selected public texture route."""
+    """Return the geometry direction owned by the selected public texture route.
+
+    Both Normal / UV Active Camera root modes use the same evaluated camera projection.
+    The Camera Root distinction is intentionally carried by ``rig_setup_pose_mode`` so
+    geometry, generated UVs, and material baking remain byte-for-byte on the same route.
+    """
 
     if not isinstance(scene, _SceneExportProfile):
         raise TypeError("scene must be _SceneExportProfile")
@@ -63,7 +68,27 @@ def _effective_projection_direction(
         return A1ProjectionDirection.POSITIVE_Z
     if scene.texture_export_mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
         return A1ProjectionDirection.ACTIVE_CAMERA
+    if scene.projection_direction.camera_root:
+        return A1ProjectionDirection.ACTIVE_CAMERA
     return scene.projection_direction
+
+
+def _effective_rig_setup_pose_mode(
+    scene: _SceneExportProfile,
+    requested: A1RigSetupPoseMode,
+) -> A1RigSetupPoseMode:
+    """Select the Normal Active Camera root without changing other export routes."""
+
+    if not isinstance(scene, _SceneExportProfile):
+        raise TypeError("scene must be _SceneExportProfile")
+    if not isinstance(requested, A1RigSetupPoseMode):
+        raise TypeError("requested must be A1RigSetupPoseMode")
+    if (
+        scene.texture_export_mode is A1TextureExportMode.NORMAL_UV_SEGMENTS
+        and scene.projection_direction.camera_root
+    ):
+        return A1RigSetupPoseMode.PREPROJECTED_SCREEN
+    return requested
 
 
 def _effective_source_geometry_mode(
@@ -93,6 +118,10 @@ def _settings_from_profiles(
         raise TypeError("scene must be _SceneExportProfile")
     if not isinstance(rig_setup_pose_mode, A1RigSetupPoseMode):
         raise TypeError("rig_setup_pose_mode must be A1RigSetupPoseMode")
+    resolved_setup_pose_mode = _effective_rig_setup_pose_mode(
+        scene,
+        rig_setup_pose_mode,
+    )
     return A1SingleObjectExportSettings(
         export=ExportSettings(
             texture_width=scene.texture_size,
@@ -120,7 +149,7 @@ def _settings_from_profiles(
         material_source_policy=scene.material_source_policy,
         generated_material_pattern=scene.generated_material_pattern,
         generated_gray_color=scene.generated_gray_color,
-        rig_setup_pose_mode=rig_setup_pose_mode,
+        rig_setup_pose_mode=resolved_setup_pose_mode,
         projection_direction=_effective_projection_direction(scene),
     )
 
@@ -282,6 +311,7 @@ __all__ = [
     "_build_sources_from_profiles",
     "_common_object_settings",
     "_effective_projection_direction",
+    "_effective_rig_setup_pose_mode",
     "_effective_source_geometry_mode",
     "_settings_from_profiles",
 ]
