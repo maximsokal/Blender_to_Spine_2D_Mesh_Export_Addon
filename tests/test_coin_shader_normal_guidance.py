@@ -1,8 +1,9 @@
-"""Regression for separating full shader audit findings from Normal-mode blockers."""
+"""Regression for Normal UV routing of camera/source-context shader findings."""
 
 from __future__ import annotations
 
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.production_shader_capability_routing import (
+    _normal_uv_blocking_camera_findings,
     normal_mode_camera_requirement_message,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
@@ -30,8 +31,8 @@ def _camera_finding(
     )
 
 
-def test_coin_guidance_lists_only_findings_normal_object_bake_cannot_reproduce() -> None:
-    audit = MaterialCapabilityAudit(
+def _coin_audit() -> MaterialCapabilityAudit:
+    return MaterialCapabilityAudit(
         material_name="Gold coin",
         render_target="CYCLES",
         required_capability=ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
@@ -55,23 +56,49 @@ def test_coin_guidance_lists_only_findings_normal_object_bake_cannot_reproduce()
             ),
             _camera_finding(
                 "SOURCE_OR_CAMERA_CONTEXT",
-                "Glossy needs a render ray",
+                "Glossy is resolved by Cycles COMBINED object bake",
                 node_id="Glossy BSDF",
                 node_type="BSDF_GLOSSY",
             ),
             _camera_finding(
                 "SOURCE_OR_CAMERA_CONTEXT",
-                "Second Glossy needs a render ray",
+                "Second Glossy is resolved by Cycles COMBINED object bake",
                 node_id="Glossy BSDF.001",
                 node_type="BSDF_GLOSSY",
             ),
         ),
     )
 
+
+def test_coin_glossy_fresnel_and_generated_are_normal_uv_bakeable() -> None:
+    audit = _coin_audit()
+
+    assert _normal_uv_blocking_camera_findings((audit,)) == ()
+
+
+def test_unclassified_camera_surface_finding_remains_fail_closed() -> None:
+    audit = MaterialCapabilityAudit(
+        material_name="Unsupported refraction",
+        render_target="CYCLES",
+        required_capability=ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
+        findings=(
+            _camera_finding(
+                "SOURCE_OR_CAMERA_CONTEXT",
+                "Refraction has no audited Normal UV object-bake route",
+                node_id="Refraction BSDF",
+                node_type="BSDF_REFRACTION",
+            ),
+        ),
+    )
+
+    blockers = _normal_uv_blocking_camera_findings((audit,))
     guidance = normal_mode_camera_requirement_message((audit,))
 
+    assert blockers == (
+        (
+            "Unsupported refraction",
+            (("SOURCE_OR_CAMERA_CONTEXT", "BSDF_REFRACTION", None),),
+        ),
+    )
     assert "Camera Projection or Depth Camera Projection" in guidance
-    assert guidance.count("BSDF_GLOSSY") == 2
-    assert "Generated" not in guidance
-    assert "FRESNEL" not in guidance
-    assert "GRAPH_CAMERA_DEPENDENCY" not in guidance
+    assert "BSDF_REFRACTION" in guidance
