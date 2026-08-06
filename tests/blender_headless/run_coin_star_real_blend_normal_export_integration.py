@@ -1,10 +1,15 @@
-"""Export the real BlendKit coin through Normal UV Segments and Cycles COMBINED bake.
+"""Export the real BlendKit coin through the public Normal UV Segments route.
 
 Blender must open the caller-provided ``coin_star.blend`` before this script starts. The
 regression proves that a material containing Fresnel, Generated coordinates, two Glossy
 BSDF nodes, and a conservatively analysed muted Add Shader is baked into the generated
 Spine UV layout instead of failing at PLAN_BAKE or switching exported geometry to Camera
 Projection.
+
+The public Blender UI currently owns ``ORIGINAL`` source geometry for Normal UV Segments.
+This runner intentionally uses that exact contract. Topology-changing evaluated modifiers
+are covered by a separate lineage/canonicalization contract and must not be smuggled into
+this material-bake regression by forcing ``EVALUATED`` here.
 """
 
 from __future__ import annotations
@@ -90,7 +95,7 @@ def _settings(output_directory: Path) -> A1SingleObjectExportSettings:
         prefix="Game Gold Coin",
         output_stem=_OUTPUT_STEM,
         json_output_stem=_OUTPUT_STEM,
-        source_geometry_mode=A1SourceGeometryMode.EVALUATED,
+        source_geometry_mode=A1SourceGeometryMode.ORIGINAL,
         uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
         diffuse_mode=BakeMode.DIFFUSE,
         procedural_mode=BakeMode.COMBINED,
@@ -212,6 +217,15 @@ def _run(expected_blend: str) -> None:
             f"coin export changed requested texture mode: {statistics}",
         )
         _assert(
+            statistics.get("source_geometry_mode")
+            == A1SourceGeometryMode.ORIGINAL.value,
+            f"coin gate diverged from the public Normal source route: {statistics}",
+        )
+        _assert(
+            statistics.get("modifier_count") == 0,
+            f"public Normal route unexpectedly evaluated modifiers: {statistics}",
+        )
+        _assert(
             statistics.get("texture_pipeline") == "OBJECT_BAKE",
             f"coin export did not use object bake: {statistics}",
         )
@@ -238,7 +252,7 @@ def _run(expected_blend: str) -> None:
             f"blend={loaded} object={source.name_full!r} outputs={len(outputs)} "
             f"texture={width}x{height} visible_pixels={visible_pixels} "
             f"signal_range={signal_range:.6f} uv_streams={uv_streams} "
-            f"elapsed={elapsed:.3f}s mode=NORMAL_UV_SEGMENTS "
+            f"elapsed={elapsed:.3f}s mode=NORMAL_UV_SEGMENTS geometry=ORIGINAL "
             "pipeline=OBJECT_BAKE bake=COMBINED strategy=CAMERA_COMBINED",
             flush=True,
         )
