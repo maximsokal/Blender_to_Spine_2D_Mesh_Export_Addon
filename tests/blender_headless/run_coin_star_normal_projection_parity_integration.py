@@ -4,8 +4,12 @@ Blender must open the caller-provided ``coin_star.blend`` before this script sta
 regression proves three independent contracts on one real production material:
 
 * every prepared side region survives both projection directions;
-* Active Camera keeps the ordinary object-pivot rig and per-vertex depth groups;
+* Active Camera keeps the ordinary object-pivot rig and complete per-vertex depth groups;
 * material baking uses identical unprojected Blender-local geometry in both directions.
+
+Signed-axis and camera-space depth values are different coordinate systems, so their
+numbers of canonical depth groups are not required to match. Each route must instead
+retain a complete internally consistent vertex-to-depth assignment.
 
 The generated destination UV layout may differ by projection, so image comparison uses
 broad luminance distribution metrics rather than byte identity.
@@ -370,6 +374,55 @@ def _assert_serialized_active_camera_normal_setup(
     return checked
 
 
+def _assert_prepared_depth_groups(label: str, prepared) -> int:
+    """Require one complete self-consistent ordinary Normal depth pipeline."""
+
+    _assert(
+        isinstance(label, str) and bool(label.strip()),
+        "depth-group validation label must be non-empty",
+    )
+    plan = prepared.z_groups
+    rig = prepared.rig
+    plan_group_count = len(plan.groups)
+    rig_group_count = len(rig.info.z_groups)
+    vertex_count = len(prepared.source_snapshot.vertices)
+    binding_count = len(plan.source_bindings)
+
+    _assert(
+        plan_group_count > 1,
+        f"{label} collapsed the volumetric real coin to one depth group: "
+        f"groups={plan_group_count}",
+    )
+    _assert(
+        rig_group_count == plan_group_count,
+        f"{label} rig lost prepared depth groups: "
+        f"plan={plan_group_count}, rig={rig_group_count}",
+    )
+    _assert(
+        tuple(rig.request.z_groups) == tuple(plan.groups),
+        f"{label} rig request changed the prepared depth-group plan",
+    )
+    _assert(
+        binding_count == vertex_count,
+        f"{label} depth bindings do not cover every projected vertex: "
+        f"bindings={binding_count}, vertices={vertex_count}",
+    )
+
+    expected_group_indices = set(
+        range(plan.z_index_base, plan.z_index_base + plan_group_count)
+    )
+    bound_group_indices = {
+        binding.z_group_index for binding in plan.source_bindings
+    }
+    _assert(
+        bound_group_indices == expected_group_indices,
+        f"{label} has unused or missing prepared depth groups: "
+        f"expected={tuple(sorted(expected_group_indices))}, "
+        f"bound={tuple(sorted(bound_group_indices))}",
+    )
+    return plan_group_count
+
+
 def _run(expected_blend: str) -> None:
     loaded = _require_loaded_blend(expected_blend)
     source = _require_source_object()
@@ -443,11 +496,13 @@ def _run(expected_blend: str) -> None:
             camera_prepared.rig.request.camera_layer_projection_kind is None,
             "Active Camera Normal retained Camera Projection layer semantics",
         )
-        _assert(
-            len(camera_prepared.rig.info.z_groups)
-            == len(axis_prepared.rig.info.z_groups)
-            and len(camera_prepared.rig.info.z_groups) > 1,
-            "Active Camera Normal lost ordinary per-depth rig groups",
+        axis_depth_group_count = _assert_prepared_depth_groups(
+            "+Z Normal",
+            axis_prepared,
+        )
+        camera_depth_group_count = _assert_prepared_depth_groups(
+            "Active Camera Normal",
+            camera_prepared,
         )
 
         started = perf_counter()
@@ -538,6 +593,18 @@ def _run(expected_blend: str) -> None:
             )
 
         _assert(
+            axis_result.statistics.get("z_group_count")
+            == axis_depth_group_count,
+            "ordinary +Z Normal statistics lost prepared depth-group count: "
+            f"prepared={axis_depth_group_count}, statistics={axis_result.statistics}",
+        )
+        _assert(
+            camera_result.statistics.get("z_group_count")
+            == camera_depth_group_count,
+            "Active Camera Normal statistics lost prepared depth-group count: "
+            f"prepared={camera_depth_group_count}, statistics={camera_result.statistics}",
+        )
+        _assert(
             camera_result.statistics.get("final_rig_setup_pose_mode")
             == A1RigSetupPoseMode.CAMERA_VIEW_NORMAL.value,
             f"Active Camera Normal serialized the wrong setup pose: "
@@ -560,9 +627,10 @@ def _run(expected_blend: str) -> None:
         )
         _assert(
             camera_result.statistics.get("normal_active_camera_depth_group_count")
-            == axis_result.statistics.get("z_group_count"),
-            "Active Camera Normal depth-group count differs from ordinary Normal: "
-            f"axis={axis_result.statistics}, camera={camera_result.statistics}",
+            == camera_depth_group_count,
+            "Active Camera Normal statistics disagree with its camera-space depth plan: "
+            f"prepared={camera_depth_group_count}, "
+            f"statistics={camera_result.statistics}",
         )
         _assert(
             axis_result.statistics.get("bake_strategy_ids")
@@ -578,8 +646,9 @@ def _run(expected_blend: str) -> None:
         print(
             "[COIN-NORMAL-PROJECTION-PARITY] PASS "
             f"blend={loaded} object={source.name_full!r} "
-            f"segments={axis_uv_streams} depth_groups="
-            f"{len(camera_prepared.rig.info.z_groups)} "
+            f"segments={axis_uv_streams} "
+            f"axis_depth_groups={axis_depth_group_count} "
+            f"camera_depth_groups={camera_depth_group_count} "
             f"neutral_constraints={neutral_constraint_count} "
             f"axis_luma=({axis_metrics[1]:.6f},{axis_metrics[2]:.6f},"
             f"{axis_metrics[3]:.6f}) "
