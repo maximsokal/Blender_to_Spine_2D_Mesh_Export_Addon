@@ -171,6 +171,11 @@ def _build_prepared_object(
         if isinstance(assembly, A1DocumentAssemblyResult)
         else document.rig
     )
+    material_bake_snapshot = getattr(
+        uv,
+        "material_bake_snapshot",
+        uv.unwrap_result.snapshot,
+    )
     common = dict(
         source_object=source.source_object,
         object_id=source.object_id,
@@ -193,6 +198,7 @@ def _build_prepared_object(
             context=context,
             scene=scene,
         ),
+        material_bake_snapshot=material_bake_snapshot,
     )
     package = getattr(source, "parallax_package", None)
     if isinstance(package, DepthParallaxGeometryPackage):
