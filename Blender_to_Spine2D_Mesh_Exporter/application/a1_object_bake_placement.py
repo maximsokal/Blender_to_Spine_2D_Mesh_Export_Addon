@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..domain.geometry import MeshSnapshot
+from ..domain.spine import A1RigSetupPoseMode, calculate_uniform_scale
 from .a1_numeric_contracts import require_finite_number
 from .a1_single_object import (
     A1MeshBounds,
@@ -52,21 +53,52 @@ def _validate_cached_bounds(bounds: A1MeshBounds) -> None:
         )
 
 
+def _preprojected_origin_pixels(
+    snapshot: MeshSnapshot,
+    settings: A1SingleObjectExportSettings,
+) -> tuple[float, float]:
+    """Return projected Object Origin even when connected placement is localized.
+
+    ``PREPROJECTED_SCREEN`` deliberately places ``main`` at camera-space zero and stores
+    the projected Blender Object Origin on the internal base layer. That base position is
+    required for every object, including connected exports that normally disable world
+    translation on the ordinary Object Root main bone.
+    """
+
+    if len(snapshot.world_matrix) != 16:
+        raise ValueError("snapshot.world_matrix must contain 16 values")
+    uniform_scale = calculate_uniform_scale(
+        settings.export.texture_width,
+        settings.export.texture_height,
+        settings.rig_scale_mode,
+    )
+    return (
+        require_finite_number(
+            float(snapshot.world_matrix[3]) * uniform_scale,
+            "preprojected_object_origin_x",
+        ),
+        require_finite_number(
+            float(snapshot.world_matrix[7]) * uniform_scale,
+            "preprojected_object_origin_y",
+        ),
+    )
+
+
 def calculate_a1_object_bake_main_position_pixels(
     snapshot: MeshSnapshot,
     settings: A1SingleObjectExportSettings,
     *,
     bounds: A1MeshBounds | None = None,
 ) -> tuple[float, float]:
-    """Return the Spine main-bone position for the Blender Object Origin.
+    """Return the Spine placement point owned by the selected object-bake rig.
 
-    Mesh coordinates in :class:`MeshSnapshot` are object-local. Their local ``(0, 0)`` is
-    therefore the authored Blender Object Origin and must stay the deformation pivot in
-    Spine. Attachment projection stores vertices relative to that origin; this function
-    contributes only the optional Blender world translation converted to Spine pixels.
+    Ordinary model-space rigs keep Blender Object Origin on ``main``. When
+    ``use_world_location_for_main_bone`` is disabled, connected composition owns the
+    anchor-relative translation and the ordinary Object Root route returns ``(0, 0)``.
 
-    When ``use_world_location_for_main_bone`` is disabled, connected composition owns the
-    anchor-relative world translation and this function returns a neutral local origin.
+    Camera Root uses ``PREPROJECTED_SCREEN``: ``main`` is camera-space zero and the
+    projected Blender Object Origin is stored below it on the rigid object base. That
+    projected position must therefore be returned even for connected composition.
     """
 
     if not isinstance(snapshot, MeshSnapshot):
@@ -75,6 +107,9 @@ def calculate_a1_object_bake_main_position_pixels(
         raise TypeError("settings must be A1SingleObjectExportSettings")
     if bounds is not None:
         _validate_cached_bounds(bounds)
+
+    if settings.rig_setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN:
+        return _preprojected_origin_pixels(snapshot, settings)
 
     world_position_pixels = calculate_a1_main_position_pixels(snapshot, settings)
     if world_position_pixels is None:
