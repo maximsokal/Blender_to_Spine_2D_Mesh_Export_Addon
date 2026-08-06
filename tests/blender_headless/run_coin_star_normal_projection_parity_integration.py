@@ -305,7 +305,7 @@ def _assert_serialized_active_camera_normal_setup(
     document: object,
     prepared,
 ) -> int:
-    """Require neutral setup offsets without a camera-relative one-layer rig."""
+    """Require neutral camera-facing rotation and model-space depth compensation."""
 
     constraints = _transform_constraints_by_name(document)
     profile = prepared.rig.profile
@@ -368,13 +368,20 @@ def _assert_serialized_active_camera_normal_setup(
         default=0.0,
         path=depth_path,
     )
-    _assert(
-        abs(depth_x) <= _NEUTRAL_TOLERANCE,
-        f"Active Camera Normal retained setup depth translation: {depth_x}",
+    expected_depth_x = (
+        min(float(group.y_offset_pixels) for group in prepared.rig.info.z_groups)
+        if isinstance(profile, TwoAxisScaleRigProfile)
+        else 0.0
     )
     _assert(
-        abs(depth_scale_x) <= _NEUTRAL_TOLERANCE,
-        f"Active Camera Normal retained setup depth scale: {depth_scale_x}",
+        abs(depth_x - expected_depth_x) <= _NEUTRAL_TOLERANCE,
+        "Active Camera Normal lost model-space depth translation compensation: "
+        f"actual={depth_x}, expected={expected_depth_x}",
+    )
+    _assert(
+        abs(depth_scale_x + 1.0) <= _NEUTRAL_TOLERANCE,
+        "Active Camera Normal lost model-space depth scale compensation: "
+        f"actual={depth_scale_x}, expected=-1.0",
     )
     checked += 1
 
