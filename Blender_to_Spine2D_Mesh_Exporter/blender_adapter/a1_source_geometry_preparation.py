@@ -64,7 +64,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class A1SourceGeometryPreparationResult:
-    """Validated source metadata and geometry products used by later stages."""
+    """Validated source metadata and geometry products used by later stages.
+
+    ``source_snapshot`` owns projected export geometry. ``material_bake_snapshot`` owns
+    the unprojected Blender-local geometry used to evaluate source materials. Keeping
+    those snapshots separate prevents projection direction from changing normals,
+    positions, Fresnel, Generated coordinates, or scene-light response during Normal /
+    UV Segments baking.
+    """
 
     source_object: Any
     object_id: str
@@ -79,6 +86,8 @@ class A1SourceGeometryPreparationResult:
     statistics: Mapping[str, StatisticsValue]
     # Appended to preserve positional compatibility with existing test doubles.
     camera_projection_kind: A1CameraProjectionKind | None = None
+    # Appended so existing positional construction remains compatible.
+    material_bake_snapshot: MeshSnapshot | None = None
 
     def __post_init__(self) -> None:
         if self.source_object is None:
@@ -100,12 +109,31 @@ class A1SourceGeometryPreparationResult:
                 raise TypeError(f"{field_name} must be {expected_type.__name__}")
         if self.source_snapshot.source_object_id != self.object_id:
             raise ValueError("source_snapshot.source_object_id must match object_id")
+
+        material_bake_snapshot = self.material_bake_snapshot
+        if material_bake_snapshot is None:
+            # Compatibility fallback for isolated test doubles. Production preparation
+            # always supplies the unprojected source snapshot explicitly.
+            material_bake_snapshot = self.source_snapshot
+            object.__setattr__(
+                self,
+                "material_bake_snapshot",
+                material_bake_snapshot,
+            )
+        if not isinstance(material_bake_snapshot, MeshSnapshot):
+            raise TypeError("material_bake_snapshot must be MeshSnapshot or None")
+        if material_bake_snapshot.source_object_id != self.object_id:
+            raise ValueError(
+                "material_bake_snapshot.source_object_id must match object_id"
+            )
+
         if not isinstance(self.warnings, tuple) or not all(
             isinstance(issue, ExportIssue) for issue in self.warnings
         ):
             raise TypeError("warnings must be a tuple of ExportIssue values")
         if not isinstance(self.statistics, Mapping):
             raise TypeError("statistics must be a mapping")
+
         active_camera = (
             self.settings.projection_direction
             is A1ProjectionDirection.ACTIVE_CAMERA
@@ -725,17 +753,19 @@ def prepare_a1_source_geometry(
         statistics = request.statistics
 
         stage = A1SingleObjectStage.READ_GEOMETRY
-        source_snapshot, modifier_count, warnings, uv_report = _read_source_snapshot(
-            source_obj,
-            request.object_id,
-            settings,
-            scene=request.scene,
-            depsgraph=request.depsgraph,
+        material_bake_snapshot, modifier_count, warnings, uv_report = (
+            _read_source_snapshot(
+                source_obj,
+                request.object_id,
+                settings,
+                scene=request.scene,
+                depsgraph=request.depsgraph,
+            )
         )
 
         stage = A1SingleObjectStage.PREPARE_GEOMETRY
         normalized = _normalize_source_geometry(
-            source_snapshot,
+            material_bake_snapshot,
             settings,
             warnings,
             object_id=request.object_id,
@@ -766,6 +796,15 @@ def prepare_a1_source_geometry(
             z_groups=z_groups,
             geometry=geometry,
         )
+        statistics = freeze_statistics(
+            statistics,
+            {
+                "material_bake_vertices": len(material_bake_snapshot.vertices),
+                "material_bake_edges": len(material_bake_snapshot.edges),
+                "material_bake_faces": len(material_bake_snapshot.faces),
+                "material_bake_projection_independent": 1,
+            },
+        )
         _log_prepared_source(
             request,
             settings,
@@ -787,6 +826,7 @@ def prepare_a1_source_geometry(
             warnings=warnings,
             statistics=statistics,
             camera_projection_kind=projection.camera_projection_kind,
+            material_bake_snapshot=material_bake_snapshot,
         )
     except A1ObjectPreparationError:
         raise
