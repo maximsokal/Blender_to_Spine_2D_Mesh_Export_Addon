@@ -156,20 +156,23 @@ def test_generated_uv_transfer_rejects_invalid_contracts():
 def test_generated_uv_transfer_fails_on_lineage_loss():
     projected = _generated_uv_snapshot()
     material = _material_snapshot()
+    missing_source_loop = SourceLoopId("Cube", 0, 99)
     material = replace(
         material,
         loops=(
             replace(
                 material.loops[0],
-                source_id=SourceLoopId("Cube", 99, 0),
+                source_id=missing_source_loop,
             ),
             *material.loops[1:],
         ),
     )
 
-    with pytest.raises(MissingSourceLoopError):
+    with pytest.raises(MissingSourceLoopError) as error:
         transfer_normal_uv_to_material_bake_snapshot(
             projected,
             material,
             layer_name=_GENERATED_LAYER,
         )
+
+    assert error.value.source_loop_ids == (missing_source_loop,)
