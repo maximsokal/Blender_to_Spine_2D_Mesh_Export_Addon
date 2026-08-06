@@ -15,6 +15,7 @@ from .legacy_rig_plan import (
 )
 from .legacy_rig_scale import require_finite_derived
 from .model import Bone
+from .rig_profiles import A1RigSetupPoseMode
 
 
 def build_core_bones(plan: LegacyRigBuildPlan) -> Tuple[Bone, ...]:
@@ -81,6 +82,35 @@ def build_legacy_z_group_bones(
             )
         )
     return tuple(bones)
+
+
+def build_camera_view_setup_compensation_bones(
+    plan: LegacyRigBuildPlan,
+) -> Tuple[Bone, ...]:
+    """Build inverse setup translations for Active Camera Object Root.
+
+    Each ordinary depth pair resolves to a pure ``(0, depth)`` translation while camera
+    setup rotations and depth scale remain neutral. Parenting vertex bones through a
+    child at ``(0, -depth)`` therefore yields an exact identity setup transform without
+    discarding the later depth-pair deformation driven by the X/Y controls.
+    """
+
+    if not isinstance(plan, LegacyRigBuildPlan):
+        raise TypeError("plan must be LegacyRigBuildPlan")
+    if plan.request.setup_pose_mode is not A1RigSetupPoseMode.CAMERA_VIEW_NORMAL:
+        return ()
+
+    return tuple(
+        Bone(
+            name=plan.profile.z_camera_setup_bone(plan.prefix, group.index),
+            parent=group.bone_name,
+            y=require_finite_derived(
+                round(-float(group.y_offset_pixels), 2),
+                f"camera_setup[{group.index}].y",
+            ),
+        )
+        for group in plan.z_groups
+    )
 
 
 def build_z_group_bones_for_request(
@@ -173,7 +203,7 @@ def build_ik_chain_bones(plan: LegacyRigBuildPlan) -> Tuple[Bone, ...]:
 
 
 def build_legacy_rig_bones(plan: LegacyRigBuildPlan) -> Tuple[Bone, ...]:
-    """Build the exact historical bone order."""
+    """Build the exact deterministic legacy hierarchy for the selected setup mode."""
 
     return (
         *build_core_bones(plan),
@@ -182,12 +212,14 @@ def build_legacy_rig_bones(plan: LegacyRigBuildPlan) -> Tuple[Bone, ...]:
             parent_bone_name=plan.main_rotation_bone_name,
             half_scale=plan.half_scale,
         ),
+        *build_camera_view_setup_compensation_bones(plan),
         *build_control_bones(plan),
         *build_ik_chain_bones(plan),
     )
 
 
 __all__ = [
+    "build_camera_view_setup_compensation_bones",
     "build_control_bones",
     "build_core_bones",
     "build_ik_chain_bones",
