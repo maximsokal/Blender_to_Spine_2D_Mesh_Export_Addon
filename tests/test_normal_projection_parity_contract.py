@@ -98,9 +98,9 @@ def test_active_camera_normal_keeps_object_pivot_and_vertex_depth():
 
     assert "A1RigSetupPoseMode.CAMERA_VIEW_NORMAL" in two_axis
     assert "neutral_model_space_camera_setup" in two_axis
-    assert "preserve_model_space_depth_setup" in two_axis
+    assert "neutral_depth_setup" in two_axis
     assert "A1RigSetupPoseMode.CAMERA_VIEW_NORMAL" in legacy
-    assert "preserve_model_space_depth_setup" in legacy
+    assert "neutral_depth_scale_setup" in legacy
 
 
 def test_normal_material_bake_uses_unprojected_source_geometry():
