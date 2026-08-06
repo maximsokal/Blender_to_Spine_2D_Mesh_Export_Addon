@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import Tuple
 
 from ..domain.baking import (
+    A1TextureExportMode,
     BakeExecutionSettings,
     BakeMaterialPolicy,
     BakeMode,
@@ -204,6 +205,28 @@ class A1SingleObjectExportSettings:
         if not isinstance(self.projection_direction, A1ProjectionDirection):
             raise TypeError(
                 "projection_direction must be A1ProjectionDirection"
+            )
+        if self.projection_direction.camera_root:
+            if (
+                self.bake_execution.texture_export_mode
+                is not A1TextureExportMode.NORMAL_UV_SEGMENTS
+            ):
+                raise ValueError(
+                    "Active Camera — Camera Root Bone is available only for "
+                    "Normal / UV Segments"
+                )
+            # Normalize the UI-facing persisted mode at the immutable application
+            # boundary. Every downstream geometry service continues to own exactly one
+            # ACTIVE_CAMERA route, while PREPROJECTED_SCREEN carries the rig-root choice.
+            object.__setattr__(
+                self,
+                "projection_direction",
+                A1ProjectionDirection.ACTIVE_CAMERA,
+            )
+            object.__setattr__(
+                self,
+                "rig_setup_pose_mode",
+                A1RigSetupPoseMode.PREPROJECTED_SCREEN,
             )
         for field_name in (
             "use_world_location_for_main_bone",
