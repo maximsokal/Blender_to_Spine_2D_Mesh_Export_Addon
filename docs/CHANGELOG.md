@@ -4,9 +4,34 @@ This changelog records public product releases. Detailed milestone notes are pre
 
 ## Current candidate status
 
-Version **0.90.0** is the current release candidate. It extends Depth Camera Projection
-with optional parallax reserve textures and weighted mesh attachments while preserving the
-`0°` single-FRONT compatibility path.
+Version **0.125.0** is the current release candidate. It adds visible diagnostics for
+Blender modifiers ignored by Normal / UV Segments and extends the audited Cycles
+`COMBINED` object-bake route to supported `BSDF_GLOSSY` materials.
+
+## [0.125.0] - 2026-08-06
+
+### Fixed
+
+- Conservatively traversed muted shader nodes no longer become false `GRAPH_ANALYSIS_INCOMPLETE` blockers.
+- Audited `BSDF_GLOSSY` materials can use the Normal / UV Segments Cycles `COMBINED` object-bake route.
+- The real `coin_star.blend` asset exports through original geometry, object bake, and a non-empty PNG plus Spine JSON.
+
+### Added
+
+- The Analysis foldout now warns when active Blender modifiers are ignored by Normal / UV Segments.
+- Modifier diagnostics include object name, modifier name, modifier type, and viewport/render state.
+- Multi-object requests group modifier diagnostics by object while preserving request order.
+- Modifiers disabled for both viewport and render are omitted from the alert.
+
+### Compatibility
+
+- Manifest version: `0.125.0`.
+- Expected archive: `blender_to_spine2d_mesh_exporter-0.125.0.zip`.
+- Minimum Blender version remains 5.2.0.
+- Scene settings schema remains 8.
+- Normal / UV Segments still exports the original Mesh datablock; apply or convert modifiers when generated geometry must appear in Spine.
+
+See [the complete 0.125.0 release note](releases/0.125.0.md).
 
 ## [0.90.0] - 2026-08-04
 
