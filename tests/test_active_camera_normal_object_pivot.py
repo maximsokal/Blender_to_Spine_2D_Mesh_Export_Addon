@@ -14,6 +14,9 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.projection import (
     A1ProjectionDirection,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import calculate_uniform_scale
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import (
+    A1RigSetupPoseMode,
+)
 
 from test_active_camera_projection import _perspective_frame, _snapshot
 
@@ -88,3 +91,38 @@ def test_connected_active_camera_normal_keeps_local_object_origin(
     ) == (0.0, 0.0)
     assert projected.projected_origin.u != 0.0
     assert projected.projected_origin.v != 0.0
+
+
+def test_connected_camera_root_preserves_projected_object_origin(
+    tmp_path: Path,
+) -> None:
+    settings = A1SingleObjectExportSettings(
+        export=ExportSettings(
+            texture_width=200,
+            texture_height=100,
+            output_directory=tmp_path,
+        ),
+        projection_direction=A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT,
+        use_world_location_for_main_bone=False,
+    )
+    assert settings.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
+    assert settings.rig_setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
+
+    uniform_scale = calculate_uniform_scale(
+        settings.export.texture_width,
+        settings.export.texture_height,
+        settings.rig_scale_mode,
+    )
+    projected = project_a1_mesh_snapshot_camera(
+        _snapshot(translation=(0.5, -0.25, -5.0)),
+        _perspective_frame(width=200, height=100),
+        uniform_scale=uniform_scale,
+    )
+
+    assert calculate_a1_object_bake_main_position_pixels(
+        projected.snapshot,
+        settings,
+    ) == (
+        projected.projected_origin.u,
+        projected.projected_origin.v,
+    )
