@@ -2,7 +2,7 @@
 
 ## Current release candidate
 
-The current extension candidate is **0.90.0**.
+The current extension candidate is **0.125.0**.
 
 Supported product scope:
 
@@ -10,6 +10,8 @@ Supported product scope:
 - Single-object and standalone multi-object export for Spine 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23 according to the target/profile capability matrix.
 - Connected and mixed composition for Spine 4.2.43 only.
 - Three explicit texture modes: Normal - UV Segments, Camera Projection, and Depth Camera Projection.
+- Normal / UV Segments active-modifier diagnostics without automatic modifier application.
+- Audited `BSDF_GLOSSY` support through the Cycles `COMBINED` object-bake route.
 - Depth Camera Projection Parallax Horizon Angle with a compatibility default of `0°`.
 - Scene settings schema 8.
 - Public selected-object export remains standalone-only.
@@ -23,7 +25,7 @@ $Python = ".\.venv-tests\Scripts\python.exe"
 $BpyPython = ".\.venv-bpy\Scripts\python.exe"
 $Blender = "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 
-foreach ($Executable in @($Python, $Blender)) {
+foreach ($Executable in @($Python, $BpyPython, $Blender)) {
     if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
         throw "Executable not found: $Executable"
     }
@@ -66,7 +68,7 @@ if ($LASTEXITCODE -ne 0) {
 ## Complete Blender-independent suite
 
 ```powershell
-& $Python -m pytest tests -q --durations=20
+& $Python -m pytest tests -q --tb=short --durations=20
 
 if ($LASTEXITCODE -ne 0) {
     throw "Python test suite failed"
@@ -75,21 +77,100 @@ if ($LASTEXITCODE -ne 0) {
 
 Do not use fail-fast for final release evidence. The suite must expose every failure.
 
-The 0.90.0 pure layer includes:
+The 0.125.0 pure layer includes:
 
+- deterministic modifier detection for Normal / UV Segments;
+- object and modifier-stack order preservation;
+- exclusion of modifiers disabled for both viewport and render;
+- UI contracts for the visible Analysis alert;
+- current manifest and public documentation version synchronization;
+- muted shader traversal policy classification;
+- Normal UV `BSDF_GLOSSY` capability routing;
 - UI degrees and persisted radians for Parallax Horizon Angle;
 - schema 8 migration with default zero;
 - accumulated unsigned dihedral Dijkstra traversal;
-- topology-density-independent angle costs;
 - exact SourceVertexId and SourceLoopId lineage;
-- one union MeshSnapshot with FRONT and material/view subsets;
-- deterministic eight-direction virtual-view assignment;
-- face-owned CameraProjectionPlan contracts;
+- deterministic virtual-view assignment;
 - temporary BMesh ownership and guaranteed `bm.free()`;
-- reserve-before-FRONT attachment order;
 - independent per-view staging and crop layouts;
-- single- and multi-object atomic output ownership;
-- release manifest, notes, package, and documentation contracts.
+- single- and multi-object atomic output ownership.
+
+## Real coin shader capability
+
+The real asset is:
+
+```text
+E:\test_BtSe\coin_star\coin_star.blend
+```
+
+Run the capability gate:
+
+```powershell
+& $Blender `
+    --factory-startup `
+    --background `
+    "E:\test_BtSe\coin_star\coin_star.blend" `
+    --python-exit-code 1 `
+    --python tests\blender_headless\run_coin_star_real_blend_shader_capability_integration.py `
+    -- `
+    --expected-blend "E:\test_BtSe\coin_star\coin_star.blend"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Real coin capability gate failed"
+}
+```
+
+Required marker:
+
+```text
+[COIN-REAL-SHADER-CAPABILITY] PASS
+capability=CAMERA_RENDER_REQUIRED
+muted_fallback=advisory
+blockers=none
+normal_mode=object-bake
+```
+
+## Real coin Normal UV full export
+
+```powershell
+& $Blender `
+    --factory-startup `
+    --background `
+    "E:\test_BtSe\coin_star\coin_star.blend" `
+    --python-exit-code 1 `
+    --python tests\blender_headless\run_coin_star_real_blend_normal_export_integration.py `
+    -- `
+    --expected-blend "E:\test_BtSe\coin_star\coin_star.blend"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Real coin Normal UV export failed"
+}
+```
+
+Required marker:
+
+```text
+[COIN-REAL-NORMAL-EXPORT] PASS
+mode=NORMAL_UV_SEGMENTS
+geometry=ORIGINAL
+pipeline=OBJECT_BAKE
+bake=COMBINED
+strategy=CAMERA_COMBINED
+```
+
+The gate must verify one non-empty PNG, one Spine JSON, valid mesh UV streams, no Camera Projection finalization, unchanged source object/material state, and no leaked temporary datablocks.
+
+## Modifier warning acceptance
+
+For a real Mesh object with an active Bevel modifier:
+
+1. Select Normal / UV Segments.
+2. Open the Analysis foldout.
+3. Confirm the alert names the object and displays `Bevel (BEVEL)` with its viewport/render state.
+4. Apply or convert the modifier.
+5. Rerun Analyze and confirm the alert disappears.
+
+The warning is diagnostic-only. Export remains available because the source Mesh is valid; the alert explains that the viewport and Spine geometry may differ.
 
 ## Real Blender Depth Camera Projection zero-angle matrix
 
@@ -122,8 +203,6 @@ Required marker:
 [DEPTH-CAMERA] PASS cases=7 targets=3.8,4.0,4.1,4.2,4.3 camera_zero=shared one_attachment=true
 ```
 
-This runner preserves the pre-0.90.0 path and proves that schema migration/default settings do not create reserve output implicitly.
-
 ## Real Blender positive Perspective parallax smoke
 
 ```powershell
@@ -143,16 +222,6 @@ Required marker:
 ```text
 [DEPTH-PARALLAX] PASS cases=1 target=4.2 camera=PERSP angle=50deg attachments=2 textures=2 camera_zero=shared
 ```
-
-Required runtime claims:
-
-- a 45° folded hidden surface is retained by a 50° horizon;
-- FRONT and reserve create separate non-empty PNG files;
-- reserve PNG contains the assigned hidden material and excludes FRONT material;
-- both attachments are weighted and share hinge bones;
-- reserve slot is below FRONT in serialized draw order;
-- crop-remapped UVs remain in `0..1`;
-- source Scene, camera, materials, selection, UV state, and temporary datablocks are restored.
 
 ## Real Blender Orthographic and sequence parallax matrix
 
@@ -174,15 +243,6 @@ Required marker:
 [DEPTH-PARALLAX-MATRIX] PASS cases=2 cameras=ORTHO,PERSP sequence_frames=2 attachments_per_case=2 view_crops=independent
 ```
 
-Required cases:
-
-```text
-Case 1: Orthographic static, positive horizon, fitted temporary ortho_scale
-Case 2: Perspective, 2 material-animation frames, FRONT and reserve sequences
-```
-
-Each view must keep one stable alpha-union crop across its own frames. FRONT and reserve may have different crop sizes. Both attachments must own native sequence metadata when Frames is positive, and the source timeline/camera must be restored.
-
 ## Real Blender positive parallax multi-object and rollback
 
 ```powershell
@@ -203,17 +263,6 @@ Required marker:
 [DEPTH-PARALLAX-MULTI] PASS objects=2 textures=4 attachments=4 transaction=shared rollback=no-files
 ```
 
-The success case must produce exactly:
-
-```text
-1 final JSON
-2 FRONT PNG files, one per object
-2 reserve PNG files, one per object
-4 weighted mesh attachments
-```
-
-The rollback case intentionally removes the active Scene camera immediately before staging object two. Object one must already have rendered both staged PNG files. Runtime validation for object two must fail, and the outer AtomicFileTransaction must remove the final JSON reservation, both staged object-one images, and every staging artifact. The expected traceback is diagnostic evidence inside a runner that ultimately prints the PASS marker.
-
 ## Real Blender historical multi-object depth acceptance
 
 ```powershell
@@ -228,124 +277,44 @@ if ($LASTEXITCODE -ne 0) {
 }
 ```
 
-Required coverage:
-
-```text
-Target: Spine 4.2.43
-Mode: STANDALONE multi-object
-Object A: 2-frame zero-angle Depth Camera Projection sequence
-Object B: static zero-angle Depth Camera Projection
-Outputs: 1 JSON + 3 PNG
-```
-
 Required marker:
 
 ```text
 [DEPTH-CAMERA-MULTI] PASS target=4.2 objects=2 sequence=2 static=1 png=3
 ```
 
-The static sibling must not inherit sequence metadata or a sequence timeline.
+## Existing standalone and connected sequence matrices
 
-## Existing standalone sequence matrices
+Run the established matrix runners:
 
-All-sequence matrix:
-
-```powershell
-& $Blender `
-    --background `
-    --factory-startup `
-    --python-exit-code 1 `
-    --python tests\blender_headless\run_multi_object_sequence_mode_matrix_integration.py
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Standalone all-sequence matrix failed"
-}
+```text
+run_multi_object_sequence_mode_matrix_integration.py
+run_multi_object_mixed_static_sequence_matrix_integration.py
+run_connected_mixed_sequence_mode_matrix_integration.py
+run_connected_mixed_static_sequence_matrix_integration.py
 ```
 
-Required marker:
+Required markers remain:
 
 ```text
 [MULTI-SEQUENCE-MATRIX] PASS 10 cases
-```
-
-Mixed static/sequence matrix:
-
-```powershell
-& $Blender `
-    --background `
-    --factory-startup `
-    --python-exit-code 1 `
-    --python tests\blender_headless\run_multi_object_mixed_static_sequence_matrix_integration.py
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Standalone mixed static/sequence matrix failed"
-}
-```
-
-Required marker:
-
-```text
 [MULTI-MIXED-TIMING] PASS 10 cases
-```
-
-## Existing connected and mixed matrices
-
-All-sequence matrix:
-
-```powershell
-& $Blender `
-    --background `
-    --factory-startup `
-    --python-exit-code 1 `
-    --python tests\blender_headless\run_connected_mixed_sequence_mode_matrix_integration.py
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Connected/mixed all-sequence matrix failed"
-}
-```
-
-Required marker:
-
-```text
 [CONNECTED-MIXED-SEQUENCE-MATRIX] PASS 8 cases
-```
-
-Mixed static/sequence matrix:
-
-```powershell
-& $Blender `
-    --background `
-    --factory-startup `
-    --python-exit-code 1 `
-    --python tests\blender_headless\run_connected_mixed_static_sequence_matrix_integration.py
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Connected/mixed static-sequence matrix failed"
-}
-```
-
-Required marker:
-
-```text
 [CONNECTED-MIXED-MIXED-TIMING] PASS 12 cases
 ```
 
 ## Real bpy suite
 
 ```powershell
-if (Test-Path -LiteralPath $BpyPython -PathType Leaf) {
-    & $BpyPython scripts\run_bpy_tests.py
-    if ($LASTEXITCODE -ne 0) {
-        throw "Real bpy suite failed"
-    }
-} else {
-    throw "Real bpy environment not found; release gate is incomplete"
+& $BpyPython scripts\run_bpy_tests.py
+if ($LASTEXITCODE -ne 0) {
+    throw "Real bpy suite failed"
 }
 ```
 
 A release claim must not silently downgrade a missing real-bpy environment to a warning.
 
-## Packaging version 0.90.0
+## Packaging version 0.125.0
 
 ```powershell
 Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
@@ -355,7 +324,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Extension package build failed"
 }
 
-$Zip = ".\dist\blender_to_spine2d_mesh_exporter-0.90.0.zip"
+$Zip = ".\dist\blender_to_spine2d_mesh_exporter-0.125.0.zip"
 if (-not (Test-Path -LiteralPath $Zip -PathType Leaf)) {
     throw "Expected ZIP was not created: $Zip"
 }
@@ -371,7 +340,7 @@ $Hash
 Write-Host "PACKAGE_SIZE=$Size"
 ```
 
-`tools/prepare_package.py` also validates Blender version, source manifest, archive root layout, required files, packaged-manifest equality, duplicate/case-colliding paths, forbidden repository directories, retired runtime modules, bytecode, nested ZIP files, and archive corruption.
+`tools/prepare_package.py` validates Blender version, source manifest, archive root layout, required files, packaged-manifest equality, duplicate/case-colliding paths, forbidden repository directories, retired runtime modules, bytecode, nested ZIP files, and archive corruption.
 
 ## Isolated install gate
 
@@ -379,7 +348,7 @@ Write-Host "PACKAGE_SIZE=$Size"
 & $Python `
     tools\run_extension_install_gate.py `
     --blender $Blender `
-    --output-root "E:\test_BtSe\extension_install_gate_0.90.0"
+    --output-root "E:\test_BtSe\extension_install_gate_0.125.0"
 
 if ($LASTEXITCODE -ne 0) {
     throw "Extension install gate failed"
@@ -392,20 +361,13 @@ The install gate must use the ZIP built from the same exact commit and must not 
 
 Import representative fresh outputs into the exact selected Spine Editor version.
 
+For the coin Normal / UV Segments case, confirm the PNG material is visible, the exported mesh matches the original Mesh datablock, and the modifier warning correctly explains any unapplied Bevel difference.
+
 For Spine 3.8 and 4.0, confirm legacy attachment swaps, frame order, Loop wrap, texture paths, and generated controls.
 
 For Spine 4.1, 4.2, and 4.3, confirm native sequence metadata, sequence ownership, texture paths, weighted attachment topology, and generated controls.
 
-For zero-angle Depth Camera Projection, move X/Y/Scale controls and confirm that the generated relief remains coherent, the farthest visible point stays at the zero relief plane, and no retained point deforms away from the camera.
-
-For positive parallax in Spine 4.2, confirm:
-
-- reserve slots are below FRONT;
-- reserve images reveal the intended hidden surfaces without duplicated FRONT material;
-- FRONT and reserve meshes meet on shared hinge bones;
-- X/Y/Scale controls deform all attachments coherently;
-- two-frame FRONT and reserve sequences advance together;
-- no texture path points to a staging filename.
+For positive parallax in Spine 4.2, confirm reserve slots are below FRONT, reserve images reveal the intended hidden surfaces, shared hinge bones remain coherent, sequences advance together, and no texture path points to a staging filename.
 
 ## Release evidence
 
@@ -414,12 +376,11 @@ A release claim records:
 - exact commit SHA and clean working tree before and after the gate;
 - Python, bpy, and Blender versions;
 - complete pytest summary;
+- real coin capability and full Normal UV export markers;
+- modifier-warning UI evidence;
 - zero-angle Depth Camera Projection marker;
-- positive Perspective parallax marker;
-- Orthographic/sequence parallax matrix marker;
-- positive multi-object/rollback marker;
-- historical depth multi-object marker;
-- all four historical standalone/connected sequence matrix markers;
+- positive Perspective, Orthographic/sequence, and multi-object/rollback markers;
+- established standalone and connected sequence matrix markers;
 - real-bpy summary;
 - archive path, byte size, and SHA256;
 - Blender extension validation result;
