@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from math import isfinite
 from pathlib import Path
 import sys
 import tempfile
@@ -72,6 +73,7 @@ _TEXTURE_SIZE = 256
 _MAX_EXPORT_SECONDS = 300.0
 _GENERATED_UV_LAYER = "SpineBakeUV"
 _MAX_LUMINANCE_RELATIVE_DELTA = 0.25
+_NEUTRAL_TOLERANCE = 1.0e-6
 
 
 def _parse_arguments() -> argparse.Namespace:
@@ -252,6 +254,122 @@ def _single_json_and_png(result) -> tuple[Path, Path]:
     return json_files[0], png_files[0]
 
 
+def _transform_constraints_by_name(document: object) -> dict[str, dict[str, object]]:
+    _assert(isinstance(document, dict), "serialized Spine document must be a mapping")
+    raw_constraints = document.get("transform", [])
+    _assert(
+        isinstance(raw_constraints, list),
+        "serialized transform constraints must be a list",
+    )
+    result: dict[str, dict[str, object]] = {}
+    for index, item in enumerate(raw_constraints):
+        _assert(
+            isinstance(item, dict),
+            f"transform[{index}] must be a mapping",
+        )
+        name = item.get("name")
+        _assert(
+            isinstance(name, str) and bool(name.strip()),
+            f"transform[{index}].name must be non-empty",
+        )
+        _assert(name not in result, f"duplicate serialized transform name: {name}")
+        result[name] = item
+    return result
+
+
+def _finite_number(
+    mapping: dict[str, object],
+    key: str,
+    *,
+    default: float,
+    path: str,
+) -> float:
+    raw = mapping.get(key, default)
+    _assert(
+        isinstance(raw, (int, float)) and not isinstance(raw, bool),
+        f"{path}.{key} must be numeric: {raw!r}",
+    )
+    value = float(raw)
+    _assert(isfinite(value), f"{path}.{key} must be finite: {value}")
+    return value
+
+
+def _assert_serialized_active_camera_normal_setup(
+    document: object,
+    prepared,
+) -> int:
+    """Require neutral setup offsets without a camera-relative one-layer rig."""
+
+    constraints = _transform_constraints_by_name(document)
+    profile = prepared.rig.profile
+    prefix = prepared.prefix
+    names = (
+        profile.rotation_x_constraint(prefix),
+        profile.rotation_y_constraint(prefix),
+        profile.scale_depth_constraint(prefix),
+    )
+    for name in names:
+        _assert(name in constraints, f"missing Active Camera Normal constraint: {name}")
+
+    rotation_x = constraints[names[0]]
+    rotation_y = constraints[names[1]]
+    depth_scale = constraints[names[2]]
+    checked = 0
+
+    for role, constraint in (
+        ("rotation_x", rotation_x),
+        ("rotation_y", rotation_y),
+    ):
+        path = f"transform[{constraint['name']}]"
+        rotation = _finite_number(
+            constraint,
+            "rotation",
+            default=0.0,
+            path=path,
+        )
+        mix_rotate = _finite_number(
+            constraint,
+            "mixRotate",
+            default=1.0,
+            path=path,
+        )
+        _assert(
+            abs(rotation) <= _NEUTRAL_TOLERANCE,
+            f"Active Camera Normal {role} retained setup rotation: {rotation}",
+        )
+        _assert(
+            abs(mix_rotate - 1.0) <= _NEUTRAL_TOLERANCE,
+            f"Active Camera Normal {role} disabled live rotation: {mix_rotate}",
+        )
+        checked += 1
+
+    depth_path = f"transform[{depth_scale['name']}]"
+    depth_x = _finite_number(
+        depth_scale,
+        "x",
+        default=0.0,
+        path=depth_path,
+    )
+    depth_scale_x = _finite_number(
+        depth_scale,
+        "scaleX",
+        default=0.0,
+        path=depth_path,
+    )
+    _assert(
+        abs(depth_x) <= _NEUTRAL_TOLERANCE,
+        f"Active Camera Normal retained setup depth translation: {depth_x}",
+    )
+    _assert(
+        abs(depth_scale_x) <= _NEUTRAL_TOLERANCE,
+        f"Active Camera Normal retained setup depth scale: {depth_scale_x}",
+    )
+    checked += 1
+
+    _assert(checked == 3, f"unexpected Active Camera setup check count: {checked}")
+    return checked
+
+
 def _run(expected_blend: str) -> None:
     loaded = _require_loaded_blend(expected_blend)
     source = _require_source_object()
@@ -318,8 +436,8 @@ def _run(expected_blend: str) -> None:
         )
         _assert(
             camera_prepared.rig.request.setup_pose_mode
-            is A1RigSetupPoseMode.PRESERVE_COMPOSITION,
-            "Active Camera Normal changed to camera-zero setup pose",
+            is A1RigSetupPoseMode.CAMERA_VIEW_NORMAL,
+            "Active Camera Normal did not use neutral object-pivot setup",
         )
         _assert(
             camera_prepared.rig.request.camera_layer_projection_kind is None,
@@ -377,6 +495,10 @@ def _run(expected_blend: str) -> None:
             f"axis={axis_uv_streams}, camera={camera_uv_streams}, "
             f"prepared={len(axis_prepared.document_assembly.projections)}",
         )
+        neutral_constraint_count = _assert_serialized_active_camera_normal_setup(
+            camera_document,
+            camera_prepared,
+        )
 
         for label, statistics in (
             ("axis", axis_result.statistics),
@@ -417,8 +539,13 @@ def _run(expected_blend: str) -> None:
 
         _assert(
             camera_result.statistics.get("final_rig_setup_pose_mode")
-            == A1RigSetupPoseMode.PRESERVE_COMPOSITION.value,
+            == A1RigSetupPoseMode.CAMERA_VIEW_NORMAL.value,
             f"Active Camera Normal serialized the wrong setup pose: "
+            f"{camera_result.statistics}",
+        )
+        _assert(
+            camera_result.statistics.get("normal_active_camera_setup_neutral") == 1,
+            f"Active Camera Normal did not report neutral setup: "
             f"{camera_result.statistics}",
         )
         _assert(
@@ -453,13 +580,14 @@ def _run(expected_blend: str) -> None:
             f"blend={loaded} object={source.name_full!r} "
             f"segments={axis_uv_streams} depth_groups="
             f"{len(camera_prepared.rig.info.z_groups)} "
+            f"neutral_constraints={neutral_constraint_count} "
             f"axis_luma=({axis_metrics[1]:.6f},{axis_metrics[2]:.6f},"
             f"{axis_metrics[3]:.6f}) "
             f"camera_luma=({camera_metrics[1]:.6f},{camera_metrics[2]:.6f},"
             f"{camera_metrics[3]:.6f}) "
             f"axis_elapsed={axis_elapsed:.3f}s "
             f"camera_elapsed={camera_elapsed:.3f}s "
-            "setup=PRESERVE_COMPOSITION pivot=OBJECT_ORIGIN "
+            "setup=CAMERA_VIEW_NORMAL pivot=OBJECT_ORIGIN "
             "material_geometry=projection-independent",
             flush=True,
         )
