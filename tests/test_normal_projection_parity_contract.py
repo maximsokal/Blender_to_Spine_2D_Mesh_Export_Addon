@@ -21,6 +21,30 @@ def test_normal_document_assembly_retains_edge_on_regions():
     assert "later X/Y rotation" in source
 
 
+def test_normal_attachment_projection_retains_setup_degenerate_meshes():
+    source = _read(
+        "Blender_to_Spine2D_Mesh_Exporter/application/"
+        "a1_attachment_projection_service.py"
+    )
+
+    for setup_mode in (
+        "A1RigSetupPoseMode.NORMALIZED_SINGLE",
+        "A1RigSetupPoseMode.PRESERVE_COMPOSITION",
+        "A1RigSetupPoseMode.CAMERA_VIEW_NORMAL",
+        "A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE",
+    ):
+        assert setup_mode in source
+
+    assert "allow_setup_degenerate: bool = False" in source
+    assert "if collapsed_triangles and not allow_setup_degenerate" in source
+    assert "if allow_setup_degenerate and len(collapsed_triangles) == triangle_count" in source
+    assert "return projection" in source
+    assert "rig.request.setup_pose_mode in _DEFORMABLE_SETUP_MODES" in source
+    assert "A1RigSetupPoseMode.PREPROJECTED_SCREEN" not in source.split(
+        "_DEFORMABLE_SETUP_MODES = frozenset(", 1
+    )[1].split(")\n", 1)[0]
+
+
 def test_active_camera_normal_keeps_object_pivot_and_vertex_depth():
     projection = _read(
         "Blender_to_Spine2D_Mesh_Exporter/domain/geometry/"
