@@ -20,15 +20,17 @@ def build_two_axis_scale_constraints(
 ) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
     """Build the exact five-phase schedule generalized from the reference rig.
 
-    Ordinary model-space documents retain the historical setup offsets and scale target
-    set. Rigid camera-relative documents place X and Y orbital transforms above the
-    projected Object Origin. Their independent Scale control targets only ``base`` below
-    that placement, so resizing the object cannot change its distance from camera zero.
+    Ordinary signed-axis model-space documents retain the historical setup offsets and
+    scale target set. Rigid camera-relative documents place X and Y orbital transforms
+    above the projected Object Origin. Their independent Scale control targets only
+    ``base`` below that placement, so resizing the object cannot change its distance from
+    camera zero.
 
-    Depth Camera Projection retains multiple per-vertex camera-distance groups and the
-    established model-space hierarchy, but its geometry is already camera-facing. Its
-    setup therefore uses zero X/Y rotation offsets and a neutral depth-scale offset. The
-    controls remain fully active because only their setup offsets are neutralized.
+    Active Camera Normal and Depth Camera Projection both arrive with camera-facing setup
+    geometry. Their setup rotation and depth-scale offsets are therefore neutral, while
+    their ordinary model-space hierarchy, per-depth groups and live controls remain
+    active. Only ``PREPROJECTED_SCREEN`` changes hierarchy and scale ownership to a rigid
+    camera-relative layer.
 
     Perspective rigid layers retain whole-layer depth foreshortening. Orthographic rigid
     layers disable automatic depth scale while preserving camera-relative translation.
@@ -42,13 +44,17 @@ def build_two_axis_scale_constraints(
         raise TypeError("plan.profile must be TwoAxisScaleRigProfile")
 
     profile = plan.profile
+    setup_pose_mode = plan.request.setup_pose_mode
     preprojected_screen = (
-        plan.request.setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
+        setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
     )
-    camera_depth_surface = (
-        plan.request.setup_pose_mode is A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE
+    neutral_model_space_camera_setup = setup_pose_mode in {
+        A1RigSetupPoseMode.CAMERA_VIEW_NORMAL,
+        A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE,
+    }
+    neutral_camera_setup = (
+        preprojected_screen or neutral_model_space_camera_setup
     )
-    neutral_camera_setup = preprojected_screen or camera_depth_surface
     orthographic_camera_layer = (
         preprojected_screen
         and plan.request.camera_layer_projection_kind
