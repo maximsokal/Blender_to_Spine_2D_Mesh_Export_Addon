@@ -43,7 +43,9 @@ def test_active_camera_normal_keeps_object_pivot_and_vertex_depth():
     )
 
     assert "projected_world.depth - projected_origin.depth" in projection
-    assert "origin.depth / uniform_scale" in projection
+    assert "origin.u / resolved_scale" in projection
+    assert "origin.v / resolved_scale" in projection
+    assert "origin.depth," in projection
     assert 'CAMERA_VIEW_NORMAL = "CAMERA_VIEW_NORMAL"' in profiles
     assert "A1RigSetupPoseMode.CAMERA_VIEW_NORMAL" in document
     assert "if active_camera_normal" in document
