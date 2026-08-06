@@ -11,6 +11,10 @@ import bpy
 
 from . import rig_ui, ui
 from .blender_adapter import generated_material_ui
+from .blender_adapter.normal_uv_modifier_warnings import (
+    collect_normal_uv_ignored_modifiers,
+    group_ignored_modifiers_by_object,
+)
 from .config import get_default_output_dir
 from .domain.baking import A1TextureExportMode
 from .domain.spine.version_target import (
@@ -30,6 +34,7 @@ logger = logging.getLogger(__name__)
 _ORIGINAL_PANEL_REMOVED = False
 _ORDERED_PANEL_REGISTERED = False
 _REGISTERED_RNA: tuple[RnaPropertyRegistration, ...] = ()
+_MAX_VISIBLE_MODIFIERS_PER_OBJECT = 8
 
 
 class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
@@ -135,11 +140,79 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
     def _draw_object_readiness(self, layout: bpy.types.UILayout, item) -> None:
         ui.OBJECT_PT_Spine2DMeshPanel._draw_object_readiness(self, layout, item)
 
+    @staticmethod
+    def _analysis_mesh_objects(
+        context: bpy.types.Context,
+    ) -> tuple[bpy.types.Object, ...]:
+        """Resolve the exact single/multi Mesh request shown by the main panel."""
+
+        selected = tuple(
+            candidate
+            for candidate in getattr(context, "selected_objects", ())
+            if getattr(candidate, "type", None) == "MESH"
+        )
+        if len(selected) > 1:
+            return selected
+
+        active = getattr(context, "active_object", None)
+        if active is not None and getattr(active, "type", None) == "MESH":
+            return (active,)
+        return selected
+
+    @staticmethod
+    def _draw_modifier_analysis_warning(
+        layout: bpy.types.UILayout,
+        context: bpy.types.Context,
+    ) -> None:
+        """Warn when Normal mode cannot reproduce viewport modifier geometry."""
+
+        scene = getattr(context, "scene", None)
+        if scene is None:
+            return
+        texture_mode = ui.OBJECT_PT_Spine2DMeshPanel._texture_mode(scene)
+        descriptors = collect_normal_uv_ignored_modifiers(
+            OBJECT_PT_Spine2DOrderedMeshPanel._analysis_mesh_objects(context),
+            texture_mode,
+        )
+        if not descriptors:
+            return
+
+        box = layout.box()
+        box.alert = True
+        box.label(
+            text="Normal / UV Segments ignores active modifiers",
+            icon="ERROR",
+        )
+        box.label(text="Viewport and Spine geometry can look different.")
+        box.label(text="Apply or convert modifiers before export.", icon="INFO")
+
+        for object_name, modifiers in group_ignored_modifiers_by_object(descriptors):
+            box.separator()
+            box.label(text=object_name, icon="MESH_DATA")
+            visible = modifiers[:_MAX_VISIBLE_MODIFIERS_PER_OBJECT]
+            for modifier in visible:
+                states: list[str] = []
+                if modifier.show_viewport:
+                    states.append("viewport")
+                if modifier.show_render:
+                    states.append("render")
+                box.label(
+                    text=(
+                        f"{modifier.modifier_name} ({modifier.modifier_type}) — "
+                        + "/".join(states)
+                    ),
+                    icon="MODIFIER",
+                )
+            hidden_count = len(modifiers) - len(visible)
+            if hidden_count > 0:
+                box.label(text=f"... and {hidden_count} more modifier(s)")
+
     def _draw_readiness(
         self,
         layout: bpy.types.UILayout,
         context: bpy.types.Context,
     ) -> bool:
+        self._draw_modifier_analysis_warning(layout, context)
         return ui.OBJECT_PT_Spine2DMeshPanel._draw_readiness(self, layout, context)
 
     def _draw_export_settings(
