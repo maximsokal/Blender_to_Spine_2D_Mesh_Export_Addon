@@ -29,17 +29,13 @@ def test_runner_uses_the_real_coin_asset_and_live_material_audit() -> None:
     assert 'finding.node_type == "BSDF_GLOSSY"' in source
     assert 'finding.output_socket == "Generated"' in source
     assert 'finding.code == "GRAPH_ANALYSIS_INCOMPLETE"' in source
-    assert "normal_mode_camera_requirement_message(audits)" in source
-    assert '"Camera Projection or Depth Camera Projection"' in source
-    assert 'guidance.count("BSDF_GLOSSY") == 2' in source
-    assert '"Generated" not in guidance' in source
-    assert '"FRESNEL" not in guidance' in source
-    assert '"GRAPH_CAMERA_DEPENDENCY" not in guidance' in source
+    assert "_normal_uv_blocking_camera_findings(audits)" in source
+    assert "not blockers" in source
     assert "[COIN-REAL-SHADER-CAPABILITY] PASS" in source
     assert "muted_fallback=advisory" in source
-    assert "source_context=FRESNEL+Generated" in source
-    assert "blockers=2xBSDF_GLOSSY" in source
-    assert "normal_mode=camera-required" in source
+    assert "source_context=FRESNEL+Generated+2xBSDF_GLOSSY" in source
+    assert "blockers=none" in source
+    assert "normal_mode=object-bake" in source
 
 
 def test_runner_cannot_synthesize_or_mutate_the_coin_scene() -> None:
