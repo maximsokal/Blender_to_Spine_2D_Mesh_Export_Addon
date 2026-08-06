@@ -1,4 +1,4 @@
-"""Current release-scope contracts for Depth parallax reserve 0.90.0."""
+"""Historical Depth parallax contracts retained under the current release."""
 
 from __future__ import annotations
 
@@ -87,12 +87,12 @@ def _depth_z_group_source_path() -> tuple[str, ...]:
     return path
 
 
-def test_current_manifest_and_scene_schema_are_0900() -> None:
+def test_current_manifest_and_scene_schema_match_release() -> None:
     with MANIFEST.open("rb") as stream:
         manifest = tomllib.load(stream)
     migration = _read(SCENE_MIGRATION)
 
-    assert manifest["version"] == "0.90.0"
+    assert manifest["version"] == "0.125.0"
     assert manifest["blender_version_min"] == "5.2.0"
     assert "CURRENT_SETTINGS_SCHEMA_VERSION = 8" in migration
     assert '("spine2d_depth_parallax_horizon_angle", 0.0)' in migration
