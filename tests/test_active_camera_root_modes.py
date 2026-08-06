@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1GeometryPreparationSettings,
+    A1SingleObjectExportSettings,
+    ExportSettings,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_document_preparation import (
     _camera_layer_projection_kind,
@@ -86,6 +90,38 @@ def test_camera_root_reuses_geometry_but_selects_preprojected_rig() -> None:
         scene,
         A1RigSetupPoseMode.NORMALIZED_SINGLE,
     ) is A1RigSetupPoseMode.PREPROJECTED_SCREEN
+
+
+def test_direct_camera_root_settings_normalize_at_application_boundary() -> None:
+    settings = A1SingleObjectExportSettings(
+        export=ExportSettings(
+            texture_width=256,
+            texture_height=256,
+            output_directory=Path("exports"),
+        ),
+        bake_execution=BakeExecutionSettings(
+            texture_export_mode=A1TextureExportMode.NORMAL_UV_SEGMENTS,
+        ),
+        projection_direction=A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT,
+    )
+
+    assert settings.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
+    assert settings.rig_setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
+
+
+def test_direct_camera_root_rejects_non_normal_texture_route() -> None:
+    with pytest.raises(ValueError, match="available only for Normal / UV Segments"):
+        A1SingleObjectExportSettings(
+            export=ExportSettings(
+                texture_width=256,
+                texture_height=256,
+                output_directory=Path("exports"),
+            ),
+            bake_execution=BakeExecutionSettings(
+                texture_export_mode=A1TextureExportMode.CAMERA_PROJECTION,
+            ),
+            projection_direction=A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT,
+        )
 
 
 def test_camera_root_does_not_change_non_normal_export_setup() -> None:
