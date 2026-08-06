@@ -171,6 +171,11 @@ def _build_prepared_object(
         if isinstance(assembly, A1DocumentAssemblyResult)
         else document.rig
     )
+    prepared_z_groups = (
+        assembly.z_groups
+        if isinstance(assembly, A1DocumentAssemblyResult)
+        else source.z_groups
+    )
     material_bake_snapshot = getattr(
         uv,
         "material_bake_snapshot",
@@ -183,7 +188,7 @@ def _build_prepared_object(
         settings=source.settings,
         output_paths=source.output_paths,
         source_snapshot=source.source_snapshot,
-        z_groups=source.z_groups,
+        z_groups=prepared_z_groups,
         geometry=source.geometry,
         texturing_topology=uv.texturing_topology,
         unwrap_result=uv.unwrap_result,
