@@ -71,13 +71,31 @@ def test_active_camera_normal_keeps_object_pivot_and_vertex_depth():
     assert "origin.v / resolved_scale" in projection
     assert "origin.depth," in projection
     assert 'CAMERA_VIEW_NORMAL = "CAMERA_VIEW_NORMAL"' in profiles
+
+    # Object Root and Camera Root share the same Active Camera projected geometry.
+    # The document stage must distinguish only the rig root and depth-group policy.
+    assert "object_root_normal = active_camera_normal and not camera_root_normal" in document
+    assert "if object_root_normal" in document
     assert "A1RigSetupPoseMode.CAMERA_VIEW_NORMAL" in document
-    assert "if active_camera_normal" in document
-    assert "camera_layer_projection_kind=None" in document
-    assert "compensate_depth_setup_y=False" in document
+    assert "if camera_root_normal" in document
+    assert "A1RigSetupPoseMode.PREPROJECTED_SCREEN" in document
+
+    # Object Root must not receive rigid camera-layer semantics. Camera Root receives
+    # the evaluated Perspective/Orthographic kind through the same request field.
+    assert "camera_layer_kind = (" in document
+    assert "if camera_root_normal and active_camera_kind is not None" in document
+    assert "else None" in document
+    assert "camera_layer_projection_kind=camera_layer_kind" in document
+
+    # Assembly compensation is enabled only for Camera Root; Object Root remains the
+    # ordinary model-space path with all camera-space per-vertex depth groups.
+    assert "compensate_depth_setup_y=camera_root_normal" in document
     assert '"normal_active_camera_setup_neutral": int(active_camera_normal)' in document
-    assert '"camera_relative_depth_group_count": 0' in document
-    assert '"depth_setup_y_compensated": 0' in document
+    assert '"normal_active_camera_root_mode": active_camera_root_mode' in document
+    assert 'len(rig.info.z_groups) if camera_root_normal else 0' in document
+    assert 'len(rig.info.z_groups) if object_root_normal else 0' in document
+    assert '"depth_setup_y_compensated": int(camera_root_normal)' in document
+
     assert "A1RigSetupPoseMode.CAMERA_VIEW_NORMAL" in two_axis
     assert "neutral_model_space_camera_setup" in two_axis
     assert "A1RigSetupPoseMode.CAMERA_VIEW_NORMAL" in legacy
