@@ -3,9 +3,9 @@
 This module owns the canonical ``(U, V, D)`` coordinate system approved in
 ``docs/tasks/normal_uv_segments_projection_space_and_draw_order.md``.
 
-Slice 1 intentionally implements only the six signed global-axis frames. Active-camera
-projection requires evaluated Blender camera data and is resolved by a later Blender
-adapter slice; attempting to resolve it here fails closed.
+Signed-axis projection is resolved entirely in this domain module. Both Active Camera
+variants require evaluated Blender camera data and therefore share the later Blender
+adapter route while selecting different Spine rig roots during document preparation.
 """
 
 from __future__ import annotations
@@ -24,7 +24,17 @@ class A1ProjectionError(ValueError):
 
 
 class A1ProjectionDirection(str, Enum):
-    """Stable persisted identifiers for the approved projection directions."""
+    """Stable persisted identifiers for approved Normal / UV projection modes.
+
+    ``ACTIVE_CAMERA`` intentionally keeps its existing persisted identifier and now has
+    the explicit UI meaning "Active Camera — Object Root Bone". Existing `.blend` files
+    therefore retain the corrected per-object pivot behavior without migration.
+
+    ``ACTIVE_CAMERA_CAMERA_ROOT`` restores the earlier rigid camera-relative rig as an
+    opt-in mode. Geometry is projected through the same camera frame and material baking
+    remains projection-independent; only the generated Spine hierarchy and depth-group
+    ownership differ.
+    """
 
     POSITIVE_X = "POSITIVE_X"
     NEGATIVE_X = "NEGATIVE_X"
@@ -33,6 +43,7 @@ class A1ProjectionDirection(str, Enum):
     POSITIVE_Z = "POSITIVE_Z"
     NEGATIVE_Z = "NEGATIVE_Z"
     ACTIVE_CAMERA = "ACTIVE_CAMERA"
+    ACTIVE_CAMERA_CAMERA_ROOT = "ACTIVE_CAMERA_CAMERA_ROOT"
 
     @property
     def label(self) -> str:
@@ -43,12 +54,36 @@ class A1ProjectionDirection(str, Enum):
             A1ProjectionDirection.NEGATIVE_Y: "-Y",
             A1ProjectionDirection.POSITIVE_Z: "+Z",
             A1ProjectionDirection.NEGATIVE_Z: "-Z",
-            A1ProjectionDirection.ACTIVE_CAMERA: "Active Camera",
+            A1ProjectionDirection.ACTIVE_CAMERA: (
+                "Active Camera — Object Root Bone"
+            ),
+            A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT: (
+                "Active Camera — Camera Root Bone"
+            ),
         }[self]
 
     @property
     def axis_aligned(self) -> bool:
-        return self is not A1ProjectionDirection.ACTIVE_CAMERA
+        return self in {
+            A1ProjectionDirection.POSITIVE_X,
+            A1ProjectionDirection.NEGATIVE_X,
+            A1ProjectionDirection.POSITIVE_Y,
+            A1ProjectionDirection.NEGATIVE_Y,
+            A1ProjectionDirection.POSITIVE_Z,
+            A1ProjectionDirection.NEGATIVE_Z,
+        }
+
+    @property
+    def active_camera(self) -> bool:
+        """Return whether evaluated active-camera projection owns geometry X/Y."""
+
+        return not self.axis_aligned
+
+    @property
+    def camera_root(self) -> bool:
+        """Return whether camera-space zero owns the generated Spine main bone."""
+
+        return self is A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT
 
 
 def resolve_a1_projection_direction(value: object) -> A1ProjectionDirection:
@@ -150,7 +185,9 @@ class A1AxisProjectionBasis:
     def __post_init__(self) -> None:
         resolved_direction = resolve_a1_projection_direction(self.direction)
         if not resolved_direction.axis_aligned:
-            raise ValueError("A1AxisProjectionBasis cannot represent ACTIVE_CAMERA")
+            raise ValueError(
+                "A1AxisProjectionBasis cannot represent an Active Camera mode"
+            )
         object.__setattr__(self, "direction", resolved_direction)
 
         for field_name in ("u_axis", "v_axis", "depth_axis"):
@@ -232,9 +269,9 @@ def resolve_a1_axis_projection_basis(value: object) -> A1AxisProjectionBasis:
     """Return the immutable basis for one signed global axis."""
 
     direction = resolve_a1_projection_direction(value)
-    if direction is A1ProjectionDirection.ACTIVE_CAMERA:
+    if not direction.axis_aligned:
         raise A1ProjectionError(
-            "ACTIVE_CAMERA requires an evaluated Blender camera projection frame"
+            "Active Camera projection requires an evaluated Blender camera frame"
         )
     return _AXIS_BASES[direction]
 
