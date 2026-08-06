@@ -53,7 +53,29 @@ def _minimum_depth_y(rig) -> float:
     return min(float(group.y_offset_pixels) for group in rig.info.z_groups)
 
 
-def test_two_axis_active_camera_normal_is_rotation_neutral_but_keeps_object_depth_setup() -> None:
+def _assert_camera_setup_inverse_bones(rig) -> None:
+    bones = _bone_by_name(rig)
+    for group in rig.info.z_groups:
+        compensation_name = rig.profile.z_camera_setup_bone(
+            rig.info.prefix,
+            group.index,
+        )
+        compensation = bones[compensation_name]
+        assert compensation.parent == group.bone_name
+        assert compensation.x is None
+        assert compensation.y == round(-float(group.y_offset_pixels), 2)
+
+
+def _assert_no_camera_setup_inverse_bones(rig) -> None:
+    bone_names = {bone.name for bone in rig.bones}
+    for group in rig.info.z_groups:
+        assert (
+            rig.profile.z_camera_setup_bone(rig.info.prefix, group.index)
+            not in bone_names
+        )
+
+
+def test_two_axis_active_camera_normal_has_neutral_full_rank_setup_and_inverses() -> None:
     rig = build_rig(
         _request(A1RigSetupPoseMode.CAMERA_VIEW_NORMAL),
         A1RigProfile.TWO_AXIS_ROTATION_SCALE,
@@ -75,8 +97,8 @@ def test_two_axis_active_camera_normal_is_rotation_neutral_but_keeps_object_dept
 
     assert rotation_x.extras["rotation"] == 0.0
     assert rotation_y.extras["rotation"] == 0.0
-    assert depth_scale.extras["x"] == _minimum_depth_y(rig)
-    assert depth_scale.extras["scaleX"] == -1
+    assert depth_scale.extras["x"] == 0.0
+    assert depth_scale.extras["scaleX"] == 0.0
     assert rotation_x.extras.get("mixRotate", 1) == 1
     assert rotation_y.extras.get("mixRotate", 1) == 1
 
@@ -92,9 +114,10 @@ def test_two_axis_active_camera_normal_is_rotation_neutral_but_keeps_object_dept
     for group in rig.info.z_groups:
         assert bones[group.scale_bone_name].parent == rig.info.main_rotation_bone_name
         assert bones[group.bone_name].parent == group.scale_bone_name
+    _assert_camera_setup_inverse_bones(rig)
 
 
-def test_two_axis_depth_camera_surface_keeps_neutral_depth_setup() -> None:
+def test_two_axis_depth_camera_surface_keeps_neutral_depth_setup_without_inverses() -> None:
     rig = build_rig(
         _request(A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE),
         A1RigProfile.TWO_AXIS_ROTATION_SCALE,
@@ -111,6 +134,7 @@ def test_two_axis_depth_camera_surface_keeps_neutral_depth_setup() -> None:
     assert rotation_y.extras["rotation"] == 0.0
     assert depth_scale.extras["x"] == 0.0
     assert depth_scale.extras["scaleX"] == 0.0
+    _assert_no_camera_setup_inverse_bones(rig)
 
 
 def test_two_axis_signed_axis_normal_keeps_historical_setup_offsets() -> None:
@@ -133,9 +157,10 @@ def test_two_axis_signed_axis_normal_keeps_historical_setup_offsets() -> None:
     depth_scale = constraints[profile.scale_depth_constraint(_PREFIX)]
     assert depth_scale.extras["x"] == _minimum_depth_y(rig)
     assert depth_scale.extras["scaleX"] == -1
+    _assert_no_camera_setup_inverse_bones(rig)
 
 
-def test_three_axis_active_camera_normal_is_rotation_neutral_with_object_depth_setup() -> None:
+def test_three_axis_active_camera_normal_has_neutral_full_rank_setup_and_inverses() -> None:
     rig = build_rig(
         _request(A1RigSetupPoseMode.CAMERA_VIEW_NORMAL),
         A1RigProfile.THREE_AXIS_ROTATION,
@@ -150,12 +175,13 @@ def test_three_axis_active_camera_normal_is_rotation_neutral_with_object_depth_s
     assert rig.request.setup_pose_mode is A1RigSetupPoseMode.CAMERA_VIEW_NORMAL
     assert len(rig.info.z_groups) == len(_Z_GROUPS)
     assert rotation_x.extras["rotation"] == 0.0
-    assert depth_scale.extras["scaleX"] == -1
+    assert depth_scale.extras["scaleX"] == 0.0
     assert rotation_x.extras.get("mixRotate", 1) == 1
     assert depth_scale.extras.get("mixScaleX", 1) == 1
+    _assert_camera_setup_inverse_bones(rig)
 
 
-def test_three_axis_depth_camera_surface_keeps_neutral_depth_setup() -> None:
+def test_three_axis_depth_camera_surface_keeps_neutral_depth_setup_without_inverses() -> None:
     rig = build_rig(
         _request(A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE),
         A1RigProfile.THREE_AXIS_ROTATION,
@@ -169,6 +195,7 @@ def test_three_axis_depth_camera_surface_keeps_neutral_depth_setup() -> None:
 
     assert rotation_x.extras["rotation"] == 0.0
     assert depth_scale.extras["scaleX"] == 0.0
+    _assert_no_camera_setup_inverse_bones(rig)
 
 
 def test_three_axis_signed_axis_normal_keeps_historical_setup_offsets() -> None:
@@ -182,3 +209,4 @@ def test_three_axis_signed_axis_normal_keeps_historical_setup_offsets() -> None:
 
     assert constraints[profile.rotation_x_constraint(_PREFIX)].extras["rotation"] == 90
     assert constraints[profile.scale_constraint(_PREFIX)].extras["scaleX"] == -1
+    _assert_no_camera_setup_inverse_bones(rig)
