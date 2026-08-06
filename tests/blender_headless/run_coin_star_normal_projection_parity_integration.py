@@ -55,6 +55,9 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.projection import (  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import (  # noqa: E402
     A1RigSetupPoseMode,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.two_axis_scale_profile import (  # noqa: E402
+    TwoAxisScaleRigProfile,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.uv import (  # noqa: E402
     UvUnwrapSettings,
 )
@@ -307,10 +310,15 @@ def _assert_serialized_active_camera_normal_setup(
     constraints = _transform_constraints_by_name(document)
     profile = prepared.rig.profile
     prefix = prepared.prefix
+    depth_constraint_name = (
+        profile.scale_depth_constraint(prefix)
+        if isinstance(profile, TwoAxisScaleRigProfile)
+        else profile.scale_constraint(prefix)
+    )
     names = (
         profile.rotation_x_constraint(prefix),
         profile.rotation_y_constraint(prefix),
-        profile.scale_depth_constraint(prefix),
+        depth_constraint_name,
     )
     for name in names:
         _assert(name in constraints, f"missing Active Camera Normal constraint: {name}")
