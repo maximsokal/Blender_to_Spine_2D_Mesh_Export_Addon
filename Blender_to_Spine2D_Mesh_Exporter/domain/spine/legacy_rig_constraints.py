@@ -23,8 +23,10 @@ def build_legacy_constraints(
 
     Ordinary signed-axis model-space exports retain every historical setup offset.
     Active Camera Normal and Depth Camera Projection are already camera-facing, so their
-    setup rotation and depth-scale offsets are neutral while the ordinary hierarchy,
-    per-depth groups and live X/Y/Z controls remain unchanged.
+    historical setup rotation is neutral. Active Camera Normal nevertheless remains an
+    Object Root rig with ordinary per-depth groups, so it must retain the standard
+    ``scaleX=-1`` depth compensation. Depth Camera Projection owns already-solved depth
+    placement and keeps a neutral depth-scale setup.
     """
 
     if not isinstance(request, LegacyRigBuildRequest):
@@ -38,6 +40,9 @@ def build_legacy_constraints(
         A1RigSetupPoseMode.CAMERA_VIEW_NORMAL,
         A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE,
     }
+    neutral_depth_scale_setup = (
+        request.setup_pose_mode is A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE
+    )
     prefix = request.prefix
     control_x, control_y, control_z = info.control_bone_names
     constraint_bone, _, constraint_rotate_ik, constraint_ik = (
@@ -104,7 +109,7 @@ def build_legacy_constraints(
             bones=info.sub_bone_scale_names,
             target=constraint_bone,
             extras={
-                "scaleX": 0.0 if neutral_camera_setup else -1,
+                "scaleX": 0.0 if neutral_depth_scale_setup else -1,
                 "mixRotate": 0,
                 "mixX": 0,
                 "mixShearY": 0,
