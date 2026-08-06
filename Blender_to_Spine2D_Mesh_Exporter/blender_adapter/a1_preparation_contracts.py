@@ -164,6 +164,9 @@ class PreparedA1Object:
     finalization_context: A1BlenderFinalizationContext = field(
         default_factory=A1BlenderFinalizationContext
     )
+    # Appended for projection-independent Normal material evaluation. Existing
+    # positional construction remains compatible and falls back to unwrap_result.
+    material_bake_snapshot: MeshSnapshot | None = None
 
     def __post_init__(self) -> None:
         if self.source_object is None:
@@ -203,6 +206,27 @@ class PreparedA1Object:
         if self.rig.request.prefix != self.prefix:
             raise ValueError("rig prefix must match prepared prefix")
 
+        material_bake_snapshot = self.material_bake_snapshot
+        if material_bake_snapshot is None:
+            material_bake_snapshot = self.unwrap_result.snapshot
+            object.__setattr__(
+                self,
+                "material_bake_snapshot",
+                material_bake_snapshot,
+            )
+        if not isinstance(material_bake_snapshot, MeshSnapshot):
+            raise TypeError("material_bake_snapshot must be MeshSnapshot or None")
+        if material_bake_snapshot.source_object_id != self.object_id:
+            raise ValueError(
+                "material_bake_snapshot.source_object_id must match object_id"
+            )
+        generated_uv_layer = self.settings.uv.layer_name
+        if generated_uv_layer not in material_bake_snapshot.uv_layer_names:
+            raise ValueError(
+                "material_bake_snapshot is missing generated destination UV layer "
+                f"{generated_uv_layer!r}"
+            )
+
         assembly_rig = getattr(self.document_assembly, "rig", None)
         if assembly_rig is not None:
             if not isinstance(assembly_rig, LegacyRigBuildResult):
@@ -222,9 +246,22 @@ class PreparedA1Object:
 
     @property
     def bake_target_snapshot(self) -> MeshSnapshot:
+        """Return the exact texture-execution geometry for the selected plan.
+
+        Generated materials own a dedicated generated target. Source-material Normal /
+        UV Segments uses the unprojected Blender-local snapshot carrying the generated
+        destination UV. Rendered Camera Projection plans ignore object-bake geometry but
+        still receive the validated compatibility snapshot.
+        """
+
         if isinstance(self.bake_plan, GeneratedBakePlan):
             return self.bake_plan.generated_material.target_snapshot
-        return self.unwrap_result.snapshot
+        material_bake_snapshot = self.material_bake_snapshot
+        if not isinstance(material_bake_snapshot, MeshSnapshot):
+            raise TypeError(
+                "material_bake_snapshot must be MeshSnapshot after validation"
+            )
+        return material_bake_snapshot
 
     @property
     def world_position(self) -> Tuple[float, float, float]:
