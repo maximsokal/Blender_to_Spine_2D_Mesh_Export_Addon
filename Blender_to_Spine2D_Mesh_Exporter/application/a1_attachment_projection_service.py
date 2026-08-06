@@ -5,6 +5,13 @@ Spine's ``hull`` field has a different responsibility: it counts the vertices of
 the physical convex hull, stored as the prefix of the final attachment vertex order.
 This service keeps those concerns separate and remaps every dependent index exactly
 once after the raw projection has been built.
+
+Normal / UV Segments rigs are deformable. A valid three-dimensional side surface can
+therefore collapse to a line only in the selected Setup Pose and become visible again
+when the generated X/Y controls rotate its vertex bones. Such setup-degenerate triangles
+must remain in the attachment. Rigid ``PREPROJECTED_SCREEN`` geometry has no later
+per-depth deformation that can restore them, so that route retains strict physical-area
+validation.
 """
 
 from __future__ import annotations
@@ -14,6 +21,7 @@ from typing import Tuple
 
 from ..domain.geometry import MeshSnapshot
 from ..domain.spine import (
+    A1RigSetupPoseMode,
     LegacyAttachmentVertex,
     LegacyMeshAttachmentRequest,
     LegacyRigBuildResult,
@@ -31,6 +39,14 @@ from .a1_attachment_projection import (
 Position2D = Tuple[float, float]
 _RELATIVE_AREA_EPSILON = 1.0e-10
 _MINIMUM_AREA_EPSILON = 1.0e-12
+_DEFORMABLE_SETUP_MODES = frozenset(
+    {
+        A1RigSetupPoseMode.NORMALIZED_SINGLE,
+        A1RigSetupPoseMode.PRESERVE_COMPOSITION,
+        A1RigSetupPoseMode.CAMERA_VIEW_NORMAL,
+        A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE,
+    }
+)
 
 
 def _position(vertex: LegacyAttachmentVertex) -> Position2D:
@@ -193,7 +209,6 @@ def _ordered_physical_hull_positions(
 
     observed_cycle = tuple(observed)
     if seen == physical_positions:
-        # Preserve the existing stable cycle, including its orientation and start.
         return observed_cycle
     if not observed_cycle:
         return physical_cycle
@@ -210,9 +225,6 @@ def _ordered_physical_hull_positions(
         return forward
     if reverse_inversions < forward_inversions:
         return reverse
-
-    # Symmetric or incomplete input can leave both orientations equally compatible.
-    # Lexicographic position order keeps the result repeatable.
     return min(forward, reverse)
 
 
@@ -249,14 +261,16 @@ def _select_physical_hull_indices(
     return resolved
 
 
-def _validate_projected_triangles(
+def _projected_triangle_area_report(
     vertices: Tuple[LegacyAttachmentVertex, ...],
     triangles: Tuple[int, ...],
-) -> None:
-    """Reject triangles that collapse after UVs become Spine pixel positions."""
+) -> tuple[float, Tuple[int, ...]]:
+    """Validate index access and return setup-collapsed triangle indices."""
 
     if not isinstance(vertices, tuple) or not vertices:
         raise ValueError("vertices must be a non-empty tuple")
+    if not all(isinstance(vertex, LegacyAttachmentVertex) for vertex in vertices):
+        raise TypeError("vertices must contain LegacyAttachmentVertex values")
     if not isinstance(triangles, tuple) or not triangles:
         raise ValueError("triangles must be a non-empty tuple")
     if len(triangles) % 3 != 0:
@@ -266,23 +280,40 @@ def _validate_projected_triangles(
 
     all_positions = tuple(_position(vertex) for vertex in vertices)
     tolerance = _area_tolerance(all_positions)
-    for triangle_index in range(0, len(triangles), 3):
-        indices = triangles[triangle_index : triangle_index + 3]
+    collapsed: list[int] = []
+    for offset in range(0, len(triangles), 3):
+        indices = triangles[offset : offset + 3]
         try:
             first, second, third = (
                 all_positions[vertex_index] for vertex_index in indices
             )
         except IndexError as exc:
             raise A1AttachmentProjectionError(
-                f"Triangle {triangle_index // 3} references an unknown attachment vertex"
+                f"Triangle {offset // 3} references an unknown attachment vertex"
             ) from exc
-        area_twice = _cross(first, second, third)
-        if abs(area_twice) <= tolerance:
-            raise A1AttachmentProjectionError(
-                f"Triangle {triangle_index // 3} collapses within Spine pixel-space "
-                f"area tolerance {tolerance}; indices={indices}, "
-                f"positions={(first, second, third)}, twice_area={area_twice}"
-            )
+        if abs(_cross(first, second, third)) <= tolerance:
+            collapsed.append(offset // 3)
+    return tolerance, tuple(collapsed)
+
+
+def _raise_first_collapsed_triangle(
+    vertices: Tuple[LegacyAttachmentVertex, ...],
+    triangles: Tuple[int, ...],
+    *,
+    tolerance: float,
+    triangle_index: int,
+) -> None:
+    """Raise the historical strict physical-area diagnostic for one triangle."""
+
+    offset = triangle_index * 3
+    indices = triangles[offset : offset + 3]
+    positions = tuple(_position(vertices[index]) for index in indices)
+    area_twice = _cross(positions[0], positions[1], positions[2])
+    raise A1AttachmentProjectionError(
+        f"Triangle {triangle_index} collapses within Spine pixel-space "
+        f"area tolerance {tolerance}; indices={indices}, "
+        f"positions={positions}, twice_area={area_twice}"
+    )
 
 
 def _remap_index_stream(
@@ -313,20 +344,43 @@ def _remap_index_stream(
 
 def normalize_a1_attachment_projection_hull(
     projection: A1AttachmentProjectionResult,
+    *,
+    allow_setup_degenerate: bool = False,
 ) -> A1AttachmentProjectionResult:
-    """Move the complete physical convex hull to the prefix and remap every index.
+    """Normalize a physical hull without deleting deformable setup geometry.
 
-    The physical XY hull may contain a vertex that is topologically interior to the
-    decomposed disk. Such a vertex must be promoted from the raw tail instead of
-    rejecting an otherwise valid attachment.
+    Strict callers reject every triangle that has no physical area in the current XY
+    pose. Normal / UV Segments passes ``allow_setup_degenerate=True`` because its
+    per-depth vertex bones can make those triangles visible after control rotation.
+
+    When every triangle is setup-degenerate, no two-dimensional physical hull exists.
+    The raw projector's deterministic topological boundary remains the only meaningful
+    hull ordering and is returned unchanged. Mixed visible/edge-on regions still receive
+    normal physical-hull normalization while retaining all triangle groups.
     """
 
     if not isinstance(projection, A1AttachmentProjectionResult):
         raise TypeError("projection must be A1AttachmentProjectionResult")
+    if not isinstance(allow_setup_degenerate, bool):
+        raise TypeError("allow_setup_degenerate must be bool")
 
     request = projection.request
     vertices = request.vertices
-    _validate_projected_triangles(vertices, request.triangles)
+    tolerance, collapsed_triangles = _projected_triangle_area_report(
+        vertices,
+        request.triangles,
+    )
+    if collapsed_triangles and not allow_setup_degenerate:
+        _raise_first_collapsed_triangle(
+            vertices,
+            request.triangles,
+            tolerance=tolerance,
+            triangle_index=collapsed_triangles[0],
+        )
+
+    triangle_count = len(request.triangles) // 3
+    if allow_setup_degenerate and len(collapsed_triangles) == triangle_count:
+        return projection
 
     ordered_hull_positions = _ordered_physical_hull_positions(
         vertices,
@@ -403,7 +457,16 @@ def normalize_a1_attachment_projection_hull(
         raise A1AttachmentProjectionError(
             "Normalized Spine hull order does not match the physical convex-hull cycle"
         )
-    _validate_projected_triangles(result.request.vertices, result.request.triangles)
+
+    _, normalized_collapsed = _projected_triangle_area_report(
+        result.request.vertices,
+        result.request.triangles,
+    )
+    if normalized_collapsed != collapsed_triangles:
+        raise A1AttachmentProjectionError(
+            "Physical-hull remapping changed setup-degenerate triangle ownership; "
+            f"before={collapsed_triangles}, after={normalized_collapsed}"
+        )
     return result
 
 
@@ -412,10 +475,18 @@ def project_triangulated_disk_attachment(
     rig: LegacyRigBuildResult,
     settings: A1AttachmentProjectionSettings,
 ) -> A1AttachmentProjectionResult:
-    """Project loop-level UV identity, then enforce the Spine physical hull contract."""
+    """Project one disk and preserve valid edge-on Normal setup triangles."""
 
+    if not isinstance(rig, LegacyRigBuildResult):
+        raise TypeError("rig must be LegacyRigBuildResult")
     raw = _project_raw_attachment(snapshot, rig, settings)
-    return normalize_a1_attachment_projection_hull(raw)
+    allow_setup_degenerate = (
+        rig.request.setup_pose_mode in _DEFORMABLE_SETUP_MODES
+    )
+    return normalize_a1_attachment_projection_hull(
+        raw,
+        allow_setup_degenerate=allow_setup_degenerate,
+    )
 
 
 __all__ = [
