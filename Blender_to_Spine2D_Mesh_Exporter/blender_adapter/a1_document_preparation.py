@@ -560,10 +560,15 @@ def prepare_a1_document(
             else None
         )
 
-        # Normal / UV Segments always owns the regular object-pivot rig. Active Camera
-        # changes the prepared setup geometry only; camera-zero PREPROJECTED_SCREEN is
-        # reserved for the separate rendered Camera Projection representation.
-        resolved_setup_pose_mode = source.settings.rig_setup_pose_mode
+        # Normal / UV Segments always owns the regular object-pivot hierarchy. Active
+        # Camera has already authored the requested setup view into geometry, so its
+        # historical setup rotations must be neutral without collapsing camera space or
+        # per-vertex depth. PREPROJECTED_SCREEN remains exclusive to Camera Projection.
+        resolved_setup_pose_mode = (
+            A1RigSetupPoseMode.CAMERA_VIEW_NORMAL
+            if active_camera_normal
+            else source.settings.rig_setup_pose_mode
+        )
         z_group_origin_mode = _resolve_z_group_origin_mode(
             camera_projection=camera_projection,
             rig_profile=resolved_rig_profile,
@@ -603,6 +608,7 @@ def prepare_a1_document(
                 "normal_active_camera_projection_kind": (
                     "" if active_camera_kind is None else active_camera_kind.value
                 ),
+                "normal_active_camera_setup_neutral": int(active_camera_normal),
                 "camera_relative_depth_group_count": 0,
                 "normal_active_camera_depth_group_count": (
                     len(rig.info.z_groups) if active_camera_normal else 0
