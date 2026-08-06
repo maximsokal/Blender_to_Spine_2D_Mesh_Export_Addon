@@ -20,10 +20,20 @@ def _build_model_space_bones(
     plan: LegacyRigBuildPlan,
     layout: TwoAxisScaleRigLayout,
 ) -> Tuple[Bone, ...]:
-    """Preserve the historical model-space and normalized-single hierarchy."""
+    """Preserve model-space hierarchy and add camera setup inverses when required.
+
+    ``CAMERA_VIEW_NORMAL`` must not collapse a depth bone in setup. Each depth pair
+    therefore stays full-rank and receives one child whose local Y is the inverse of the
+    pair's setup translation. Vertex bones are parented to that child by the attachment
+    builder. The resulting setup transform is identity for every group, while later X/Y
+    control changes still propagate as deltas relative to the camera-facing setup pose.
+    """
 
     normalized_single = (
         plan.request.setup_pose_mode is A1RigSetupPoseMode.NORMALIZED_SINGLE
+    )
+    camera_view_normal = (
+        plan.request.setup_pose_mode is A1RigSetupPoseMode.CAMERA_VIEW_NORMAL
     )
     control_x, control_y, scale_control = plan.control_bone_names
     constraint_bone, scale_ik, rotate_ik, ik_target = plan.ik_chain_bone_names
@@ -53,6 +63,20 @@ def _build_model_space_bones(
                 ),
             )
         )
+        if camera_view_normal:
+            z_bones.append(
+                Bone(
+                    name=plan.profile.z_camera_setup_bone(
+                        plan.prefix,
+                        group.index,
+                    ),
+                    parent=group.bone_name,
+                    y=_rounded(
+                        -float(group.y_offset_pixels),
+                        f"camera_setup[{group.index}].y",
+                    ),
+                )
+            )
 
     return (
         Bone(name=plan.root_bone_name),
