@@ -259,7 +259,7 @@ def test_orthographic_frame_preserves_depth_independent_screen_scale() -> None:
     assert far.depth == -20.0
 
 
-def test_camera_projection_keeps_origin_and_attachment_pixels_consistent() -> None:
+def test_camera_projection_keeps_object_pivot_and_per_vertex_depth() -> None:
     frame = _perspective_frame()
     source = _snapshot(translation=(0.5, -0.25, -5.0))
     source_positions = tuple(vertex.position for vertex in source.vertices)
@@ -275,7 +275,7 @@ def test_camera_projection_keeps_origin_and_attachment_pixels_consistent() -> No
     assert tuple(vertex.position for vertex in source.vertices) == source_positions
     assert result.projected_origin.u == projected.world_matrix[3] * scale
     assert result.projected_origin.v == projected.world_matrix[7] * scale
-    assert projected.world_matrix[11] == 0.0
+    assert projected.world_matrix[11] == result.projected_origin.depth
 
     for source_vertex, projected_vertex in zip(
         source.vertices,
@@ -292,16 +292,22 @@ def test_camera_projection_keeps_origin_and_attachment_pixels_consistent() -> No
 
         assert isclose(final_spine_x, expected.u, abs_tol=1.0e-10)
         assert isclose(final_spine_y, expected.v, abs_tol=1.0e-10)
-        assert projected_vertex.position[2] == result.projected_origin.depth
+        assert isclose(
+            projected_vertex.position[2],
+            expected.depth - result.projected_origin.depth,
+            abs_tol=1.0e-12,
+        )
 
-    assert {vertex.position[2] for vertex in projected.vertices} == {
-        result.projected_origin.depth
-    }
+    assert tuple(vertex.position[2] for vertex in projected.vertices) == (
+        0.0,
+        0.5,
+        -1.0,
+    )
     normal_length = sqrt(sum(value * value for value in projected.vertices[0].normal))
     assert isclose(normal_length, 1.0, abs_tol=1.0e-12)
 
 
-def test_camera_depth_range_represents_one_rigid_object_layer() -> None:
+def test_camera_depth_range_retains_normal_rig_depth_layers() -> None:
     result = project_a1_mesh_snapshot_camera(
         _snapshot(translation=(0.0, 0.0, -5.0)),
         _perspective_frame(),
@@ -310,12 +316,12 @@ def test_camera_depth_range_represents_one_rigid_object_layer() -> None:
 
     depth_range = calculate_a1_projected_snapshot_depth_range(result.snapshot)
 
-    assert depth_range.origin_depth == 0.0
-    assert depth_range.nearest_vertex_id == VertexId(0)
-    assert depth_range.nearest_vertex_depth == -5.0
-    assert depth_range.farthest_vertex_id == VertexId(0)
-    assert depth_range.farthest_vertex_depth == -5.0
-    assert depth_range.depth_span == 0.0
+    assert depth_range.origin_depth == -5.0
+    assert depth_range.nearest_vertex_id == VertexId(1)
+    assert depth_range.nearest_vertex_depth == -4.5
+    assert depth_range.farthest_vertex_id == VertexId(2)
+    assert depth_range.farthest_vertex_depth == -6.0
+    assert depth_range.depth_span == 1.5
 
 
 def test_geometry_outside_camera_frame_is_allowed() -> None:
