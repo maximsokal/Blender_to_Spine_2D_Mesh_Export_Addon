@@ -16,7 +16,7 @@ Blender 4.x and Blender 5.0/5.1 are not supported. The minimum version is declar
 2. Open Blender 5.2 or newer.
 3. Open **Edit > Preferences > Extensions**.
 4. Choose **Install from Disk**.
-5. Select `blender_to_spine2d_mesh_exporter-0.90.0.zip`.
+5. Select `blender_to_spine2d_mesh_exporter-0.125.0.zip`.
 6. Enable **Blender to Spine2D Mesh Exporter**.
 7. Open a 3D View, press `N`, and select the extension tab.
 
@@ -27,14 +27,14 @@ Do not unpack the archive. Its root must contain `blender_manifest.toml` and `__
 1. Disable or remove the old extension.
 2. Close Blender completely.
 3. Start Blender again.
-4. Install `blender_to_spine2d_mesh_exporter-0.90.0.zip` through **Install from Disk**.
+4. Install `blender_to_spine2d_mesh_exporter-0.125.0.zip` through **Install from Disk**.
 5. Reopen the project and run **Analyze** before export.
 
 Closing Blender prevents loaded Python modules and cached extension metadata from keeping the previous implementation active.
 
 ## Export modes
 
-Version 0.90.0 exposes three independent modes:
+Version 0.125.0 exposes three independent modes:
 
 ```text
 Normal - UV Segments
@@ -46,7 +46,37 @@ Depth Camera Projection
 
 The public depth base is **Farthest Visible Point**. The farthest retained point receives zero relief offset and all remaining retained points extend only toward the camera.
 
-### Parallax reserve
+## Normal / UV Segments and modifiers
+
+Normal / UV Segments exports the original Mesh datablock. Geometry generated only by active Blender modifiers is not included in the serialized Spine mesh.
+
+Version 0.125.0 adds a red warning inside the Analysis foldout whenever the current Normal / UV Segments request contains active modifiers. The warning lists:
+
+```text
+Object name
+Modifier name
+Modifier type
+Viewport/render state
+```
+
+For example, an unapplied Bevel modifier can make a coin look rounded in Blender while Spine receives the original sharp-edged mesh. Apply or convert the modifier before export when its generated geometry must appear in Spine.
+
+The warning does not automatically apply modifiers. Topology-changing modifier evaluation requires stable vertex, loop, UV, region, and rig lineage and is therefore kept separate from the current original-mesh Normal route.
+
+## Normal / UV Segments material baking
+
+Audited view-dependent materials, including supported `BSDF_GLOSSY` graphs, can use the Cycles `COMBINED` object-bake route while preserving Normal / UV Segments topology. Conservatively traversed muted shader nodes remain advisory when every input was analyzed.
+
+The real coin acceptance path is:
+
+```text
+NORMAL_UV_SEGMENTS
+ORIGINAL geometry
+OBJECT_BAKE
+COMBINED
+```
+
+## Parallax reserve
 
 `Parallax Horizon Angle` is available only for Depth Camera Projection.
 
@@ -81,7 +111,7 @@ When parallax reserve is enabled, FRONT and every reserve view receive the same 
 
 ## Scene settings migration
 
-Version 0.90.0 uses Scene settings schema 8. Migration preserves existing valid export mode, rig profile, Spine target, projection direction, seam mode, material settings, paths, per-object sequence timing, and all established Depth Camera Projection settings.
+Version 0.125.0 uses Scene settings schema 8. Migration preserves existing valid export mode, rig profile, Spine target, projection direction, seam mode, material settings, paths, per-object sequence timing, and all established Depth Camera Projection settings.
 
 Schema 8 initializes only the missing parallax field:
 
@@ -89,7 +119,7 @@ Schema 8 initializes only the missing parallax field:
 Parallax Horizon Angle = 0°
 ```
 
-That default keeps saved files on the pre-0.90.0 front-only path until the user explicitly enables reserve coverage.
+That default keeps saved files on the established front-only path until the user explicitly enables reserve coverage.
 
 Current values can be inspected in Blender's Python Console:
 
@@ -134,14 +164,14 @@ if ($LASTEXITCODE -ne 0) {
 Expected archive:
 
 ```text
-dist/blender_to_spine2d_mesh_exporter-0.90.0.zip
+dist/blender_to_spine2d_mesh_exporter-0.125.0.zip
 ```
 
 Validate the built archive:
 
 ```powershell
 & $Blender --command extension validate `
-    dist\blender_to_spine2d_mesh_exporter-0.90.0.zip
+    dist\blender_to_spine2d_mesh_exporter-0.125.0.zip
 
 if ($LASTEXITCODE -ne 0) {
     throw "Built extension validation failed"
@@ -154,12 +184,13 @@ After installation:
 
 1. Open a representative saved project.
 2. Verify that the three export modes appear.
-3. Select `Depth Camera Projection` and an active Perspective camera.
-4. Leave `Parallax Horizon Angle` at `0°`; export and confirm one texture and one attachment.
-5. Set a positive angle on a folded test mesh; confirm separate FRONT and reserve textures and reserve-before-front slot order.
-6. Repeat with an Orthographic camera.
-7. Export a two-frame material sequence and confirm both FRONT and reserve sequences use stable per-view crops.
-8. Import the output into the exact selected Spine version.
-9. Move the generated X/Y/Scale controls and confirm that front and reserve attachments deform through the shared rig without gaps at their common hinge.
+3. Select a Normal / UV Segments object with an active modifier and confirm the Analysis foldout shows the modifier alert.
+4. Apply or convert the modifier, rerun Analyze, and confirm the alert disappears.
+5. Export the real coin asset in Normal / UV Segments and confirm a non-empty PNG plus Spine JSON.
+6. Select `Depth Camera Projection` and an active Perspective camera.
+7. Leave `Parallax Horizon Angle` at `0°`; export and confirm one texture and one attachment.
+8. Set a positive angle on a folded test mesh; confirm separate FRONT and reserve textures and reserve-before-front slot order.
+9. Repeat with an Orthographic camera.
+10. Import the output into the exact selected Spine version.
 
 Continue with the [Usage Guide](usage.md), [Settings Reference](settings-reference.md), and [Testing and Release Validation](testing.md).
