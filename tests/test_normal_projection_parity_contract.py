@@ -128,6 +128,10 @@ def test_real_coin_projection_parity_gate_covers_all_three_regressions():
         assert marker in source
 
     assert "def _assert_serialized_active_camera_normal_setup(" in source
+    assert "TwoAxisScaleRigProfile" in source
+    assert "isinstance(profile, TwoAxisScaleRigProfile)" in source
+    assert "profile.scale_depth_constraint(prefix)" in source
+    assert "else profile.scale_constraint(prefix)" in source
     assert "abs(rotation) <= _NEUTRAL_TOLERANCE" in source
     assert "retained setup rotation" in source
     assert "abs(mix_rotate - 1.0) <= _NEUTRAL_TOLERANCE" in source
