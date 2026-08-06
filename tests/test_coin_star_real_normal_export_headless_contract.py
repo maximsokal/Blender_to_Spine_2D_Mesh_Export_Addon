@@ -17,8 +17,8 @@ RUNNER = (
 def test_runner_exports_real_coin_in_normal_uv_mode() -> None:
     source = RUNNER.read_text(encoding="utf-8")
 
-    assert '"Game Gold Coin"' not in source  # resolved by the shared real-asset helper
     assert "_require_source_object()" in source
+    assert 'prefix="Game Gold Coin"' in source
     assert "--expected-blend" in source
     assert "export_a1_single_object(" in source
     assert "A1TextureExportMode.NORMAL_UV_SEGMENTS" in source
