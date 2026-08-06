@@ -43,7 +43,9 @@ def test_installation_uses_current_archive_schema_and_manual_parallax_gate() -> 
     assert "reserve attachments reuse the same generated vertex bone rig" in normalized
     assert "reserve slots are serialized before the front slot" in normalized
     assert "Repeat with an Orthographic camera" in source
-    assert "two-frame material sequence" in source
+    assert "Frames > 0" in source
+    assert "Export a Loop texture sequence for this object only." in source
+    assert "Static siblings do not inherit sequence metadata" in source
 
 
 def test_settings_reference_describes_the_complete_public_parallax_contract() -> None:
@@ -120,5 +122,7 @@ def test_testing_guide_requires_current_runtime_and_package_evidence() -> None:
         assert marker in source
     assert "blender_to_spine2d_mesh_exporter-0.125.0.zip" in source
     assert "extension_install_gate_0.125.0" in source
-    assert 'throw "Real bpy environment not found; release gate is incomplete"' in source
+    assert 'foreach ($Executable in @($Python, $BpyPython, $Blender))' in source
+    assert 'throw "Executable not found: $Executable"' in source
+    assert "must not silently downgrade a missing real-bpy environment" in source
     assert "archive path, byte size, and SHA256" in source
