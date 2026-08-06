@@ -26,19 +26,13 @@ def build_two_axis_scale_constraints(
     ``base`` below that placement, so resizing the object cannot change its distance from
     camera zero.
 
-    Active Camera Normal and Depth Camera Projection both arrive with camera-facing setup
-    geometry, so their historical X/Y setup rotations are neutral. Their depth treatment
-    is intentionally different:
-
-    * ``CAMERA_VIEW_NORMAL`` remains an ordinary Object Root rig. Its per-vertex camera
-      depth groups still require the standard minimum-depth translation and ``scaleX=-1``
-      setup compensation used by signed-axis Normal. Removing that compensation adds each
-      depth group's hidden-axis offset to its setup position and visibly stretches the
-      projected mesh.
-    * ``CAMERA_DEPTH_SURFACE`` owns already-solved depth-surface placement and therefore
-      keeps neutral depth-scale setup values.
-    * ``PREPROJECTED_SCREEN`` changes hierarchy and scale ownership to one rigid
-      camera-relative layer and also keeps neutral depth-scale setup values.
+    Camera-facing setup modes keep their historical X/Y setup rotations neutral. For
+    ``CAMERA_VIEW_NORMAL`` the ordinary per-depth pair must also remain full-rank in
+    setup. A deterministic inverse-setup child below every depth pair cancels only the
+    authored setup translation before the projected vertex position is applied. This
+    preserves the exact camera-facing setup shape without discarding later depth-driven
+    deformation. ``CAMERA_DEPTH_SURFACE`` and ``PREPROJECTED_SCREEN`` continue to own
+    already-solved depth placement and likewise keep neutral depth setup values.
 
     Perspective rigid layers retain whole-layer depth foreshortening. Orthographic rigid
     layers disable automatic depth scale while preserving camera-relative translation.
@@ -64,8 +58,7 @@ def build_two_axis_scale_constraints(
         preprojected_screen or neutral_model_space_camera_setup
     )
     neutral_depth_setup = (
-        preprojected_screen
-        or setup_pose_mode is A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE
+        preprojected_screen or neutral_model_space_camera_setup
     )
     orthographic_camera_layer = (
         preprojected_screen
