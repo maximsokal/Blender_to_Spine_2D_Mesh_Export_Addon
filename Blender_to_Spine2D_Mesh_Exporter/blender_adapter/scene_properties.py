@@ -52,8 +52,12 @@ def projection_direction_rna_enum_items() -> tuple[tuple[str, str, str], ...]:
             "Project world -X to Spine X, world +Y to Spine Y, and use world -Z as depth"
         ),
         A1ProjectionDirection.ACTIVE_CAMERA: (
-            "Project evaluated geometry through the active Perspective or Orthographic "
-            "camera using the selected export texture dimensions"
+            "Project through the active camera while keeping each exported object's "
+            "Blender Object Origin as its own Spine main-bone pivot"
+        ),
+        A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT: (
+            "Project through the active camera and use camera-space zero as the Spine "
+            "main-bone pivot, with the projected Object Origin stored inside the rig"
         ),
     }
     return tuple(
@@ -223,7 +227,8 @@ PROPERTIES = (
         bpy.props.EnumProperty(
             name="Projection Direction",
             description=(
-                "Choose the world axis or active camera used by Normal / UV Segments"
+                "Choose the world axis or active-camera rig root used by "
+                "Normal / UV Segments"
             ),
             items=projection_direction_rna_enum_items(),
             default=A1ProjectionDirection.POSITIVE_Z.value,
