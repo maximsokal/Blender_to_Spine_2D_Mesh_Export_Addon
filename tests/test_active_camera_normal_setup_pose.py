@@ -49,7 +49,11 @@ def _bone_by_name(rig):
     return {bone.name: bone for bone in rig.bones}
 
 
-def test_two_axis_active_camera_normal_is_neutral_but_model_space() -> None:
+def _minimum_depth_y(rig) -> float:
+    return min(float(group.y_offset_pixels) for group in rig.info.z_groups)
+
+
+def test_two_axis_active_camera_normal_is_rotation_neutral_but_keeps_object_depth_setup() -> None:
     rig = build_rig(
         _request(A1RigSetupPoseMode.CAMERA_VIEW_NORMAL),
         A1RigProfile.TWO_AXIS_ROTATION_SCALE,
@@ -71,8 +75,8 @@ def test_two_axis_active_camera_normal_is_neutral_but_model_space() -> None:
 
     assert rotation_x.extras["rotation"] == 0.0
     assert rotation_y.extras["rotation"] == 0.0
-    assert depth_scale.extras["x"] == 0.0
-    assert depth_scale.extras["scaleX"] == 0.0
+    assert depth_scale.extras["x"] == _minimum_depth_y(rig)
+    assert depth_scale.extras["scaleX"] == -1
     assert rotation_x.extras.get("mixRotate", 1) == 1
     assert rotation_y.extras.get("mixRotate", 1) == 1
 
@@ -88,6 +92,25 @@ def test_two_axis_active_camera_normal_is_neutral_but_model_space() -> None:
     for group in rig.info.z_groups:
         assert bones[group.scale_bone_name].parent == rig.info.main_rotation_bone_name
         assert bones[group.bone_name].parent == group.scale_bone_name
+
+
+def test_two_axis_depth_camera_surface_keeps_neutral_depth_setup() -> None:
+    rig = build_rig(
+        _request(A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE),
+        A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+        spine_target=SpineJsonTarget.SPINE_4_2,
+    )
+    constraints = _transform_by_name(rig)
+    profile = rig.profile
+
+    rotation_x = constraints[profile.rotation_x_constraint(_PREFIX)]
+    rotation_y = constraints[profile.rotation_y_constraint(_PREFIX)]
+    depth_scale = constraints[profile.scale_depth_constraint(_PREFIX)]
+
+    assert rotation_x.extras["rotation"] == 0.0
+    assert rotation_y.extras["rotation"] == 0.0
+    assert depth_scale.extras["x"] == 0.0
+    assert depth_scale.extras["scaleX"] == 0.0
 
 
 def test_two_axis_signed_axis_normal_keeps_historical_setup_offsets() -> None:
@@ -107,10 +130,12 @@ def test_two_axis_signed_axis_normal_keeps_historical_setup_offsets() -> None:
         constraints[profile.rotation_y_constraint(_PREFIX)].extras["rotation"]
         == profile.rotation_y_setup_degrees
     )
-    assert constraints[profile.scale_depth_constraint(_PREFIX)].extras["scaleX"] == -1
+    depth_scale = constraints[profile.scale_depth_constraint(_PREFIX)]
+    assert depth_scale.extras["x"] == _minimum_depth_y(rig)
+    assert depth_scale.extras["scaleX"] == -1
 
 
-def test_three_axis_active_camera_normal_is_neutral_with_all_depth_groups() -> None:
+def test_three_axis_active_camera_normal_is_rotation_neutral_with_object_depth_setup() -> None:
     rig = build_rig(
         _request(A1RigSetupPoseMode.CAMERA_VIEW_NORMAL),
         A1RigProfile.THREE_AXIS_ROTATION,
@@ -125,9 +150,25 @@ def test_three_axis_active_camera_normal_is_neutral_with_all_depth_groups() -> N
     assert rig.request.setup_pose_mode is A1RigSetupPoseMode.CAMERA_VIEW_NORMAL
     assert len(rig.info.z_groups) == len(_Z_GROUPS)
     assert rotation_x.extras["rotation"] == 0.0
-    assert depth_scale.extras["scaleX"] == 0.0
+    assert depth_scale.extras["scaleX"] == -1
     assert rotation_x.extras.get("mixRotate", 1) == 1
     assert depth_scale.extras.get("mixScaleX", 1) == 1
+
+
+def test_three_axis_depth_camera_surface_keeps_neutral_depth_setup() -> None:
+    rig = build_rig(
+        _request(A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE),
+        A1RigProfile.THREE_AXIS_ROTATION,
+        spine_target=SpineJsonTarget.SPINE_4_2,
+    )
+    constraints = _transform_by_name(rig)
+    profile = rig.profile
+
+    rotation_x = constraints[profile.rotation_x_constraint(_PREFIX)]
+    depth_scale = constraints[profile.scale_constraint(_PREFIX)]
+
+    assert rotation_x.extras["rotation"] == 0.0
+    assert depth_scale.extras["scaleX"] == 0.0
 
 
 def test_three_axis_signed_axis_normal_keeps_historical_setup_offsets() -> None:
