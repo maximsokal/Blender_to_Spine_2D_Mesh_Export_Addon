@@ -98,7 +98,9 @@ def test_active_camera_normal_keeps_object_pivot_and_vertex_depth():
 
     assert "A1RigSetupPoseMode.CAMERA_VIEW_NORMAL" in two_axis
     assert "neutral_model_space_camera_setup" in two_axis
+    assert "preserve_model_space_depth_setup" in two_axis
     assert "A1RigSetupPoseMode.CAMERA_VIEW_NORMAL" in legacy
+    assert "preserve_model_space_depth_setup" in legacy
 
 
 def test_normal_material_bake_uses_unprojected_source_geometry():
@@ -154,10 +156,12 @@ def test_real_coin_projection_parity_gate_covers_all_three_regressions():
     assert "retained setup rotation" in source
     assert "abs(mix_rotate - 1.0) <= _NEUTRAL_TOLERANCE" in source
     assert "disabled live rotation" in source
-    assert "abs(depth_x) <= _NEUTRAL_TOLERANCE" in source
-    assert "retained setup depth translation" in source
-    assert "abs(depth_scale_x) <= _NEUTRAL_TOLERANCE" in source
-    assert "retained setup depth scale" in source
+    assert "expected_depth_x = (" in source
+    assert "min(float(group.y_offset_pixels)" in source
+    assert "abs(depth_x - expected_depth_x) <= _NEUTRAL_TOLERANCE" in source
+    assert "lost model-space depth translation compensation" in source
+    assert "abs(depth_scale_x + 1.0) <= _NEUTRAL_TOLERANCE" in source
+    assert "lost model-space depth scale compensation" in source
 
     assert "def _assert_prepared_depth_groups(" in source
     assert "rig_group_count == plan_group_count" in source
