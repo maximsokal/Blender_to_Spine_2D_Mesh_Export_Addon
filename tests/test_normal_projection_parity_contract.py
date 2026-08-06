@@ -15,10 +15,10 @@ def test_normal_document_assembly_retains_edge_on_regions():
         "a1_projected_region_filter.py"
     )
 
+    assert "split_xy_visible_region_snapshots" in source
+    assert "_validate_triangulated_region(snapshot)" in source
     assert "return (snapshot,)" in source
     assert "Removing edge-on faces" not in source
-    assert "split_xy_visible_region_snapshots" in source
-    assert "later X/Y rotation" in source
 
 
 def test_normal_attachment_projection_retains_setup_degenerate_meshes():
@@ -121,7 +121,16 @@ def test_real_coin_projection_parity_gate_covers_all_three_regressions():
         "Normal projection direction changed source-material bake geometry",
         "real coin parity gate did not retain expected side regions",
         "Active Camera Normal did not use neutral object-pivot setup",
-        "Active Camera Normal retained setup rotation",
         "Normal projection changed material brightness beyond tolerance",
     ):
         assert marker in source
+
+    assert "def _assert_serialized_active_camera_normal_setup(" in source
+    assert "abs(rotation) <= _NEUTRAL_TOLERANCE" in source
+    assert "retained setup rotation" in source
+    assert "abs(mix_rotate - 1.0) <= _NEUTRAL_TOLERANCE" in source
+    assert "disabled live rotation" in source
+    assert "abs(depth_x) <= _NEUTRAL_TOLERANCE" in source
+    assert "retained setup depth translation" in source
+    assert "abs(depth_scale_x) <= _NEUTRAL_TOLERANCE" in source
+    assert "retained setup depth scale" in source
