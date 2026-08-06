@@ -1,4 +1,4 @@
-"""Current public documentation contracts for release 0.90.0."""
+"""Public documentation contracts retained across release 0.125.0."""
 
 from __future__ import annotations
 
@@ -31,13 +31,13 @@ def test_current_guides_do_not_advertise_the_retired_0810_release() -> None:
         assert "Scene schema 7" not in source, path
 
 
-def test_installation_uses_0900_archive_schema_and_manual_parallax_gate() -> None:
+def test_installation_uses_current_archive_schema_and_manual_parallax_gate() -> None:
     source = _read(INSTALLATION)
     normalized = _normalized(source)
 
-    assert "blender_to_spine2d_mesh_exporter-0.90.0.zip" in source
-    assert "Version 0.90.0 exposes three independent modes" in source
-    assert "Version 0.90.0 uses Scene settings schema 8" in source
+    assert "blender_to_spine2d_mesh_exporter-0.125.0.zip" in source
+    assert "Version 0.125.0 exposes three independent modes" in source
+    assert "Version 0.125.0 uses Scene settings schema 8" in source
     assert "Parallax Horizon Angle" in source
     assert "the default is 0°" in normalized
     assert "reserve attachments reuse the same generated vertex bone rig" in normalized
@@ -96,10 +96,10 @@ def test_usage_explains_front_reserve_ownership_draw_order_and_atomicity() -> No
     assert "front and reserve views keep independent crop rectangles" in normalized
 
 
-def test_testing_guide_requires_all_0900_runtime_and_package_evidence() -> None:
+def test_testing_guide_requires_current_runtime_and_package_evidence() -> None:
     source = _read(TESTING)
 
-    assert "current extension candidate is **0.90.0**" in source
+    assert "current extension candidate is **0.125.0**" in source
     assert "Scene settings schema 8" in source
     assert "Every Blender headless command must include `--python-exit-code 1`" in source
     for runner in (
@@ -118,7 +118,7 @@ def test_testing_guide_requires_all_0900_runtime_and_package_evidence() -> None:
         "[DEPTH-CAMERA-MULTI] PASS",
     ):
         assert marker in source
-    assert "blender_to_spine2d_mesh_exporter-0.90.0.zip" in source
-    assert "extension_install_gate_0.90.0" in source
+    assert "blender_to_spine2d_mesh_exporter-0.125.0.zip" in source
+    assert "extension_install_gate_0.125.0" in source
     assert 'throw "Real bpy environment not found; release gate is incomplete"' in source
     assert "archive path, byte size, and SHA256" in source
