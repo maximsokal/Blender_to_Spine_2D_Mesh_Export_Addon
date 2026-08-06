@@ -1,0 +1,82 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+ADDON = ROOT / "Blender_to_Spine2D_Mesh_Exporter"
+
+
+def _read(relative: str) -> str:
+    return (ROOT / relative).read_text(encoding="utf-8")
+
+
+def test_normal_document_assembly_retains_edge_on_regions():
+    source = _read(
+        "Blender_to_Spine2D_Mesh_Exporter/application/"
+        "a1_projected_region_filter.py"
+    )
+
+    assert "return (snapshot,)" in source
+    assert "Removing edge-on faces" not in source
+    assert "split_xy_visible_region_snapshots" in source
+    assert "later X/Y rotation" in source
+
+
+def test_active_camera_normal_keeps_object_pivot_and_vertex_depth():
+    projection = _read(
+        "Blender_to_Spine2D_Mesh_Exporter/domain/geometry/"
+        "camera_projection.py"
+    )
+    document = _read(
+        "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/"
+        "a1_document_preparation.py"
+    )
+
+    assert "projected_world.depth - projected_origin.depth" in projection
+    assert "origin.depth / uniform_scale" in projection
+    assert "resolved_setup_pose_mode = source.settings.rig_setup_pose_mode" in document
+    assert "camera_layer_projection_kind=None" in document
+    assert "compensate_depth_setup_y=False" in document
+    assert '"camera_relative_depth_group_count": 0' in document
+    assert '"depth_setup_y_compensated": 0' in document
+
+
+def test_normal_material_bake_uses_unprojected_source_geometry():
+    source_geometry = _read(
+        "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/"
+        "a1_source_geometry_preparation.py"
+    )
+    uv = _read(
+        "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/"
+        "a1_uv_preparation.py"
+    )
+    contracts = _read(
+        "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/"
+        "a1_preparation_contracts.py"
+    )
+
+    assert "material_bake_snapshot=material_bake_snapshot" in source_geometry
+    assert "transfer_normal_uv_to_material_bake_snapshot" in uv
+    assert "transfer_uv_by_source_loop" in uv
+    assert "updated.vertices != material_snapshot.vertices" in uv
+    assert "updated.world_matrix != material_snapshot.world_matrix" in uv
+    assert "return material_bake_snapshot" in contracts
+
+
+def test_real_coin_projection_parity_gate_covers_all_three_regressions():
+    source = _read(
+        "tests/blender_headless/"
+        "run_coin_star_normal_projection_parity_integration.py"
+    )
+
+    for marker in (
+        "[COIN-NORMAL-PROJECTION-PARITY] PASS",
+        "segments=",
+        "setup=PRESERVE_COMPOSITION",
+        "pivot=OBJECT_ORIGIN",
+        "material_geometry=projection-independent",
+        "Normal projection direction changed source-material bake geometry",
+        "real coin parity gate did not retain expected side regions",
+        "Active Camera Normal changed to camera-zero setup pose",
+        "Normal projection changed material brightness beyond tolerance",
+    ):
+        assert marker in source
