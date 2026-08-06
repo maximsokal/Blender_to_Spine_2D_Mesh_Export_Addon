@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -35,6 +36,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.projection import (  # noqa: E402
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import (  # noqa: E402
     A1CameraLayerProjectionKind,
+    A1RigProfile,
     A1RigSetupPoseMode,
 )
 from run_bake_integration import (  # noqa: E402
@@ -73,6 +75,30 @@ def _parse_arguments() -> argparse.Namespace:
         help="Exact coin_star.blend path Blender must already have loaded.",
     )
     return parser.parse_args(arguments)
+
+
+def _two_axis_settings(
+    output_directory: Path,
+    setup_pose_mode: A1RigSetupPoseMode,
+):
+    """Reuse the parity fixture while selecting the public production rig profile."""
+
+    if not isinstance(output_directory, Path):
+        raise TypeError("output_directory must be pathlib.Path")
+    if not isinstance(setup_pose_mode, A1RigSetupPoseMode):
+        raise TypeError("setup_pose_mode must be A1RigSetupPoseMode")
+    base = _settings(
+        output_directory,
+        A1ProjectionDirection.ACTIVE_CAMERA,
+    )
+    return replace(
+        base,
+        export=replace(
+            base.export,
+            rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE.value,
+        ),
+        rig_setup_pose_mode=setup_pose_mode,
+    )
 
 
 def _bone_by_name(rig, name: str):
@@ -117,16 +143,13 @@ def _run(expected_blend: str) -> None:
         prefix="spine2d-coin-normal-camera-root-modes-"
     ) as directory:
         root = Path(directory)
-        object_root_settings = _settings(
+        object_root_settings = _two_axis_settings(
             root / "object-root",
-            A1ProjectionDirection.ACTIVE_CAMERA,
+            A1RigSetupPoseMode.PRESERVE_COMPOSITION,
         )
-        camera_root_settings = replace(
-            _settings(
-                root / "camera-root",
-                A1ProjectionDirection.ACTIVE_CAMERA,
-            ),
-            rig_setup_pose_mode=A1RigSetupPoseMode.PREPROJECTED_SCREEN,
+        camera_root_settings = _two_axis_settings(
+            root / "camera-root",
+            A1RigSetupPoseMode.PREPROJECTED_SCREEN,
         )
 
         object_root = prepare_a1_object(
@@ -235,8 +258,6 @@ def _run(expected_blend: str) -> None:
 
         object_json, object_png = _single_json_and_png(object_result)
         camera_json, camera_png = _single_json_and_png(camera_result)
-        import json
-
         object_document = json.loads(object_json.read_text(encoding="utf-8"))
         camera_document = json.loads(camera_json.read_text(encoding="utf-8"))
         object_meshes = _mesh_uv_stream_count(object_document)
