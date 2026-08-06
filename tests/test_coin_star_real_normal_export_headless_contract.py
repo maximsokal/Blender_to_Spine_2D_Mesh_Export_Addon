@@ -22,6 +22,10 @@ def test_runner_exports_real_coin_in_normal_uv_mode() -> None:
     assert "--expected-blend" in source
     assert "export_a1_single_object(" in source
     assert "A1TextureExportMode.NORMAL_UV_SEGMENTS" in source
+    assert "source_geometry_mode=A1SourceGeometryMode.ORIGINAL" in source
+    assert 'statistics.get("source_geometry_mode")' in source
+    assert "== A1SourceGeometryMode.ORIGINAL.value" in source
+    assert 'statistics.get("modifier_count") == 0' in source
     assert 'render_engine="CYCLES"' in source
     assert "BakeMode.COMBINED" in source
     assert 'statistics.get("texture_pipeline") == "OBJECT_BAKE"' in source
@@ -33,6 +37,7 @@ def test_runner_exports_real_coin_in_normal_uv_mode() -> None:
     assert "_mesh_uv_stream_count(document)" in source
     assert "[COIN-REAL-NORMAL-EXPORT] PASS" in source
     assert "mode=NORMAL_UV_SEGMENTS" in source
+    assert "geometry=ORIGINAL" in source
     assert "pipeline=OBJECT_BAKE" in source
     assert "bake=COMBINED" in source
     assert "strategy=CAMERA_COMBINED" in source
