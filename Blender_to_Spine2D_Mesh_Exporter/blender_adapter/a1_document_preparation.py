@@ -36,7 +36,6 @@ from ..domain.spine.legacy_rig_contracts import (
 from ..domain.spine.model import MeshAttachment, Skin, Slot, SpineDocument
 from ..domain.spine.rig_builder import build_rig
 from ..domain.spine.rig_profiles import (
-    A1CameraLayerProjectionKind,
     A1RigProfile,
     A1RigSetupPoseMode,
     resolve_a1_rig_profile,
@@ -333,10 +332,10 @@ def _resolve_z_group_origin_mode(
     return LegacyZGroupOriginMode.MINIMUM_Z
 
 
-def _active_camera_layer_kind(
+def _active_camera_projection_kind(
     value: A1CameraProjectionKind | None,
-) -> A1CameraLayerProjectionKind:
-    """Map typed projection-domain camera kind to rig-domain semantics."""
+) -> A1CameraProjectionKind:
+    """Validate the evaluated camera kind without changing rig semantics."""
 
     if value is None:
         raise ValueError(
@@ -344,11 +343,7 @@ def _active_camera_layer_kind(
         )
     if not isinstance(value, A1CameraProjectionKind):
         raise TypeError("value must be A1CameraProjectionKind or None")
-    if value is A1CameraProjectionKind.PERSPECTIVE:
-        return A1CameraLayerProjectionKind.PERSPECTIVE
-    if value is A1CameraProjectionKind.ORTHOGRAPHIC:
-        return A1CameraLayerProjectionKind.ORTHOGRAPHIC
-    raise AssertionError(f"Unhandled Active Camera projection kind: {value}")
+    return value
 
 
 def _finalize_unadapted_target(
@@ -476,9 +471,13 @@ def _assemble_document_for_texture(
     rig: LegacyRigBuildResult,
     *,
     camera_projection: bool,
-    active_camera_layout: bool,
 ) -> A1DocumentAssemblyResult:
-    """Assemble and target-finalize one prepared texture plan."""
+    """Assemble and target-finalize one prepared texture plan.
+
+    Active Camera inside Normal / UV Segments is already expressed in the projected
+    geometry around Blender Object Origin. It must therefore use the ordinary model-space
+    assembly path and must never request camera-zero depth compensation.
+    """
 
     if not isinstance(texture, A1TexturePlanningResult):
         raise TypeError("texture must be A1TexturePlanningResult")
@@ -486,8 +485,6 @@ def _assemble_document_for_texture(
         raise TypeError("rig must be LegacyRigBuildResult")
     if not isinstance(camera_projection, bool):
         raise TypeError("camera_projection must be bool")
-    if not isinstance(active_camera_layout, bool):
-        raise TypeError("active_camera_layout must be bool")
 
     uv = texture.uv
     source = uv.source
@@ -508,7 +505,7 @@ def _assemble_document_for_texture(
         sequence_timing=source.settings.export.sequence_timing,
         uv_range_policy=source.settings.uv.range_policy,
         uv_range_epsilon=source.settings.uv.range_epsilon,
-        compensate_depth_setup_y=active_camera_layout,
+        compensate_depth_setup_y=False,
     )
     skeleton_metadata = build_skeleton_metadata(source.settings)
     if camera_projection:
@@ -549,7 +546,7 @@ def prepare_a1_document(
     statistics = texture.statistics
     try:
         camera_projection = isinstance(texture.bake_plan, CameraProjectionPlan)
-        active_camera_layout = (
+        active_camera_normal = (
             not camera_projection
             and source.settings.projection_direction
             is A1ProjectionDirection.ACTIVE_CAMERA
@@ -557,24 +554,16 @@ def prepare_a1_document(
         resolved_rig_profile = resolve_a1_rig_profile(
             source.settings.export.rig_profile
         )
-        if (
-            active_camera_layout
-            and resolved_rig_profile is not A1RigProfile.TWO_AXIS_ROTATION_SCALE
-        ):
-            raise ValueError(
-                "Active Camera rigid layers require TWO_AXIS_ROTATION_SCALE"
-            )
-
-        camera_layer_kind = (
-            _active_camera_layer_kind(source.camera_projection_kind)
-            if active_camera_layout
+        active_camera_kind = (
+            _active_camera_projection_kind(source.camera_projection_kind)
+            if active_camera_normal
             else None
         )
-        resolved_setup_pose_mode = (
-            A1RigSetupPoseMode.PREPROJECTED_SCREEN
-            if active_camera_layout
-            else source.settings.rig_setup_pose_mode
-        )
+
+        # Normal / UV Segments always owns the regular object-pivot rig. Active Camera
+        # changes the prepared setup geometry only; camera-zero PREPROJECTED_SCREEN is
+        # reserved for the separate rendered Camera Projection representation.
+        resolved_setup_pose_mode = source.settings.rig_setup_pose_mode
         z_group_origin_mode = _resolve_z_group_origin_mode(
             camera_projection=camera_projection,
             rig_profile=resolved_rig_profile,
@@ -598,7 +587,7 @@ def prepare_a1_document(
                 scale_mode=source.settings.rig_scale_mode,
                 setup_pose_mode=resolved_setup_pose_mode,
                 z_group_origin_mode=z_group_origin_mode,
-                camera_layer_projection_kind=camera_layer_kind,
+                camera_layer_projection_kind=None,
             ),
             resolved_rig_profile,
             spine_target=source.settings.export.spine_target,
@@ -610,13 +599,15 @@ def prepare_a1_document(
                 "rig_profile": rig.profile.profile_id,
                 "rig_setup_pose_mode": rig.request.setup_pose_mode.value,
                 "z_group_origin_mode": rig.request.z_group_origin_mode.value,
-                "camera_layer_projection_kind": (
-                    "" if camera_layer_kind is None else camera_layer_kind.value
+                "camera_layer_projection_kind": "",
+                "normal_active_camera_projection_kind": (
+                    "" if active_camera_kind is None else active_camera_kind.value
                 ),
-                "camera_relative_depth_group_count": (
-                    len(rig.info.z_groups) if active_camera_layout else 0
+                "camera_relative_depth_group_count": 0,
+                "normal_active_camera_depth_group_count": (
+                    len(rig.info.z_groups) if active_camera_normal else 0
                 ),
-                "depth_setup_y_compensated": int(active_camera_layout),
+                "depth_setup_y_compensated": 0,
             },
         )
 
@@ -625,7 +616,6 @@ def prepare_a1_document(
             texture,
             rig,
             camera_projection=camera_projection,
-            active_camera_layout=active_camera_layout,
         )
         final_rig = document_assembly.rig
         document = document_assembly.document
@@ -656,19 +646,17 @@ def prepare_a1_document(
         )
         logger.debug(
             "Prepared Spine document for %s: target=%s profile=%s setup=%s "
-            "camera_layer=%s z_origin=%s depth_y_compensation=%s "
-            "sequence=%s fps=%s bones=%d slots=%d attachments=%d",
+            "normal_active_camera=%s camera_kind=%s z_origin=%s "
+            "depth_y_compensation=%s sequence=%s fps=%s bones=%d slots=%d "
+            "attachments=%d",
             source.object_id,
             source.settings.export.spine_version,
             final_rig.profile.profile_id,
             final_rig.request.setup_pose_mode.value,
-            (
-                ""
-                if final_rig.request.camera_layer_projection_kind is None
-                else final_rig.request.camera_layer_projection_kind.value
-            ),
+            active_camera_normal,
+            "" if active_camera_kind is None else active_camera_kind.value,
             final_rig.request.z_group_origin_mode.value,
-            active_camera_layout,
+            False,
             statistics["texture_sequence_encoding"],
             statistics["texture_sequence_fps"],
             len(document.bones),
