@@ -5,16 +5,16 @@ its local geometry, leaving only world translation in ``world_matrix``. Every wo
 is projected independently, so the current Perspective or Orthographic camera view is
 retained in X/Y.
 
-The returned local X/Y coordinates are stored in rig units around the projected Blender
-Object Origin. Local Z deliberately stores the same camera-local Object Origin depth for
-every vertex. Active Camera is therefore represented as one rigid camera-relative layer:
-X/Y controls can move and depth-scale the complete object without applying a different
-transform to every source-vertex depth.
+Active Camera inside Normal / UV Segments is an object-space presentation mode, not the
+flat Camera Projection export mode. The projected Blender Object Origin therefore remains
+the exported object pivot, while every vertex keeps camera-space depth relative to that
+origin. This preserves the ordinary multi-depth rig and allows the side surfaces retained
+by Normal segmentation to appear when the Spine controls rotate the object.
 
 The existing object-bake attachment projector converts internal Mesh Y to Spine Y by
 negating it. Camera-projected local Y is therefore stored with the opposite sign so the
 final Spine setup position matches camera screen-up coordinates without changing the
-legacy axis-projection path.
+legacy signed-axis paths.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class A1MeshCameraProjectionError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class A1MeshCameraProjectionResult:
-    """One immutable screen-space snapshot and its projected Object Origin."""
+    """One immutable camera-oriented snapshot and its projected Object Origin."""
 
     snapshot: MeshSnapshot
     frame: A1CameraProjectionFrame
@@ -122,25 +122,37 @@ def _projected_translation_matrix(
     origin: A1ProjectedPoint,
     uniform_scale: float,
 ) -> Matrix4x4:
-    """Store projected Object Origin X/Y without duplicating depth translation.
+    """Store the projected Blender Object Origin as the ordinary object pivot.
 
-    Camera depth is carried by the one rigid local Z group. Keeping matrix Z neutral
-    prevents downstream composition from adding Object Origin depth a second time.
+    Camera X/Y are expressed in export pixels, while Normal attachment construction
+    expects geometry units and multiplies them by ``uniform_scale`` exactly once. Camera
+    depth remains in Blender/camera units, matching signed-axis Normal depth ownership.
     """
 
+    if not isinstance(origin, A1ProjectedPoint):
+        raise TypeError("origin must be A1ProjectedPoint")
+    if (
+        isinstance(uniform_scale, bool)
+        or not isinstance(uniform_scale, (int, float))
+        or not isfinite(float(uniform_scale))
+        or float(uniform_scale) <= 0.0
+    ):
+        raise ValueError("uniform_scale must be a finite positive number")
+
+    resolved_scale = float(uniform_scale)
     return (
         1.0,
         0.0,
         0.0,
-        origin.u / uniform_scale,
+        origin.u / resolved_scale,
         0.0,
         1.0,
         0.0,
-        origin.v / uniform_scale,
+        origin.v / resolved_scale,
         0.0,
         0.0,
         1.0,
-        0.0,
+        origin.depth,
         0.0,
         0.0,
         0.0,
@@ -173,16 +185,16 @@ def project_a1_mesh_snapshot_camera(
     *,
     uniform_scale: float,
 ) -> A1MeshCameraProjectionResult:
-    """Project all world vertices into one rigid camera-relative object layer.
+    """Project Normal geometry to the active-camera view around Object Origin.
 
-    X/Y are divided by the rig uniform scale because the downstream attachment builder
-    multiplies object-bake coordinates by that scale exactly once. Internal local Y is
-    negated to compensate the established attachment projection convention.
+    Perspective or Orthographic X/Y is baked into the setup pose, but this is not a flat
+    camera attachment. Every vertex retains ``camera_depth - object_origin_depth`` as its
+    local Z and the projected Object Origin is retained in ``world_matrix``. Consequently
+    downstream Z grouping and rig construction remain the same object-pivot pipeline used
+    by signed-axis Normal export.
 
-    Every local Z is the camera-local depth of Blender Object Origin. Perspective shape
-    for the current camera view remains baked into X/Y, while live Spine controls operate
-    on one depth layer for the complete object instead of deforming individual vertices.
-    Geometry outside the frame is retained.
+    Geometry outside the camera frame and geometry that is edge-on in the current setup
+    pose are both retained.
     """
 
     if not isinstance(snapshot, MeshSnapshot):
@@ -221,7 +233,7 @@ def project_a1_mesh_snapshot_camera(
                 position=(
                     (projected_world.u - projected_origin.u) / resolved_scale,
                     -(projected_world.v - projected_origin.v) / resolved_scale,
-                    float(projected_origin.depth),
+                    float(projected_world.depth - projected_origin.depth),
                 ),
                 projected_world=projected_world,
             )
