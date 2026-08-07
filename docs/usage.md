@@ -1,6 +1,6 @@
 # Usage Guide
 
-This guide describes Blender to Spine2D Mesh Exporter **0.128.0**.
+This guide describes Blender to Spine2D Mesh Exporter **0.129.0**.
 
 ## Open the exporter
 
@@ -11,7 +11,7 @@ This guide describes Blender to Spine2D Mesh Exporter **0.128.0**.
 5. Open **3D View > Sidebar > Blender to Spine2D Mesh Exporter**.
 
 Run **Analyze** after changing selection, geometry, modifiers, UVs, seams, materials,
-renderer, camera, frame settings, or exporter settings.
+renderer, camera, frame settings, texture size, or other exporter settings.
 
 ## Choose an export mode
 
@@ -178,7 +178,25 @@ modifiers is not part of that topology. Analyze reports active ignored modifiers
 viewport/Spine difference is visible. Apply or convert modifiers when their generated
 geometry must be exported.
 
-## Configure texture sequences
+## Configure Bake
+
+The **Bake** foldout owns the scene-wide texture resolution and frame/sequence controls.
+
+### Texture size
+
+`Texture size` controls the square resolution used for generated bake textures and
+rendered-camera texture targets.
+
+- Default: `1024`.
+- Valid range: even values from `64` through `4096`.
+- Ownership: Scene-level; all objects in one selected-object export request share the same
+  texture resolution.
+- Changing Texture size invalidates cached Analyze results.
+
+The control is intentionally located in **Bake**, not **Paths and Spine 2D version**,
+because it changes texture generation rather than output-path or JSON-version selection.
+
+### Texture sequences
 
 For each selected Mesh:
 
@@ -189,7 +207,7 @@ Frames > 0  -> Loop texture sequence for this object
 
 `Start` selects the first source timeline frame. Selected objects keep independent timing.
 Static siblings do not receive sequence metadata just because another selected object is
-animated.
+animated. Texture size remains shared even when frame timing is per object.
 
 For Depth Camera Projection with reserve views, FRONT and reserve views use the same frame
 tasks but keep independent stable crops and image namespaces.
@@ -228,9 +246,10 @@ A stale report should be regenerated after any relevant source or settings chang
 1. Make the Mesh active.
 2. Configure Export Mode and mode-specific settings.
 3. Choose the Spine target.
-4. Run Analyze.
-5. Review diagnostics.
-6. Run **Export Current Object**.
+4. Configure Texture size and any frame settings in Bake.
+5. Run Analyze.
+6. Review diagnostics.
+7. Run **Export Current Object**.
 
 Typical output:
 
@@ -242,7 +261,7 @@ images/<ObjectName>_Baked.png
 ## Export selected objects
 
 1. Select at least two Mesh objects.
-2. Configure shared Scene settings.
+2. Configure shared Scene settings, including Texture size in Bake.
 3. Configure per-object Frames and Start values.
 4. Run Analyze.
 5. Run **Export Selected Objects**.
@@ -270,7 +289,7 @@ The main reset restores the current defaults, including:
 
 - Normal / UV Segments;
 - `+Z` projection;
-- texture size 1024;
+- Bake Texture size `1024`;
 - Seam Maker Auto;
 - current-frame static baking;
 - Parallax Horizon Angle `0°`.
