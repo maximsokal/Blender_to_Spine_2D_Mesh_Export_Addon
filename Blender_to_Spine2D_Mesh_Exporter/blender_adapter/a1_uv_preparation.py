@@ -144,6 +144,11 @@ def transfer_normal_uv_to_material_bake_snapshot(
     The two snapshots must share exact ``SourceLoopId`` lineage. Export projection may
     change positions, normals and ``matrix_world`` on ``projected_uv_snapshot``; none of
     those values are allowed to leak into the returned material snapshot.
+
+    An existing source render-UV role is immutable. A source mesh with no UV/render role
+    is different: adding the generated destination layer makes it both active and render
+    UV by the ``MeshSnapshot`` invariant. That first-role initialization is required for
+    baking and is not treated as mutation of pre-existing source material semantics.
     """
 
     if not isinstance(projected_uv_snapshot, MeshSnapshot):
@@ -188,8 +193,21 @@ def transfer_normal_uv_to_material_bake_snapshot(
         raise ValueError("Material-bake UV transfer changed face topology")
     if updated.world_matrix != material_snapshot.world_matrix:
         raise ValueError("Material-bake UV transfer changed matrix_world")
-    if updated.render_uv_layer != material_snapshot.render_uv_layer:
-        raise ValueError("Material-bake UV transfer changed source render UV role")
+
+    # Preserve every existing source render role. When the source has no render UV at
+    # all, MeshSnapshot intentionally promotes the newly active generated layer to the
+    # render role. Reject any other role change.
+    expected_render_uv_layer = (
+        material_snapshot.render_uv_layer
+        if material_snapshot.render_uv_layer is not None
+        else resolved_layer_name
+    )
+    if updated.render_uv_layer != expected_render_uv_layer:
+        raise ValueError(
+            "Material-bake UV transfer changed source render UV role; "
+            f"expected={expected_render_uv_layer!r}, "
+            f"actual={updated.render_uv_layer!r}"
+        )
 
     return updated, report
 
