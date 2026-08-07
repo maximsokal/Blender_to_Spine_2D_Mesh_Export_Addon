@@ -37,7 +37,12 @@ def test_submission_manifest_has_public_listing_metadata() -> None:
     assert set(manifest["tags"]) == EXPECTED_TAGS
     assert manifest["license"] == ["SPDX:GPL-3.0-or-later"]
     assert manifest["copyright"] == ["2025-2026 Maxim Sokolenko"]
-    assert str(manifest["tagline"]).strip()
+
+    tagline = manifest["tagline"]
+    assert isinstance(tagline, str)
+    assert tagline == tagline.strip()
+    assert 1 <= len(tagline) <= 64
+    assert not tagline.endswith((".", "!", "?"))
 
 
 def test_submission_permission_reason_is_store_safe() -> None:
