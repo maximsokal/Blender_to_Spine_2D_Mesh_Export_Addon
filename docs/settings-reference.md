@@ -1,28 +1,26 @@
 # Settings Reference
 
-This document describes the public Blender 5.2 Scene and object settings in extension
-version **0.90.0**. Defaults apply to a genuinely new Scene. Saved files migrate to Scene
-settings schema 8 without changing their selected export mode.
+This document describes the maintained public settings in Blender to Spine2D Mesh Exporter
+**0.128.0**. Fresh-Scene defaults are listed below. The current Scene settings schema is
+**8**.
 
 ## Export
 
-### Export mode
-
-The selector contains exactly three values.
+### Export Mode
 
 | Value | Default | Behavior |
 | --- | --- | --- |
-| Normal - UV Segments | Yes | Segments geometry, creates generated bake UV, bakes source surfaces, and exports region-based weighted Spine attachments. |
+| Normal / UV Segments | Yes | Segments source-derived topology, creates generated bake UV, bakes the material, and exports weighted mesh attachments. |
 | Camera Projection | No | Renders through the active camera and exports a flat cropped screen-space mesh. |
-| Depth Camera Projection | No | Renders through the active camera and exports an optimized visible depth-relief mesh with generated vertex bones and optional horizon reserve attachments. |
+| Depth Camera Projection | No | Renders through the active camera and exports a bounded visible depth-relief mesh with generated vertex bones and optional reserve views. |
 
-Changing Export mode invalidates cached readiness. Run Analyze again before export.
+Changing Export Mode invalidates cached readiness.
 
-### Projection direction
+### Projection Direction
 
-Visible only for **Normal - UV Segments**.
+Visible only for **Normal / UV Segments**.
 
-| Label | Persisted ID | Default | U / V / depth contract |
+| Label | Persisted ID | Default | Contract |
 | --- | --- | --- | --- |
 | +X | `POSITIVE_X` | No | U = world +Y, V = world +Z, depth = world +X. |
 | -X | `NEGATIVE_X` | No | U = world -Y, V = world +Z, depth = world -X. |
@@ -30,126 +28,38 @@ Visible only for **Normal - UV Segments**.
 | -Y | `NEGATIVE_Y` | No | U = world +X, V = world +Z, depth = world -Y. |
 | +Z | `POSITIVE_Z` | Yes | U = world +X, V = world +Y, depth = world +Z. |
 | -Z | `NEGATIVE_Z` | No | U = world -X, V = world +Y, depth = world -Z. |
-| Active Camera | `ACTIVE_CAMERA` | No | U/V come from the active camera frame and depth is camera-local Z. |
+| Active Camera — Object Root Bone | `ACTIVE_CAMERA` | No | U/V come from the active camera; each object keeps its Blender Object Origin as the Spine main-bone pivot and retains per-depth deformation. |
+| Active Camera — Camera Root Bone | `ACTIVE_CAMERA_CAMERA_ROOT` | No | Uses the same camera projection but camera-space zero owns the Spine main bone and the object is placed below one rigid camera-depth layer. |
 
-Active Camera in this selector remains a Normal / UV Segments route. It does not become
-flat Camera Projection or Depth Camera Projection.
+Both Active Camera modes support evaluated Perspective and Orthographic cameras. They do
+not become Camera Projection or Depth Camera Projection; they remain Normal / UV Segments
+representations.
 
-### Projection alpha threshold
+#### Object Root setup contract
 
-Visible for Camera Projection and Depth Camera Projection.
+`ACTIVE_CAMERA` resolves to the `CAMERA_VIEW_NORMAL` rig setup mode during document
+preparation.
 
-| Type | Range | Default |
-| --- | --- | --- |
-| Float | 0.0 through 1.0 | `1 / 255` |
+- X/Y setup rotation is neutral.
+- Per-vertex camera-depth groups are preserved.
+- Each depth group receives a generated `<group>_camera_setup` child.
+- The child uses the inverse setup Y offset and owns generated vertex bones.
+- The depth Transform constraint uses neutral setup translation/scale values.
 
-Pixels below the threshold are excluded from rendered-camera coverage and crop bounds.
+The inverse child cancels the camera-depth setup translation while leaving the live depth
+hierarchy available to X/Y pseudo-rotation.
 
-### Depth base
+#### Camera Root setup contract
 
-Depth Camera Projection uses **Farthest Visible Point** publicly in 0.90.0.
+`ACTIVE_CAMERA_CAMERA_ROOT` is normalized to the same active-camera geometry projection
+but selects `PREPROJECTED_SCREEN` rig setup.
 
-```text
-farthest visible surface → rig offset 0
-nearer retained points   → non-negative offset toward the camera
-```
+- camera-space zero owns `<prefix>_main`;
+- the projected Object Origin is stored below the camera-relative hierarchy;
+- one rigid camera-depth group owns all attachment vertices;
+- camera kind is carried as Perspective or Orthographic rig semantics.
 
-The architecture also implements `OBJECT_ORIGIN`, but the property is hidden. It fails
-closed unless Object Origin lies behind every visible point. The UI does not expose a
-fourth mode or a public base selector.
-
-### Depth smoothing
-
-Visible only for Depth Camera Projection.
-
-| Type | Range | Default |
-| --- | --- | --- |
-| Float | 0.0 through 1.0 | 0.35 |
-
-Controls one edge-aware depth smoothing pass. Neighboring samples are blended only when
-their depth difference does not exceed the resolved edge threshold.
-
-### Depth edge threshold
-
-| Type | Range | Default |
-| --- | --- | --- |
-| Float fraction | 0.0 through 1.0 | 0.08 |
-
-The value is multiplied by the visible object depth range. Candidate triangles and
-smoothing neighborhoods do not cross larger depth jumps. Values that disconnect every
-candidate triangle block readiness/export instead of silently flattening the object.
-
-### Depth mesh error (px)
-
-| Type | Range | Default |
-| --- | --- | --- |
-| Float pixels | 0.25 through 128.0 | 4.0 |
-
-This is the requested screen-space sample spacing for the generated relief lattice.
-Smaller values retain more points until the hard point limit is reached.
-
-### Max depth points
-
-| Type | Range | Default |
-| --- | --- | --- |
-| Integer | 4 through 4096 | 128 |
-
-Hard limit for retained depth points and their generated vertex bones. The source Blender
-vertex count is not copied directly.
-
-When a positive Parallax Horizon Angle causes the union of FRONT and reserve surfaces to
-exceed this limit, readiness and export fail closed. The exporter does not silently remove
-reserve faces, lower the requested horizon angle, or create a second independent rig.
-
-### Parallax Horizon Angle
-
-Visible only in the **Cut** foldout when **Depth Camera Projection** is selected. The
-setting belongs to Cut because it changes retained surface topology and reserve-view
-generation; it is not displayed in Rig.
-
-| Type | Hard range | Soft range | Default |
-| --- | --- | --- | --- |
-| Rotation angle | 0° through 89° | 0° through 45° | 0° |
-
-Blender displays this setting in degrees because the RNA property uses the `ANGLE`
-subtype and `ROTATION` unit. The persisted value and the domain contract use radians.
-
-`0°` preserves the established front-only path: one camera texture, one weighted mesh
-attachment, and no reserve camera plans.
-
-For a positive value, the exporter performs deterministic Dijkstra traversal over
-face adjacency. The path cost is the accumulated unsigned dihedral angle across shared
-edges. Faces outside the active-camera visible set may be retained when their minimum
-accumulated cost is within the requested horizon budget.
-
-Retained reserve faces are assigned to deterministic virtual directions:
-
-```text
-RIGHT, UP_RIGHT, UP, UP_LEFT,
-LEFT, DOWN_LEFT, DOWN, DOWN_RIGHT
-```
-
-Each non-empty direction owns:
-
-- exact evaluated source-face indices;
-- one fitted Perspective lens or Orthographic scale;
-- one temporary face-isolated render proxy;
-- one alpha-union crop across that view's sequence frames;
-- one texture namespace and one weighted reserve attachment.
-
-Reserve attachments reuse the same generated vertex-bone rig as the FRONT attachment.
-Reserve slots are emitted before the FRONT slot so the FRONT remains above them in Spine
-draw order. Shared hinge vertices keep shared generated bones.
-
-### Texture size
-
-| Type | Range | Default |
-| --- | --- | --- |
-| Even integer | 64 through 4096 | 1024 |
-
-Controls object bake textures and rendered-camera targets.
-
-### Spine version
+### Spine Version
 
 | UI value | Exact JSON version |
 | --- | --- |
@@ -159,8 +69,7 @@ Controls object bake textures and rendered-camera targets.
 | Spine 4.2 | 4.2.43 |
 | Spine 4.3 | 4.3.23 |
 
-Standalone single- and multi-object capability is validated by the target/profile
-registry. Connected and mixed composition remain limited to supported Spine 4.2 routes.
+Target/profile/composition compatibility is validated before expensive export work.
 
 ### JSON
 
@@ -173,30 +82,31 @@ Directory for the final Spine JSON. Blender-relative paths resolve through
 | --- | --- |
 | Relative path | `images/` |
 
-Backslashes become forward slashes. Leading `./` and surrounding slashes are removed.
+The path is normalized below the JSON output directory.
+
+### Texture Size
+
+| Type | Range | Default |
+| --- | --- | --- |
+| Even integer | 64 through 4096 | 1024 |
+
+Controls semantic object-bake textures and rendered-camera targets.
 
 ## Rig
 
-### Rig profile
+### Rig Profile
 
-The public Rewrite UI exports the 2-Axis Rotation + Scale profile. Historical 3-Axis
-values remain persisted for compatibility and explicit development/API composition.
+The public UI uses **2-Axis Rotation + Scale**. The persisted profile property remains
+available internally so saved files and explicit development composition paths can be
+validated without silently rewriting data.
 
 | Value | Persisted ID | Fresh Scene default |
 | --- | --- | --- |
 | 3-Axis Rotation | `LEGACY_ROTATABLE_MESH` | No |
 | 2-Axis Rotation + Scale | `TWO_AXIS_ROTATION_SCALE` | Yes |
 
-Normal / UV Segments and Depth Camera Projection both use the existing generated
-vertex-bone pipeline. Flat Camera Projection retains its flat rendered contour attachment.
-
-For public Depth Camera Projection with Farthest Visible Point, the existing Normal rig
-uses `MINIMUM_Z` as the Z-group origin policy. This maps the farthest visible depth to
-zero and keeps every generated group offset non-negative toward the camera.
-
-Positive parallax does not create a second reserve rig. FRONT and reserve attachments are
-subsets of one union MeshSnapshot and use one shared Z-group assignment and generated
-vertex-bone namespace. The topology control itself is located in Cut.
+Public Normal / UV Segments Active Camera Camera Root requires the 2-Axis profile because
+its rigid camera-relative setup is defined by that hierarchy.
 
 ### 2-Axis controls
 
@@ -204,7 +114,6 @@ vertex-bone namespace. The topology control itself is located in Cut.
 <prefix>_rotation_X
 <prefix>_rotation_Y
 <prefix>_scale
-<prefix>_main
 ```
 
 The single-object constraint phase order is:
@@ -213,27 +122,23 @@ The single-object constraint phase order is:
 0  Rotation X Transform
 1  IK
 2  Uniform Scale Transform
-3  X Depth Scale Transform
+3  Depth Scale Transform
 4  Rotation Y Transform
 ```
 
-`TWO_AXIS_ROTATION_SCALE` supports connected composition through a dedicated five-phase connected constraint schedule. Connected order values are assigned by ordered Z layer.
-Objects in the same layer may intentionally share one phase order.
+The exact setup payload depends on signed-axis, Active Camera Object Root, Active Camera
+Camera Root, or depth-surface ownership. See [Rig Profiles](rig-profiles.md).
 
-### Control icons
+### Control Icons
 
 | Type | Default |
 | --- | --- |
 | Boolean | Disabled |
 
-### Saved Scene migration
+### Preview Animation
 
-Scene schema 8 adds `spine2d_depth_parallax_horizon_angle` with a default of `0.0`
-radians. Existing valid export mode, Spine target, seam mode, rig profile, depth quality
-settings, paths, and per-object sequence timing remain unchanged.
-
-The zero default is a compatibility boundary: a migrated Scene does not gain reserve
-textures or attachments until the user explicitly chooses a positive angle.
+Adds the generated preview animation when enabled. It does not replace the setup-pose
+contract or target-specific sequence encoding.
 
 ## Cut
 
@@ -241,66 +146,151 @@ textures or attachments until the user explicitly chooses a positive angle.
 
 | Value | Default | Behavior |
 | --- | --- | --- |
-| Auto | Yes | Uses angular segmentation controls. |
-| Custom | No | Uses user-marked seams and disables angular splitting controls. |
+| Auto | Yes | Uses deterministic angular segmentation. |
+| Custom | No | Uses user-marked seams and disables angular splitting. |
 
-Depth Camera Projection creates its own generated relief topology. Its discontinuities are
-controlled by Depth edge threshold, while horizon reserve growth is controlled by
-Parallax Horizon Angle. For this mode the Cut foldout replaces source seam controls with
-the generated-depth explanation and the Parallax reserve control.
+Depth Camera Projection generates its own relief topology and does not use source seam
+controls.
 
-### Seed angle limit
+### Seed Angle Limit
 
 | Type | Range | Default |
 | --- | --- | --- |
 | Integer degrees | 1 through 89 | 30 |
 
-### Angular mode
+### Angular Mode
 
 | Value | Default | Behavior |
 | --- | --- | --- |
 | Seed cone | Yes | Compares each candidate face normal with the segment seed normal. |
 | Seed cone + local dihedral | No | Also limits the angle across each traversed shared edge. |
 
+## Rendered camera settings
+
+### Projection Alpha Threshold
+
+Visible for Camera Projection and Depth Camera Projection.
+
+| Type | Range | Default |
+| --- | --- | --- |
+| Float | 0.0 through 1.0 | `1 / 255` |
+
+Pixels below the threshold do not contribute to usable render coverage or crop bounds.
+
+## Depth Camera Projection
+
+### Depth Base
+
+The public policy is **Farthest Visible Point**.
+
+```text
+farthest retained visible surface -> rig offset 0
+nearer retained points            -> non-negative offset toward the camera
+```
+
+The internal `OBJECT_ORIGIN` policy is not a public selector and fails closed unless its
+geometry preconditions are satisfied.
+
+### Depth Smoothing
+
+| Type | Range | Default |
+| --- | --- | --- |
+| Float | 0.0 through 1.0 | 0.35 |
+
+One edge-aware smoothing pass. Samples are not blended across resolved depth discontinuities.
+
+### Depth Edge Threshold
+
+| Type | Range | Default |
+| --- | --- | --- |
+| Float fraction | 0.0 through 1.0 | 0.08 |
+
+The value is resolved against visible depth range. Candidate smoothing/triangulation does
+not cross larger jumps.
+
+### Depth Mesh Error (px)
+
+| Type | Range | Default |
+| --- | --- | --- |
+| Float pixels | 0.25 through 128.0 | 4.0 |
+
+Requested screen-space sampling spacing for the generated relief surface.
+
+### Max Depth Points
+
+| Type | Range | Default |
+| --- | --- | --- |
+| Integer | 4 through 4096 | 128 |
+
+Hard limit for retained generated relief points. Exceeding the limit blocks export rather
+than silently changing requested topology.
+
+### Parallax Horizon Angle
+
+Visible only for Depth Camera Projection.
+
+| Type | Hard range | Soft range | Default |
+| --- | --- | --- | --- |
+| Rotation angle | 0° through 89° | 0° through 45° | 0° |
+
+Blender displays degrees and persists radians.
+
+- `0°` keeps FRONT-only output.
+- A positive value traverses connected source faces by accumulated unsigned dihedral cost.
+- Retained reserve faces are assigned to deterministic virtual directions.
+- Each non-empty view owns a face-isolated render and crop.
+- FRONT and reserve attachments share one generated rig.
+- Reserve slots are emitted before FRONT.
+
 ## Bake
 
 ### Frames and Start
 
-For one active object, Scene `Frames` and `Start` are used. For selected-object export,
-every Mesh stores its own values.
+For selected-object export each Mesh stores independent timing.
 
 ```text
-Frames = 0  → one static texture at current frame
-Frames > 0  → Loop texture sequence for that object only
+Frames = 0  -> static texture at current frame
+Frames > 0  -> Loop texture sequence for that object
 ```
 
-This applies independently to Normal / UV Segments, Camera Projection, and Depth Camera
-Projection. With positive parallax, each FRONT/reserve view receives the same frame count
-but owns a separate stable crop and image sequence.
-
-### Sequence FPS override
+### Sequence FPS Override
 
 | Type | Range | Default |
 | --- | --- | --- |
 | Float | 0.0 through 1000.0 | 0.0 |
 
-Zero uses Scene FPS. A positive value overrides playback timing.
+Zero uses Scene FPS. A positive value overrides exported playback timing.
 
 ### Rendered-camera scene influence
 
-Visible for Camera Projection and Depth Camera Projection:
+Camera Projection and Depth Camera Projection expose controls for supported shadow,
+reflection/transmission, World, and render participation behavior. These settings affect
+the camera-render transaction without allowing unrelated objects to become unintended
+final attachments.
 
-- Include shadows from scene objects;
-- Include reflection/transmission objects;
-- World affects lighting/reflections.
+## Generated Materials
 
-These settings affect render-ray participation without allowing unrelated objects to
-become direct camera-visible output.
+Policies:
+
+```text
+Require Source
+Generate If Missing
+Force Generated
+```
+
+Generated patterns are temporary. They do not modify source material graphs.
 
 ## Analysis
 
-Analyze runs production preparation without writing files. Depth Camera Projection reports
-retained depth points, visible and reserve source triangles, FRONT/reserve attachment
-counts, virtual texture-view counts, maximum relief, weighted attachment statistics, and
-structured blockers. Any geometry, material, camera, selection, frame, mode, target,
-depth-setting, or Parallax Horizon Angle change makes the report stale.
+Analyze executes production preparation without final output commit. It reports structured
+blockers/warnings and geometry, material, rig, attachment, camera, depth, sequence, and
+modifier statistics.
+
+Changing any relevant source state or exporter setting invalidates or stales the report.
+
+## Saved Scene migration
+
+Scene schema **8** preserves valid saved values and initializes missing Depth parallax data
+with a safe `0°` default. Persisted `ACTIVE_CAMERA` continues to mean **Active Camera —
+Object Root Bone**; the Camera Root mode uses the separate
+`ACTIVE_CAMERA_CAMERA_ROOT` identifier.
