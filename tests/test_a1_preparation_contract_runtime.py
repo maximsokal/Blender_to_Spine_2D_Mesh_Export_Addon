@@ -31,12 +31,31 @@ class Settings(Base):
             texture_width=128,
             texture_height=64,
         )
+        self.uv = SimpleNamespace(layer_name="SpineBakeUV")
 
 
 class Snapshot(Base):
     def __init__(self):
         self.source_object_id = "Object"
-        self.world_matrix = (1.0, 0.0, 0.0, 2.0, 0.0, 1.0, 0.0, 3.0, 0.0, 0.0, 1.0, 4.0, 0.0, 0.0, 0.0, 1.0)
+        self.world_matrix = (
+            1.0,
+            0.0,
+            0.0,
+            2.0,
+            0.0,
+            1.0,
+            0.0,
+            3.0,
+            0.0,
+            0.0,
+            1.0,
+            4.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        )
+        self.uv_layer_names = ("SpineBakeUV",)
 
 
 class GeneratedBakePlan(Base):
@@ -60,7 +79,7 @@ class DocumentAssembly(Base):
 
 class Unwrap(Base):
     def __init__(self):
-        self.snapshot = object()
+        self.snapshot = Snapshot()
 
 
 def _install_stub(name, **values):
@@ -105,7 +124,12 @@ def _load_contracts():
         SpineDocument=type("SpineDocument", (Base,), {}),
     )
     _install_stub(root + ".domain.uv", UvUnwrapResult=Unwrap)
-    path = Path(__file__).resolve().parents[1] / "Blender_to_Spine2D_Mesh_Exporter" / "blender_adapter" / "a1_preparation_contracts.py"
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "Blender_to_Spine2D_Mesh_Exporter"
+        / "blender_adapter"
+        / "a1_preparation_contracts.py"
+    )
     name = root + ".blender_adapter.a1_preparation_contracts"
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -141,7 +165,9 @@ def test_metadata_and_prepared_result_share_strict_contract():
         texturing_topology=application.A1TexturingTopology(),
         unwrap_result=Unwrap(),
         uv_regions=application.A1UvPropagationResult(),
-        material_analysis=sys.modules["contractpkg.domain.baking"].ObjectMaterialAnalysis(),
+        material_analysis=sys.modules[
+            "contractpkg.domain.baking"
+        ].ObjectMaterialAnalysis(),
         bake_plan=BakePlan(),
         rig=Rig(),
         document_assembly=DocumentAssembly(),
@@ -149,5 +175,6 @@ def test_metadata_and_prepared_result_share_strict_contract():
         statistics={"count": 1},
     )
     assert prepared.world_position == (2.0, 3.0, 4.0)
+    assert isinstance(prepared.material_bake_snapshot, Snapshot)
     with pytest.raises(TypeError):
         prepared.statistics["count"] = 2
