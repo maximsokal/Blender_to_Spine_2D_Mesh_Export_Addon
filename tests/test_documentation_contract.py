@@ -200,6 +200,7 @@ def test_documentation_matches_manifest_and_current_defaults() -> None:
         "docs/settings-reference.md",
         "docs/rig-profiles.md",
         "docs/testing.md",
+        "docs/submission.md",
         "examples/examples.md",
     ):
         assert version in _read(ROOT / relative_path), relative_path
@@ -240,6 +241,19 @@ def test_texture_size_is_documented_as_bake_owned_setting() -> None:
 
     readme = _read(README)
     assert "The **Bake** foldout owns the scene-wide **Texture size** setting" in readme
+
+
+def test_submission_document_matches_current_public_manifest() -> None:
+    submission = _read(DOCS / "submission.md")
+    manifest = _read(MANIFEST)
+
+    assert "Windows x64" in submission
+    assert "Import-Export, Mesh, UV, Animation" in submission
+    assert "License: GPL-3.0-or-later" in submission
+    assert "Permission: Files" in submission
+    assert "blender_to_spine2d_mesh_exporter-0.129.0.zip" in submission
+    assert 'platforms = ["windows-x64"]' in manifest
+    assert 'website = "https://github.com/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon"' in manifest
 
 
 def test_public_docs_do_not_describe_blender_44_as_supported() -> None:
