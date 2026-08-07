@@ -52,7 +52,8 @@ def _stage_values():
     )
     uv = SimpleNamespace(
         texturing_topology=object(),
-        unwrap_result=object(),
+        unwrap_result=SimpleNamespace(snapshot=object()),
+        material_bake_snapshot=object(),
         uv_regions=object(),
         warnings=(_warning("uv-warning"),),
         statistics={"uv_loop_count": 6},
@@ -134,6 +135,7 @@ def test_orchestrator_passes_each_typed_stage_result_to_the_next(monkeypatch):
     assert captured["rig"] is document.rig
     assert captured["warnings"] == document.warnings
     assert captured["statistics"] == document.statistics
+    assert captured["material_bake_snapshot"] is uv.material_bake_snapshot
     assert isinstance(
         captured["finalization_context"],
         A1BlenderFinalizationContext,
