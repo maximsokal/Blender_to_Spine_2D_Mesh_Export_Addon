@@ -1,43 +1,30 @@
 # Documentation
 
-This directory contains the maintained public documentation for Blender to Spine2D Mesh
-Exporter **0.125.0**.
+This directory contains the maintained documentation for Blender to Spine2D Mesh Exporter
+**0.128.0**.
 
-## User documentation
+The documentation describes the current product only. Historical release notes, milestone
+journals, and superseded implementation checkpoints belong in Git history and tags rather
+than in the maintained documentation tree.
 
-- [Installation](installation.md) - requirements, installation, update, removal, and local packaging.
-- [Usage](usage.md) - complete Blender-to-Spine workflow for all three export modes.
-- [Settings Reference](settings-reference.md) - every public Scene and object setting.
-- [Output Format](output-format.md) - JSON, texture, sequence, naming, weighted attachment, and atomic output behavior.
-- [Troubleshooting](troubleshooting.md) - blockers, warnings, logs, stale work files, and bug reports.
-- [Examples](../examples/examples.md) - repository example projects and validation goals.
+## Current product baseline
 
-## Developer documentation
-
-- [Architecture](architecture.md) - package boundaries and production data flow.
-- [Rig Profiles](rig-profiles.md) - selectable rig plans and generated constraint topology.
-- [Testing and Release Validation](testing.md) - pure Python, real bpy, Blender headless, runtime-oracle, and packaging gates.
-- [Contributing](CONTRIBUTING.md) - coding, Blender state, tests, and documentation requirements.
-- [Changelog](CHANGELOG.md) - public release history.
-- [0.125.0 release note](releases/0.125.0.md) - Normal UV material routing and ignored-modifier diagnostics.
-- [0.90.0 release note](releases/0.90.0.md) - Depth parallax reserve attachments.
-- [0.81.0 release note](releases/0.81.0.md) - initial Depth Camera Projection.
-- [0.80.1 release note](releases/0.80.1.md) - per-object static and sequence timing acceptance.
-- [0.80.0 release note](releases/0.80.0.md) - complete all-sequence acceptance milestone.
-- [Spine 4.1 release checkpoint](spine-json-versioning/RELEASE_0_47_10.md) - historical 0.47.10 evidence.
-
-## Supported product baseline
-
-- Extension version: 0.125.0.
-- Minimum Blender version: 5.2.0.
-- Standalone targets: Spine 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23 according to the target/profile capability matrix.
-- Connected and mixed composition target: Spine 4.2.43.
+- Extension version: **0.128.0**.
+- Minimum Blender version: **5.2.0**.
 - Currently tested desktop platform: Windows.
-- Default Seam Maker mode: Auto.
-- Default rig profile for genuinely fresh Scenes: 2-Axis Rotation + Scale.
-- Scene settings schema: 8.
+- Scene settings schema: **8**.
+- Fresh Scene rig profile: **2-Axis Rotation + Scale**.
+- Default export mode: **Normal / UV Segments**.
+- Default Normal projection direction: **+Z**.
+- Supported standalone Spine targets:
+  - 3.8.99
+  - 4.0.64
+  - 4.1.24
+  - 4.2.43
+  - 4.3.23
+- Connected and mixed composition: supported only by explicitly allowed Spine 4.2 routes.
 
-The public `Export mode` selector contains exactly:
+## Export modes
 
 ```text
 Normal / UV Segments
@@ -45,54 +32,51 @@ Camera Projection
 Depth Camera Projection
 ```
 
-Normal / UV Segments preserves segmented source-derived topology and generated UV.
-Camera Projection renders and exports a flat cropped screen-space contour. Depth Camera
-Projection renders through the active camera and builds an optimized visible depth-relief
-surface with Normal-style generated vertex bones.
-
-## Normal UV modifier warning
-
-Normal / UV Segments exports the original Mesh datablock. Geometry created only by active
-Blender modifiers, such as Bevel, is not part of that original topology. Version 0.125.0
-adds an Analysis alert that lists every active modifier ignored by this route. The alert
-names the affected object, modifier type, and viewport/render state so a viewport-to-Spine
-shape mismatch no longer passes silently.
-
-Apply or convert a modifier before export when its generated geometry must appear in
-Spine. The warning does not automatically apply modifiers because topology-changing
-modifier evaluation requires a separate lineage-preserving geometry pipeline.
-
-## Normal UV material bake routing
-
-Version 0.125.0 also keeps conservatively traversed muted shader nodes as advisory
-findings and allows audited `BSDF_GLOSSY` materials to use the existing Cycles `COMBINED`
-object-bake route. This preserves Normal / UV Segments mesh topology while converting the
-visible Blender material result into a PNG for Spine.
-
-The real `coin_star.blend` acceptance asset is required to export through:
+Normal / UV Segments supports six signed world-axis projections plus two active-camera
+rig-root choices:
 
 ```text
-NORMAL_UV_SEGMENTS
-ORIGINAL geometry
-OBJECT_BAKE
-COMBINED
++X
+-X
++Y
+-Y
++Z
+-Z
+Active Camera — Object Root Bone
+Active Camera — Camera Root Bone
 ```
 
-## Depth Camera Projection baseline
+The two Active Camera modes share evaluated camera-projected geometry and material-bake
+input. Object Root keeps each Blender Object Origin as its Spine pivot and uses per-depth
+inverse setup bones. Camera Root places the main bone at camera-space zero and uses one
+rigid camera-depth layer.
 
-Depth Camera Projection uses Farthest Visible Point as the public relief base. Generated
-rig offsets start at zero on the farthest visible surface and extend only toward the
-camera. The hidden Object Origin policy is implemented for future use and fails closed
-when the origin is not behind the complete visible surface.
+Depth Camera Projection builds a bounded visible relief surface and can optionally retain
+parallax reserve surfaces with `Parallax Horizon Angle`.
 
-Version 0.90.0 added `Parallax Horizon Angle`. The compatibility default is `0°`, which
-preserves the established single FRONT attachment. Positive values traverse adjacent
-source faces by accumulated unsigned dihedral angle, assign hidden retained faces to
-fitted Perspective or Orthographic virtual camera views, and emit face-isolated reserve
-textures and weighted mesh attachments before the FRONT slot. FRONT and reserve views
-share one generated rig, keep independent crop layouts, support texture sequences, and
-participate in the same atomic output transaction.
+## User documentation
 
-Development journals and temporary Rewrite milestone documents are intentionally not part
-of the public documentation set. Permanent behavior belongs in these documents and in
-executable tests.
+- [Installation](installation.md) — installation, update, local build, and archive validation.
+- [Usage](usage.md) — complete Blender-to-Spine workflow for all public export modes.
+- [Settings Reference](settings-reference.md) — public Scene and object settings.
+- [Output Format](output-format.md) — JSON, textures, sequences, rig ownership, naming, and atomic output.
+- [Troubleshooting](troubleshooting.md) — readiness diagnostics, camera/UV/material issues, and output recovery.
+- [Examples](../examples/examples.md) — repository examples and validation goals.
+
+## Developer documentation
+
+- [Architecture](architecture.md) — package boundaries and production data flow.
+- [Rig Profiles](rig-profiles.md) — current generated rig topology and setup-pose policies.
+- [Testing](testing.md) — pure Python, real bpy, Blender headless, and packaging gates.
+- [Contributing](CONTRIBUTING.md) — coding, Blender-state, testing, and documentation requirements.
+
+## Documentation policy
+
+Maintained documents must:
+
+1. be written in English;
+2. describe the current extension behavior;
+3. avoid release-history sections and superseded implementation narratives;
+4. link to executable tests when behavior needs regression evidence;
+5. match the current manifest version and public UI labels;
+6. avoid documenting hidden development paths as ordinary public UI features.
