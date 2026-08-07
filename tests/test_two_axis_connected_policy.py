@@ -161,7 +161,6 @@ def test_connected_two_axis_builds_global_and_per_object_controls():
         bones["First_main"].x,
         bones["First_main"].y,
     ) == ("all_objects_layer_1", 10.0, 20.0)
-    # The two-axis wrapper owns +200 setup Y for relative Z=2, leaving +90 local Y.
     assert (
         bones["Second_main"].parent,
         bones["Second_main"].x,
@@ -190,7 +189,6 @@ def test_connected_two_axis_schedule_is_layer_grouped_and_semantically_ordered()
         schedule.global_scale_depth,
         schedule.global_rotation_y,
     ) == (0, 1, 2, 3, 4)
-    # Assignment tuples preserve source-object order while order values come from layer.
     assert schedule.object_rotation_x == (("first", 6), ("second", 5))
     assert schedule.object_scale_depth == (("first", 12), ("second", 11))
     assert schedule.object_rotation_y == (("first", 14), ("second", 13))
@@ -274,9 +272,10 @@ def test_production_adapter_routes_connected_two_axis_to_profile_aware_builder()
     assert "profile=prepared[0].rig.profile" in source
 
 
-def test_public_settings_document_connected_two_axis_support():
+def test_public_settings_keep_connected_composition_as_explicit_development_scope():
     source = SETTINGS.read_text(encoding="utf-8")
 
     assert "TWO_AXIS_ROTATION_SCALE" in source
     assert "Connected composition remains blocked" not in source
-    assert "five-phase connected" in source
+    assert "explicit development composition paths" in source
+    assert "Target/profile/composition compatibility is validated" in source
