@@ -32,7 +32,10 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.projection import (
     A1ProjectionDirection,
     A1ProjectionError,
 )
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import A1RigProfile
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import (
+    A1RigProfile,
+    A1RigSetupPoseMode,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import SpineJsonTarget
 
 
@@ -139,11 +142,7 @@ def _expected(
 
 @pytest.mark.parametrize(
     "direction",
-    tuple(
-        item
-        for item in A1ProjectionDirection
-        if item is not A1ProjectionDirection.ACTIVE_CAMERA
-    ),
+    tuple(item for item in A1ProjectionDirection if item.axis_aligned),
 )
 def test_axis_projection_transforms_geometry_normals_and_origin(
     direction: A1ProjectionDirection,
@@ -168,7 +167,6 @@ def test_axis_projection_transforms_geometry_normals_and_origin(
     assert result.snapshot.loops == source.loops
     assert result.snapshot.uv_layer_names == source.uv_layer_names
     assert tuple(vertex.position for vertex in source.vertices) == original_positions
-
 
 
 def test_positive_z_is_exact_compatibility_path() -> None:
@@ -208,14 +206,21 @@ def test_non_default_axis_creates_valid_replacement(
     assert result.snapshot.object_name == source.object_name
 
 
-
-def test_axis_projection_rejects_active_camera_without_camera_frame() -> None:
-    with pytest.raises(A1ProjectionError, match="ACTIVE_CAMERA"):
-        project_a1_mesh_snapshot_axis(
-            _snapshot(),
-            A1ProjectionDirection.ACTIVE_CAMERA,
-        )
-
+@pytest.mark.parametrize(
+    "direction",
+    (
+        A1ProjectionDirection.ACTIVE_CAMERA,
+        A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT,
+    ),
+)
+def test_axis_projection_rejects_active_camera_without_camera_frame(
+    direction: A1ProjectionDirection,
+) -> None:
+    with pytest.raises(
+        A1ProjectionError,
+        match="Active Camera projection requires an evaluated Blender camera frame",
+    ):
+        project_a1_mesh_snapshot_axis(_snapshot(), direction)
 
 
 def test_axis_projection_rejects_non_normalized_world_matrix() -> None:
@@ -255,7 +260,6 @@ def test_axis_projection_rejects_non_normalized_world_matrix() -> None:
         )
 
 
-
 def _export_settings() -> ExportSettings:
     return ExportSettings(
         texture_width=32,
@@ -266,22 +270,34 @@ def _export_settings() -> ExportSettings:
     )
 
 
-
 def test_single_object_settings_default_to_positive_z() -> None:
     settings = A1SingleObjectExportSettings(export=_export_settings())
 
     assert settings.projection_direction is A1ProjectionDirection.POSITIVE_Z
 
 
-
-def test_single_object_settings_accept_all_typed_projection_directions() -> None:
-    for direction in A1ProjectionDirection:
+def test_single_object_settings_preserve_axes_and_object_root_camera() -> None:
+    directions = tuple(
+        direction
+        for direction in A1ProjectionDirection
+        if not direction.camera_root
+    )
+    for direction in directions:
         settings = A1SingleObjectExportSettings(
             export=_export_settings(),
             projection_direction=direction,
         )
         assert settings.projection_direction is direction
 
+
+def test_single_object_settings_normalize_camera_root_to_shared_camera_geometry() -> None:
+    settings = A1SingleObjectExportSettings(
+        export=_export_settings(),
+        projection_direction=A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT,
+    )
+
+    assert settings.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
+    assert settings.rig_setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
 
 
 def test_single_object_settings_reject_untyped_projection_direction() -> None:
