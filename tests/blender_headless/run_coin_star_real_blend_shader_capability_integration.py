@@ -1,7 +1,7 @@
 """Audit the real coin asset without mutating its Blender scene or shader graph.
 
 Blender must open the exact caller-provided ``coin_star.blend`` before this script runs.
-The regression reproduces the BlendKit ``Gold coin`` material that contains a muted
+The regression reproduces the BlendKit coin material that contains a muted
 ``Add Shader`` with two same-named inputs. Recursive traversal conservatively visits all
 inputs, so that advisory must not mask the material's genuine camera-context findings.
 Fresnel, Generated coordinates, and Glossy surface contribution are all resolved by the
@@ -43,7 +43,6 @@ from run_bake_integration import _assert  # noqa: E402
 
 
 _EXPECTED_OBJECT_NAME = "Game Gold Coin"
-_EXPECTED_MATERIAL_NAME = "Gold coin"
 _RENDER_TARGET = "CYCLES"
 _MUTED_ADVISORY = (
     "Muted node 'Add Shader' has no unambiguous internal bypass for output "
@@ -212,6 +211,13 @@ def _require_loaded_blend(expected_blend: str) -> str:
 
 
 def _require_source_object() -> bpy.types.Object:
+    """Resolve the real coin by stable object identity, not material display name.
+
+    The shader-capability gate below validates the material by graph semantics. Blender
+    material names are artist-facing labels and may be renamed without changing the
+    fixture or exporter behavior, so they are intentionally not part of fixture identity.
+    """
+
     source = bpy.data.objects.get(_EXPECTED_OBJECT_NAME)
     _assert(source is not None, f"missing real object: {_EXPECTED_OBJECT_NAME}")
     _assert(source.type == "MESH", f"{_EXPECTED_OBJECT_NAME} is not a MESH object")
@@ -221,16 +227,14 @@ def _require_source_object() -> bpy.types.Object:
     )
     material = source.material_slots[0].material
     _assert(material is not None, "real coin material slot is empty")
-    _assert(
-        material.name_full == _EXPECTED_MATERIAL_NAME,
-        f"unexpected real coin material: {material.name_full}",
-    )
     return source
 
 
 def _run(expected_blend: str) -> None:
     loaded = _require_loaded_blend(expected_blend)
     source = _require_source_object()
+    material = source.material_slots[0].material
+    _assert(material is not None, "real coin material slot became empty")
 
     scene_before = _scene_fingerprint()
     object_before = _object_fingerprint(source)
@@ -322,7 +326,7 @@ def _run(expected_blend: str) -> None:
 
     print(
         "[COIN-REAL-SHADER-CAPABILITY] PASS "
-        f"blend={loaded} object={source.name_full!r} material={_EXPECTED_MATERIAL_NAME!r} "
+        f"blend={loaded} object={source.name_full!r} material={material.name_full!r} "
         f"nodes={len(graph.reachable_nodes)} links={len(graph.reachable_links)} "
         f"findings={len(findings)} capability={capability.value} "
         "muted_fallback=advisory source_context=FRESNEL+Generated+2xBSDF_GLOSSY "
