@@ -21,8 +21,11 @@ def test_publication_wrapper_runs_all_real_coin_normal_geometry_gates() -> None:
         "projection_gate._run(expected_blend)",
         "camera_root_gate._run(expected_blend)",
         "object_root_gate._run(expected_blend)",
-        "ShaderBakeCapability.LOCAL_UV_SAFE",
+        "ShaderBakeCapability.CAMERA_RENDER_REQUIRED",
         "_normal_uv_blocking_camera_findings(audits)",
+        'finding.code == "SOURCE_OR_CAMERA_CONTEXT"',
+        'finding.node_type == "FRESNEL"',
+        "bake_route=CAMERA_COMBINED",
         "source=restored",
     ):
         assert marker in source
@@ -41,9 +44,12 @@ def test_publication_wrapper_restores_original_material_in_finally() -> None:
     assert "_datablock_fingerprint() == datablocks_before" in source
 
 
-def test_publication_override_has_no_displacement_path() -> None:
+def test_publication_override_exercises_camera_combined_without_displacement() -> None:
     source = RUNNER.read_text(encoding="utf-8")
 
-    assert 'nodes.new(type="ShaderNodeEmission")' in source
-    assert 'node_tree.links.new(emission.outputs["Emission"], output.inputs["Surface"])' in source
+    assert 'nodes.new(type="ShaderNodeFresnel")' in source
+    assert 'nodes.new(type="ShaderNodeBsdfDiffuse")' in source
+    assert 'node_tree.links.new(fresnel.outputs["Fac"], diffuse.inputs["Color"])' in source
+    assert 'node_tree.links.new(diffuse.outputs["BSDF"], output.inputs["Surface"])' in source
     assert 'output.inputs["Displacement"]' not in source
+    assert 'nodes.new(type="ShaderNodeEmission")' not in source
