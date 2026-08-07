@@ -128,8 +128,9 @@ def test_temporary_rewrite_documents_are_not_public_docs() -> None:
     assert not (DOCS / "private-release-manifest.example.json").exists()
 
 
-def test_readme_preserves_visual_assets_badges_counters_and_video() -> None:
+def test_readme_presents_current_product_without_stale_ui_media() -> None:
     source = _read(README)
+
     required_fragments = (
         "assets/cover.png",
         "img.shields.io/badge/License-GPLv3",
@@ -137,14 +138,32 @@ def test_readme_preserves_visual_assets_badges_counters_and_video() -> None:
         "img.shields.io/github/downloads/",
         "Blender-5.2%2B",
         "patreon.com/MaximSokolenko",
-        "youtube.com/watch?v=f_1Zc2qCz44",
-        "img.youtube.com/vi/f_1Zc2qCz44/maxresdefault.jpg",
-        "assets/ui_addon.png",
+        "## What the exporter does",
+        "## Export modes",
+        "Active Camera — Object Root Bone",
+        "Active Camera — Camera Root Bone",
+        "## Rig and animation controls",
+        "## Geometry, segmentation, and UV",
+        "## Materials and baking",
+        "## Texture sequences",
+        "## Analyze and diagnostics",
+        "## Output and transaction safety",
+        "## Source-scene safety",
     )
     missing = tuple(fragment for fragment in required_fragments if fragment not in source)
-    assert not missing, f"README visual contract is missing: {missing}"
+    assert not missing, f"README current-product contract is missing: {missing}"
+
+    forbidden_fragments = (
+        "img.youtube.com/",
+        "youtube.com/watch?v=",
+        "Click to watch the video",
+        "assets/ui_addon.png",
+        "## Interface",
+    )
+    stale = tuple(fragment for fragment in forbidden_fragments if fragment in source)
+    assert not stale, f"README still contains stale media/UI presentation: {stale}"
+
     assert (ROOT / "assets" / "cover.png").is_file()
-    assert (ROOT / "assets" / "ui_addon.png").is_file()
 
 
 def test_public_documentation_relative_links_and_images_exist() -> None:
