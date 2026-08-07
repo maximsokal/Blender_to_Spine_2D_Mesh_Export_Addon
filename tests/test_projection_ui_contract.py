@@ -31,6 +31,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.projection import (
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import (
     A1RigProfile,
+    A1RigSetupPoseMode,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import (
     DEFAULT_SPINE_JSON_TARGET,
@@ -103,7 +104,7 @@ def test_scene_projection_resolver_fails_closed_for_invalid_values(raw: object) 
         _resolve_projection_direction(scene)
 
 
-def test_normal_uv_settings_preserve_every_selected_projection_direction() -> None:
+def test_normal_uv_ui_preserves_selection_and_application_normalizes_camera_root() -> None:
     source = _object_profile()
 
     for direction in A1ProjectionDirection:
@@ -111,7 +112,11 @@ def test_normal_uv_settings_preserve_every_selected_projection_direction() -> No
 
         assert _effective_projection_direction(scene) is direction
         settings = _settings_from_profiles(source, scene)
-        assert settings.projection_direction is direction
+        if direction.camera_root:
+            assert settings.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
+            assert settings.rig_setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
+        else:
+            assert settings.projection_direction is direction
 
 
 @pytest.mark.parametrize(
@@ -162,7 +167,8 @@ def test_public_panel_draws_projection_only_for_normal_uv_and_reset_restores_z()
     assert '"spine2d_projection_direction"' in source
     assert "_draw_projection_direction(layout, scene)" in source
     assert "A1TextureExportMode.CAMERA_PROJECTION.value" in source
-    assert "A1ProjectionDirection.ACTIVE_CAMERA" in source
+    assert "direction.active_camera" in source
+    assert "direction.camera_root" in source
     assert (
         "context.scene.spine2d_projection_direction = (" in source
         and "A1ProjectionDirection.POSITIVE_Z.value" in source
