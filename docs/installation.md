@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide describes Blender to Spine2D Mesh Exporter **0.128.0**.
+This guide describes Blender to Spine2D Mesh Exporter **0.129.0**.
 
 ## Requirements
 
@@ -19,7 +19,7 @@ The minimum Blender version is declared in
 2. Open Blender 5.2 or newer.
 3. Open **Edit > Preferences > Extensions**.
 4. Choose **Install from Disk**.
-5. Select `blender_to_spine2d_mesh_exporter-0.128.0.zip`.
+5. Select `blender_to_spine2d_mesh_exporter-0.129.0.zip`.
 6. Enable **Blender to Spine2D Mesh Exporter**.
 7. Open a 3D View, press `N`, and select the extension tab.
 
@@ -63,6 +63,10 @@ Active Camera — Camera Root Bone
 `ACTIVE_CAMERA` remains the persisted ID for Object Root. Camera Root uses the separate
 `ACTIVE_CAMERA_CAMERA_ROOT` ID.
 
+The **Paths and Spine 2D version** foldout contains Spine target and output paths. The
+scene-wide **Texture size** control is located in **Bake**, before the frame/sequence
+controls. Moving the control does not change the persisted RNA property or saved value.
+
 ## Active Camera requirements
 
 Both Normal / UV Active Camera modes require a valid active Perspective or Orthographic
@@ -97,7 +101,8 @@ Current Scene settings schema: **8**.
 
 Migration preserves valid saved settings and initializes missing parallax data to `0°`.
 Existing persisted `ACTIVE_CAMERA` values continue to select Active Camera Object Root;
-Camera Root is opt-in through its separate persisted ID.
+Camera Root is opt-in through its separate persisted ID. `spine2d_texture_size` remains the
+same Scene property; only its UI location changed to the Bake foldout.
 
 ## Build locally
 
@@ -107,7 +112,7 @@ From the repository root in PowerShell:
 $Blender = "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 $SourceDir = ".\Blender_to_Spine2D_Mesh_Exporter"
 $DistDir = ".\dist"
-$Archive = Join-Path $DistDir "blender_to_spine2d_mesh_exporter-0.128.0.zip"
+$Archive = Join-Path $DistDir "blender_to_spine2d_mesh_exporter-0.129.0.zip"
 
 if (-not (Test-Path -LiteralPath $Blender -PathType Leaf)) {
     throw "Blender executable not found: $Blender"
@@ -136,21 +141,22 @@ Get-FileHash -LiteralPath $Archive -Algorithm SHA256
 Expected archive:
 
 ```text
-dist/blender_to_spine2d_mesh_exporter-0.128.0.zip
+dist/blender_to_spine2d_mesh_exporter-0.129.0.zip
 ```
 
 ## After installation
 
 Use a representative project and verify:
 
-1. Analyze completes without unexpected blockers.
-2. Signed-axis Normal export imports correctly.
-3. Active Camera Object Root matches the Blender camera setup pose without stretching.
-4. Object Root X/Y controls pivot around the projected Blender Object Origin.
-5. Active Camera Camera Root keeps correct camera-relative placement.
-6. Camera Projection produces a flat camera-facing attachment.
-7. Depth Camera Projection produces the expected FRONT relief and optional reserve views.
-8. The generated JSON imports into the exact selected Spine target.
+1. `Texture size` appears in Bake and not in Paths and Spine 2D version.
+2. Analyze completes without unexpected blockers.
+3. Signed-axis Normal export imports correctly.
+4. Active Camera Object Root matches the Blender camera setup pose without stretching.
+5. Object Root X/Y controls pivot around the projected Blender Object Origin.
+6. Active Camera Camera Root keeps correct camera-relative placement.
+7. Camera Projection produces a flat camera-facing attachment.
+8. Depth Camera Projection produces the expected FRONT relief and optional reserve views.
+9. The generated JSON imports into the exact selected Spine target.
 
 Continue with [Usage](usage.md), [Settings Reference](settings-reference.md), and
 [Testing](testing.md).
