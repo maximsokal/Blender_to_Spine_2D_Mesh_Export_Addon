@@ -3,7 +3,7 @@
 The `examples` directory contains Blender scenes for learning and manual validation of the
 current exporter. Examples do not replace automated regression tests.
 
-Use Blender 5.2 or newer with Blender to Spine2D Mesh Exporter **0.128.0**.
+Use Blender 5.2 or newer with Blender to Spine2D Mesh Exporter **0.129.0**.
 
 ## General workflow
 
@@ -14,10 +14,11 @@ Use Blender 5.2 or newer with Blender to Spine2D Mesh Exporter **0.128.0**.
 5. Choose a writable JSON directory and `images/` subfolder.
 6. Choose Export Mode and, for Normal / UV Segments, Projection Direction.
 7. Choose the exact Spine target.
-8. Run Analyze and review diagnostics.
-9. Export.
-10. Import the JSON and matching textures into the selected Spine version.
-11. Verify setup pose, UV alignment, generated controls, slot order, and sequence timing.
+8. Open **Bake** and configure shared Texture size plus frame/sequence settings.
+9. Run Analyze and review diagnostics.
+10. Export.
+11. Import the JSON and matching textures into the selected Spine version.
+12. Verify setup pose, UV alignment, generated controls, slot order, and sequence timing.
 
 Never combine JSON from one export run with textures from another.
 
@@ -42,7 +43,7 @@ Suggested baseline:
 ```text
 Export Mode:       Normal / UV Segments
 Projection:        +Z
-Texture Size:      128 or 256
+Bake / Texture size: 128 or 256
 Seam Maker:        Auto
 Seed Angle Limit:  30
 Frames:            0
@@ -98,7 +99,8 @@ Good for:
 - static versus sequence output;
 - deciding between Normal and rendered-camera representations.
 
-Start with a static low-resolution export before increasing sequence frame count.
+Start with a static low-resolution export by setting Texture size in Bake before increasing
+sequence frame count.
 
 ## Multi-object text
 
@@ -111,6 +113,7 @@ examples/03_spine_text_multi/text_spine.blend
 Good for:
 
 - public selected-object standalone export;
+- one shared Scene-level Bake Texture size;
 - per-object Frames/Start settings;
 - output namespace and atomic transaction checks.
 
