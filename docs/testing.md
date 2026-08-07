@@ -1,7 +1,7 @@
 # Testing and Release Validation
 
 This document defines the current validation policy for Blender to Spine2D Mesh Exporter
-**0.128.0**.
+**0.129.0**.
 
 A focused test is not a release claim. Release evidence must be generated from one exact
 clean commit and the archive built from that same commit.
@@ -17,6 +17,7 @@ clean commit and the archive built from that same commit.
 - Active Camera — Object Root Bone.
 - Active Camera — Camera Root Bone.
 - Static and per-object texture sequences.
+- Scene-level Texture size owned by the Bake foldout.
 - Depth parallax reserve views.
 - Atomic output and Blender-state restoration.
 - Scene settings schema 8.
@@ -78,12 +79,23 @@ Important current contracts include:
 - neutral camera-facing setup constraints;
 - Camera Root single rigid depth-layer ownership;
 - material-bake geometry independence from Normal projection direction;
+- Texture size rendered by the ordered Bake foldout and absent from Paths and Spine 2D version;
+- Texture size remaining Scene-owned rather than becoming a per-object sequence setting;
 - loop-level UV identity and weighted attachment construction;
 - target-specific Spine version adaptation;
 - sequence ownership;
 - parallax reserve topology/camera planning;
 - Blender-state/resource lifecycle contracts;
 - manifest/documentation version synchronization.
+
+Focused UI coverage includes:
+
+```text
+tests/test_texture_size_bake_ui.py
+tests/test_documentation_contract.py
+tests/test_manifest_version.py
+tests/test_extension_version_0129.py
+```
 
 Focused Object Root tests include:
 
@@ -216,11 +228,11 @@ if ($LASTEXITCODE -ne 0) { throw "Real bpy suite failed" }
 
 A missing real-bpy environment must not be reported as successful release validation.
 
-## Build 0.128.0
+## Build 0.129.0
 
 ```powershell
 $SourceDir = ".\Blender_to_Spine2D_Mesh_Exporter"
-$Archive = ".\dist\blender_to_spine2d_mesh_exporter-0.128.0.zip"
+$Archive = ".\dist\blender_to_spine2d_mesh_exporter-0.129.0.zip"
 
 New-Item -ItemType Directory -Force ".\dist" | Out-Null
 Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue
@@ -241,6 +253,16 @@ Get-FileHash -LiteralPath $Archive -Algorithm SHA256
 The archive root must contain `blender_manifest.toml` and `__init__.py` and must not include
 repository-only tests, docs, legacy runtime sources, bytecode, or nested archives excluded
 by the manifest build rules.
+
+## Manual Blender UI validation
+
+Before packaging, verify in a saved `.blend`:
+
+1. Expand **Paths and Spine 2D version** and confirm `Texture size` is absent.
+2. Expand **Bake** and confirm `Texture size` is the first setting.
+3. Change Texture size and confirm Analyze becomes stale/invalidated.
+4. Confirm Frames/Start remain per-object in selected-object export while Texture size is shared.
+5. Reset settings and confirm Texture size returns to `1024`.
 
 ## Manual Spine validation
 
@@ -268,7 +290,7 @@ Record:
 - real-bpy result;
 - archive path, size, and SHA256;
 - Blender extension validation result;
-- manual Spine validation notes.
+- manual Blender UI and Spine validation notes.
 
 Never claim a test passed on a commit that was not the exact commit used to generate the
 reported output.
