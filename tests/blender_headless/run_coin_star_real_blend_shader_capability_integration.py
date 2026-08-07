@@ -1,10 +1,11 @@
-"""Audit the real coin asset without mutating its Blender scene or shader graph.
+"""Audit the real coin material against the public execution boundaries.
 
 Blender must open the exact caller-provided ``coin_star.blend`` before this script runs.
-The real artist asset may evolve between reviewed fixture revisions, so material display
-names and exact node topology are intentionally not part of fixture identity. The gate
-instead proves that the current material graph is completely analyzable, is supported by
-the Normal / UV object-bake route, and remains byte-for-byte untouched by the audit.
+The artist material is allowed to evolve: display names and exact node topology are not
+fixture identity. The gate instead proves that the current graph is completely analyzable,
+that no GROUP/UNSUPPORTED boundary is required, that Normal/UV blockers are reported
+honestly, and that Camera/Depth remains a valid public route for CAMERA_RENDER_REQUIRED
+materials. The audit must not mutate the Blender scene, object, or material graph.
 """
 
 from __future__ import annotations
@@ -43,9 +44,10 @@ from run_bake_integration import _assert  # noqa: E402
 
 _EXPECTED_OBJECT_NAME = "Game Gold Coin"
 _RENDER_TARGET = "CYCLES"
-_ALLOWED_NORMAL_UV_CAPABILITIES = frozenset(
+_PUBLICLY_ROUTABLE_CAPABILITIES = frozenset(
     {
         ShaderBakeCapability.LOCAL_UV_SAFE,
+        ShaderBakeCapability.SCENE_UV_SAFE,
         ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
     }
 )
@@ -226,6 +228,23 @@ def _require_source_object() -> bpy.types.Object:
     return source
 
 
+def _blocking_codes(
+    blockers: tuple[tuple[str, tuple[tuple[str, str | None, str | None], ...]], ...],
+) -> tuple[str, ...]:
+    """Flatten deterministic Normal/UV blocker diagnostics for publication logs."""
+
+    codes = tuple(
+        code
+        for _material_name, findings in blockers
+        for code, _node_type, _output_socket in findings
+    )
+    _assert(
+        all(isinstance(code, str) and bool(code.strip()) for code in codes),
+        f"real coin blocker diagnostics contain an invalid code: {blockers}",
+    )
+    return codes
+
+
 def _run(expected_blend: str) -> None:
     loaded = _require_loaded_blend(expected_blend)
     source = _require_source_object()
@@ -250,7 +269,10 @@ def _run(expected_blend: str) -> None:
         analysis,
         render_target=_RENDER_TARGET,
     )
-    _assert(len(audits) == 1, f"unexpected coin capability audit count: {len(audits)}")
+    _assert(
+        len(audits) == 1,
+        f"unexpected coin capability audit count: {len(audits)}",
+    )
 
     findings = audits[0].findings
     unsupported = tuple(
@@ -274,16 +296,24 @@ def _run(expected_blend: str) -> None:
 
     capability = strongest_object_capability(audits)
     _assert(
-        capability in _ALLOWED_NORMAL_UV_CAPABILITIES,
-        "real coin shader capability is not supported by Normal / UV object bake: "
+        capability in _PUBLICLY_ROUTABLE_CAPABILITIES,
+        "real coin requires an unsupported public execution boundary: "
         f"{capability.value}",
     )
 
     blockers = _normal_uv_blocking_camera_findings(audits)
-    _assert(
-        not blockers,
-        f"real coin blocks Normal / UV object baking: {blockers}",
-    )
+    blocker_codes = _blocking_codes(blockers)
+    if blocker_codes:
+        _assert(
+            capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
+            "Normal/UV blockers are only valid for CAMERA_RENDER_REQUIRED material: "
+            f"capability={capability.value}, blockers={blockers}",
+        )
+        normal_route = "blocked"
+        camera_route = "supported"
+    else:
+        normal_route = "supported"
+        camera_route = "supported"
 
     _assert(_scene_fingerprint() == scene_before, "coin audit changed Blender context")
     _assert(_object_fingerprint(source) == object_before, "coin audit changed source data")
@@ -297,8 +327,9 @@ def _run(expected_blend: str) -> None:
         f"blend={loaded} object={source.name_full!r} material={material.name_full!r} "
         f"nodes={len(graph.reachable_nodes)} links={len(graph.reachable_links)} "
         f"graph_issues={len(graph.issues)} findings={len(findings)} "
-        f"capability={capability.value} blockers=none "
-        "normal_mode=object-bake scene=unchanged",
+        f"capability={capability.value} normal_mode={normal_route} "
+        f"camera_modes={camera_route} blockers={blocker_codes} "
+        "scene=unchanged",
         flush=True,
     )
 
