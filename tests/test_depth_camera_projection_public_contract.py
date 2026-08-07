@@ -256,7 +256,7 @@ def test_scene_schema_and_manifest_are_current_release() -> None:
     manifest = tomllib.loads(_read(MANIFEST))
     migration = _read(SCENE_MIGRATION)
 
-    assert manifest["version"] == "0.125.0"
+    assert manifest["version"] == "0.129.0"
     assert manifest["blender_version_min"] == "5.2.0"
     assert "CURRENT_SETTINGS_SCHEMA_VERSION = 8" in migration
     assert "_initialize_depth_defaults(" in migration
