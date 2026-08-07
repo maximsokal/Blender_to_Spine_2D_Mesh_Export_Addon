@@ -25,18 +25,23 @@ def test_real_coin_fixture_uses_stable_object_identity_only() -> None:
     assert 'material is not None, "real coin material slot is empty"' in source
 
 
-def test_real_coin_material_is_validated_by_current_capability_contract() -> None:
+def test_real_coin_material_is_validated_by_public_route_capability() -> None:
     source = RUNNER.read_text(encoding="utf-8")
 
     for marker in (
         "ShaderBakeCapability.LOCAL_UV_SAFE",
+        "ShaderBakeCapability.SCENE_UV_SAFE",
         "ShaderBakeCapability.CAMERA_RENDER_REQUIRED",
         "ShaderBakeCapability.UNSUPPORTED",
         'finding.code == "GRAPH_ANALYSIS_INCOMPLETE"',
         "strongest_object_capability(audits)",
         "_normal_uv_blocking_camera_findings(audits)",
-        "capability in _ALLOWED_NORMAL_UV_CAPABILITIES",
+        "capability in _PUBLICLY_ROUTABLE_CAPABILITIES",
+        "capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED",
+        'normal_route = "blocked"',
+        'camera_route = "supported"',
         "material={material.name_full!r}",
+        "blockers={blocker_codes}",
         "scene=unchanged",
     ):
         assert marker in source
@@ -46,5 +51,7 @@ def test_real_coin_material_is_validated_by_current_capability_contract() -> Non
         'finding.node_type == "BSDF_GLOSSY"',
         'finding.output_socket == "Generated"',
         "muted_fallback=advisory",
+        "capability in _ALLOWED_NORMAL_UV_CAPABILITIES",
+        "blockers=none normal_mode=object-bake",
     ):
         assert stale_fixture_marker not in source
