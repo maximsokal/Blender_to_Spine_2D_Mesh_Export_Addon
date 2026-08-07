@@ -221,6 +221,27 @@ def test_documentation_matches_manifest_and_current_defaults() -> None:
     assert "PREPROJECTED_SCREEN" in rig_profiles
 
 
+def test_texture_size_is_documented_as_bake_owned_setting() -> None:
+    settings = _read(DOCS / "settings-reference.md")
+    export_start = settings.index("## Export")
+    rig_start = settings.index("## Rig")
+    bake_start = settings.index("## Bake")
+    texture_start = settings.index("### Texture Size")
+
+    assert "### Texture Size" not in settings[export_start:rig_start]
+    assert texture_start > bake_start
+    assert "Scene-level" in settings[texture_start:]
+    assert "Paths and Spine 2D version" in settings[texture_start:]
+
+    usage = _read(DOCS / "usage.md")
+    assert "## Configure Bake" in usage
+    assert "### Texture size" in usage
+    assert usage.index("### Texture size") > usage.index("## Configure Bake")
+
+    readme = _read(README)
+    assert "The **Bake** foldout owns the scene-wide **Texture size** setting" in readme
+
+
 def test_public_docs_do_not_describe_blender_44_as_supported() -> None:
     violations: list[str] = []
     for path in _public_document_paths():
