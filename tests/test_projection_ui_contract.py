@@ -104,19 +104,30 @@ def test_scene_projection_resolver_fails_closed_for_invalid_values(raw: object) 
         _resolve_projection_direction(scene)
 
 
-def test_normal_uv_ui_preserves_selection_and_application_normalizes_camera_root() -> None:
+def test_normal_uv_ui_selection_is_preserved_until_application_normalization() -> None:
     source = _object_profile()
 
     for direction in A1ProjectionDirection:
         scene = _scene_profile(direction)
 
-        assert _effective_projection_direction(scene) is direction
+        # Scene capture owns the exact persisted UI choice. The application-facing
+        # geometry route deliberately collapses both Active Camera root modes onto the
+        # same camera projection while carrying Camera Root ownership through setup mode.
+        assert scene.projection_direction is direction
+
+        expected_geometry_direction = (
+            A1ProjectionDirection.ACTIVE_CAMERA
+            if direction.camera_root
+            else direction
+        )
+        assert _effective_projection_direction(scene) is expected_geometry_direction
+
         settings = _settings_from_profiles(source, scene)
+        assert settings.projection_direction is expected_geometry_direction
         if direction.camera_root:
-            assert settings.projection_direction is A1ProjectionDirection.ACTIVE_CAMERA
             assert settings.rig_setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
         else:
-            assert settings.projection_direction is direction
+            assert settings.rig_setup_pose_mode is A1RigSetupPoseMode.PRESERVE_COMPOSITION
 
 
 @pytest.mark.parametrize(
