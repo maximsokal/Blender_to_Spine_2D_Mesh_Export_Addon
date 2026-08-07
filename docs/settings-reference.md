@@ -1,7 +1,7 @@
 # Settings Reference
 
 This document describes the maintained public settings in Blender to Spine2D Mesh Exporter
-**0.128.0**. Fresh-Scene defaults are listed below. The current Scene settings schema is
+**0.129.0**. Fresh-Scene defaults are listed below. The current Scene settings schema is
 **8**.
 
 ## Export
@@ -83,14 +83,6 @@ Directory for the final Spine JSON. Blender-relative paths resolve through
 | Relative path | `images/` |
 
 The path is normalized below the JSON output directory.
-
-### Texture Size
-
-| Type | Range | Default |
-| --- | --- | --- |
-| Even integer | 64 through 4096 | 1024 |
-
-Controls semantic object-bake textures and rendered-camera targets.
 
 ## Rig
 
@@ -244,6 +236,19 @@ Blender displays degrees and persists radians.
 
 ## Bake
 
+### Texture Size
+
+| Type | Range | Default |
+| --- | --- | --- |
+| Even integer | 64 through 4096 | 1024 |
+
+Controls semantic object-bake textures and rendered-camera targets. This is one Scene-level
+setting shared by all objects in the current export request. It appears first in the
+**Bake** foldout and no longer appears in **Paths and Spine 2D version**.
+
+Changing Texture Size invalidates cached readiness because it changes bake/render output
+resolution and camera-projection canvas dimensions.
+
 ### Frames and Start
 
 For selected-object export each Mesh stores independent timing.
@@ -252,6 +257,9 @@ For selected-object export each Mesh stores independent timing.
 Frames = 0  -> static texture at current frame
 Frames > 0  -> Loop texture sequence for that object
 ```
+
+Texture Size remains shared even though Frames and Start are per-object in selected-object
+export.
 
 ### Sequence FPS Override
 
@@ -294,3 +302,7 @@ Scene schema **8** preserves valid saved values and initializes missing Depth pa
 with a safe `0°` default. Persisted `ACTIVE_CAMERA` continues to mean **Active Camera —
 Object Root Bone**; the Camera Root mode uses the separate
 `ACTIVE_CAMERA_CAMERA_ROOT` identifier.
+
+`spine2d_texture_size` remains the same persisted Scene property in 0.129.0; only its visual
+owner moved from the paths/version foldout to Bake, so no Scene migration is required for
+this UI change.
