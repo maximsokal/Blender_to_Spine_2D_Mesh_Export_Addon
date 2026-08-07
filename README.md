@@ -9,7 +9,19 @@
   <img src="https://img.shields.io/github/v/release/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon" alt="Latest Release">
   <img src="https://img.shields.io/github/downloads/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon/total" alt="Total Downloads">
   <img src="https://img.shields.io/badge/Blender-5.2%2B-orange?logo=blender" alt="Blender 5.2 or newer">
+  <a href="https://patreon.com/MaximSokolenko">
+    <img src="https://img.shields.io/badge/Support-Patreon-orange.svg" alt="Support on Patreon">
+  </a>
 </p>
+
+<div align="center">
+  <a href="https://www.youtube.com/watch?v=f_1Zc2qCz44">
+    <img src="https://img.youtube.com/vi/f_1Zc2qCz44/maxresdefault.jpg"
+         alt="Blender to Spine2D Mesh Exporter demo"
+         style="width:100%;max-width:600px;">
+  </a>
+  <p><strong>Click to watch the video</strong></p>
+</div>
 
 Blender to Spine2D Mesh Exporter converts Blender Mesh objects into Spine JSON, weighted
 mesh attachments, baked or rendered textures, generated control rigs, and optional texture
@@ -146,6 +158,10 @@ native sequence metadata/timelines where supported.
 9. Run **Analyze** and review diagnostics.
 10. Export the current object or selected objects.
 11. Import the generated JSON and textures into the matching Spine version.
+
+## Interface
+
+![Blender to Spine2D Mesh Exporter interface](assets/ui_addon.png)
 
 ## Output
 
