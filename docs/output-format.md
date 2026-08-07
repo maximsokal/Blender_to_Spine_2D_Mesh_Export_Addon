@@ -1,7 +1,7 @@
 # Output Format
 
 This document describes the current output contract for Blender to Spine2D Mesh Exporter
-**0.128.0**.
+**0.129.0**.
 
 ## Spine targets
 
@@ -37,6 +37,9 @@ Typical result:
 D:/project/export/Hero_merged.json
 D:/project/export/images/Hero_Baked.png
 ```
+
+Texture resolution is controlled by the Scene-level `Texture size` setting in the **Bake**
+foldout. Its UI location does not change output naming or path semantics.
 
 ## Naming
 
