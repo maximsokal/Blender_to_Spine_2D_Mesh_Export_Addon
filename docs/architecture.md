@@ -1,7 +1,7 @@
 # Architecture
 
 This document describes the production architecture of Blender to Spine2D Mesh Exporter
-**0.128.0**.
+**0.129.0**.
 
 ## Package boundaries
 
@@ -80,6 +80,27 @@ Blender UI
 
 Later stages consume typed immutable settings rather than repeatedly reading mutable Scene
 RNA.
+
+## Ordered UI ownership
+
+`ui.py` owns the reusable base panel controls and operators. `ui_layout.py` owns the actual
+ordered production panel registered for successful extension startup and composes the
+user-facing foldouts in this order:
+
+```text
+Paths and Spine 2D version
+Rig
+Rewrite Generated Materials
+Cut
+Bake
+Analysis
+```
+
+Control placement is semantic rather than based on where the RNA property was originally
+defined. In 0.129.0, the existing Scene property `spine2d_texture_size` is drawn by the
+ordered **Bake** foldout before frame/sequence controls. It is not duplicated in **Paths
+and Spine 2D version**. The RNA property, reset value, readiness dependency, and downstream
+bake/render consumers remain unchanged.
 
 ## Object preparation
 
