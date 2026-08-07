@@ -15,6 +15,7 @@ CYRILLIC = re.compile(r"[\u0400-\u04FF]")
 MARKDOWN_LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 HTML_LINK = re.compile(r"(?:src|href)=[\"']([^\"']+)[\"']", re.IGNORECASE)
 SEMANTIC_VERSION = re.compile(r"\d+\.\d+\.\d+")
+EXTENSION_ZERO_VERSION = re.compile(r"\b0\.\d+\.\d+\b")
 
 
 def _public_document_paths() -> tuple[Path, ...]:
@@ -25,8 +26,29 @@ def _public_document_paths() -> tuple[Path, ...]:
     return tuple(dict.fromkeys(paths))
 
 
+def _maintained_markdown_paths() -> tuple[Path, ...]:
+    return tuple(
+        path
+        for path in _public_document_paths()
+        if path.suffix.lower() == ".md"
+    )
+
+
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8-sig")
+
+
+def _manifest_version() -> str:
+    source = _read(MANIFEST)
+    match = re.search(
+        r'^version\s*=\s*"([^"]+)"\s*$',
+        source,
+        re.MULTILINE,
+    )
+    assert match is not None, "Manifest version is missing"
+    version = match.group(1)
+    assert SEMANTIC_VERSION.fullmatch(version), version
+    return version
 
 
 def _local_targets(path: Path, source: str) -> tuple[str, ...]:
@@ -46,7 +68,7 @@ def _resolve_local_target(document: Path, raw_target: str) -> Path | None:
     return (document.parent / target).resolve(strict=False)
 
 
-def test_public_documentation_contains_no_cyrillic_characters():
+def test_public_documentation_contains_no_cyrillic_characters() -> None:
     violations: list[str] = []
     for path in _public_document_paths():
         source = _read(path)
@@ -55,18 +77,58 @@ def test_public_documentation_contains_no_cyrillic_characters():
             continue
         line = source.count("\n", 0, match.start()) + 1
         violations.append(f"{path.relative_to(ROOT)}:{line}: {match.group(0)!r}")
-    assert not violations, "Cyrillic characters found in public documentation:\n" + "\n".join(
-        violations
+
+    assert not violations, (
+        "Cyrillic characters found in public documentation:\n"
+        + "\n".join(violations)
     )
 
 
-def test_temporary_rewrite_documents_are_not_public_docs():
+def test_historical_release_documents_are_not_public_docs() -> None:
+    forbidden: list[str] = []
+    for path in _maintained_markdown_paths():
+        relative = path.relative_to(ROOT)
+        parts = relative.parts
+        if len(parts) >= 2 and parts[0] == "docs" and parts[1] == "releases":
+            forbidden.append(str(relative))
+            continue
+        if path.name == "CHANGELOG.md" or path.name.startswith("RELEASE_"):
+            forbidden.append(str(relative))
+
+    assert not forbidden, (
+        "Historical release documents remain in the maintained documentation tree:\n"
+        + "\n".join(forbidden)
+    )
+
+
+def test_public_docs_do_not_publish_superseded_extension_versions() -> None:
+    current_version = _manifest_version()
+    violations: list[str] = []
+
+    for path in _maintained_markdown_paths():
+        source = _read(path)
+        for match in EXTENSION_ZERO_VERSION.finditer(source):
+            version = match.group(0)
+            if version == current_version:
+                continue
+            line = source.count("\n", 0, match.start()) + 1
+            violations.append(
+                f"{path.relative_to(ROOT)}:{line}: superseded extension version {version}"
+            )
+
+    assert not violations, (
+        "Superseded extension versions found in current-product documentation:\n"
+        + "\n".join(violations)
+    )
+
+
+def test_temporary_rewrite_documents_are_not_public_docs() -> None:
     assert not tuple(DOCS.glob("REWRITE_*.md"))
     assert not (DOCS / "a1_fixture_manifest.example.json").exists()
     assert not (DOCS / "private-release-manifest.example.json").exists()
 
 
-def test_readme_preserves_visual_assets_badges_counters_and_video():
+def test_readme_preserves_visual_assets_badges_counters_and_video() -> None:
     source = _read(README)
     required_fragments = (
         "assets/cover.png",
@@ -85,7 +147,7 @@ def test_readme_preserves_visual_assets_badges_counters_and_video():
     assert (ROOT / "assets" / "ui_addon.png").is_file()
 
 
-def test_public_documentation_relative_links_and_images_exist():
+def test_public_documentation_relative_links_and_images_exist() -> None:
     missing: list[str] = []
     for document in _public_document_paths():
         if document.suffix.lower() not in {".md", ".toml"}:
@@ -104,36 +166,43 @@ def test_public_documentation_relative_links_and_images_exist():
                 continue
             if not resolved.exists():
                 missing.append(f"{document.relative_to(ROOT)} -> {raw_target}")
+
     assert not missing, "Broken public documentation links:\n" + "\n".join(missing)
 
 
-def test_documentation_matches_manifest_and_current_defaults():
-    manifest_source = _read(MANIFEST)
-    match = re.search(
-        r'^version\s*=\s*"([^"]+)"\s*$',
-        manifest_source,
-        re.MULTILINE,
-    )
-    assert match is not None
-    version = match.group(1)
-    assert SEMANTIC_VERSION.fullmatch(version), version
+def test_documentation_matches_manifest_and_current_defaults() -> None:
+    version = _manifest_version()
 
     for relative_path in (
+        "README.md",
         "docs/README.md",
-        "docs/CHANGELOG.md",
         "docs/installation.md",
+        "docs/usage.md",
+        "docs/settings-reference.md",
+        "docs/rig-profiles.md",
         "docs/testing.md",
+        "examples/examples.md",
     ):
         assert version in _read(ROOT / relative_path), relative_path
 
     settings = _read(DOCS / "settings-reference.md")
     assert "### Seam Maker" in settings
     assert "| Auto | Yes |" in settings
-    assert "Normal - UV Segments" in settings
-    assert "dedicated five-phase connected constraint schedule" in settings
+    assert "Normal / UV Segments" in settings
+    assert "Active Camera — Object Root Bone" in settings
+    assert "Active Camera — Camera Root Bone" in settings
+    assert "`ACTIVE_CAMERA`" in settings
+    assert "`ACTIVE_CAMERA_CAMERA_ROOT`" in settings
+    assert "`CAMERA_VIEW_NORMAL`" in settings
+    assert "Parallax Horizon Angle" in settings
+
+    rig_profiles = _read(DOCS / "rig-profiles.md")
+    assert "*_camera_setup" in rig_profiles
+    assert "CAMERA_VIEW_NORMAL" in rig_profiles
+    assert "PREPROJECTED_SCREEN" in rig_profiles
 
 
-def test_public_docs_do_not_describe_blender_44_as_supported():
+def test_public_docs_do_not_describe_blender_44_as_supported() -> None:
     violations: list[str] = []
     for path in _public_document_paths():
         source = _read(path)
