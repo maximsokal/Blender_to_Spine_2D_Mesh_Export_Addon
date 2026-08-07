@@ -18,6 +18,11 @@ dist/blender_to_spine2d_mesh_exporter-0.129.0.zip
 Do not upload the repository ZIP. The extension archive must be produced by Blender's
 `extension build` command and must validate with `extension validate`.
 
+The repository website declared by the manifest must expose the same candidate as the
+uploaded archive. Before submission, fast-forward the repository default branch to the exact
+validated candidate commit. Do not leave the public website pointing at superseded source or
+documentation.
+
 ## Current public metadata
 
 ```text
@@ -46,11 +51,11 @@ Suggested reviewer-oriented description:
 
 > The extension converts Blender Mesh objects into Spine-ready JSON and textures. It
 > supports Normal / UV Segments with six signed-axis projections and two Active Camera rig
-> roots, flat Camera Projection, depth-aware Camera Projection, 2-Axis Rotation + Scale
-> controls, generated bake UVs, automatic/custom seam segmentation, texture sequences,
-> multi-object standalone export, readiness analysis, and atomic output rollback. The
-> current public package targets Windows x64 and Blender 5.2 or newer. It performs no
-> network requests and declares only filesystem access.
+> roots, flat Camera Projection, Depth Camera Projection, 2-Axis Rotation + Scale controls,
+> generated bake UVs, automatic/custom seam segmentation, texture sequences, multi-object
+> standalone export, readiness analysis, and atomic output rollback. The current public
+> package targets Windows x64 and Blender 5.2 or newer. It performs no network requests and
+> declares only filesystem access.
 
 ## Reviewer test path
 
@@ -86,6 +91,8 @@ Before every upload candidate:
 - inspect the ZIP inventory and confirm excluded legacy/tests/docs are absent;
 - install the exact ZIP from disk in a clean Blender profile;
 - enable, exercise, disable, restart, re-enable, and uninstall it;
+- fast-forward the public default branch to the exact validated commit;
+- confirm the manifest website shows the same version/source/documentation;
 - record the final ZIP SHA256.
 
 Do not upload an archive that was built before the final manifest/test/documentation commit.
