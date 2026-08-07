@@ -127,6 +127,11 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
         column: bpy.types.UILayout,
         context: bpy.types.Context,
     ) -> None:
+        """Draw texture resolution before the shared frame and render controls."""
+
+        scene = context.scene
+        column.prop(scene, "spine2d_texture_size", text="Texture size")
+        column.separator()
         ui.OBJECT_PT_Spine2DMeshPanel._draw_bake_settings(column, context)
 
     @staticmethod
@@ -220,10 +225,11 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
         column: bpy.types.UILayout,
         context: bpy.types.Context,
     ) -> None:
-        """Draw the target Spine schema, texture size, and output paths.
+        """Draw the target Spine schema and output paths.
 
-        Export mode and connected-object controls are owned by the Rig foldout. The
-        target schema remains an output-format setting and therefore belongs here.
+        Export mode and connected-object controls are owned by the Rig foldout. Texture
+        resolution is a bake/render setting and is owned by the Bake foldout. The target
+        schema remains an output-format setting and therefore belongs here.
         """
 
         scene = context.scene
@@ -256,8 +262,6 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
             )
         column.separator()
 
-        column.prop(scene, "spine2d_texture_size", text="Texture size")
-        column.separator()
         column.prop(scene, "spine2d_json_path", text="JSON")
         json_full_path = bpy.path.abspath(scene.spine2d_json_path)
         if not json_full_path or json_full_path == bpy.path.abspath("//"):
