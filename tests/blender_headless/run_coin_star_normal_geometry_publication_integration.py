@@ -5,10 +5,12 @@ acceptance checks. It may require Camera/Depth because of displacement or other 
 features; that capability is validated separately by
 ``run_coin_star_real_blend_shader_capability_integration.py``.
 
-This runner temporarily assigns a deterministic emission material to the real coin,
-runs the three existing Normal/Active-Camera geometry and rig gates, then restores the
-original material and removes the temporary datablock in ``finally``. The source .blend
-is never saved and must be byte-semantically unchanged in Blender after the run.
+This runner temporarily assigns a deterministic camera-context surface material to the
+real coin. Fresnel keeps the material on the same supported Normal/UV CAMERA_COMBINED
+object-bake boundary exercised by the production coin gates, while the graph contains no
+Volume or Displacement output. The three existing Normal/Active-Camera geometry and rig
+gates then run unchanged. The original artist material is restored and the temporary
+material datablock is removed in ``finally``; the source .blend is never saved.
 """
 
 from __future__ import annotations
@@ -59,7 +61,10 @@ _SAFE_MATERIAL_NAME = "Spine2D Publication Normal UV Material"
 def _parse_arguments() -> argparse.Namespace:
     arguments = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     parser = argparse.ArgumentParser(
-        description="Run real-coin Normal/UV geometry gates with a safe material override."
+        description=(
+            "Run real-coin Normal/UV geometry gates with a supported "
+            "camera-context material override."
+        )
     )
     parser.add_argument(
         "--expected-blend",
@@ -70,7 +75,7 @@ def _parse_arguments() -> argparse.Namespace:
 
 
 def _create_safe_material() -> bpy.types.Material:
-    """Create one deterministic Normal/UV-safe material with no displacement path."""
+    """Create a deterministic CAMERA_COMBINED-compatible material without displacement."""
 
     existing = bpy.data.materials.get(_SAFE_MATERIAL_NAME)
     _assert(
@@ -83,13 +88,22 @@ def _create_safe_material() -> bpy.types.Material:
         material.use_nodes = True
         node_tree = material.node_tree
         _assert(node_tree is not None, "temporary material has no node tree")
+
         nodes = node_tree.nodes
         nodes.clear()
+
         output = nodes.new(type="ShaderNodeOutputMaterial")
-        emission = nodes.new(type="ShaderNodeEmission")
-        emission.inputs["Color"].default_value = (0.82, 0.52, 0.08, 1.0)
-        emission.inputs["Strength"].default_value = 1.0
-        node_tree.links.new(emission.outputs["Emission"], output.inputs["Surface"])
+        diffuse = nodes.new(type="ShaderNodeBsdfDiffuse")
+        fresnel = nodes.new(type="ShaderNodeFresnel")
+
+        # Keep one genuine source/camera-context dependency so Normal/UV planning
+        # exercises CAMERA_COMBINED rather than the simpler local DIFFUSE/EMIT routes.
+        fresnel.inputs["IOR"].default_value = 1.45
+        diffuse.inputs["Roughness"].default_value = 0.35
+        node_tree.links.new(fresnel.outputs["Fac"], diffuse.inputs["Color"])
+        node_tree.links.new(diffuse.outputs["BSDF"], output.inputs["Surface"])
+
+        # No link is ever created to Material Output Volume or Displacement.
         return material
     except Exception:
         if material.users == 0:
@@ -98,7 +112,7 @@ def _create_safe_material() -> bpy.types.Material:
 
 
 def _assert_safe_material_route(source: bpy.types.Object) -> None:
-    """Prove the override itself is a strict Local-UV material before geometry gates."""
+    """Prove the override selects supported camera-context COMBINED object baking."""
 
     analysis = analyse_object_materials(
         source,
@@ -111,13 +125,29 @@ def _assert_safe_material_route(source: bpy.types.Object) -> None:
         render_target="CYCLES",
     )
     _assert(len(audits) == 1, f"safe material audit count is wrong: {len(audits)}")
+
     capability = strongest_object_capability(audits)
     _assert(
-        capability is ShaderBakeCapability.LOCAL_UV_SAFE,
-        f"safe publication material is not LOCAL_UV_SAFE: {capability.value}",
+        capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
+        "safe publication material must exercise the CAMERA_COMBINED route: "
+        f"{capability.value}",
     )
+
+    findings = audits[0].findings
+    _assert(
+        any(
+            finding.code == "SOURCE_OR_CAMERA_CONTEXT"
+            and finding.node_type == "FRESNEL"
+            for finding in findings
+        ),
+        f"safe publication material lost its Fresnel camera-context finding: {findings}",
+    )
+
     blockers = _normal_uv_blocking_camera_findings(audits)
-    _assert(not blockers, f"safe publication material has Normal/UV blockers: {blockers}")
+    _assert(
+        not blockers,
+        f"safe publication material has Normal/UV blockers: {blockers}",
+    )
 
 
 def _run(expected_blend: str) -> None:
@@ -151,8 +181,14 @@ def _run(expected_blend: str) -> None:
             )
             bpy.data.materials.remove(safe_material)
 
-    _assert(_scene_fingerprint() == scene_before, "publication wrapper changed Blender context")
-    _assert(_object_fingerprint(source) == object_before, "publication wrapper changed source data")
+    _assert(
+        _scene_fingerprint() == scene_before,
+        "publication wrapper changed Blender context",
+    )
+    _assert(
+        _object_fingerprint(source) == object_before,
+        "publication wrapper changed source data",
+    )
     _assert(
         _datablock_fingerprint() == datablocks_before,
         "publication wrapper leaked or removed Blender datablocks",
@@ -162,8 +198,9 @@ def _run(expected_blend: str) -> None:
         "[COIN-NORMAL-GEOMETRY-PUBLICATION] PASS "
         f"blend={loaded} object={source.name_full!r} "
         f"original_material={original_material.name_full!r} "
-        "override=LOCAL_UV_SAFE gates=projection+camera-roots+object-root-setup "
-        "source=restored",
+        "override=CAMERA_RENDER_REQUIRED/FRESNEL "
+        "bake_route=CAMERA_COMBINED blockers=none "
+        "gates=projection+camera-roots+object-root-setup source=restored",
         flush=True,
     )
 
