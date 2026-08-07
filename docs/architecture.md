@@ -1,10 +1,7 @@
 # Architecture
 
-## Purpose
-
-Blender to Spine2D Mesh Exporter is split into explicit boundaries so Blender state, deterministic geometry logic, Spine document construction, and output transactions can be tested independently.
-
-The production extension targets Blender 5.2+ and Spine 4.2.43.
+This document describes the production architecture of Blender to Spine2D Mesh Exporter
+**0.128.0**.
 
 ## Package boundaries
 
@@ -18,241 +15,297 @@ Blender_to_Spine2D_Mesh_Exporter/
 
 ### `application`
 
-Owns use-case orchestration and immutable request, settings, progress, readiness, composition, and result contracts.
+Owns export use cases, immutable settings/results, readiness, geometry-to-attachment
+orchestration, composition, texture planning, and document assembly.
 
-Application code coordinates stages but does not own Blender RNA mutation, low-level geometry algorithms, or filesystem installation details.
+Application modules coordinate stages but do not own Blender RNA or low-level Blender
+resource lifetime.
 
 ### `blender_adapter`
 
-Owns every boundary that reads or temporarily mutates Blender state:
+Owns every Blender-facing boundary:
 
-- source and evaluated Mesh capture;
-- UV and edge attributes;
-- material and shader graph analysis;
-- render-engine and View Layer validation;
+- Scene and object RNA capture;
+- source/evaluated Mesh access;
+- temporary Mesh/Object creation;
+- UV preparation;
+- material graph inspection;
 - semantic object baking;
-- camera projection;
-- Scene and object settings capture;
-- UI request routing;
-- registration-facing Scene migration;
-- cleanup and state restoration.
+- camera rendering and camera-space projection;
+- render/camera/selection/frame restoration;
+- UI routing and Scene migration.
 
-A Blender adapter may call `bpy` or `bmesh`. It must release owned temporary resources and restore borrowed Blender state in `finally` paths.
+Adapters may use `bpy` and `bmesh`. A BMesh created with `bmesh.new()` must be released
+exactly once in `finally`. A BMesh borrowed through `bmesh.from_edit_mesh()` must never be
+freed by the borrower.
 
 ### `domain`
 
-Contains Blender-independent immutable models and algorithms:
+Contains Blender-independent contracts and algorithms:
 
-- geometry IDs, lineage, topology, segmentation, decomposition, and triangulation;
-- UV ranges and layout contracts;
-- bake plans, material capabilities, projection coverage, contour, layout, and output policy;
-- Spine bones, slots, attachments, constraints, animations, composition, validation, weighted-stream remapping, and serialization.
+- source/local geometry identity and lineage;
+- segmentation, topology, decomposition, triangulation;
+- signed-axis projection bases;
+- UV contracts;
+- bake/camera/depth planning models;
+- Spine bones, constraints, slots, attachments, skins, animation, validation, target
+  adaptation, weighted streams, and serialization.
 
 Domain modules do not import `bpy` or `bmesh`.
 
 ### `infrastructure`
 
-Owns cross-cutting technical services:
+Owns cross-cutting services:
 
 - transactional registration;
 - durable atomic output;
 - interprocess locking;
-- stale stage and backup recovery;
-- export diagnostics and events;
-- logging discovery;
-- pipeline auditing and tracing;
-- performance budgets.
+- stale-stage/backup recovery;
+- diagnostics, logging, tracing, and audit services.
 
-## Registration lifecycle
-
-The root `__init__.py` registers owners transactionally in dependency order:
+## Public request flow
 
 ```text
-add-on preferences
-Scene RNA properties
-Scene settings migration
-UI
-readiness invalidation
-automatic readiness
-re-polish child panel
-generated material UI
-single-object operator boundary
+Blender UI
+-> capture immutable Scene/object settings
+-> capability validation
+-> readiness or export request
+-> object preparation
+-> Spine document assembly
+-> target-specific adaptation
+-> texture/JSON staging
+-> staged validation
+-> atomic commit
 ```
 
-If a step fails, completed steps are rolled back in reverse order. Unregistration also runs in reverse order and reports cleanup failures rather than silently suppressing them.
+Later stages consume typed immutable settings rather than repeatedly reading mutable Scene
+RNA.
 
-The Scene settings migration captures raw persisted ID-properties before Scene RNA registration. Migration runs after the new RNA descriptors exist and before the main UI becomes active, so fresh defaults cannot hide older saved values.
+## Object preparation
 
-## Export request flow
-
-```text
-Blender panel and operators
-  -> capture Scene and selected-object profiles
-  -> build immutable single or multi export plan
-  -> run readiness or production export
-  -> prepare each object
-  -> compose the Spine document
-  -> stage JSON and textures
-  -> validate staged output
-  -> atomically commit all files
-```
-
-Mutable Blender UI state is captured once. Later stages consume typed immutable settings instead of repeatedly reading Scene properties.
-
-## Object preparation stages
-
-Each source object follows four typed stages:
+Each source object flows through:
 
 ```text
 source geometry
-  -> UV preparation
-  -> texture planning
-  -> Spine document preparation
+-> UV preparation
+-> texture planning
+-> Spine document preparation
 ```
 
-Stage-specific errors preserve the owning stage, object identity, statistics, warnings, and original exception cause.
+Stage errors preserve stage identity, object identity, warnings/statistics, and the original
+exception cause.
 
-### Source geometry
-
-The adapter reads an isolated evaluated mesh, applies the supported world-transform normalization policy, validates source lineage, and builds an immutable `MeshSnapshot`.
-
-Local IDs identify elements inside one snapshot. Source IDs preserve identity back to the original Blender mesh. `SourceLoopId` is the authoritative key for UV correspondence; rounded positions and nearest-point matching are not used.
-
-### Segmentation and decomposition
-
-Auto Seam Maker uses deterministic angular region growth. Custom mode uses user-marked seam boundaries and disables angular splitting.
-
-Every final attachment region must be a valid manifold disk. Complex regions are decomposed deterministically with complete and disjoint face coverage.
-
-### UV preparation
-
-Generated bake UVs are created on isolated temporary meshes. The source UV layer set, active/render-active roles, coordinates, and source Mesh identity are fingerprinted before and after relevant stages.
-
-Required malformed or missing UV dependencies block export. Unused malformed UV data can be reported without being treated as a required dependency.
-
-### Texture planning
-
-Material graphs are analyzed for the effective renderer output. Image dependencies, semantic channels, and renderer capabilities determine whether the selected user mode can execute safely.
-
-Normal mode never silently switches to Camera Projection. Unsupported mode/material combinations produce explicit diagnostics.
-
-## Normal - UV Segments pipeline
+## Normal / UV Segments
 
 ```text
-prepared regions
-  -> shared generated SpineBakeUV layout
-  -> per-region typed mesh attachments
-  -> shared vertex-bone compaction
-  -> exact UV, topology, and weighted-index correspondence validation
-  -> temporary material and image setup
-  -> semantic Cycles bake
-  -> row conversion to Spine PNG file space
-  -> staged texture validation
-  -> per-region attachment output
+source Mesh
+-> source/evaluated capture and lineage
+-> segmentation/decomposition
+-> generated SpineBakeUV
+-> projection into canonical U/V/depth
+-> Z-group assignment
+-> rig build
+-> weighted per-region attachments
+-> shared generated-vertex-bone optimization
+-> material bake on unprojected source geometry
+-> target-specific Spine document
 ```
 
-Segmentation can repeat a source point in several region attachments. The typed vertex-bone optimizer groups only component-owned generated bones with identical parent and final setup data. It keeps the first deterministic canonical bone, builds a complete old-index to new-index map, decodes every weighted vertex stream, remaps only bone indices, and re-encodes the stream. UVs, triangles, hulls, edges, attachment paths, local influence coordinates, and weights remain unchanged. Different Z parents are never merged.
+Projection geometry and material-bake geometry are intentionally separate. Changing Normal
+projection direction changes the Spine representation but does not rotate/reproject the
+geometry used to evaluate the source material.
 
-The source Scene may use Blender 5.2 EEVEE. The bake transaction temporarily configures the validated Cycles state and restores the original Scene state afterward.
+### Signed-axis projection
 
-The saved texture rows are converted to the file-space orientation expected by the exported Spine UV coordinates. Staged validation loads the image through Blender and applies the inverse loaded-image axis conversion when sampling Spine UVs.
+The six signed-axis modes use deterministic orthonormal bases from
+`domain/projection.py`. U/V map to Spine X/Y and the selected depth axis owns generated
+Z-group separation.
 
-## Camera Projection pipeline
+### Active Camera shared geometry stage
+
+Both Active Camera Normal modes use the same evaluated camera frame and the same projected
+snapshot. Perspective and Orthographic projection are resolved by the Blender camera
+adapter before rig selection.
+
+The projected snapshot contains:
+
+- camera-projected U/V positions;
+- camera-space per-vertex depth;
+- projected Blender Object Origin;
+- source identity/UV lineage.
+
+Rig ownership is selected later during document preparation.
+
+### Active Camera — Object Root Bone
+
+Persisted projection ID: `ACTIVE_CAMERA`.
+
+Setup mode: `CAMERA_VIEW_NORMAL`.
+
+Contract:
 
 ```text
-validated active camera and render context
-  -> transparent full-frame render tasks
-  -> sequence maximum-coverage union
-  -> alpha threshold and conservative cleanup
-  -> stable crop
-  -> concave contour or safe convex fallback
-  -> exact triangulation
-  -> projection attachment and cropped texture output
+root
+└── <prefix>_main                  projected Blender Object Origin
+    └── <prefix>                   object-local base
+        └── <prefix>_scale_rotate_X
+            └── <prefix>_rotate_X
+                ├── <prefix>_<z>_scale
+                │   └── <prefix>_<z>
+                │       └── <prefix>_<z>_camera_setup
+                │           └── generated vertex bones for this depth
+                └── ...
 ```
 
-Camera Projection is explicit. It produces a screen-space attachment rather than region-based Normal attachments.
+The camera-facing setup pose is already solved by projection, so X/Y setup rotation and
+depth Transform setup values are neutral. Each `_camera_setup` child applies the inverse
+of its depth-group setup Y translation. Vertex bones are parented below that child.
 
-## Generated materials
+This produces two required properties simultaneously:
 
-Generated material policy is independent of source geometry preparation:
+1. setup world XY equals the active-camera projection;
+2. live depth separation remains available to X/Y pseudo-rotation around the object's
+   projected Blender Object Origin.
+
+This is intentionally not implemented by collapsing the depth-scale transform with a
+setup `scaleX=-1`, because that mixes camera depth into setup XY and deforms camera-facing
+meshes.
+
+### Active Camera — Camera Root Bone
+
+Persisted projection ID: `ACTIVE_CAMERA_CAMERA_ROOT`.
+
+Application settings normalize geometry projection back to `ACTIVE_CAMERA` while selecting
+setup mode `PREPROJECTED_SCREEN`.
+
+Contract:
 
 ```text
-Require Source
-Generate If Missing
-Force Generated
+root
+└── <prefix>_main                  camera-space zero
+    └── camera-relative transform/depth layer
+        └── <prefix>               projected Blender Object Origin
+            └── generated vertex bones
 ```
 
-Temporary generated material patterns can color one complete output, each region, or each exported polygon. Generated materials use temporary node trees and color attributes and are removed on every exit path.
+All attachment vertices bind through one rigid camera-depth group. Perspective and
+Orthographic layer behavior is carried explicitly in the rig request. This mode reuses the
+same camera-projected geometry and material-bake input as Object Root.
+
+## Camera Projection
+
+```text
+active camera render tasks
+-> alpha coverage union
+-> stable crop
+-> contour simplification
+-> exact triangulation
+-> flat screen-space attachment
+-> target-specific document
+```
+
+Camera Projection is an explicit representation. It never silently replaces Normal / UV
+Segments.
+
+## Depth Camera Projection
+
+```text
+active camera visible surface
+-> front-most depth sampling
+-> edge-aware depth smoothing
+-> bounded relief topology
+-> depth-group/vertex-bone generation
+-> FRONT render/crop
+-> optional reserve-view renders/crops
+-> weighted attachments
+-> target-specific document
+```
+
+The public relief base is Farthest Visible Point. A positive Parallax Horizon Angle can
+retain connected reserve surfaces by accumulated unsigned dihedral cost. FRONT and reserve
+attachments use one union geometry/rig where source identity is shared.
+
+Temporary virtual cameras and render proxies are isolated Blender resources and are removed
+on success and failure.
+
+## Attachment projection
+
+Blender UV identity belongs to loops. The attachment projector therefore preserves
+`(SourceVertexId, UV)` identity instead of assuming one UV per geometric vertex.
+
+Final mesh attachments preserve:
+
+- UV-specific attachment vertices;
+- triangulation corner order;
+- physical Spine hull semantics;
+- explicit Z-group binding;
+- deterministic generated vertex-bone ownership.
+
+Setup-degenerate side geometry is retained for deformable rig modes because later control
+movement can restore visible area.
+
+## Shared generated vertex bones
+
+Segmentation can duplicate the same source point across attachments. The optimizer shares
+only generated component vertex bones whose final setup semantics are identical. Parent
+identity is part of the key, so different depth groups never collapse together.
+
+Only weighted bone indices are remapped. UVs, triangles, hull, edges, paths, local
+influence positions, and weights remain unchanged.
+
+## Target-specific Spine adaptation
+
+Canonical rig/document construction happens before target adaptation. The target layer then
+encodes the selected Spine version and any required bone-index or sequence representation
+changes.
+
+Supported standalone target versions are 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23.
+Unsupported scope/profile/target combinations fail before expensive work.
 
 ## Multi-object composition
 
-The UI partitions selected Mesh objects into connected and standalone groups.
+Public selected-object export creates standalone composition. Internal connected and mixed
+composition routes are explicit and capability-gated.
 
-- Standalone mode composes independent component rigs.
-- Connected mode composes at least two connected sources under the shared connected contract.
-- Mixed mode combines one connected subgroup with standalone sources.
+Each object owns its preparation and generated vertex-bone optimization before outer
+composition. Generated bones are never shared across unrelated object boundaries.
 
-Exactly one connected source falls back to standalone mode with a structured warning.
+The outer request owns one atomic transaction for the final JSON and every texture.
 
-Each object compacts its own generated segment vertex bones before outer composition. Bones are never shared across object boundaries.
+## Readiness
 
-The outer multi-object transaction owns the final JSON and every individual or grouped texture. Inner stages do not commit independently.
+Readiness executes production preparation without final commit and records immutable
+blockers/warnings/statistics. Relevant source or settings changes stale or invalidate the
+cached report.
 
-## Readiness analysis
-
-Readiness uses the production preparation path without final file commit. It stores an immutable report with:
-
-- overall state;
-- object reports;
-- blockers and warnings;
-- geometry, topology, material, texture, rig, and attachment statistics.
-
-Selection, geometry, UV, material, Scene, renderer, camera, or setting changes invalidate or stale the cached report.
+Readiness diagnostics do not weaken export validation; production export still validates
+all required contracts.
 
 ## Atomic output
 
-Outputs are reserved before installation and written to unique stage files. Existing finals may be protected by backups.
+Output files are reserved and staged before installation. Existing finals may be protected
+with backups.
 
-Commit guarantees:
+Required properties:
 
-1. reservation order is deterministic;
-2. every staged file is complete before installation;
-3. partial installation attempts restore previous finals when possible;
-4. rollback removes or preserves stage files according to diagnostics preferences;
-5. stale stage and backup files are recovered on a later export;
-6. one live process does not remove work files owned by another live process.
+1. deterministic path reservation;
+2. complete staged files before installation;
+3. rollback/restoration on partial failure;
+4. stale stage/backup recovery;
+5. no deletion of work owned by another live process.
 
-## Source immutability and cleanup
+## Source-state integrity
 
-The production path must not permanently change:
+Production export must not permanently change source topology, UVs, materials, transforms,
+active object, selection, mode, renderer, frame, active camera, View Layer, or visibility
+state outside the intended transaction.
 
-- source Mesh topology;
-- source UV layers or coordinates;
-- source material graphs;
-- active object, selection, mode, renderer, frame, camera, View Layer, or visibility state beyond the transaction scope.
-
-A `bmesh` created with `bmesh.new()` must be freed exactly once in `finally`. A BMesh returned by `bmesh.from_edit_mesh()` is borrowed and must not be freed by the caller.
-
-Temporary Blender images, meshes, objects, collections, materials, node trees, and attributes are removed on success and failure paths.
-
-## Stable public surfaces
-
-The user-facing production operators are exposed through the current UI as:
-
-```text
-object.spine2d_single_export
-object.spine2d_multi_export
-object.spine2d_refresh_info
-spine2d.reset_settings
-spine2d.reset_generated_materials
-```
-
-Internal module and helper names are not public compatibility guarantees unless a test or documented API explicitly states otherwise.
+Temporary Blender datablocks are removed on success and failure paths.
 
 ## Related documents
 
 - [Usage](usage.md)
 - [Settings Reference](settings-reference.md)
+- [Rig Profiles](rig-profiles.md)
 - [Output Format](output-format.md)
 - [Testing](testing.md)
-- [Contributing](CONTRIBUTING.md)
