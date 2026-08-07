@@ -1,221 +1,232 @@
 # Output Format
 
-## Compatibility target
+This document describes the current output contract for Blender to Spine2D Mesh Exporter
+**0.128.0**.
 
-The current exporter builds Spine JSON for the Spine 4.2.43 compatibility profile. Generated documents contain typed and validated skeleton, bone, slot, skin, attachment, constraint, and optional animation data before serialization.
+## Spine targets
 
-The exporter does not guarantee byte-for-byte equality between runs when volatile metadata or external Blender rendering results change. Stable geometry, UV, rig, naming, ordering, and cross-reference contracts are validated independently.
+The exporter builds a canonical typed Spine document and adapts it to the selected target.
+Supported standalone target metadata versions are:
+
+```text
+3.8.99
+4.0.64
+4.1.24
+4.2.43
+4.3.23
+```
+
+Target adaptation may change version-specific bone indices, sequence representation, or
+other schema details while preserving the validated geometry/rig semantics.
 
 ## Output directories
 
-The JSON setting selects the final output directory. Images Subfolder selects a relative directory below it.
+The JSON setting selects the final output directory. `Images Subfolder` selects a relative
+directory below it.
 
 Example:
 
 ```text
-JSON directory:       D:/project/export
-Images Subfolder:     images/
+JSON directory:   D:/project/export
+Images Subfolder: images/
 ```
 
-Result:
+Typical result:
 
 ```text
-D:/project/export/<name>.json
-D:/project/export/images/<texture files>
+D:/project/export/Hero_merged.json
+D:/project/export/images/Hero_Baked.png
 ```
 
-The JSON stores texture paths relative to the configured output relationship.
+## Naming
 
-## Single-object naming
-
-For an object named `Hero`, the UI derives:
+Single-object JSON:
 
 ```text
-JSON stem: Hero_merged
-Texture stem: Hero
+<ObjectName>_merged.json
 ```
 
-Typical static output:
+Static texture:
 
 ```text
-Hero_merged.json
-images/Hero_Baked.png
+<stem>_Baked.png
 ```
 
-The exact texture extension follows the resolved texture format policy.
-
-## Multi-object naming
-
-The output stem uses the first ordered selected object name and the number of additional selected objects.
-
-For four ordered selected objects beginning with `Body`:
+Sequence textures:
 
 ```text
-Body_plus_3_objects.json
+<stem>_Baked_0000.png
+<stem>_Baked_0001.png
+...
 ```
 
-Associated texture stems remain deterministic for the individual or grouped texture plans that participate in the request.
+Multi-object JSON uses the first ordered source name plus the number of additional selected
+objects.
 
-## Filename sanitization
+Output stems are sanitized for ordinary Windows filesystem restrictions. Invalid filename
+characters and reserved device-name collisions are normalized or rejected before staging.
 
-Output stems are sanitized for ordinary Windows file APIs:
+## Normal / UV Segments attachments
 
-- `< > : " / \ | ? *` and ASCII control characters become `_`;
-- surrounding whitespace is removed;
-- trailing spaces and periods are removed;
-- empty sanitized stems are rejected;
-- reserved DOS device names such as `CON`, `NUL`, `COM1`, and `LPT1` receive a safe suffix.
+Each final manifold region becomes a Spine mesh attachment containing:
 
-Output namespace preflight rejects collisions using case-insensitive Windows path identity even when tests run on another operating system.
-
-## Static textures
-
-A static bake uses:
-
-```text
-<stem>_Baked.<extension>
-```
-
-Examples:
-
-```text
-Hero_Baked.png
-Projection_Baked.png
-```
-
-## Texture sequences
-
-A sequence uses:
-
-```text
-<stem>_Baked_<frame>.<extension>
-```
-
-Frame numbers are zero padded according to the configured sequence digit contract.
-
-Example:
-
-```text
-Hero_Baked_0000.png
-Hero_Baked_0001.png
-Hero_Baked_0002.png
-```
-
-The output frame number is `sequence_start_frame + task_index`.
-
-## Normal - UV Segments attachments
-
-Normal mode exports one or more mesh attachments derived from final manifold disk regions.
-
-Each attachment contains:
-
-- ordered UV coordinates;
+- UVs;
 - triangle indices;
-- physical Spine hull size;
-- weighted vertex data;
-- texture path metadata;
-- deterministic region and source lineage relationships used during assembly.
+- physical hull count;
+- optional edges;
+- target-relative texture path;
+- weighted vertex stream;
+- dimensions;
+- optional sequence metadata.
 
-The physical `hull` prefix describes the convex hull of final attachment XY positions. Topological boundary order is remapped when required so Spine receives a valid physical hull.
+UV identity is loop-aware. One geometric source vertex can therefore produce more than one
+attachment vertex when UV seams require distinct UV values.
 
-The exported UVs retain the generated bake layout values. Before saving the semantic bake image, Blender pixel rows are converted to the top-down file-space orientation expected by those Spine UVs.
+Setup-degenerate side geometry may remain present because deformable rig controls can make
+it visible later.
 
-### Shared segment vertex bones
+## Generated vertex-bone weights
 
-Segmentation can repeat one physical source point in several independent attachments. Version 0.47.0 keeps every attachment vertex and its own UV entry, but equivalent generated vertex bones are shared when all of the following match:
+Before optional sharing, every attachment vertex owns one generated Spine bone and one
+full-weight influence:
 
-- the segments belong to the same exported object;
-- the generated bones have the same Z-parent;
-- their final serialized setup X and Y values are identical;
-- their remaining setup properties are identical;
-- removing the duplicate name cannot break a slot, constraint, child, skin, or animation reference.
+```text
+influence count = 1
+local x = 0
+local y = 0
+weight = 1
+```
 
-Only weighted `boneIndex` values are compacted. The exporter does not alter attachment UVs, triangles, hull, edges, texture paths, local influence X/Y, or influence weights. Coincident XY points under different Z parents remain separate because they participate in different depth deformation.
+The generated bone owns the exported setup XY position.
+
+### Signed-axis Normal
+
+Generated vertex bones are parented to the matching depth rotation bone.
+
+### Active Camera — Object Root Bone
+
+Generated vertex bones are parented to the matching generated
+`<depth-bone>_camera_setup` inverse child.
+
+For each depth group:
+
+```text
+depth scale bone
+-> depth rotation bone
+-> camera setup inverse bone
+-> generated vertex bone
+```
+
+The depth translation and inverse setup translation cancel in setup pose, so attachment
+world XY remains the camera-projected XY. Live depth ownership remains in the ancestors for
+later X/Y control deformation.
+
+### Active Camera — Camera Root Bone
+
+All generated vertex bones are parented below the object base under one rigid
+camera-relative depth layer. The exported main bone represents camera-space zero.
+
+## Shared generated vertex bones
+
+Equivalent generated vertex bones can be compacted across segmented attachments of the
+same object when their complete setup semantics match. Parent identity is part of the
+comparison.
+
+Compaction changes only weighted bone indices and generated-bone inventory. It does not
+change:
+
+- UV values;
+- triangle order;
+- hull;
+- edges;
+- local influence X/Y;
+- influence weight;
+- attachment texture path.
 
 ## Camera Projection attachment
 
-Camera Projection produces one screen-space mesh attachment for the selected render group.
+Camera Projection produces a flat screen-space mesh from the active camera render.
 
-The attachment is derived from:
+The attachment is based on:
 
-- active camera render coverage;
-- stable sequence crop;
-- simplified concave contour or deterministic convex fallback;
-- exact triangulation;
-- cropped output dimensions and UV layout.
+- usable alpha coverage;
+- stable crop across sequence frames;
+- contour simplification/fallback;
+- deterministic triangulation;
+- crop-local UV coordinates.
 
-The source region attachments used by Normal mode are not substituted silently. Camera Projection is a separate explicit output contract.
+It is a separate representation and does not reuse Normal region attachments.
 
-## Connected and mixed output
+## Depth Camera Projection attachments
 
-A connected subgroup shares the connected rig and composition contract. Standalone sources retain independent component rigs.
+Depth Camera Projection emits weighted relief attachments.
 
-Mixed output combines:
+At `Parallax Horizon Angle = 0°`, the object has the FRONT representation only.
 
-```text
-connected subgroup
-+ standalone components
--> one final Spine document
-```
+With positive parallax:
 
-The final transaction owns all JSON and texture paths for the complete request.
+- retained surfaces share one union geometry/rig;
+- every non-empty reserve view receives its own texture namespace and attachment;
+- each view owns an independent stable crop;
+- reserve slots are serialized before FRONT;
+- sequence frame tasks are shared while texture/crop ownership stays per view.
 
-## Bones, slots, and constraints
+## Sequence encoding
 
-The compatibility profile preserves deterministic ordering and cross-references for:
+Spine 3.8 and 4.0 use the supported attachment-swap representation.
 
-- bones and parents;
-- slots and slot-to-bone references;
-- skins and attachment paths;
-- IK and transform constraints;
+Spine 4.1, 4.2, and 4.3 use native sequence metadata/timelines where supported by the
+selected target contract.
+
+A static object does not receive sequence metadata merely because another object in the
+same export request is animated.
+
+## Bones, slots, constraints, and skins
+
+Before serialization the document validates:
+
+- unique bone names and valid parents;
+- slot-to-bone references;
+- skin/attachment references;
+- IK and Transform constraint references/order;
 - weighted mesh bone indices;
-- optional control icons;
-- optional preview animation.
+- finite numeric payloads;
+- target-specific sequence data;
+- generated control references.
 
-Every serialized document is validated for finite numeric values, valid indices, valid names, and legal cross-references before commit.
+## Texture-space contract
 
-## Generated material output
+Normal / UV semantic bake images are saved in the file-space orientation expected by the
+exported Spine UV values.
 
-Generated patterns affect only temporary bake appearance. They do not change source materials.
+Rendered-camera modes remap full-frame camera UV into the final crop without changing the
+validated attachment topology unexpectedly.
 
-- Solid Gray produces one opaque selected RGB value.
-- One Region - One Color produces deterministic region colors.
-- One Polygon - One Color produces deterministic final-triangle colors.
+## Atomic output
 
-Generated output alpha is always 1.0.
-
-## Atomic transaction files
-
-During export, the output directory may temporarily contain files similar to:
+Export stages candidate files before installation. Temporary transaction files can look
+like:
 
 ```text
 .spine2d-stage-*
 .spine2d-backup-*
 ```
 
-These are not final assets.
+They are not final Spine assets.
 
-- Stage files hold complete candidate output before installation.
-- Backup files protect existing finals during replacement.
-- Successful commit installs every reserved final and removes obsolete work files.
-- Failure restores previous finals when possible and removes or preserves stages according to preferences.
-- A later export can recover stale work left by a hard process interruption.
+The transaction is responsible for:
 
-Do not import stage or backup files into Spine.
-
-## Staged texture validation
-
-Normal mode validates staged textures before final commit. The validation checks that exported triangle samples:
-
-- use finite UV coordinates inside the unit square;
-- map through the saved Spine file-space orientation;
-- reach non-empty alpha coverage in the staged image.
-
-Directional Blender headless regression tests additionally verify that geometry vertices, JSON UV corners, and asymmetric baked image regions correspond correctly.
+1. deterministic output reservation;
+2. complete staged JSON/textures before installation;
+3. backup of replaced finals when required;
+4. rollback/restoration after partial failure;
+5. stale work recovery;
+6. avoiding work owned by another live process.
 
 ## Related documents
 
 - [Usage](usage.md)
 - [Settings Reference](settings-reference.md)
+- [Rig Profiles](rig-profiles.md)
 - [Architecture](architecture.md)
 - [Troubleshooting](troubleshooting.md)
