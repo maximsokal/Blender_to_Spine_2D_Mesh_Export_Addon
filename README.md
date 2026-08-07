@@ -18,7 +18,7 @@ Blender to Spine2D Mesh Exporter converts Blender Mesh objects into Spine-ready 
 weighted mesh attachments, baked or camera-rendered textures, generated animation controls,
 and optional texture sequences.
 
-Current extension version: **0.128.0**.
+Current extension version: **0.129.0**.
 
 ## Requirements
 
@@ -236,6 +236,11 @@ The exporter:
 The exporter analyzes the effective Blender material graph before choosing an execution
 path. It does not silently replace the selected export mode.
 
+The **Bake** foldout owns the scene-wide **Texture size** setting. Texture size controls the
+resolution used by generated bake textures and rendered-camera texture targets; it remains
+one shared Scene setting for the complete export request rather than a per-object sequence
+setting.
+
 Supported behavior includes:
 
 - audited source-material baking for Normal / UV Segments;
@@ -277,7 +282,8 @@ The exporter does not export Blender camera animation as a Spine camera animatio
 
 ## Texture sequences
 
-Each selected Mesh owns independent `Frames` and `Start` values.
+Each selected Mesh owns independent `Frames` and `Start` values. Texture resolution remains
+a shared Scene-level Bake setting.
 
 ```text
 Frames = 0  -> one static texture evaluated at the current frame
@@ -376,7 +382,7 @@ Blender geometry or bake work begins.
 
 ## Quick start
 
-1. Install `blender_to_spine2d_mesh_exporter-0.128.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
+1. Install `blender_to_spine2d_mesh_exporter-0.129.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
 2. Save the `.blend` file.
 3. Select one or more Mesh objects in Object Mode.
 4. Open **3D View > Sidebar > Blender to Spine2D Mesh Exporter**.
@@ -384,7 +390,7 @@ Blender geometry or bake work begins.
 6. For Normal / UV Segments, choose the required Projection Direction.
 7. Choose the exact Spine target.
 8. Configure Cut, material, camera/depth, and Bake settings as required by the selected
-   mode.
+   mode. Texture resolution is configured as **Texture size** inside **Bake**.
 9. Run **Analyze** and resolve blockers.
 10. Export the current object or selected objects.
 11. Import the generated JSON and matching texture directory into the selected Spine
@@ -414,7 +420,7 @@ From the repository root:
 ```powershell
 $Blender = "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 $Source = ".\Blender_to_Spine2D_Mesh_Exporter"
-$Output = ".\dist\blender_to_spine2d_mesh_exporter-0.128.0.zip"
+$Output = ".\dist\blender_to_spine2d_mesh_exporter-0.129.0.zip"
 
 New-Item -ItemType Directory -Force ".\dist" | Out-Null
 & $Blender --command extension build --source-dir $Source --output-filepath $Output
