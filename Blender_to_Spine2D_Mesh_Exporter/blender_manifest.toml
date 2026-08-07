@@ -1,14 +1,19 @@
 schema_version = "1.0.0"
 
 id = "blender_to_spine2d_mesh_exporter"
-version = "0.129.0"
+version = "0.130.0"
 name = "Blender to Spine2D Mesh Exporter"
 maintainer = "Maxim Sokolenko"
+website = "https://github.com/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon"
 blender_version_min = "5.2.0"
 type = "add-on"
-tags = ["Object"]
+tags = ["Import-Export", "Mesh", "UV", "Animation"]
+platforms = ["windows-x64"]
 license = [
   "SPDX:GPL-3.0-or-later",
+]
+copyright = [
+  "2025-2026 Maxim Sokolenko",
 ]
 tagline = "Blender 3D objects into Spine 2D meshes"
 
