@@ -14,18 +14,9 @@
   </a>
 </p>
 
-<div align="center">
-  <a href="https://www.youtube.com/watch?v=f_1Zc2qCz44">
-    <img src="https://img.youtube.com/vi/f_1Zc2qCz44/maxresdefault.jpg"
-         alt="Blender to Spine2D Mesh Exporter demo"
-         style="width:100%;max-width:600px;">
-  </a>
-  <p><strong>Click to watch the video</strong></p>
-</div>
-
-Blender to Spine2D Mesh Exporter converts Blender Mesh objects into Spine JSON, weighted
-mesh attachments, baked or rendered textures, generated control rigs, and optional texture
-sequences.
+Blender to Spine2D Mesh Exporter converts Blender Mesh objects into Spine-ready JSON,
+weighted mesh attachments, baked or camera-rendered textures, generated animation controls,
+and optional texture sequences.
 
 Current extension version: **0.128.0**.
 
@@ -42,75 +33,156 @@ Current extension version: **0.128.0**.
   - Spine 4.2.43
   - Spine 4.3.23
 
-Standalone single-object and standalone multi-object export use the target/profile
-capability registry. Connected and mixed composition are supported only by the explicitly
-allowed Spine 4.2 routes.
+Public single-object and selected-object export are standalone routes. Connected and mixed
+composition remain explicit internal/development paths and are accepted only by supported
+Spine 4.2 capability combinations.
+
+## What the exporter does
+
+| Area | Functionality |
+| --- | --- |
+| Geometry | Converts Blender Mesh geometry into Spine weighted mesh attachments with deterministic source lineage. |
+| Projection | Supports six signed world-axis projections and two Active Camera rig-root variants for Normal / UV Segments. |
+| Camera output | Supports flat Camera Projection and depth-aware Depth Camera Projection through Perspective or Orthographic cameras. |
+| UV | Generates a dedicated bake UV layout while preserving source-loop correspondence. |
+| Segmentation | Supports automatic angular segmentation and user-authored seam segmentation. |
+| Rig | Generates a 2-Axis Rotation + Scale control rig with per-vertex/depth ownership appropriate to the selected projection mode. |
+| Materials | Analyzes source shader graphs, bakes supported materials, and can generate temporary fallback materials. |
+| Sequences | Exports static textures or per-object texture sequences with target-specific Spine sequence encoding. |
+| Multi-object | Exports multiple selected Mesh objects in one standalone request while preserving independent object timing and rigs. |
+| Analysis | Runs production preparation without committing files and reports blockers, warnings, geometry, material, texture, rig, and depth statistics. |
+| Output safety | Stages JSON and textures atomically, validates staged output, rolls back partial failures, and recovers stale work files. |
+| Blender safety | Restores source Mesh, UV, material, selection, mode, frame, camera, render, and temporary datablock state after success or failure. |
 
 ## Export modes
 
-The public `Export Mode` selector contains three values.
-
 ### Normal / UV Segments
 
-Preserves source-derived surface topology, splits it into valid Spine mesh regions, creates
-a generated bake UV layout, bakes the source material, and exports weighted mesh
-attachments.
+Use this mode when the Spine result must remain a deformable mesh rather than a flat camera
+render.
 
-Projection directions:
+Pipeline:
 
-- `+X`, `-X`, `+Y`, `-Y`, `+Z`, `-Z`
-- `Active Camera — Object Root Bone`
-- `Active Camera — Camera Root Bone`
+```text
+Blender Mesh
+-> projection into canonical Spine space
+-> automatic or custom-seam segmentation
+-> manifold region decomposition
+-> generated SpineBakeUV layout
+-> weighted Spine mesh attachments
+-> semantic texture bake
+-> Spine JSON + textures
+```
 
-The two Active Camera choices use the same evaluated Perspective or Orthographic camera
-projection and the same material-bake geometry. They differ only in generated Spine rig
-ownership.
+Normal / UV Segments keeps source-derived surface topology and creates one or more weighted
+attachments from the final valid regions.
+
+#### Projection Direction
+
+Normal / UV Segments supports:
+
+| UI value | Persisted ID | Meaning |
+| --- | --- | --- |
+| `+X` | `POSITIVE_X` | World +Y -> Spine X, world +Z -> Spine Y, world +X -> depth. |
+| `-X` | `NEGATIVE_X` | World -Y -> Spine X, world +Z -> Spine Y, world -X -> depth. |
+| `+Y` | `POSITIVE_Y` | World -X -> Spine X, world +Z -> Spine Y, world +Y -> depth. |
+| `-Y` | `NEGATIVE_Y` | World +X -> Spine X, world +Z -> Spine Y, world -Y -> depth. |
+| `+Z` | `POSITIVE_Z` | World +X -> Spine X, world +Y -> Spine Y, world +Z -> depth. |
+| `-Z` | `NEGATIVE_Z` | World -X -> Spine X, world +Y -> Spine Y, world -Z -> depth. |
+| `Active Camera — Object Root Bone` | `ACTIVE_CAMERA` | Camera-projected geometry with each Blender Object Origin retained as the object's Spine pivot. |
+| `Active Camera — Camera Root Bone` | `ACTIVE_CAMERA_CAMERA_ROOT` | Camera-projected geometry owned by a camera-relative root hierarchy. |
+
+The two Active Camera choices share the same Perspective/Orthographic camera projection and
+the same material-bake geometry. They differ only in rig ownership.
 
 #### Active Camera — Object Root Bone
 
-- each object keeps its own Blender Object Origin as the Spine main-bone pivot;
-- camera-space depth remains per vertex/depth group;
-- generated `*_camera_setup` inverse-setup bones cancel depth translation in the setup
-  pose without destroying live depth deformation;
-- the exported setup pose matches the active-camera projection without stretching the
-  mesh.
+- keeps each Blender Object Origin as the object's Spine main-bone pivot;
+- retains camera-space depth per generated depth group;
+- inserts one `*_camera_setup` inverse-setup bone below each model-space depth group;
+- cancels setup-only camera-depth translation without collapsing the live deformation
+  hierarchy;
+- reproduces the active-camera setup projection while preserving object-root animation
+  controls.
+
+Conceptually:
+
+```text
+depth scale bone
+└── depth bone
+    └── *_camera_setup
+        └── generated vertex bone
+```
 
 #### Active Camera — Camera Root Bone
 
-- camera-space zero owns the Spine main bone;
-- the projected Blender Object Origin is stored below the camera-relative hierarchy;
-- all attachment vertices use one rigid camera-depth layer;
-- Perspective and Orthographic cameras retain their correct camera-layer behavior.
+- uses camera-space zero as the Spine main-bone pivot;
+- stores the projected Blender Object Origin inside the camera-relative hierarchy;
+- uses one rigid camera-depth layer for the attachment geometry;
+- preserves Perspective and Orthographic camera-layer behavior;
+- shares projected geometry and baked appearance with Object Root mode.
 
 ### Camera Projection
 
-Renders through the active camera, computes stable alpha coverage and crop, creates a
-screen-space contour mesh, and exports a flat camera-facing attachment.
+Use this mode for a deliberately flat camera-facing result.
+
+Pipeline:
+
+```text
+active camera render
+-> sequence coverage union
+-> alpha cleanup
+-> stable crop
+-> contour construction and triangulation
+-> flat screen-space attachment
+-> Spine JSON + cropped texture
+```
+
+Camera Projection does not reuse Normal / UV Segments region meshes. It is a separate
+screen-space representation.
 
 ### Depth Camera Projection
 
-Renders through the active camera and builds a bounded visible depth-relief surface instead
-of a flat contour. The generated surface uses weighted vertex bones and supports
-Perspective and Orthographic cameras.
+Use this mode when a camera-rendered appearance must retain controlled depth deformation in
+Spine.
 
-Public depth controls include:
+Pipeline:
 
-- Depth smoothing
-- Depth edge threshold
-- Depth mesh error
-- Max depth points
-- Parallax Horizon Angle
+```text
+active-camera visible surface
+-> front-most depth sampling
+-> edge-aware depth processing
+-> bounded generated relief topology
+-> weighted generated vertex bones
+-> camera render and crop
+-> crop-local UV remap
+-> Spine JSON + depth-aware attachment
+```
 
-`Parallax Horizon Angle = 0°` keeps the front-only result. A positive value may retain
-connected surfaces around the visible horizon and generate reserve camera views,
-face-isolated textures, and reserve attachments while sharing one generated rig.
+Supported controls:
 
-## Rig
+- **Depth smoothing** — edge-aware smoothing of retained depth samples.
+- **Depth edge threshold** — prevents smoothing and generated triangles from crossing large
+  depth discontinuities.
+- **Depth mesh error (px)** — requested screen-space spacing for generated relief points.
+- **Max depth points** — hard upper bound for generated depth points.
+- **Parallax Horizon Angle** — optionally retains connected surfaces around the visible
+  horizon.
 
-The public UI uses **2-Axis Rotation + Scale**. The persisted 3-Axis profile remains only
-where required for compatibility and explicit internal composition paths.
+`Parallax Horizon Angle = 0°` produces the front-only result. A positive value can generate
+reserve views for retained side surfaces. Reserve views use fitted Perspective or
+Orthographic camera copies, face-isolated render proxies, independent crops and textures,
+and reserve weighted attachments that reuse the same generated rig as the FRONT
+attachment.
 
-The 2-Axis rig exposes:
+Depth Camera Projection is a 2.5D representation of camera-visible geometry. Large later
+rotations can reveal surfaces that were never visible or retained during export.
+
+## Rig and animation controls
+
+The public UI uses **2-Axis Rotation + Scale**.
+
+Generated primary controls:
 
 ```text
 <prefix>_rotation_X
@@ -118,52 +190,131 @@ The 2-Axis rig exposes:
 <prefix>_scale
 ```
 
-Normal / UV Segments signed-axis projection, Active Camera Object Root, Active Camera
-Camera Root, and Depth Camera Projection select different setup/depth ownership policies
-without silently changing the chosen export mode.
+The rig keeps X/Y pseudo-rotation and uniform scale as explicit Spine controls while depth
+groups provide the spatial response needed by Normal / UV Segments and Depth Camera
+Projection.
 
-## Material and geometry behavior
+Additional rig behavior:
 
-- Normal / UV Segments keeps the original Mesh datablock topology.
-- Active Blender modifiers that are not part of that topology are reported by Analyze.
-- Apply or convert a modifier when its generated geometry must be present in Spine.
-- Supported source materials use the audited object-bake path.
-- Camera-dependent representations remain explicit Camera Projection or Depth Camera
-  Projection choices; the exporter does not silently switch modes.
-- Temporary Blender objects, meshes, images, materials, node trees, cameras, render state,
-  selection, frame, and mode changes are restored or removed on every exit path.
+- per-object Blender Object Origin pivots for ordinary Normal projection and Active Camera
+  Object Root mode;
+- camera-relative hierarchy for Active Camera Camera Root mode;
+- deterministic constraint ordering;
+- optional control icons;
+- optional generated preview animation;
+- connected five-phase constraint scheduling on the explicitly supported internal Spine
+  4.2 route.
+
+## Geometry, segmentation, and UV
+
+### Seam Maker: Auto
+
+Auto segmentation grows deterministic face regions from angular rules.
+
+Available angular behavior:
+
+- **Seed cone** — candidate faces are compared with the region seed normal.
+- **Seed cone + local dihedral** — also limits the angle across each traversed shared edge.
+
+### Seam Maker: Custom
+
+Custom segmentation uses seams marked on the Blender Mesh. Angular splitting is disabled,
+but topology validation and manifold-region decomposition still run.
+
+### UV handling
+
+The exporter:
+
+- creates a generated `SpineBakeUV` layout for output baking;
+- preserves source-loop lineage instead of matching geometry by rounded coordinates;
+- validates required source UV dependencies used by materials;
+- keeps generated Spine attachment UVs synchronized with the baked file-space texture
+  orientation.
+
+## Materials and baking
+
+The exporter analyzes the effective Blender material graph before choosing an execution
+path. It does not silently replace the selected export mode.
+
+Supported behavior includes:
+
+- audited source-material baking for Normal / UV Segments;
+- camera-rendered material evaluation for Camera Projection and Depth Camera Projection;
+- temporary Cycles configuration for semantic object baking with Scene state restoration;
+- diagnostics for unsupported or camera-dependent shader requirements;
+- diagnostics for active Blender modifiers that are not part of the original Mesh topology;
+- temporary generated-material fallback without changing the source material graph.
+
+Generated Material policies:
+
+- **Require Source** — block when required source material data is unavailable.
+- **Generate If Missing** — generate a temporary material only when required source material
+  data is missing.
+- **Force Generated** — ignore source shading and use the selected generated pattern.
+
+Generated patterns:
+
+- Solid Gray
+- One Region - One Color
+- One Polygon - One Color
+
+Apply or convert topology-changing Blender modifiers when their generated geometry must be
+present in the exported Spine mesh.
+
+## Camera rendering controls
+
+Camera Projection and Depth Camera Projection support:
+
+- active Perspective and Orthographic cameras;
+- configurable alpha threshold for coverage and crop calculation;
+- inclusion/exclusion of scene shadow contributors;
+- inclusion/exclusion of reflection/transmission contributors;
+- World participation in lighting/reflections;
+- stable alpha-union crops across texture-sequence frames;
+- restoration of source camera and render state after export.
+
+The exporter does not export Blender camera animation as a Spine camera animation.
 
 ## Texture sequences
 
-Each selected Mesh owns independent `Frames` and `Start` settings.
+Each selected Mesh owns independent `Frames` and `Start` values.
 
 ```text
-Frames = 0  -> one static texture at the current frame
-Frames > 0  -> a Loop texture sequence for that object
+Frames = 0  -> one static texture evaluated at the current frame
+Frames > 0  -> Loop texture sequence for that object only
 ```
 
-Spine 3.8 and 4.0 use attachment-swap sequence encoding. Spine 4.1, 4.2, and 4.3 use
-native sequence metadata/timelines where supported.
+A sequence can use Scene FPS or an explicit sequence FPS override.
 
-## Quick start
+Target-specific output:
 
-1. Install `blender_to_spine2d_mesh_exporter-0.128.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
-2. Save the `.blend` file.
-3. Select one or more Mesh objects in Object Mode.
-4. Open **3D View > Sidebar > Blender to Spine2D Mesh Exporter**.
-5. Choose an Export Mode.
-6. For Normal / UV Segments, choose a Projection Direction.
-7. Choose the exact Spine target.
-8. Configure Cut and Bake settings.
-9. Run **Analyze** and review diagnostics.
-10. Export the current object or selected objects.
-11. Import the generated JSON and textures into the matching Spine version.
+- Spine 3.8 and 4.0 use attachment-swap sequence encoding.
+- Spine 4.1, 4.2, and 4.3 use native sequence metadata/timelines where supported.
 
-## Interface
+In selected-object export, static and animated objects can participate in the same request
+without inheriting each other's sequence metadata.
 
-![Blender to Spine2D Mesh Exporter interface](assets/ui_addon.png)
+## Analyze and diagnostics
 
-## Output
+**Analyze** runs the real preparation pipeline without committing final files.
+
+It can report:
+
+- source and exported vertex/triangle counts;
+- region and attachment counts;
+- material and texture execution path;
+- active modifiers ignored by the original-mesh Normal route;
+- UV and topology blockers;
+- camera and render blockers;
+- generated bone and depth-group counts;
+- retained depth points and maximum relief;
+- FRONT/reserve attachment and virtual-view statistics;
+- structured blockers and warnings.
+
+Changing relevant geometry, UV, material, selection, camera, frame, renderer, projection,
+Depth settings, or export settings makes the cached analysis stale.
+
+## Output and transaction safety
 
 Typical static single-object output:
 
@@ -172,15 +323,72 @@ Typical static single-object output:
 images/<ObjectName>_Baked.png
 ```
 
-Typical sequence output:
+Typical texture sequence:
 
 ```text
 images/<ObjectName>_Baked_0000.png
 images/<ObjectName>_Baked_0001.png
 ```
 
-Output is staged and committed atomically. Temporary `.spine2d-stage-*` and
-`.spine2d-backup-*` files are transaction data, not Spine assets.
+The exporter:
+
+- sanitizes output stems for Windows-safe filenames;
+- rejects output namespace collisions before writing;
+- stages JSON and textures before installation;
+- validates staged output;
+- commits all files atomically;
+- restores previous finals after partial installation failures when possible;
+- can recover stale `.spine2d-stage-*` and `.spine2d-backup-*` work files left by an
+  interrupted process.
+
+Temporary stage and backup files are transaction data, not Spine assets.
+
+## Source-scene safety
+
+Export preparation is designed not to permanently modify the source project.
+
+The transaction verifies or restores relevant:
+
+- source Mesh topology;
+- UV layers and coordinates;
+- material graphs;
+- object transforms;
+- active object and selection;
+- Object/Edit mode requirements;
+- current frame;
+- active camera;
+- render engine and render settings;
+- temporary objects, meshes, images, collections, materials, node trees, camera proxies,
+  render proxies, and generated attributes.
+
+## Supported Spine targets
+
+| UI target | Exact JSON version | Public standalone export |
+| --- | --- | --- |
+| Spine 3.8 | 3.8.99 | Yes |
+| Spine 4.0 | 4.0.64 | Yes |
+| Spine 4.1 | 4.1.24 | Yes, according to the capability registry |
+| Spine 4.2 | 4.2.43 | Yes |
+| Spine 4.3 | 4.3.23 | Yes, according to the capability registry |
+
+The target/profile capability registry rejects unsupported combinations before expensive
+Blender geometry or bake work begins.
+
+## Quick start
+
+1. Install `blender_to_spine2d_mesh_exporter-0.128.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
+2. Save the `.blend` file.
+3. Select one or more Mesh objects in Object Mode.
+4. Open **3D View > Sidebar > Blender to Spine2D Mesh Exporter**.
+5. Choose **Normal / UV Segments**, **Camera Projection**, or **Depth Camera Projection**.
+6. For Normal / UV Segments, choose the required Projection Direction.
+7. Choose the exact Spine target.
+8. Configure Cut, material, camera/depth, and Bake settings as required by the selected
+   mode.
+9. Run **Analyze** and resolve blockers.
+10. Export the current object or selected objects.
+11. Import the generated JSON and matching texture directory into the selected Spine
+    version.
 
 ## Documentation
 
@@ -196,8 +404,8 @@ Output is staged and committed atomically. Temporary `.spine2d-stage-*` and
 - [Contributing](docs/CONTRIBUTING.md)
 - [Examples](examples/examples.md)
 
-The documentation describes the current product only. Historical release notes are kept
-in Git history and tags rather than in the maintained documentation set.
+The maintained documentation describes the current product. Historical release notes live
+in Git history and tags rather than in the current documentation tree.
 
 ## Build the extension
 
