@@ -11,7 +11,7 @@ than in the maintained documentation tree.
 
 - Extension version: **0.129.0**.
 - Minimum Blender version: **5.2.0**.
-- Currently tested desktop platform: Windows.
+- Initial Blender Extensions package: **Windows x64**.
 - Scene settings schema: **8**.
 - Fresh Scene rig profile: **2-Axis Rotation + Scale**.
 - Default export mode: **Normal / UV Segments**.
@@ -69,6 +69,7 @@ parallax reserve surfaces with `Parallax Horizon Angle`.
 - [Architecture](architecture.md) — package boundaries and production data flow.
 - [Rig Profiles](rig-profiles.md) — current generated rig topology and setup-pose policies.
 - [Testing](testing.md) — pure Python, real bpy, Blender headless, and packaging gates.
+- [Blender Extensions Submission](submission.md) — current store metadata, reviewer path, and pre-upload gate.
 - [Contributing](CONTRIBUTING.md) — coding, Blender-state, testing, and documentation requirements.
 
 ## Documentation policy
