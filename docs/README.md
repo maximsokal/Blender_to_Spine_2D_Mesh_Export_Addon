@@ -1,7 +1,7 @@
 # Documentation
 
 This directory contains the maintained documentation for Blender to Spine2D Mesh Exporter
-**0.128.0**.
+**0.129.0**.
 
 The documentation describes the current product only. Historical release notes, milestone
 journals, and superseded implementation checkpoints belong in Git history and tags rather
@@ -9,13 +9,14 @@ than in the maintained documentation tree.
 
 ## Current product baseline
 
-- Extension version: **0.128.0**.
+- Extension version: **0.129.0**.
 - Minimum Blender version: **5.2.0**.
 - Currently tested desktop platform: Windows.
 - Scene settings schema: **8**.
 - Fresh Scene rig profile: **2-Axis Rotation + Scale**.
 - Default export mode: **Normal / UV Segments**.
 - Default Normal projection direction: **+Z**.
+- `Texture size` is a Scene-level **Bake** setting shared by the complete export request.
 - Supported standalone Spine targets:
   - 3.8.99
   - 4.0.64
