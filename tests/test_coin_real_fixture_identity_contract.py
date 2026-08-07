@@ -1,4 +1,4 @@
-"""Keep the real coin Blender gate independent of artist-facing material names."""
+"""Keep the real coin Blender gate stable across artist material revisions."""
 
 from __future__ import annotations
 
@@ -14,27 +14,37 @@ RUNNER = (
 )
 
 
-def test_real_coin_fixture_does_not_require_a_material_display_name() -> None:
+def test_real_coin_fixture_uses_stable_object_identity_only() -> None:
     source = RUNNER.read_text(encoding="utf-8")
 
     assert '_EXPECTED_OBJECT_NAME = "Game Gold Coin"' in source
     assert "_EXPECTED_MATERIAL_NAME" not in source
+    assert "_MUTED_ADVISORY" not in source
     assert "unexpected real coin material" not in source
     assert 'len(source.material_slots) == 1' in source
     assert 'material is not None, "real coin material slot is empty"' in source
 
 
-def test_real_coin_material_is_validated_by_shader_semantics() -> None:
+def test_real_coin_material_is_validated_by_current_capability_contract() -> None:
     source = RUNNER.read_text(encoding="utf-8")
 
     for marker in (
-        "_MUTED_ADVISORY in graph.issues",
+        "ShaderBakeCapability.LOCAL_UV_SAFE",
         "ShaderBakeCapability.CAMERA_RENDER_REQUIRED",
-        'finding.code == "GRAPH_CAMERA_DEPENDENCY"',
+        "ShaderBakeCapability.UNSUPPORTED",
+        'finding.code == "GRAPH_ANALYSIS_INCOMPLETE"',
+        "strongest_object_capability(audits)",
+        "_normal_uv_blocking_camera_findings(audits)",
+        "capability in _ALLOWED_NORMAL_UV_CAPABILITIES",
+        "material={material.name_full!r}",
+        "scene=unchanged",
+    ):
+        assert marker in source
+
+    for stale_fixture_marker in (
         'finding.node_type == "FRESNEL"',
         'finding.node_type == "BSDF_GLOSSY"',
         'finding.output_socket == "Generated"',
-        "_normal_uv_blocking_camera_findings(audits)",
-        "material={material.name_full!r}",
+        "muted_fallback=advisory",
     ):
-        assert marker in source
+        assert stale_fixture_marker not in source
