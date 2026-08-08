@@ -1,9 +1,9 @@
 """Shared A1 texturing topology and exact UV propagation to prepared regions.
 
 Legacy-compatible baking unwraps one complete object copy with every segmentation
-and decomposition cut marked as a seam.  The baked UV layer is then transferred to
-all exported regions.  This module implements that ordering with immutable
-snapshots and exact ``SourceLoopId`` correspondence.
+and decomposition cut marked as a seam. The baked UV layer is then transferred to
+all exported regions. This module implements that ordering with immutable snapshots
+and exact source-lineage correspondence.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from ..domain.geometry import (
     EdgeId,
     MeshSnapshot,
     MeshSnapshotValidator,
+    SourceEdgeId,
     UvTransferReport,
     transfer_uv_by_source_loop,
 )
@@ -96,35 +97,123 @@ class A1UvPropagationResult:
         return tuple(region.snapshot for region in self.regions)
 
 
-def _internal_segmentation_cut_ids(
+_GeometryEdgeReference = tuple[EdgeId, SourceEdgeId | None]
+
+
+def _internal_segmentation_cut_references(
     geometry: A1GeometryPreparationResult,
-) -> Tuple[EdgeId, ...]:
+) -> Tuple[_GeometryEdgeReference, ...]:
+    """Return internal segmentation cuts with stable source lineage."""
+
     return tuple(
         sorted(
             {
-                boundary.edge_id
+                (boundary.edge_id, boundary.source_edge_id)
                 for boundary in geometry.segmentation.boundary_edges
                 if len(boundary.linked_face_ids) == 2
                 and len(boundary.segment_ids) == 2
             },
-            key=lambda item: item.index,
+            key=lambda item: item[0].index,
         )
     )
 
 
-def _decomposition_cut_ids(
+def _decomposition_cut_references(
     geometry: A1GeometryPreparationResult,
-) -> Tuple[EdgeId, ...]:
+) -> Tuple[_GeometryEdgeReference, ...]:
+    """Return internal decomposition cuts with stable source lineage."""
+
     return tuple(
         sorted(
             {
-                cut.edge_id
+                (cut.edge_id, cut.source_edge_id)
                 for cut in geometry.decomposition.cuts
                 if len(cut.linked_face_ids) == 2 and len(cut.region_ids) == 2
             },
-            key=lambda item: item.index,
+            key=lambda item: item[0].index,
         )
     )
+
+
+def _source_edge_lookup(
+    source_snapshot: MeshSnapshot,
+) -> dict[SourceEdgeId, Tuple[EdgeId, ...]]:
+    """Build ``SourceEdgeId -> local EdgeId`` correspondence for texturing topology."""
+
+    grouped: dict[SourceEdgeId, list[EdgeId]] = {}
+    for edge in source_snapshot.edges:
+        if edge.source_id is None:
+            continue
+        grouped.setdefault(edge.source_id, []).append(edge.id)
+    return {
+        source_id: tuple(sorted(edge_ids, key=lambda item: item.index))
+        for source_id, edge_ids in grouped.items()
+    }
+
+
+def _resolve_geometry_cut_edge_ids(
+    source_snapshot: MeshSnapshot,
+    references: Tuple[_GeometryEdgeReference, ...],
+    *,
+    label: str,
+) -> Tuple[EdgeId, ...]:
+    """Translate repaired geometry cut IDs onto the full texturing snapshot.
+
+    Geometry preparation may conservatively split a non-manifold edge into multiple
+    local ``EdgeId`` values. The full texturing/unwrap snapshot intentionally remains the
+    unrepaired source topology, so local IDs cannot be compared directly after repair.
+    Stable ``SourceEdgeId`` lineage is authoritative for source edges. Generated edges
+    have no source lineage and are accepted only when the exact local ID still exists as
+    a generated edge in the texturing snapshot; the non-manifold repair preserves those
+    original IDs and appends only additional edge copies.
+    """
+
+    if not isinstance(source_snapshot, MeshSnapshot):
+        raise TypeError("source_snapshot must be MeshSnapshot")
+    if not isinstance(references, tuple):
+        raise TypeError("references must be a tuple")
+    if not isinstance(label, str) or not label.strip():
+        raise ValueError("label must be a non-empty string")
+
+    edge_map = source_snapshot.edge_by_id()
+    source_lookup = _source_edge_lookup(source_snapshot)
+    resolved: set[EdgeId] = set()
+
+    for edge_id, source_edge_id in references:
+        if not isinstance(edge_id, EdgeId):
+            raise TypeError(f"{label} cut edge_id must be EdgeId")
+        if source_edge_id is not None and not isinstance(source_edge_id, SourceEdgeId):
+            raise TypeError(f"{label} cut source_edge_id must be SourceEdgeId or None")
+
+        if source_edge_id is not None:
+            matches = source_lookup.get(source_edge_id, ())
+            if not matches:
+                raise A1TexturingLayoutError(
+                    f"{label} seam cannot resolve SourceEdgeId "
+                    f"{source_edge_id.object_id}:{source_edge_id.edge_index} "
+                    "onto the texturing snapshot"
+                )
+            resolved.update(matches)
+            continue
+
+        # A generated edge has no SourceEdgeId. Its local identity is safe only when the
+        # exact generated edge still exists in the unrepaired snapshot. Repair keeps all
+        # original IDs stable specifically to make this deterministic.
+        source_edge = edge_map.get(edge_id)
+        if source_edge is None:
+            raise A1TexturingLayoutError(
+                f"{label} generated seam edge {edge_id.index} has no SourceEdgeId and "
+                "does not exist in the texturing snapshot"
+            )
+        if source_edge.source_id is not None:
+            raise A1TexturingLayoutError(
+                f"{label} seam edge {edge_id.index} lost source lineage: geometry has "
+                "source_edge_id=None but texturing edge has "
+                f"{source_edge.source_id.object_id}:{source_edge.source_id.edge_index}"
+            )
+        resolved.add(edge_id)
+
+    return tuple(sorted(resolved, key=lambda item: item.index))
 
 
 def build_a1_texturing_topology(
@@ -146,20 +235,30 @@ def build_a1_texturing_topology(
             "geometry preparation does not belong to source_snapshot"
         )
 
-    edge_map = source_snapshot.edge_by_id()
     existing = tuple(
         sorted(
             (edge.id for edge in source_snapshot.edges if edge.seam),
             key=lambda item: item.index,
         )
     )
-    segmentation = _internal_segmentation_cut_ids(geometry)
-    decomposition = _decomposition_cut_ids(geometry)
+    segmentation = _resolve_geometry_cut_edge_ids(
+        source_snapshot,
+        _internal_segmentation_cut_references(geometry),
+        label="Segmentation",
+    )
+    decomposition = _resolve_geometry_cut_edge_ids(
+        source_snapshot,
+        _decomposition_cut_references(geometry),
+        label="Decomposition",
+    )
     requested = set(existing) | set(segmentation) | set(decomposition)
+
+    # All resolved seam IDs must now belong to the actual topology being unwrapped.
+    edge_map = source_snapshot.edge_by_id()
     unknown = requested - set(edge_map)
     if unknown:
         raise A1TexturingLayoutError(
-            "Texturing seam plan references unknown edges: "
+            "Resolved texturing seam plan references unknown edges: "
             + str(tuple(sorted(edge_id.index for edge_id in unknown)))
         )
 
