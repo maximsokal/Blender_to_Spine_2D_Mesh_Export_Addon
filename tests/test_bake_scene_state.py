@@ -35,11 +35,9 @@ class FakeScene:
                 use_pass_direct=True,
                 use_pass_indirect=True,
                 use_pass_color=False,
-                use_pass_ambient_occlusion=False,
                 use_pass_diffuse=False,
                 use_pass_glossy=False,
                 use_pass_transmission=False,
-                use_pass_subsurface=False,
                 use_pass_emit=False,
             ),
         )
@@ -105,7 +103,7 @@ def test_configure_scene_maps_explicit_diffuse_and_selected_to_active(tmp_path):
     assert scene.cycles.samples == 128
 
 
-def test_configure_scene_enables_complete_combined_contributions(tmp_path):
+def test_configure_scene_enables_blender_52_combined_contributions(tmp_path):
     scene = FakeScene()
     plan = make_plan(tmp_path, procedural=True)
     assert plan.bake_mode is BakeMode.COMBINED
@@ -122,11 +120,9 @@ def test_configure_scene_enables_complete_combined_contributions(tmp_path):
     assert scene.render.bake.use_pass_direct
     assert scene.render.bake.use_pass_indirect
     assert scene.render.bake.use_pass_color
-    assert scene.render.bake.use_pass_ambient_occlusion
     assert scene.render.bake.use_pass_diffuse
     assert scene.render.bake.use_pass_glossy
     assert scene.render.bake.use_pass_transmission
-    assert scene.render.bake.use_pass_subsurface
     assert scene.render.bake.use_pass_emit
     assert scene.cycles.bake_type == "COMBINED"
 
