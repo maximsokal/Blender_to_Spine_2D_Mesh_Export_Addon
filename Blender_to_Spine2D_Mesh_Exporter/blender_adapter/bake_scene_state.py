@@ -87,6 +87,9 @@ class BakeSceneState:
             )
 
 
+# Blender 5.2 BakeSettings exposes only these Combined contribution toggles:
+# EMIT, DIRECT, INDIRECT, COLOR, DIFFUSE, GLOSSY and TRANSMISSION. Ambient
+# Occlusion and Subsurface are not BakeSettings pass-filter properties in 5.2.
 _CAPTURE_PATHS = (
     "render.engine",
     # Capture color mode first so reverse-order restoration puts the file format
@@ -102,11 +105,9 @@ _CAPTURE_PATHS = (
     "render.bake.use_pass_direct",
     "render.bake.use_pass_indirect",
     "render.bake.use_pass_color",
-    "render.bake.use_pass_ambient_occlusion",
     "render.bake.use_pass_diffuse",
     "render.bake.use_pass_glossy",
     "render.bake.use_pass_transmission",
-    "render.bake.use_pass_subsurface",
     "render.bake.use_pass_emit",
     "cycles.bake_type",
     "cycles.samples",
@@ -148,9 +149,10 @@ def configure_scene_for_bake(
 
     Camera-scoped semantic passes use Blender's ``ACTIVE_CAMERA`` bake view so
     reflection and transmission rays are evaluated from the same camera context used by
-    the material plan. Every Combined contribution is set explicitly; results therefore
-    cannot depend on whichever Render > Bake toggles the user last changed. All settings
-    are owned by :func:`preserve_bake_scene_state` and restored after the bake.
+    the material plan. Every Blender-5.2 Combined contribution is set explicitly;
+    results therefore cannot depend on whichever Render > Bake toggles the user last
+    changed. All settings are owned by :func:`preserve_bake_scene_state` and restored
+    after the bake.
     """
 
     if scene is None:
@@ -205,14 +207,12 @@ def configure_scene_for_bake(
     scene.render.bake.use_pass_indirect = not flat_color_pass
     scene.render.bake.use_pass_color = True
 
-    # Blender stores these contribution toggles in Scene state even though several bake
-    # modes ignore them. Set every value explicitly so COMBINED is deterministic and
-    # includes the complete surface appearance, including transmission.
-    scene.render.bake.use_pass_ambient_occlusion = True
+    # Blender 5.2's Combined pass-filter exposes exactly these surface contribution
+    # toggles. Set all of them explicitly so Metallic/Coat/Transmission appearance is
+    # deterministic and independent of the user's previous Render > Bake settings.
     scene.render.bake.use_pass_diffuse = True
     scene.render.bake.use_pass_glossy = True
     scene.render.bake.use_pass_transmission = True
-    scene.render.bake.use_pass_subsurface = True
     scene.render.bake.use_pass_emit = True
 
     scene.cycles.bake_type = bake_mode.value
