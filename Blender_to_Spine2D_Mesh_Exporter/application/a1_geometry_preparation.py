@@ -29,6 +29,7 @@ from ..domain.geometry import (
     is_simple_disk,
     materialize_decomposed_snapshots,
     segment_mesh_a1,
+    split_non_manifold_edges,
     triangulate_snapshot,
 )
 
@@ -40,7 +41,12 @@ class A1GeometryPreparationError(ValueError):
 @dataclass(frozen=True, slots=True)
 class A1GeometryPreparationSettings:
     segmentation: SegmentationSettings = SegmentationSettings()
-    decomposition: DecompositionSettings = DecompositionSettings()
+    # A1 exports may safely cut ambiguous >2-face source edges because Spine output is
+    # already materialized as independent attachment regions. Direct domain callers keep
+    # DecompositionSettings()' strict reject_non_manifold=True default.
+    decomposition: DecompositionSettings = DecompositionSettings(
+        reject_non_manifold=False
+    )
     triangulation: TriangulationSettings = TriangulationSettings()
     angular_mode: A1AngularMode = A1AngularMode.SEED_CONE
     local_angle_limit_degrees: float | None = None
@@ -231,7 +237,13 @@ def prepare_a1_geometry_regions(
     source_snapshot: MeshSnapshot,
     settings: A1GeometryPreparationSettings | None = None,
 ) -> A1GeometryPreparationResult:
-    """Prepare triangulated manifold-disk regions for later UV unwrap and export."""
+    """Prepare triangulated manifold-disk regions for later UV unwrap and export.
+
+    A1's non-manifold repair policy is implemented as an immutable topological cut before
+    segmentation. Only edges with more than two incident faces are duplicated per face;
+    geometry, UVs and source lineage remain unchanged. The subsequent disk grower still
+    rejects pinches and any union that is not a manifold topological disk.
+    """
 
     if not isinstance(source_snapshot, MeshSnapshot):
         raise TypeError("source_snapshot must be MeshSnapshot")
@@ -240,19 +252,23 @@ def prepare_a1_geometry_regions(
     if not isinstance(resolved_settings, A1GeometryPreparationSettings):
         raise TypeError("settings must be A1GeometryPreparationSettings")
 
+    working_snapshot = source_snapshot
+    if not resolved_settings.decomposition.reject_non_manifold:
+        working_snapshot, _ = split_non_manifold_edges(source_snapshot)
+
     segmentation = segment_mesh_a1(
-        source_snapshot,
+        working_snapshot,
         resolved_settings.segmentation,
         angular_mode=resolved_settings.angular_mode,
         local_angle_limit_degrees=resolved_settings.local_angle_limit_degrees,
     )
     decomposition = decompose_complex_segments(
-        source_snapshot,
+        working_snapshot,
         segmentation,
         resolved_settings.decomposition,
     )
     region_snapshots = materialize_decomposed_snapshots(
-        source_snapshot,
+        working_snapshot,
         decomposition,
     )
     if len(region_snapshots) != len(decomposition.regions):
@@ -271,7 +287,7 @@ def prepare_a1_geometry_regions(
         triangulation = triangulate_snapshot(
             region_snapshot,
             resolved_settings.triangulation,
-            snapshot_id=f"{source_snapshot.snapshot_id}:region-{region_index:03d}:tri",
+            snapshot_id=f"{working_snapshot.snapshot_id}:region-{region_index:03d}:tri",
         )
         triangulated_topology = analyse_face_region(
             triangulation.snapshot,
@@ -297,12 +313,12 @@ def prepare_a1_geometry_regions(
 
     prepared_regions = tuple(prepared)
     _validate_prepared_coverage(
-        source_snapshot,
+        working_snapshot,
         decomposition,
         prepared_regions,
     )
     return A1GeometryPreparationResult(
-        source_snapshot_id=source_snapshot.snapshot_id,
+        source_snapshot_id=working_snapshot.snapshot_id,
         settings=resolved_settings,
         segmentation=segmentation,
         decomposition=decomposition,
