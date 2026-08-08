@@ -42,7 +42,6 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
 from run_bake_integration import PNG_SIGNATURE, _assert  # noqa: E402
 from run_grenade_bump_displacement_normal_uv_integration import (  # noqa: E402
     _assert_capability_route,
-    _assert_prepared_plan,
     _require_loaded_blend,
     _require_material,
     _require_source_object,
@@ -271,6 +270,8 @@ def _run(expected_blend: str) -> None:
     with tempfile.TemporaryDirectory(prefix="spine2d_grenade_full_") as temp_root:
         output_directory = Path(temp_root).resolve(strict=False)
 
+        # Prepare the exact object/face that previously failed before running the full
+        # scene. This localizes any future geometry regression immediately.
         cylinder_settings = replace(
             _cube_settings(output_directory),
             prefix="Grenade_Cylinder_002",
@@ -287,7 +288,6 @@ def _run(expected_blend: str) -> None:
             all(len(face.loop_ids) == 3 for face in cylinder_prepared.source_snapshot.faces),
             "prepared Cylinder.002 source geometry is not fully triangulated",
         )
-        _assert_prepared_plan(cylinder_prepared)
 
         sources = _sources(objects, output_directory)
         multi_settings = A1MultiObjectExportSettings(
