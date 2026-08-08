@@ -24,7 +24,13 @@ from ..domain.geometry import (
     SourceFaceId,
     SourceLoopId,
     SourceVertexId,
+    TriangulationError,
     VertexId,
+    triangulate_snapshot,
+)
+from .blender_loop_triangulation import (
+    BlenderLoopTriangulationError,
+    triangulate_snapshot_with_blender_loop_triangles,
 )
 from .mesh_edge_attributes import (
     MeshEdgeAttributeError,
@@ -155,6 +161,59 @@ def _loop_uvs(
         raise MeshReadError(
             f"Unable to read UV coordinates for mesh loop {mesh_loop_index}: {exc}"
         ) from exc
+
+
+def _resolve_blender_tessellation_fallback(
+    mesh: Any,
+    snapshot: MeshSnapshot,
+) -> MeshSnapshot:
+    """Keep source polygons unless strict domain triangulation rejects Blender geometry.
+
+    The pure triangulator remains the first authority for ordinary snapshots. When it
+    rejects a live Blender Mesh, Blender's own ``loop_triangles`` tessellation is accepted
+    only if it produces the exact N-2 triangle count expected from every source polygon.
+    This preserves the historical polygon snapshot for normal meshes while recovering
+    Blender-valid artist geometry whose polygon boundary the generic 2D triangulator
+    interprets differently.
+    """
+
+    if not isinstance(snapshot, MeshSnapshot):
+        raise TypeError("snapshot must be MeshSnapshot")
+
+    try:
+        triangulate_snapshot(snapshot)
+        return snapshot
+    except TriangulationError as strict_error:
+        try:
+            fallback = triangulate_snapshot_with_blender_loop_triangles(
+                mesh,
+                snapshot,
+                snapshot_id=f"{snapshot.snapshot_id}:blender-fallback",
+            )
+        except BlenderLoopTriangulationError as blender_error:
+            raise MeshReadError(
+                "Source Mesh failed both strict rewrite triangulation and Blender "
+                f"loop-triangle tessellation: strict={strict_error}; "
+                f"blender={blender_error}"
+            ) from strict_error
+
+        expected_triangle_count = sum(
+            len(face.loop_ids) - 2 for face in snapshot.faces
+        )
+        if len(fallback.faces) != expected_triangle_count:
+            raise MeshReadError(
+                "Blender loop-triangle fallback did not cover every source polygon: "
+                f"expected_triangles={expected_triangle_count}, "
+                f"actual_triangles={len(fallback.faces)}"
+            ) from strict_error
+
+        logger.warning(
+            "Strict rewrite triangulation rejected Blender source '%s'; using Blender "
+            "loop-triangle tessellation instead: %s",
+            snapshot.source_object_id,
+            strict_error,
+        )
+        return fallback
 
 
 def read_source_mesh_snapshot(
@@ -299,18 +358,20 @@ def read_source_mesh_snapshot(
             render_uv_layer=render_uv_name,
         )
         MeshSnapshotValidator().validate_or_raise(snapshot)
+        resolved_snapshot = _resolve_blender_tessellation_fallback(mesh, snapshot)
         logger.debug(
             "Read Blender 5.2 source mesh snapshot '%s': %d vertices, %d edges, "
-            "%d loops, %d faces active_uv=%s render_uv=%s",
-            snapshot.snapshot_id,
-            len(snapshot.vertices),
-            len(snapshot.edges),
-            len(snapshot.loops),
-            len(snapshot.faces),
-            snapshot.active_uv_layer,
-            snapshot.render_uv_layer,
+            "%d loops, %d faces active_uv=%s render_uv=%s blender_fallback=%s",
+            resolved_snapshot.snapshot_id,
+            len(resolved_snapshot.vertices),
+            len(resolved_snapshot.edges),
+            len(resolved_snapshot.loops),
+            len(resolved_snapshot.faces),
+            resolved_snapshot.active_uv_layer,
+            resolved_snapshot.render_uv_layer,
+            int(resolved_snapshot is not snapshot),
         )
-        return snapshot
+        return resolved_snapshot
     except MeshReadError:
         raise
     except Exception as exc:
