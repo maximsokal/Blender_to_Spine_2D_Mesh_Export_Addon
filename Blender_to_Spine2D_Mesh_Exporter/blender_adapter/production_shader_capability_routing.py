@@ -22,6 +22,10 @@ from ..domain.baking import (
 from ..domain.baking.normal_uv_camera_context import (
     build_normal_uv_camera_context_plan,
 )
+from .production_shader_capability_principled import (
+    PRINCIPLED_REFLECTION_CONTEXT_CODE,
+    PRINCIPLED_REFLECTION_CONTEXT_OUTPUTS,
+)
 from .render_engine_contract import RenderEngineContract
 
 
@@ -121,13 +125,25 @@ def _supports_normal_uv_object_bake(
         return (finding.output_socket or "").strip().casefold() in (
             _NORMAL_UV_GEOMETRY_OUTPUTS
         )
+    if finding.code == PRINCIPLED_REFLECTION_CONTEXT_CODE:
+        return (
+            (finding.node_type or "").strip().upper() == "BSDF_PRINCIPLED"
+            and (finding.output_socket or "").strip()
+            in PRINCIPLED_REFLECTION_CONTEXT_OUTPUTS
+        )
     return False
 
 
 def _normal_uv_blocking_camera_findings(
     audits: Tuple[MaterialCapabilityAudit, ...],
 ) -> tuple[tuple[str, tuple[tuple[str, str | None, str | None], ...]], ...]:
-    """Return camera findings that cannot be reproduced by Normal object UV bake."""
+    """Return camera findings that cannot be reproduced by Normal object UV bake.
+
+    ``GRAPH_CAMERA_DEPENDENCY`` is only an aggregate. It is ignored when concrete
+    camera findings explain the dependency, but remains fail-closed if no concrete
+    cause was classified. This prevents unknown camera dependencies from silently
+    entering the Normal/UV route.
+    """
 
     if not isinstance(audits, tuple) or not all(
         isinstance(audit, MaterialCapabilityAudit) for audit in audits
