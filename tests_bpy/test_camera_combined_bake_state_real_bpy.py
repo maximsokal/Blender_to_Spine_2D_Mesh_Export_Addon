@@ -21,6 +21,19 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
 )
 
 
+_EXPECTED_BLENDER_52_COMBINED_FILTER = frozenset(
+    {
+        "DIRECT",
+        "INDIRECT",
+        "COLOR",
+        "DIFFUSE",
+        "GLOSSY",
+        "TRANSMISSION",
+        "EMIT",
+    }
+)
+
+
 def _plan(tmp_path):
     analysis = ObjectMaterialAnalysis(
         "CameraCombinedStateProbe",
@@ -55,6 +68,19 @@ def test_camera_combined_uses_active_camera_transmission_and_restores_state(tmp_
     scene.camera = camera_object
 
     try:
+        # Assert the exact Blender 5.2 RNA boundary before testing our configuration.
+        bake_properties = {
+            property_rna.identifier
+            for property_rna in scene.render.bake.bl_rna.properties
+        }
+        assert "view_from" in bake_properties
+        assert "use_pass_diffuse" in bake_properties
+        assert "use_pass_glossy" in bake_properties
+        assert "use_pass_transmission" in bake_properties
+        assert "use_pass_emit" in bake_properties
+        assert "use_pass_ambient_occlusion" not in bake_properties
+        assert "use_pass_subsurface" not in bake_properties
+
         state_before = BakeSceneState.capture(scene)
 
         with preserve_bake_scene_state(scene):
@@ -74,10 +100,11 @@ def test_camera_combined_uses_active_camera_transmission_and_restores_state(tmp_
             assert scene.render.bake.use_pass_diffuse
             assert scene.render.bake.use_pass_glossy
             assert scene.render.bake.use_pass_transmission
-            assert scene.render.bake.use_pass_subsurface
             assert scene.render.bake.use_pass_emit
-            assert scene.render.bake.use_pass_ambient_occlusion
             assert scene.cycles.bake_type == "COMBINED"
+
+            pass_filter = frozenset(scene.render.bake.pass_filter)
+            assert _EXPECTED_BLENDER_52_COMBINED_FILTER.issubset(pass_filter)
 
         assert BakeSceneState.capture(scene) == state_before
     finally:
