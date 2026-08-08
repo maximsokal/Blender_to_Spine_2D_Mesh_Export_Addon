@@ -1,9 +1,11 @@
 """Live Principled BSDF capability details for production bake routing.
 
-The immutable graph records that a material depends on camera/view/reflection context,
-but a Principled BSDF can reach that aggregate dependency through materially different
-features. Metallic and Coat are reproducible by the Normal/UV Cycles COMBINED object-bake
-route, while Transmission remains a render-ray boundary and must stay blocked there.
+The immutable graph records aggregate camera/view/reflection dependencies, while live
+Principled BSDF RNA tells us which surface feature caused them. Metallic, Coat and
+Transmission are all representable by Cycles COMBINED object baking when the bake uses
+the active camera as its view-ray source. Keeping these findings concrete lets Normal/UV
+route them through ``CAMERA_COMBINED`` without weakening fail-closed handling for unknown
+camera dependencies, volume or render displacement.
 """
 
 from __future__ import annotations
@@ -26,10 +28,9 @@ from .shader_graph_semantics import (
 
 
 PRINCIPLED_REFLECTION_CONTEXT_CODE = "PRINCIPLED_REFLECTION_CONTEXT"
-PRINCIPLED_TRANSMISSION_RENDER_REQUIRED_CODE = (
-    "PRINCIPLED_TRANSMISSION_RENDER_REQUIRED"
-)
+PRINCIPLED_TRANSMISSION_CONTEXT_CODE = "PRINCIPLED_TRANSMISSION_CONTEXT"
 PRINCIPLED_REFLECTION_CONTEXT_OUTPUTS = frozenset({"Metallic", "Coat Weight"})
+PRINCIPLED_TRANSMISSION_CONTEXT_OUTPUTS = frozenset({"Transmission Weight"})
 
 _FEATURE_OUTPUT_NAME = {
     PrincipledCameraFeature.METALLIC: "Metallic",
@@ -44,10 +45,10 @@ def build_principled_context_findings(
 ) -> tuple[ShaderCapabilityFinding, ...]:
     """Build concrete camera findings for reachable live Principled BSDF nodes.
 
-    ``GRAPH_CAMERA_DEPENDENCY`` is intentionally an aggregate finding and cannot tell
-    Normal/UV routing whether the dependency came from reflective surface appearance or
-    from transmission/refraction. This function preserves that distinction while live
-    Blender RNA is still aligned with the immutable graph snapshot.
+    ``GRAPH_CAMERA_DEPENDENCY`` is intentionally aggregate and cannot distinguish
+    reflective surface appearance from transmission/refraction. Both are supported by
+    Cycles COMBINED object bake, but they remain separate findings for diagnostics and so
+    routing never needs to guess why the aggregate dependency exists.
     """
 
     if not isinstance(graph, MaterialGraphSnapshot):
@@ -69,11 +70,11 @@ def build_principled_context_findings(
                 findings.append(
                     build_finding(
                         ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
-                        PRINCIPLED_TRANSMISSION_RENDER_REQUIRED_CODE,
+                        PRINCIPLED_TRANSMISSION_CONTEXT_CODE,
                         (
-                            "Principled Transmission requires camera-ray/refraction "
-                            "evaluation and cannot be represented faithfully by the "
-                            "Normal/UV surface object-bake route"
+                            "Principled Transmission uses camera/view transmission rays "
+                            "that Cycles COMBINED object bake can evaluate from the "
+                            "active camera on the original source surface"
                         ),
                         node=snapshot,
                         output_socket=output_name,
@@ -87,8 +88,8 @@ def build_principled_context_findings(
                     PRINCIPLED_REFLECTION_CONTEXT_CODE,
                     (
                         f"Principled {output_name} uses camera/view reflection context "
-                        "that Cycles COMBINED object bake can evaluate on the original "
-                        "source surface"
+                        "that Cycles COMBINED object bake can evaluate from the active "
+                        "camera on the original source surface"
                     ),
                     node=snapshot,
                     output_socket=output_name,
@@ -118,7 +119,8 @@ def apply_principled_context_boundary(
 __all__ = [
     "PRINCIPLED_REFLECTION_CONTEXT_CODE",
     "PRINCIPLED_REFLECTION_CONTEXT_OUTPUTS",
-    "PRINCIPLED_TRANSMISSION_RENDER_REQUIRED_CODE",
+    "PRINCIPLED_TRANSMISSION_CONTEXT_CODE",
+    "PRINCIPLED_TRANSMISSION_CONTEXT_OUTPUTS",
     "apply_principled_context_boundary",
     "build_principled_context_findings",
 ]
