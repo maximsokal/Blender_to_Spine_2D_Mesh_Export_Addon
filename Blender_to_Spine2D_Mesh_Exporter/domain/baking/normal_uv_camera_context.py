@@ -1,16 +1,18 @@
 """Explicit Normal/UV-segment planning for source- and camera-context materials.
 
 Blender object baking evaluates the original shader graph at surface points while the
-``uv_layer`` argument selects only the destination layout.  A material may therefore
-need object, normal, view, reflection, or active-camera context without requiring the
-exported mesh to become a full-frame Camera Projection attachment.
+``uv_layer`` argument selects only the destination layout. A material may therefore
+need object, normal, view, reflection, active-camera, or bump-only displacement context
+without requiring the exported mesh to become a full-frame Camera Projection attachment.
 
-This module keeps those two concerns separate:
+This module keeps those concerns separate:
 
 * material evaluation uses a CAMERA-scoped COMBINED object-bake pass;
 * exported geometry remains the ordinary Normal / UV Segments topology;
-* volume and render displacement remain rejected because object UV baking cannot
-  represent those output channels as a surface texture without changing geometry.
+* volume and true render displacement remain rejected;
+* bump-only Material Output displacement is accepted only when the production capability
+  router has already proved the live Blender material uses Bump Only rather than geometry
+  displacement.
 """
 
 from __future__ import annotations
@@ -49,12 +51,6 @@ _APPEARANCE_CHANNELS = frozenset(
     {
         MaterialSemanticChannel.SURFACE_COLOR,
         MaterialSemanticChannel.SURFACE_EMISSION,
-    }
-)
-_UNREPRESENTABLE_NORMAL_UV_CHANNELS = frozenset(
-    {
-        MaterialSemanticChannel.VOLUME,
-        MaterialSemanticChannel.DISPLACEMENT,
     }
 )
 
@@ -177,28 +173,48 @@ def _frame_tasks(settings: BakeSettings) -> Tuple[BakeFrameTask, ...]:
     return tuple(tasks)
 
 
-def _validate_normal_uv_channels(analysis: ObjectMaterialAnalysis) -> None:
+def _validate_normal_uv_channels(
+    analysis: ObjectMaterialAnalysis,
+    *,
+    allow_bump_displacement: bool,
+) -> None:
+    """Reject channels that cannot be represented by the approved Normal/UV route.
+
+    ``allow_bump_displacement`` is deliberately explicit and fail-closed. The immutable
+    material analysis only knows that Material Output -> Displacement is connected; it
+    cannot know whether Blender evaluates that connection as Bump Only or true geometry
+    displacement. Only the live production capability router may set this flag after it
+    has classified every displacement finding and proved that no true-displacement
+    blocker remains.
+    """
+
+    if not isinstance(analysis, ObjectMaterialAnalysis):
+        raise TypeError("analysis must be ObjectMaterialAnalysis")
+    if not isinstance(allow_bump_displacement, bool):
+        raise TypeError("allow_bump_displacement must be bool")
+
+    forbidden_channels = {MaterialSemanticChannel.VOLUME}
+    if not allow_bump_displacement:
+        forbidden_channels.add(MaterialSemanticChannel.DISPLACEMENT)
+
     invalid = tuple(
         (
             slot.slot_index,
             slot.material_name or f"slot-{slot.slot_index}",
             tuple(
                 sorted(
-                    (
-                        channel.value
-                        for channel in set(slot.semantic_channels)
-                        & _UNREPRESENTABLE_NORMAL_UV_CHANNELS
-                    )
+                    channel.value
+                    for channel in set(slot.semantic_channels) & forbidden_channels
                 )
             ),
         )
         for slot in analysis.slots
         if slot.kind is not MaterialKind.EMPTY
-        and set(slot.semantic_channels) & _UNREPRESENTABLE_NORMAL_UV_CHANNELS
+        and set(slot.semantic_channels) & forbidden_channels
     )
     if invalid:
         raise BakePlanError(
-            "Normal — UV Segments cannot represent volume or render displacement "
+            "Normal — UV Segments cannot represent volume or true render displacement "
             f"outputs as surface textures: {invalid}"
         )
 
@@ -209,6 +225,7 @@ def build_normal_uv_camera_context_plan(
     *,
     object_context: ObjectBakeContext,
     scene_context: SceneBakeContext,
+    allow_bump_displacement: bool = False,
 ) -> BakePlan:
     """Build a Normal/UV-segment plan for camera/source-context shader evaluation."""
 
@@ -220,6 +237,8 @@ def build_normal_uv_camera_context_plan(
         raise TypeError("object_context must be ObjectBakeContext")
     if not isinstance(scene_context, SceneBakeContext):
         raise TypeError("scene_context must be SceneBakeContext")
+    if not isinstance(allow_bump_displacement, bool):
+        raise TypeError("allow_bump_displacement must be bool")
     if object_context.source_object_id != analysis.source_object_id:
         raise BakePlanError("object context does not match material analysis")
     if scene_context.camera is None:
@@ -228,7 +247,10 @@ def build_normal_uv_camera_context_plan(
             f"'{analysis.source_object_id}'"
         )
 
-    _validate_normal_uv_channels(analysis)
+    _validate_normal_uv_channels(
+        analysis,
+        allow_bump_displacement=allow_bump_displacement,
+    )
     registry = BakeStrategyRegistry(
         strategies=(
             NormalUvCameraCombinedBakeStrategy(),
