@@ -1,13 +1,15 @@
 """Real grenade.blend end-to-end Normal/UV regression across every Mesh object.
 
-This gate is intentionally tied to the artist-authored fixture that exposed both the
-Bump Only capability bug and the Blender-vs-domain polygon tessellation mismatch. It
-must not synthesize replacement geometry or materials.
+This gate is intentionally tied to the artist-authored fixture that exposed the Bump
+Only capability bug, the Blender-vs-domain polygon tessellation mismatch, and Blender's
+zero-area loop-triangle output for ``Cylinder.002``. It must not synthesize replacement
+geometry or materials.
 
-The test first proves that ``Cylinder.002`` source polygon 26 is recovered through
-Blender's own ``Mesh.loop_triangles`` while preserving ``SourceFaceId`` lineage. It then
-exports every Mesh object in the loaded grenade scene through the same standalone
-multi-object Normal / UV Segments route used by the UI.
+The test first proves that source polygon 26 is recovered through Blender's own
+``Mesh.loop_triangles`` while zero-area tessellation triangles are discarded and
+``SourceFaceId``/``SourceLoopId`` lineage is preserved. It then exports every Mesh object
+in the loaded grenade scene through the same standalone multi-object Normal / UV Segments
+route used by the UI.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 import json
+from math import sqrt
 from pathlib import Path
 import sys
 import tempfile
@@ -38,6 +41,9 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     export_a1_multi_object,
     prepare_a1_object,
     read_source_mesh_snapshot,
+)
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.blender_loop_triangulation import (  # noqa: E402
+    _ZERO_AREA_EPSILON,
 )
 from run_bake_integration import PNG_SIGNATURE, _assert  # noqa: E402
 from run_grenade_bump_displacement_normal_uv_integration import (  # noqa: E402
@@ -137,7 +143,28 @@ def _datablock_fingerprint() -> tuple:
     )
 
 
-def _assert_blender_tessellation_fallback(source) -> tuple[int, int]:
+def _loop_triangle_cross_length(mesh, triangle) -> float:
+    """Return twice the geometric area of one Blender loop triangle."""
+
+    loop_indices = tuple(int(value) for value in triangle.loops)
+    _assert(len(loop_indices) == 3, f"unexpected Blender triangle loops: {loop_indices}")
+    positions = []
+    for loop_index in loop_indices:
+        vertex_index = int(mesh.loops[loop_index].vertex_index)
+        co = mesh.vertices[vertex_index].co
+        positions.append(tuple(float(co[index]) for index in range(3)))
+    first, second, third = positions
+    ab = tuple(second[index] - first[index] for index in range(3))
+    ac = tuple(third[index] - first[index] for index in range(3))
+    cross = (
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    )
+    return sqrt(sum(component * component for component in cross))
+
+
+def _assert_blender_tessellation_fallback(source) -> tuple[int, int, int]:
     mesh = source.data
     _assert(
         len(mesh.polygons) > _EXPECTED_SOURCE_FACE_INDEX,
@@ -149,6 +176,40 @@ def _assert_blender_tessellation_fallback(source) -> tuple[int, int]:
         source_corner_count >= 4,
         "expected grenade regression polygon to remain non-triangular; "
         f"corners={source_corner_count}",
+    )
+
+    mesh.calc_loop_triangles()
+    raw_source_triangles = tuple(
+        triangle
+        for triangle in mesh.loop_triangles
+        if int(triangle.polygon_index) == _EXPECTED_SOURCE_FACE_INDEX
+    )
+    expected_raw_count = source_corner_count - 2
+    _assert(
+        len(raw_source_triangles) == expected_raw_count,
+        "Blender raw tessellation no longer provides source-face N-2 coverage: "
+        f"face={_EXPECTED_SOURCE_FACE_INDEX}, corners={source_corner_count}, "
+        f"expected={expected_raw_count}, actual={len(raw_source_triangles)}",
+    )
+    raw_areas = tuple(
+        _loop_triangle_cross_length(mesh, triangle)
+        for triangle in raw_source_triangles
+    )
+    degenerate_count = sum(
+        1 for value in raw_areas if value <= _ZERO_AREA_EPSILON
+    )
+    non_degenerate_count = sum(
+        1 for value in raw_areas if value > _ZERO_AREA_EPSILON
+    )
+    _assert(
+        degenerate_count >= 1,
+        "grenade regression polygon no longer contains a zero-area Blender triangle; "
+        f"areas={raw_areas!r}",
+    )
+    _assert(
+        non_degenerate_count >= 1,
+        "grenade regression polygon became wholly degenerate; "
+        f"areas={raw_areas!r}",
     )
 
     snapshot = read_source_mesh_snapshot(
@@ -165,17 +226,17 @@ def _assert_blender_tessellation_fallback(source) -> tuple[int, int]:
         all(len(face.loop_ids) == 3 for face in snapshot.faces),
         "Blender fallback snapshot contains a non-triangle face",
     )
-    source_triangles = tuple(
+    retained_source_triangles = tuple(
         face
         for face in snapshot.faces
         if face.source_id.face_index == _EXPECTED_SOURCE_FACE_INDEX
     )
-    expected_count = source_corner_count - 2
     _assert(
-        len(source_triangles) == expected_count,
-        "Blender fallback did not preserve source-face N-2 coverage: "
-        f"face={_EXPECTED_SOURCE_FACE_INDEX}, corners={source_corner_count}, "
-        f"expected={expected_count}, actual={len(source_triangles)}",
+        len(retained_source_triangles) == non_degenerate_count,
+        "Blender fallback did not retain exactly the non-degenerate source triangles: "
+        f"face={_EXPECTED_SOURCE_FACE_INDEX}, raw={len(raw_source_triangles)}, "
+        f"degenerate={degenerate_count}, non_degenerate={non_degenerate_count}, "
+        f"retained={len(retained_source_triangles)}",
     )
     source_loop_ids = tuple(
         loop.source_id
@@ -187,7 +248,7 @@ def _assert_blender_tessellation_fallback(source) -> tuple[int, int]:
         all(item.object_id == source.name_full for item in source_loop_ids),
         "fallback SourceLoopId object lineage changed",
     )
-    return source_corner_count, len(source_triangles)
+    return source_corner_count, non_degenerate_count, degenerate_count
 
 
 def _component_token(index: int) -> str:
@@ -257,9 +318,11 @@ def _run(expected_blend: str) -> None:
 
     before = _scene_fingerprint(scene, objects)
     datablocks_before = _datablock_fingerprint()
-    source_corner_count, fallback_triangle_count = _assert_blender_tessellation_fallback(
-        triangulation_source
-    )
+    (
+        source_corner_count,
+        fallback_triangle_count,
+        degenerate_triangle_count,
+    ) = _assert_blender_tessellation_fallback(triangulation_source)
 
     # Keep the earlier material regression inside the same real fixture gate. The full
     # multi-object export below then proves that capability + tessellation coexist.
@@ -318,7 +381,8 @@ def _run(expected_blend: str) -> None:
         f"problem_object={_EXPECTED_TRIANGULATION_OBJECT!r} "
         f"source_face={_EXPECTED_SOURCE_FACE_INDEX} "
         f"source_corners={source_corner_count} "
-        f"blender_triangles={fallback_triangle_count} "
+        f"retained_blender_triangles={fallback_triangle_count} "
+        f"filtered_zero_area_triangles={degenerate_triangle_count} "
         f"outputs={len(outputs)} source=unchanged",
         flush=True,
     )
