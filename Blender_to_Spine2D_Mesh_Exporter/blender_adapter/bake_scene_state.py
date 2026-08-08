@@ -7,7 +7,12 @@ from dataclasses import dataclass
 import logging
 from typing import Any, Iterator, Tuple
 
-from ..domain.baking import BakeExecutionSettings, BakeMode, BakePlan
+from ..domain.baking import (
+    BakeEvaluationScope,
+    BakeExecutionSettings,
+    BakeMode,
+    BakePlan,
+)
 from ..domain.baking.texture_format_policy import resolve_texture_color_mode
 
 
@@ -93,9 +98,16 @@ _CAPTURE_PATHS = (
     "render.bake.use_selected_to_active",
     "render.bake.use_cage",
     "render.bake.cage_extrusion",
+    "render.bake.view_from",
     "render.bake.use_pass_direct",
     "render.bake.use_pass_indirect",
     "render.bake.use_pass_color",
+    "render.bake.use_pass_ambient_occlusion",
+    "render.bake.use_pass_diffuse",
+    "render.bake.use_pass_glossy",
+    "render.bake.use_pass_transmission",
+    "render.bake.use_pass_subsurface",
+    "render.bake.use_pass_emit",
     "cycles.bake_type",
     "cycles.samples",
 )
@@ -130,8 +142,16 @@ def configure_scene_for_bake(
     execution_settings: BakeExecutionSettings,
     *,
     bake_mode: BakeMode,
+    evaluation_scope: BakeEvaluationScope,
 ) -> None:
-    """Apply explicit Blender 5.2 settings for one immutable bake pass."""
+    """Apply explicit Blender 5.2 settings for one immutable bake pass.
+
+    Camera-scoped semantic passes use Blender's ``ACTIVE_CAMERA`` bake view so
+    reflection and transmission rays are evaluated from the same camera context used by
+    the material plan. Every Combined contribution is set explicitly; results therefore
+    cannot depend on whichever Render > Bake toggles the user last changed. All settings
+    are owned by :func:`preserve_bake_scene_state` and restored after the bake.
+    """
 
     if scene is None:
         raise BakeSceneStateError("scene cannot be None")
@@ -141,6 +161,8 @@ def configure_scene_for_bake(
         raise TypeError("execution_settings must be BakeExecutionSettings")
     if not isinstance(bake_mode, BakeMode):
         raise TypeError("bake_mode must be BakeMode")
+    if not isinstance(evaluation_scope, BakeEvaluationScope):
+        raise TypeError("evaluation_scope must be BakeEvaluationScope")
 
     for path in _CAPTURE_PATHS:
         try:
@@ -149,6 +171,15 @@ def configure_scene_for_bake(
             raise BakeSceneStateError(
                 f"Required Blender 5.2 bake setting '{path}' is unavailable"
             ) from exc
+
+    if evaluation_scope is BakeEvaluationScope.CAMERA and getattr(
+        scene,
+        "camera",
+        None,
+    ) is None:
+        raise BakeSceneStateError(
+            "Camera-scoped semantic bake requires scene.camera"
+        )
 
     scene.render.engine = execution_settings.render_engine
     scene.render.image_settings.file_format = plan.settings.texture_format.value
@@ -163,10 +194,27 @@ def configure_scene_for_bake(
     scene.render.bake.use_selected_to_active = plan.settings.selected_to_active
     scene.render.bake.use_cage = plan.settings.selected_to_active
     scene.render.bake.cage_extrusion = plan.settings.cage_extrusion
+    scene.render.bake.view_from = (
+        "ACTIVE_CAMERA"
+        if evaluation_scope is BakeEvaluationScope.CAMERA
+        else "ABOVE_SURFACE"
+    )
+
     flat_color_pass = bake_mode in {BakeMode.DIFFUSE, BakeMode.EMIT}
     scene.render.bake.use_pass_direct = not flat_color_pass
     scene.render.bake.use_pass_indirect = not flat_color_pass
     scene.render.bake.use_pass_color = True
+
+    # Blender stores these contribution toggles in Scene state even though several bake
+    # modes ignore them. Set every value explicitly so COMBINED is deterministic and
+    # includes the complete surface appearance, including transmission.
+    scene.render.bake.use_pass_ambient_occlusion = True
+    scene.render.bake.use_pass_diffuse = True
+    scene.render.bake.use_pass_glossy = True
+    scene.render.bake.use_pass_transmission = True
+    scene.render.bake.use_pass_subsurface = True
+    scene.render.bake.use_pass_emit = True
+
     scene.cycles.bake_type = bake_mode.value
     scene.cycles.samples = execution_settings.samples
 
