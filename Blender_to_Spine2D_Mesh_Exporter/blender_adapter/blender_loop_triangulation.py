@@ -5,6 +5,12 @@ polygon triangulator chooses a different 2D projection or rejects a non-simple b
 For live Blender source geometry the authoritative interpretation is ``Mesh.loop_triangles``.
 This adapter converts that tessellation back into the rewrite ``MeshSnapshot`` contract
 without mutating the source Mesh, using operators, or allocating a BMesh.
+
+Blender may emit zero-area loop triangles for artist-authored polygons containing
+coincident or collinear corners. Those triangles carry no renderable surface and cannot
+form a valid rewrite face normal. They are therefore filtered before topology creation,
+but only when every source polygon still retains at least one non-degenerate triangle.
+A wholly degenerate polygon remains a hard error.
 """
 
 from __future__ import annotations
@@ -27,6 +33,8 @@ from ..domain.geometry import (
 
 
 logger = logging.getLogger(__name__)
+
+_ZERO_AREA_EPSILON = 1.0e-15
 
 
 class BlenderLoopTriangulationError(RuntimeError):
@@ -89,14 +97,12 @@ def _triangle_loop_indices(triangle: Any, triangle_index: int) -> tuple[int, int
     return values  # type: ignore[return-value]
 
 
-def _triangle_normal(
+def _triangle_normal_or_none(
     first: tuple[float, float, float],
     second: tuple[float, float, float],
     third: tuple[float, float, float],
-    *,
-    triangle_index: int,
-) -> tuple[float, float, float]:
-    """Calculate one normalized triangle normal from snapshot vertex positions."""
+) -> tuple[float, float, float] | None:
+    """Return a normalized triangle normal or ``None`` for zero-area geometry."""
 
     ab = tuple(second[index] - first[index] for index in range(3))
     ac = tuple(third[index] - first[index] for index in range(3))
@@ -106,10 +112,8 @@ def _triangle_normal(
         ab[0] * ac[1] - ab[1] * ac[0],
     )
     length = sqrt(sum(component * component for component in cross))
-    if length <= 1.0e-15:
-        raise BlenderLoopTriangulationError(
-            f"Blender loop triangle {triangle_index} has zero geometric area"
-        )
+    if length <= _ZERO_AREA_EPSILON:
+        return None
     return tuple(component / length for component in cross)  # type: ignore[return-value]
 
 
@@ -128,6 +132,11 @@ def triangulate_snapshot_with_blender_loop_triangles(
     Original Blender edges retain source lineage/seam/sharp flags. Tessellation diagonals
     are generated rewrite edges with ``source_id=None``. Triangle loops copy the exact
     source loop lineage and UV payload from the originating Blender corner.
+
+    Zero-area Blender loop triangles are omitted because they have no renderable area and
+    cannot provide a valid face normal. The omission is accepted only when Blender still
+    provides at least one non-degenerate triangle for every source polygon and the raw
+    Blender tessellation itself contains exactly ``N-2`` triangles per polygon.
     """
 
     if mesh is None:
@@ -186,9 +195,17 @@ def triangulate_snapshot_with_blender_loop_triangles(
         original_edge_by_key[key] = edge
 
     triangle_records: list[
-        tuple[int, MeshFace, tuple[MeshLoop, MeshLoop, MeshLoop]]
+        tuple[
+            int,
+            MeshFace,
+            tuple[MeshLoop, MeshLoop, MeshLoop],
+            tuple[float, float, float],
+        ]
     ] = []
     used_edge_keys: set[tuple[int, int]] = set()
+    raw_count_by_polygon: dict[int, int] = {}
+    kept_count_by_polygon: dict[int, int] = {}
+    degenerate_triangle_indices: list[int] = []
 
     for triangle_index, triangle in enumerate(loop_triangles):
         polygon_index = _triangle_polygon_index(mesh, triangle, triangle_index)
@@ -198,6 +215,7 @@ def triangulate_snapshot_with_blender_loop_triangles(
             raise BlenderLoopTriangulationError(
                 f"loop triangle {triangle_index} references missing face {polygon_index}"
             )
+        raw_count_by_polygon[polygon_index] = raw_count_by_polygon.get(polygon_index, 0) + 1
 
         loop_indices = _triangle_loop_indices(triangle, triangle_index)
         source_loops: list[MeshLoop] = []
@@ -222,6 +240,20 @@ def triangulate_snapshot_with_blender_loop_triangles(
             source_loops.append(source_loop)
 
         resolved_loops = tuple(source_loops)
+        positions = tuple(
+            vertex_map[source_loop.vertex_id].position
+            for source_loop in resolved_loops
+        )
+        normal = _triangle_normal_or_none(
+            positions[0],
+            positions[1],
+            positions[2],
+        )
+        if normal is None:
+            degenerate_triangle_indices.append(triangle_index)
+            continue
+
+        kept_count_by_polygon[polygon_index] = kept_count_by_polygon.get(polygon_index, 0) + 1
         for corner_index, source_loop in enumerate(resolved_loops):
             following = resolved_loops[(corner_index + 1) % 3]
             used_edge_keys.add(_edge_key(source_loop.vertex_id, following.vertex_id))
@@ -231,8 +263,32 @@ def triangulate_snapshot_with_blender_loop_triangles(
                 triangle_index,
                 source_face,
                 resolved_loops,  # type: ignore[arg-type]
+                normal,
             )
         )
+
+    for source_face in snapshot.faces:
+        polygon_index = source_face.id.index
+        expected_raw_count = len(source_face.loop_ids) - 2
+        raw_count = raw_count_by_polygon.get(polygon_index, 0)
+        if raw_count != expected_raw_count:
+            raise BlenderLoopTriangulationError(
+                "Blender loop-triangle count does not match source polygon: "
+                f"polygon={polygon_index}, corners={len(source_face.loop_ids)}, "
+                f"expected={expected_raw_count}, actual={raw_count}"
+            )
+        kept_count = kept_count_by_polygon.get(polygon_index, 0)
+        if kept_count <= 0:
+            raise BlenderLoopTriangulationError(
+                "Blender source polygon has no non-degenerate tessellation triangles: "
+                f"polygon={polygon_index}, raw_triangles={raw_count}"
+            )
+        if kept_count > expected_raw_count:
+            raise BlenderLoopTriangulationError(
+                "Blender retained more non-degenerate triangles than source polygon "
+                f"permits: polygon={polygon_index}, expected_max={expected_raw_count}, "
+                f"actual={kept_count}"
+            )
 
     existing_keys = tuple(
         sorted(
@@ -273,7 +329,7 @@ def triangulate_snapshot_with_blender_loop_triangles(
     faces: list[MeshFace] = []
     next_loop_index = 0
 
-    for triangle_index, source_face, source_loops in triangle_records:
+    for triangle_index, source_face, source_loops, normal in triangle_records:
         triangle_loop_ids: list[LoopId] = []
         for corner_index, source_loop in enumerate(source_loops):
             following = source_loops[(corner_index + 1) % 3]
@@ -291,16 +347,6 @@ def triangulate_snapshot_with_blender_loop_triangles(
                 )
             )
 
-        positions = tuple(
-            vertex_map[source_loop.vertex_id].position
-            for source_loop in source_loops
-        )
-        normal = _triangle_normal(
-            positions[0],
-            positions[1],
-            positions[2],
-            triangle_index=triangle_index,
-        )
         faces.append(
             MeshFace(
                 id=FaceId(len(faces)),
@@ -326,11 +372,20 @@ def triangulate_snapshot_with_blender_loop_triangles(
         render_uv_layer=snapshot.render_uv_layer,
     )
     MeshSnapshotValidator().validate_or_raise(output)
+
+    if degenerate_triangle_indices:
+        logger.warning(
+            "Filtered %d zero-area Blender loop triangles for '%s': triangle_indices=%s",
+            len(degenerate_triangle_indices),
+            snapshot.source_object_id,
+            tuple(degenerate_triangle_indices),
+        )
     logger.debug(
-        "Converted Blender loop triangles for '%s': polygons=%d triangles=%d "
-        "generated_edges=%d",
+        "Converted Blender loop triangles for '%s': polygons=%d raw_triangles=%d "
+        "retained_triangles=%d generated_edges=%d",
         snapshot.source_object_id,
         len(snapshot.faces),
+        len(loop_triangles),
         len(output.faces),
         len(generated_keys),
     )
