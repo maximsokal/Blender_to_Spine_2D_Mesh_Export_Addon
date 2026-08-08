@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.production_shader_capability_principled import (
     PRINCIPLED_REFLECTION_CONTEXT_CODE,
-    PRINCIPLED_TRANSMISSION_RENDER_REQUIRED_CODE,
+    PRINCIPLED_TRANSMISSION_CONTEXT_CODE,
     apply_principled_context_boundary,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.production_shader_capability_routing import (
@@ -151,36 +151,31 @@ def test_linked_principled_coat_is_camera_combined_safe_for_normal_uv() -> None:
     assert _normal_uv_blocking_camera_findings((audit,)) == ()
 
 
-def test_principled_transmission_remains_a_normal_uv_blocker() -> None:
+def test_principled_transmission_uses_camera_combined_normal_uv_route() -> None:
     audit = _enrich(transmission=0.35)
 
-    blockers = _normal_uv_blocking_camera_findings((audit,))
-    assert blockers == (
-        (
-            "BottleMaterial",
-            (
-                (
-                    PRINCIPLED_TRANSMISSION_RENDER_REQUIRED_CODE,
-                    "BSDF_PRINCIPLED",
-                    "Transmission Weight",
-                ),
-            ),
-        ),
+    transmission = tuple(
+        finding
+        for finding in audit.findings
+        if finding.code == PRINCIPLED_TRANSMISSION_CONTEXT_CODE
     )
+    assert len(transmission) == 1
+    assert transmission[0].node_type == "BSDF_PRINCIPLED"
+    assert transmission[0].output_socket == "Transmission Weight"
+    assert _normal_uv_blocking_camera_findings((audit,)) == ()
 
 
-def test_reflection_does_not_hide_principled_transmission_blocker() -> None:
+def test_reflection_and_transmission_are_both_camera_combined_safe() -> None:
     audit = _enrich(metallic=1.0, transmission_linked=True)
 
-    assert any(
-        finding.code == PRINCIPLED_REFLECTION_CONTEXT_CODE
+    codes = {
+        finding.code
         for finding in audit.findings
-    )
-    blockers = _normal_uv_blocking_camera_findings((audit,))
-    assert len(blockers) == 1
-    assert tuple(item[0] for item in blockers[0][1]) == (
-        PRINCIPLED_TRANSMISSION_RENDER_REQUIRED_CODE,
-    )
+        if finding.capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED
+    }
+    assert PRINCIPLED_REFLECTION_CONTEXT_CODE in codes
+    assert PRINCIPLED_TRANSMISSION_CONTEXT_CODE in codes
+    assert _normal_uv_blocking_camera_findings((audit,)) == ()
 
 
 def test_unknown_aggregate_only_camera_dependency_stays_fail_closed() -> None:
