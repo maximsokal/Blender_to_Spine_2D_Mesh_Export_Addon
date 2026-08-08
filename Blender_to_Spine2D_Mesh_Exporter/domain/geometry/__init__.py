@@ -83,6 +83,11 @@ from .model import (
     Vector2,
     Vector3,
 )
+from .non_manifold_repair import (
+    NonManifoldEdgeSplitReport,
+    NonManifoldRepairError,
+    split_non_manifold_edges,
+)
 from .segmentation import (
     MeshSegment,
     SegmentationError,
@@ -175,6 +180,8 @@ __all__ = [
     "MeshWorldTransformResult",
     "MissingSourceLoopError",
     "ModifierLineagePolicy",
+    "NonManifoldEdgeSplitReport",
+    "NonManifoldRepairError",
     "NonPlanarPolygonPolicy",
     "RegionTopologyError",
     "SegmentBoundaryEdge",
@@ -220,6 +227,7 @@ __all__ = [
     "require_valid_evaluated_lineage",
     "segment_mesh",
     "segment_mesh_a1",
+    "split_non_manifold_edges",
     "transfer_uv_by_source_loop",
     "triangulate_snapshot",
 ]
