@@ -24,6 +24,7 @@ from ..domain.baking.normal_uv_camera_context import (
 )
 from .production_shader_capability_displacement import (
     DISPLACEMENT_BUMP_CONTEXT_CODE,
+    DISPLACEMENT_RENDER_REQUIRED_CODE,
 )
 from .production_shader_capability_principled import (
     PRINCIPLED_REFLECTION_CONTEXT_CODE,
@@ -204,6 +205,33 @@ def _normal_uv_blocking_camera_findings(
     return tuple(details)
 
 
+def _normal_uv_allows_bump_displacement(
+    audits: Tuple[MaterialCapabilityAudit, ...],
+) -> bool:
+    """Return whether live audits proved every displacement requirement bump-only.
+
+    The domain planner deliberately defaults to rejecting semantic DISPLACEMENT because
+    immutable analysis cannot distinguish Bump Only from vertex-moving displacement.
+    This production router may opt in only after the live Blender material boundary has
+    replaced blanket displacement findings with ``DISPLACEMENT_BUMP_CONTEXT`` and no
+    true/unknown displacement blocker remains.
+    """
+
+    if not isinstance(audits, tuple) or not all(
+        isinstance(audit, MaterialCapabilityAudit) for audit in audits
+    ):
+        raise TypeError("audits must contain MaterialCapabilityAudit values")
+
+    saw_bump = False
+    for audit in audits:
+        for finding in audit.findings:
+            if finding.code == DISPLACEMENT_RENDER_REQUIRED_CODE:
+                return False
+            if finding.code == DISPLACEMENT_BUMP_CONTEXT_CODE:
+                saw_bump = True
+    return saw_bump
+
+
 def normal_mode_camera_requirement_message(
     audits: Tuple[MaterialCapabilityAudit, ...],
 ) -> str:
@@ -269,6 +297,7 @@ def build_capability_checked_texture_plan(
             settings,
             object_context=object_context,
             scene_context=scene_context,
+            allow_bump_displacement=_normal_uv_allows_bump_displacement(audits),
         )
 
     return build_bake_plan(
