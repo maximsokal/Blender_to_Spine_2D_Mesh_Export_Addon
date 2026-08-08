@@ -171,10 +171,10 @@ def _resolve_blender_tessellation_fallback(
 
     The pure triangulator remains the first authority for ordinary snapshots. When it
     rejects a live Blender Mesh, Blender's own ``loop_triangles`` tessellation is accepted
-    only if it produces the exact N-2 triangle count expected from every source polygon.
-    This preserves the historical polygon snapshot for normal meshes while recovering
-    Blender-valid artist geometry whose polygon boundary the generic 2D triangulator
-    interprets differently.
+    only after the adapter has discarded zero-area Blender triangles and proved that
+    every source polygon still has at least one non-degenerate triangle. A fallback may
+    contain fewer than ``N-2`` retained faces only because zero-area triangles carry no
+    renderable surface; it may never exceed ``N-2`` or lose an entire source polygon.
     """
 
     if not isinstance(snapshot, MeshSnapshot):
@@ -197,15 +197,47 @@ def _resolve_blender_tessellation_fallback(
                 f"blender={blender_error}"
             ) from strict_error
 
-        expected_triangle_count = sum(
-            len(face.loop_ids) - 2 for face in snapshot.faces
-        )
-        if len(fallback.faces) != expected_triangle_count:
+        retained_by_source_face: dict[SourceFaceId, int] = {}
+        for face in fallback.faces:
+            retained_by_source_face[face.source_id] = (
+                retained_by_source_face.get(face.source_id, 0) + 1
+            )
+
+        expected_source_ids = frozenset(face.source_id for face in snapshot.faces)
+        actual_source_ids = frozenset(retained_by_source_face)
+        if actual_source_ids != expected_source_ids:
+            missing = tuple(
+                sorted(
+                    (
+                        (item.object_id, item.face_index)
+                        for item in expected_source_ids - actual_source_ids
+                    )
+                )
+            )
+            unknown = tuple(
+                sorted(
+                    (
+                        (item.object_id, item.face_index)
+                        for item in actual_source_ids - expected_source_ids
+                    )
+                )
+            )
             raise MeshReadError(
-                "Blender loop-triangle fallback did not cover every source polygon: "
-                f"expected_triangles={expected_triangle_count}, "
-                f"actual_triangles={len(fallback.faces)}"
+                "Blender loop-triangle fallback changed source-face coverage: "
+                f"missing={missing}, unknown={unknown}"
             ) from strict_error
+
+        for source_face in snapshot.faces:
+            retained = retained_by_source_face[source_face.source_id]
+            maximum = len(source_face.loop_ids) - 2
+            if retained < 1 or retained > maximum:
+                raise MeshReadError(
+                    "Blender loop-triangle fallback produced invalid non-degenerate "
+                    "coverage for source polygon: "
+                    f"source_face={source_face.source_id.face_index}, "
+                    f"corners={len(source_face.loop_ids)}, retained={retained}, "
+                    f"allowed_range=(1, {maximum})"
+                ) from strict_error
 
         logger.warning(
             "Strict rewrite triangulation rejected Blender source '%s'; using Blender "
