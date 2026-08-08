@@ -22,6 +22,9 @@ from ..domain.baking import (
 from ..domain.baking.normal_uv_camera_context import (
     build_normal_uv_camera_context_plan,
 )
+from .production_shader_capability_displacement import (
+    DISPLACEMENT_BUMP_CONTEXT_CODE,
+)
 from .production_shader_capability_principled import (
     PRINCIPLED_REFLECTION_CONTEXT_CODE,
     PRINCIPLED_REFLECTION_CONTEXT_OUTPUTS,
@@ -139,6 +142,8 @@ def _supports_normal_uv_object_bake(
             and (finding.output_socket or "").strip()
             in PRINCIPLED_TRANSMISSION_CONTEXT_OUTPUTS
         )
+    if finding.code == DISPLACEMENT_BUMP_CONTEXT_CODE:
+        return True
     return False
 
 
@@ -207,7 +212,7 @@ def normal_mode_camera_requirement_message(
     details = _normal_uv_blocking_camera_findings(audits)
     return (
         "Normal — UV Segments can bake audited source-object surface context, but "
-        "cannot reproduce these volume, displacement, unsupported source attribute, "
+        "cannot reproduce these volume, true displacement, unsupported source attribute, "
         "group/instance, or unclassified camera findings. Select Export Mode: Camera "
         "Projection or Depth Camera Projection. "
         f"Blocking findings: {details}"
