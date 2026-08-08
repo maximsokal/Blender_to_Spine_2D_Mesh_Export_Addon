@@ -25,6 +25,8 @@ from ..domain.baking.normal_uv_camera_context import (
 from .production_shader_capability_principled import (
     PRINCIPLED_REFLECTION_CONTEXT_CODE,
     PRINCIPLED_REFLECTION_CONTEXT_OUTPUTS,
+    PRINCIPLED_TRANSMISSION_CONTEXT_CODE,
+    PRINCIPLED_TRANSMISSION_CONTEXT_OUTPUTS,
 )
 from .render_engine_contract import RenderEngineContract
 
@@ -131,6 +133,12 @@ def _supports_normal_uv_object_bake(
             and (finding.output_socket or "").strip()
             in PRINCIPLED_REFLECTION_CONTEXT_OUTPUTS
         )
+    if finding.code == PRINCIPLED_TRANSMISSION_CONTEXT_CODE:
+        return (
+            (finding.node_type or "").strip().upper() == "BSDF_PRINCIPLED"
+            and (finding.output_socket or "").strip()
+            in PRINCIPLED_TRANSMISSION_CONTEXT_OUTPUTS
+        )
     return False
 
 
@@ -194,13 +202,13 @@ def _normal_uv_blocking_camera_findings(
 def normal_mode_camera_requirement_message(
     audits: Tuple[MaterialCapabilityAudit, ...],
 ) -> str:
-    """Explain why specific render-ray findings require a camera-render mode."""
+    """Explain why specific camera findings require a camera-render mode."""
 
     details = _normal_uv_blocking_camera_findings(audits)
     return (
         "Normal — UV Segments can bake audited source-object surface context, but "
-        "cannot reproduce these render-ray, volume, displacement, unsupported source "
-        "attribute, or unclassified camera findings. Select Export Mode: Camera "
+        "cannot reproduce these volume, displacement, unsupported source attribute, "
+        "group/instance, or unclassified camera findings. Select Export Mode: Camera "
         "Projection or Depth Camera Projection. "
         f"Blocking findings: {details}"
     )
