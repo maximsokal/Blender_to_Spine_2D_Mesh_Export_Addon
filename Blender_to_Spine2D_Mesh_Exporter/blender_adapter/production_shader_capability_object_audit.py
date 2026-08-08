@@ -7,6 +7,9 @@ from typing import Any, Tuple
 from ..domain.baking.capabilities import MaterialCapabilityAudit
 from ..domain.baking.model import ObjectMaterialAnalysis
 from .production_shader_capability_error import ProductionShaderCapabilityError
+from .production_shader_capability_principled import (
+    apply_principled_context_boundary,
+)
 from .production_shader_capability_proxy import apply_alpha_proxy_boundary
 from .production_shader_capability_runtime import analyse_production_material_graph
 from .production_shader_capability_uv import apply_source_uv_boundary
@@ -52,6 +55,11 @@ def audit_object_material_capabilities(
         audit = audit_material_graph_capabilities(
             runtime.graph,
             render_target=target,
+        )
+        audit = apply_principled_context_boundary(
+            audit,
+            runtime.graph,
+            runtime.live_nodes,
         )
         audit = apply_alpha_proxy_boundary(audit, runtime.graph)
         audit = apply_source_uv_boundary(
