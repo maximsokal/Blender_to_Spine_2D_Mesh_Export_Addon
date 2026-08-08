@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 from ..domain.baking.graph import (
@@ -59,6 +60,14 @@ SURFACE_SHADER_TYPES = frozenset(
 )
 
 
+class PrincipledCameraFeature(str, Enum):
+    """Camera-sensitive Principled BSDF features with distinct bake semantics."""
+
+    METALLIC = "METALLIC"
+    COAT = "COAT"
+    TRANSMISSION = "TRANSMISSION"
+
+
 def _coerce_traversal(
     value: ShaderGraphTraversalResult | RecursiveShaderGraphWalker,
 ) -> ShaderGraphTraversalResult:
@@ -91,24 +100,47 @@ def principled_alpha_enabled(node: Any) -> bool:
     ) < 0.999999
 
 
-def principled_dependencies(node: Any) -> set[MaterialDependencyKind]:
-    result: set[MaterialDependencyKind] = set()
-    if node_type(node) != "BSDF_PRINCIPLED":
-        return result
+def principled_camera_features(node: Any) -> frozenset[PrincipledCameraFeature]:
+    """Return enabled camera-sensitive Principled features from current RNA state.
 
+    Blender 5.2 names are preferred while the historical socket names are retained as
+    deterministic fallbacks for compatible saved node trees. Linked sockets count as
+    enabled even when their displayed default value is zero.
+    """
+
+    if node_type(node) != "BSDF_PRINCIPLED":
+        return frozenset()
+
+    features: set[PrincipledCameraFeature] = set()
     transmission = first_input_socket(
         node,
         ("Transmission Weight", "Transmission"),
     )
     metallic = input_socket(node, "Metallic")
     coat = first_input_socket(node, ("Coat Weight", "Clearcoat"))
+
+    if socket_enabled(metallic):
+        features.add(PrincipledCameraFeature.METALLIC)
+    if socket_enabled(coat):
+        features.add(PrincipledCameraFeature.COAT)
+    if socket_enabled(transmission):
+        features.add(PrincipledCameraFeature.TRANSMISSION)
+    return frozenset(features)
+
+
+def principled_dependencies(node: Any) -> set[MaterialDependencyKind]:
+    result: set[MaterialDependencyKind] = set()
+    if node_type(node) != "BSDF_PRINCIPLED":
+        return result
+
+    camera_features = principled_camera_features(node)
     subsurface = first_input_socket(
         node,
         ("Subsurface Weight", "Subsurface"),
     )
     sheen = first_input_socket(node, ("Sheen Weight", "Sheen"))
 
-    if socket_enabled(transmission):
+    if PrincipledCameraFeature.TRANSMISSION in camera_features:
         result.update(
             {
                 MaterialDependencyKind.CAMERA,
@@ -119,7 +151,10 @@ def principled_dependencies(node: Any) -> set[MaterialDependencyKind]:
                 MaterialDependencyKind.TRANSMISSION,
             }
         )
-    if socket_enabled(metallic) or socket_enabled(coat):
+    if camera_features & {
+        PrincipledCameraFeature.METALLIC,
+        PrincipledCameraFeature.COAT,
+    }:
         result.update(
             {
                 MaterialDependencyKind.CAMERA,
@@ -283,12 +318,14 @@ __all__ = [
     "CAMERA_SHADER_TYPES",
     "GEOMETRY_NODE_TYPES",
     "OBJECT_NODE_TYPES",
+    "PrincipledCameraFeature",
     "SCENE_LIGHTING_SHADER_TYPES",
     "SURFACE_SHADER_TYPES",
     "VIEW_NODE_TYPES",
     "derive_material_dependencies",
     "derive_semantic_channels",
     "principled_alpha_enabled",
+    "principled_camera_features",
     "principled_dependencies",
     "principled_emission_enabled",
 ]
