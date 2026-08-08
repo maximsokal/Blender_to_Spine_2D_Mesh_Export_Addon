@@ -181,6 +181,7 @@ def _bake_pass_to_buffer(
             runtime.plan,
             runtime.execution_settings,
             bake_mode=pass_plan.bake_mode,
+            evaluation_scope=pass_plan.evaluation_scope,
         )
         image = _create_bake_image(
             runtime.bpy_module,
@@ -227,6 +228,7 @@ def _bake_single_frame(
             runtime.plan,
             runtime.execution_settings,
             bake_mode=pass_plan.bake_mode,
+            evaluation_scope=pass_plan.evaluation_scope,
         )
         image = _create_bake_image(
             runtime.bpy_module,
