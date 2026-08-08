@@ -5,9 +5,10 @@ When one source edge is used by more than two faces, there is no unique manifold
 that an exporter may infer safely. The conservative repair is therefore to cut that edge
 for every incident face while preserving all geometric/source lineage.
 
-The source Blender mesh is never mutated. Only local ``EdgeId`` identity changes inside a
-new immutable ``MeshSnapshot``; duplicated edges retain the same ``SourceEdgeId``, seam
-and sharp flags. Vertices, loops, faces, UV payloads and source IDs are unchanged.
+The source Blender mesh is never mutated. Existing local ``EdgeId`` values remain stable;
+additional per-face copies are appended after the original edge domain. Duplicated edges
+retain the same ``SourceEdgeId``, seam and sharp flags. Vertices, loops, faces, UV payloads
+and source IDs are unchanged.
 """
 
 from __future__ import annotations
@@ -90,17 +91,35 @@ def _loop_owner_by_id(snapshot: MeshSnapshot) -> dict[LoopId, FaceId]:
     return owners
 
 
+def _copy_edge(edge: MeshEdge, edge_id: EdgeId) -> MeshEdge:
+    """Copy one immutable edge while preserving all stable source semantics."""
+
+    if not isinstance(edge, MeshEdge):
+        raise TypeError("edge must be MeshEdge")
+    if not isinstance(edge_id, EdgeId):
+        raise TypeError("edge_id must be EdgeId")
+    return MeshEdge(
+        id=edge_id,
+        source_id=edge.source_id,
+        vertex_ids=edge.vertex_ids,
+        seam=edge.seam,
+        sharp=edge.sharp,
+    )
+
+
 def split_non_manifold_edges(
     snapshot: MeshSnapshot,
     *,
     snapshot_id: str | None = None,
 ) -> tuple[MeshSnapshot, NonManifoldEdgeSplitReport]:
-    """Cut every edge used by more than two faces into per-face local edge identities.
+    """Cut every >2-face edge into per-face local edge identities.
 
-    The operation is intentionally maximally conservative. It never guesses which two
-    faces should remain connected across a non-manifold edge. Every incident face gets a
-    distinct local edge, turning that source edge into an export boundary while keeping
-    the same ``SourceEdgeId`` provenance on all copies.
+    The operation never guesses which pair of faces should remain connected. The first
+    incident face retains the original local ``EdgeId`` and every additional incident
+    face receives an appended edge copy. Keeping the complete original edge domain at
+    the same IDs is critical: segmentation/decomposition cuts may later be translated
+    back onto the unrepaired texturing snapshot without invalidating unrelated generated
+    edges that have no ``SourceEdgeId`` lineage.
     """
 
     if not isinstance(snapshot, MeshSnapshot):
@@ -123,6 +142,7 @@ def split_non_manifold_edges(
         )
     )
     resolved_output_id = snapshot_id or snapshot.snapshot_id
+
     if not split_edge_ids:
         report = NonManifoldEdgeSplitReport(
             source_snapshot_id=snapshot.snapshot_id,
@@ -146,47 +166,42 @@ def split_non_manifold_edges(
             world_matrix=snapshot.world_matrix,
             render_uv_layer=snapshot.render_uv_layer,
         )
+        MeshSnapshotValidator().validate_or_raise(copied)
         return copied, report
 
     split_set = set(split_edge_ids)
     loop_owner = _loop_owner_by_id(snapshot)
 
-    # Rebuild the edge domain densely. Ordinary manifold edges keep one local copy.
-    # Every non-manifold edge receives one copy per incident face.
-    edge_id_map: dict[tuple[EdgeId, FaceId | None], EdgeId] = {}
-    rebuilt_edges: list[MeshEdge] = []
-    for edge in snapshot.edges:
-        if edge.id not in split_set:
-            new_id = EdgeId(len(rebuilt_edges))
-            edge_id_map[(edge.id, None)] = new_id
-            rebuilt_edges.append(
-                MeshEdge(
-                    id=new_id,
-                    source_id=edge.source_id,
-                    vertex_ids=edge.vertex_ids,
-                    seam=edge.seam,
-                    sharp=edge.sharp,
-                )
-            )
-            continue
+    # Preserve every original EdgeId exactly. This prevents one repaired edge from
+    # shifting all subsequent local IDs, including generated Blender tessellation edges
+    # that intentionally have no SourceEdgeId available for lineage remapping.
+    rebuilt_edges: list[MeshEdge] = [
+        _copy_edge(edge, edge.id)
+        for edge in snapshot.edges
+    ]
+    edge_id_map: dict[tuple[EdgeId, FaceId | None], EdgeId] = {
+        (edge.id, None): edge.id
+        for edge in snapshot.edges
+        if edge.id not in split_set
+    }
 
-        incident_faces = edge_to_faces.get(edge.id, ())
+    # A split edge keeps its original ID for the first deterministic incident face.
+    # Additional face-local copies are appended after the entire original edge domain.
+    for edge_id in split_edge_ids:
+        edge = snapshot.edge_by_id()[edge_id]
+        incident_faces = edge_to_faces.get(edge_id, ())
         if len(incident_faces) <= 2:
             raise NonManifoldRepairError(
-                f"Edge {edge.id.index} was selected for repair without >2 incident faces"
+                f"Edge {edge_id.index} was selected for repair without >2 incident faces"
             )
-        for face_id in incident_faces:
+
+        first_face = incident_faces[0]
+        edge_id_map[(edge_id, first_face)] = edge_id
+
+        for face_id in incident_faces[1:]:
             new_id = EdgeId(len(rebuilt_edges))
-            edge_id_map[(edge.id, face_id)] = new_id
-            rebuilt_edges.append(
-                MeshEdge(
-                    id=new_id,
-                    source_id=edge.source_id,
-                    vertex_ids=edge.vertex_ids,
-                    seam=edge.seam,
-                    sharp=edge.sharp,
-                )
-            )
+            edge_id_map[(edge_id, face_id)] = new_id
+            rebuilt_edges.append(_copy_edge(edge, new_id))
 
     rebuilt_loops: list[MeshLoop] = []
     for loop in snapshot.loops:
@@ -227,6 +242,23 @@ def split_non_manifold_edges(
     )
     MeshSnapshotValidator().validate_or_raise(repaired)
 
+    # Original local IDs and stable source semantics must remain byte-for-byte equal.
+    for original in snapshot.edges:
+        repaired_original = repaired.edges[original.id.index]
+        if repaired_original.id != original.id:
+            raise NonManifoldRepairError(
+                f"Repair changed original EdgeId {original.id.index}"
+            )
+        if (
+            repaired_original.source_id != original.source_id
+            or repaired_original.vertex_ids != original.vertex_ids
+            or repaired_original.seam != original.seam
+            or repaired_original.sharp != original.sharp
+        ):
+            raise NonManifoldRepairError(
+                f"Repair changed source semantics for edge {original.id.index}"
+            )
+
     repaired_edge_to_faces = build_edge_to_faces(repaired)
     remaining_non_manifold = tuple(
         sorted(
@@ -251,8 +283,8 @@ def split_non_manifold_edges(
         output_edge_count=len(repaired.edges),
     )
     logger.warning(
-        "Split %d non-manifold source edges for '%s' into per-face boundaries: "
-        "input_edges=%d output_edges=%d created_edges=%d",
+        "Split %d non-manifold source edges for '%s' into per-face boundaries while "
+        "preserving original EdgeIds: input_edges=%d output_edges=%d created_edges=%d",
         len(report.split_edge_ids),
         snapshot.source_object_id,
         report.input_edge_count,
