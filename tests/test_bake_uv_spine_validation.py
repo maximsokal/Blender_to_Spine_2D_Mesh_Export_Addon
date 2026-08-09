@@ -9,7 +9,6 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.bake_uv_spine_validation import (
     BakedUvSpineValidationError,
     RgbaImageBuffer,
-    _inset_samples,
     validate_projection_uv_coverage,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import LoopId, VertexId
@@ -49,6 +48,14 @@ def _loaded_image_with_single_spine_file_pixel(
     offset = (loaded_y * width + pixel_x) * 4
     pixels[offset : offset + 4] = (0.25, 0.5, 0.75, 1.0)
     return RgbaImageBuffer(width, height, tuple(pixels))
+
+
+def _transparent_image(*, width: int = 8, height: int = 8):
+    return RgbaImageBuffer(
+        width,
+        height,
+        tuple(0.0 for _ in range(width * height * 4)),
+    )
 
 
 def _projection(uvs):
@@ -99,6 +106,7 @@ def test_spine_uv_triangle_samples_the_saved_png_island():
 
     assert len(samples) == 1
     assert samples[0].maximum_alpha == 1.0
+    assert samples[0].resolution_representable is True
 
 
 def test_missing_spine_file_space_vertical_transform_is_detected():
@@ -135,44 +143,110 @@ def test_spine_file_space_sampling_inverts_only_the_loaded_image_v_axis():
     assert image.rgba_spine_file_pixel(0, 1) == (1.0, 0.0, 0.0, 1.0)
 
 
-def test_small_triangle_uses_intersecting_raster_footprint_after_point_samples_miss():
+def test_subpixel_triangle_without_texel_center_is_resolution_unrepresentable():
+    # At 8x8 this finite triangle lives entirely near the top-left corner of pixel
+    # cell (3, 2), but it contains neither that cell's centre nor any other texel centre.
+    triangle = (
+        (0.37510, 0.25010),
+        (0.38000, 0.25010),
+        (0.37510, 0.25500),
+    )
+    projection = _projection(triangle)
+
+    samples = validate_projection_uv_coverage(
+        _transparent_image(),
+        (projection,),
+    )
+
+    assert len(samples) == 1
+    sample = samples[0]
+    assert sample.maximum_alpha == 0.0
+    assert sample.resolution_representable is False
+    assert sample.raster_sample_count == 0
+    assert sample.triangle_twice_area_pixels > 0.0
+
+
+def test_rasterizable_triangle_with_empty_texel_center_still_fails_closed():
+    # Pixel (3, 2) centre is (0.4375, 0.3125) at 8x8 and lies inside this triangle.
+    projection = _projection(
+        (
+            (0.400, 0.280),
+            (0.490, 0.280),
+            (0.440, 0.360),
+        )
+    )
+
+    with pytest.raises(
+        BakedUvSpineValidationError,
+        match="despite having raster sample centres",
+    ):
+        validate_projection_uv_coverage(
+            _transparent_image(),
+            (projection,),
+        )
+
+
+def test_rasterizable_triangle_accepts_its_opaque_texel():
     image = _loaded_image_with_single_spine_file_pixel(
         width=8,
         height=8,
         pixel_x=3,
         pixel_y=2,
     )
-    triangle = ((0.25, 0.25), (0.40, 0.25), (0.25, 0.40))
-    projection = _projection(triangle)
-
-    # The historical four-point validator samples only texel (2, 2) for this triangle.
-    # Pixel (3, 2) is nevertheless intersected by the triangle's real raster footprint.
-    assert all(
-        image.rgba_spine_file_space(u, v)[3] == 0.0
-        for u, v in _inset_samples(triangle)
+    projection = _projection(
+        (
+            (0.400, 0.280),
+            (0.490, 0.280),
+            (0.440, 0.360),
+        )
     )
 
     samples = validate_projection_uv_coverage(image, (projection,))
 
     assert len(samples) == 1
     assert samples[0].maximum_alpha == 1.0
-    assert len(samples[0].rgba_samples) > 4
+    assert samples[0].resolution_representable is True
 
 
-def test_raster_footprint_does_not_accept_unrelated_opaque_texel():
+def test_unrelated_opaque_texel_does_not_rescue_rasterizable_triangle():
     image = _loaded_image_with_single_spine_file_pixel(
         width=8,
         height=8,
         pixel_x=7,
         pixel_y=7,
     )
-    projection = _projection(((0.25, 0.25), (0.40, 0.25), (0.25, 0.40)))
+    projection = _projection(
+        (
+            (0.400, 0.280),
+            (0.490, 0.280),
+            (0.440, 0.360),
+        )
+    )
 
     with pytest.raises(
         BakedUvSpineValidationError,
-        match="point only into empty baked pixels",
+        match="despite having raster sample centres",
     ):
         validate_projection_uv_coverage(image, (projection,))
+
+
+def test_exactly_degenerate_uv_triangle_remains_a_hard_error():
+    projection = _projection(
+        (
+            (0.2, 0.2),
+            (0.3, 0.3),
+            (0.4, 0.4),
+        )
+    )
+
+    with pytest.raises(
+        BakedUvSpineValidationError,
+        match="degenerate UV area",
+    ):
+        validate_projection_uv_coverage(
+            _transparent_image(),
+            (projection,),
+        )
 
 
 @pytest.mark.parametrize(
