@@ -5,9 +5,15 @@ Blender object baking evaluates the original shader graph at surface points whil
 need object, normal, view, reflection, active-camera, or bump-only displacement context
 without requiring the exported mesh to become a full-frame Camera Projection attachment.
 
+Normal / UV Segments exports texture data, not a fully lit render. Camera/source context
+is therefore preserved while the BSDF lighting layer is removed: matched surface-color
+slots are evaluated through a CAMERA-scoped EMIT proxy that keeps their linked Base Color
+graph alive. Full scene lighting, metallic/specular reflections, and transmission remain
+the responsibility of Camera Projection.
+
 This module keeps those concerns separate:
 
-* material evaluation uses a CAMERA-scoped COMBINED object-bake pass;
+* material color evaluation keeps CAMERA scope but bakes through EMIT;
 * exported geometry remains the ordinary Normal / UV Segments topology;
 * volume and true render displacement remain rejected;
 * bump-only Material Output displacement is accepted only when the production capability
@@ -17,12 +23,13 @@ This module keeps those concerns separate:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Tuple
 
 from .context import ObjectBakeContext, SceneBakeContext
 from .graph import MaterialSemanticChannel
 from .model import (
+    BakeCompositeMode,
     BakeEvaluationScope,
     BakeFrameTask,
     BakeMode,
@@ -89,7 +96,13 @@ def _material_preparations(
 
 @dataclass(frozen=True, slots=True)
 class NormalUvCameraCombinedBakeStrategy:
-    """Evaluate camera/source-context appearance through object UV COMBINED bake."""
+    """Evaluate camera/source-context surface color without scene-light BSDF shading.
+
+    ``CAMERA_COMBINED`` remains the stable strategy identifier used by the surrounding
+    routing/statistics contract, but the executable Blender bake mode is deliberately
+    EMIT. The Blender adapter recognizes this typed combination and temporarily proxies
+    matched materials to straight surface color while preserving CAMERA evaluation scope.
+    """
 
     strategy_id: BakeStrategyId = BakeStrategyId.CAMERA_COMBINED
     priority: int = 25
@@ -121,7 +134,7 @@ class NormalUvCameraCombinedBakeStrategy:
             raise TypeError("slots must contain MaterialAnalysis values")
         if not isinstance(settings, BakeSettings):
             raise TypeError("settings must be BakeSettings")
-        return BakeMode.COMBINED
+        return BakeMode.EMIT
 
     def material_preparations(
         self,
@@ -219,6 +232,31 @@ def _validate_normal_uv_channels(
         )
 
 
+def _normalize_camera_texture_composite(passes, composite):
+    """Do not unpremultiply CAMERA-scoped EMIT texture-data color passes.
+
+    Generic composition historically treats every CAMERA/SCENE color pass as rendered
+    appearance. Normal/UV camera-context color is different: it is straight texture data
+    evaluated in camera context. Keep unpremultiplication only when at least one routed
+    color pass is a real scene/camera COMBINED pass.
+    """
+
+    if composite.mode is not BakeCompositeMode.ADD_RGB_REPLACE_ALPHA:
+        return composite
+    if not composite.unpremultiply_color_by_alpha:
+        return composite
+
+    render_appearance_color = any(
+        passes[index].bake_mode is BakeMode.COMBINED
+        and passes[index].evaluation_scope
+        in {BakeEvaluationScope.SCENE, BakeEvaluationScope.CAMERA}
+        for index in composite.color_pass_indices
+    )
+    if render_appearance_color:
+        return composite
+    return replace(composite, unpremultiply_color_by_alpha=False)
+
+
 def build_normal_uv_camera_context_plan(
     analysis: ObjectMaterialAnalysis,
     settings: BakeSettings,
@@ -267,6 +305,7 @@ def build_normal_uv_camera_context_plan(
         object_context=object_context,
         scene_context=scene_context,
     )
+    composite = _normalize_camera_texture_composite(passes, composite)
     tasks = _frame_tasks(settings)
     return BakePlan(
         source_object_id=analysis.source_object_id,
