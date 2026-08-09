@@ -13,20 +13,20 @@ from .render_engine_contract import render_engine_contract
 
 
 def _material_preparation_pass(pass_plan: BakePassPlan) -> BakePassPlan:
-    """Map camera-context Normal/UV EMIT into the existing surface-color proxy.
+    """Map camera-context surface-color EMIT into the established color proxy.
 
-    ``NormalUvCameraCombinedBakeStrategy`` keeps CAMERA evaluation scope so Blender
-    resolves allowed camera/object-dependent nodes consistently, but its EMIT bake must
-    not evaluate the original BSDF surface. The established SURFACE_COLOR+EMIT material
-    preparation path already extracts linked Base Color into a temporary Emission node.
-    Re-tag only the isolated adapter-side preparation view of the immutable pass; the
-    domain plan and exported statistics retain their original typed strategy identity.
+    ``CAMERA_SURFACE_COLOR`` must keep CAMERA evaluation scope so Blender resolves
+    allowed camera/object-dependent nodes consistently, but it must not evaluate the
+    original BSDF lighting layer. The established SURFACE_COLOR+EMIT preparation path
+    already extracts linked Base Color into a temporary Emission node. Re-tag only the
+    adapter-side preparation view of the immutable pass; the domain plan and exported
+    statistics retain ``CAMERA_SURFACE_COLOR``.
     """
 
     if not isinstance(pass_plan, BakePassPlan):
         raise TypeError("pass_plan must be BakePassPlan")
     if (
-        pass_plan.strategy_id is BakeStrategyId.CAMERA_COMBINED
+        pass_plan.strategy_id is BakeStrategyId.CAMERA_SURFACE_COLOR
         and pass_plan.bake_mode is BakeMode.EMIT
     ):
         return replace(pass_plan, strategy_id=BakeStrategyId.SURFACE_COLOR)
