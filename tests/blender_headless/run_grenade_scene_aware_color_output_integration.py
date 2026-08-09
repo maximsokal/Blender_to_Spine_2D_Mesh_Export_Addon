@@ -1,4 +1,4 @@
-"""Export a focused grenade scene-aware bake for visual color-management review."""
+"""Export a focused grenade camera-context surface-color bake for visual review."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ _VISUAL_SMOKE_SAMPLES = 16
 def _parse_arguments() -> argparse.Namespace:
     arguments = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     parser = argparse.ArgumentParser(
-        description="Bake Cylinder.019 + Cube for grenade scene-aware color review."
+        description="Bake Cylinder.019 + Cube for grenade camera-context color review."
     )
     parser.add_argument(
         "--expected-blend",
@@ -168,7 +168,7 @@ def _run(expected_blend: str, raw_output_directory: str) -> None:
             ),
             A1MultiObjectExportSettings(
                 output_directory=output_directory,
-                output_stem="Grenade_Scene_Aware_Color_Smoke",
+                output_stem="Grenade_Camera_Context_Color_Smoke",
                 mode=A1MultiObjectMode.STANDALONE,
             ),
             context=bpy.context,
@@ -176,7 +176,7 @@ def _run(expected_blend: str, raw_output_directory: str) -> None:
         )
         _assert(
             bool(result.success),
-            "focused grenade scene-aware color export failed: "
+            "focused grenade camera-context color export failed: "
             f"issues={result.issues!r}, statistics={dict(result.statistics)!r}",
         )
 
@@ -206,12 +206,18 @@ def _run(expected_blend: str, raw_output_directory: str) -> None:
 
         target_prefix = "component.object_1:Cylinder.019."
         strategy = result.statistics.get(target_prefix + "bake_strategy_ids", "")
+        bake_mode = result.statistics.get(target_prefix + "bake_mode", "")
         scene_aware = result.statistics.get(target_prefix + "bake_scene_aware", 0)
         _assert(
             "CAMERA_COMBINED" in str(strategy),
-            f"focused target is no longer CAMERA_COMBINED: {strategy!r}",
+            f"focused target lost the camera-context strategy: {strategy!r}",
         )
-        _assert(int(scene_aware) == 1, "focused target is no longer scene-aware")
+        _assert(
+            str(bake_mode) == "EMIT",
+            "Normal/UV camera-context target must flatten surface color through EMIT, "
+            f"got bake_mode={bake_mode!r}",
+        )
+        _assert(int(scene_aware) == 1, "focused target is no longer camera-context aware")
 
         _assert(
             _source_fingerprint(target, scene) == target_before,
@@ -227,11 +233,11 @@ def _run(expected_blend: str, raw_output_directory: str) -> None:
         )
 
         print(
-            "[GRENADE-SCENE-AWARE-COLOR] PASS "
+            "[GRENADE-CAMERA-SURFACE-COLOR] PASS "
             f"blend={loaded} target={target.name_full!r} companion={companion.name_full!r} "
             f"texture={texture_size} samples={_VISUAL_SMOKE_SAMPLES} "
-            f"strategy={strategy!r} output={target_png} metrics={metrics!r} "
-            "source=unchanged",
+            f"strategy={strategy!r} bake_mode={bake_mode!r} output={target_png} "
+            f"metrics={metrics!r} source=unchanged",
             flush=True,
         )
     finally:
