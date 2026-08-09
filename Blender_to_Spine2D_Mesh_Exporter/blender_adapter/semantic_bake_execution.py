@@ -30,9 +30,9 @@ from .semantic_bake_image_io import (
     _activate_uv_layer,
     _create_bake_image,
     _remove_image,
-    _save_bake_image,
     _set_timeline_frame,
 )
+from .semantic_bake_render_save import save_semantic_bake_image
 from .semantic_bake_validation import (
     SemanticBakeRuntime,
     validate_semantic_bake_reservations,
@@ -243,7 +243,12 @@ def _bake_single_frame(
                 pass_plan.bake_mode.value,
                 uv_layer_name=runtime.plan.settings.uv_layer_name,
             )
-            _save_bake_image(image, reservation, runtime.plan)
+            save_semantic_bake_image(
+                image,
+                reservation,
+                runtime.plan,
+                scene=runtime.scene,
+            )
     finally:
         _remove_image(runtime.bpy_module, image)
 
@@ -278,7 +283,12 @@ def _bake_composed_frame(
             ),
         )
         write_bake_image_pixels(final_image, composed)
-        _save_bake_image(final_image, reservation, runtime.plan)
+        save_semantic_bake_image(
+            final_image,
+            reservation,
+            runtime.plan,
+            scene=runtime.scene,
+        )
     finally:
         _remove_image(runtime.bpy_module, final_image)
 
