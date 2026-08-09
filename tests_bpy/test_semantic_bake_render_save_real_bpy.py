@@ -38,7 +38,25 @@ def _load_first_rgba(path: Path) -> tuple[float, float, float, float]:
         bpy.data.images.remove(image, do_unlink=True)
 
 
-def test_scene_aware_hdr_png_uses_render_view_transform_instead_of_raw_clipping(tmp_path):
+def _save_render_rgba(
+    image,
+    path: Path,
+    *,
+    scene,
+    exposure: float,
+) -> tuple[float, float, float, float]:
+    scene.view_settings.exposure = exposure
+    _save_render_managed_image(
+        image,
+        path,
+        texture_format=TextureFormat.PNG,
+        scene=scene,
+    )
+    assert path.is_file() and path.stat().st_size > 0
+    return _load_first_rgba(path)
+
+
+def test_scene_aware_hdr_png_uses_scene_render_color_management(tmp_path):
     scene = bpy.context.scene
     image_settings = scene.render.image_settings
     view_settings = scene.view_settings
@@ -59,37 +77,55 @@ def test_scene_aware_hdr_png_uses_render_view_transform_instead_of_raw_clipping(
         image_settings.color_mode = "RGBA"
         image_settings.color_depth = "8"
         view_settings.view_transform = "AgX"
-        view_settings.exposure = 0.0
         view_settings.gamma = 1.0
 
         local_path = tmp_path / "local_texture_data.png"
-        render_path = tmp_path / "scene_render_appearance.png"
+        render_zero_path = tmp_path / "scene_render_exposure_0.png"
+        render_minus_two_path = tmp_path / "scene_render_exposure_minus_2.png"
 
         local_image = _new_hdr_image("__Spine2D_Test_Local_HDR")
         local_image.filepath_raw = str(local_path)
         local_image.save()
 
         render_image = _new_hdr_image("__Spine2D_Test_Render_HDR")
-        _save_render_managed_image(
+        render_zero_rgba = _save_render_rgba(
             render_image,
-            render_path,
-            texture_format=TextureFormat.PNG,
+            render_zero_path,
             scene=scene,
+            exposure=0.0,
+        )
+        render_minus_two_rgba = _save_render_rgba(
+            render_image,
+            render_minus_two_path,
+            scene=scene,
+            exposure=-2.0,
         )
 
         assert local_path.is_file() and local_path.stat().st_size > 0
-        assert render_path.is_file() and render_path.stat().st_size > 0
-        assert local_path.read_bytes() != render_path.read_bytes()
+        assert local_path.read_bytes() != render_zero_path.read_bytes()
+        assert render_zero_path.read_bytes() != render_minus_two_path.read_bytes()
 
         local_rgba = _load_first_rgba(local_path)
-        render_rgba = _load_first_rgba(render_path)
 
-        # The old texture-data save clips scene-linear HDR red to the PNG ceiling.
-        # AgX render saving compresses that highlight into display range instead.
+        # Raw texture-data saving clips the HDR red channel at the PNG ceiling.
         assert local_rgba[0] > 0.98
-        assert render_rgba[0] < local_rgba[0] - 0.01
-        assert render_rgba[0] > render_rgba[1] > render_rgba[2] >= 0.0
-        assert render_rgba[3] == pytest.approx(1.0, abs=1.0 / 255.0)
+
+        # The exact AgX mapping is an OCIO implementation detail. The stable contract
+        # is that Save as Render consumes Scene color management: changing exposure by
+        # -2 EV must materially darken the exact same scene-linear HDR buffer.
+        assert render_minus_two_rgba[0] < render_zero_rgba[0] - 0.05
+        assert render_minus_two_rgba[1] < render_zero_rgba[1] - 0.02
+        assert render_minus_two_rgba[2] <= render_zero_rgba[2]
+
+        assert render_zero_rgba[0] > render_zero_rgba[1] > render_zero_rgba[2] >= 0.0
+        assert (
+            render_minus_two_rgba[0]
+            > render_minus_two_rgba[1]
+            > render_minus_two_rgba[2]
+            >= 0.0
+        )
+        assert render_zero_rgba[3] == pytest.approx(1.0, abs=1.0 / 255.0)
+        assert render_minus_two_rgba[3] == pytest.approx(1.0, abs=1.0 / 255.0)
     finally:
         if local_image is not None:
             bpy.data.images.remove(local_image, do_unlink=True)
