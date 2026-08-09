@@ -6,14 +6,16 @@ need object, normal, view, reflection, active-camera, or bump-only displacement 
 without requiring the exported mesh to become a full-frame Camera Projection attachment.
 
 Normal / UV Segments exports texture data, not a fully lit render. Camera/source context
-is therefore preserved while the BSDF lighting layer is removed: matched surface-color
-slots are evaluated through a CAMERA-scoped EMIT proxy that keeps their linked Base Color
-graph alive. Full scene lighting, metallic/specular reflections, and transmission remain
-the responsibility of Camera Projection.
+is therefore preserved while the BSDF lighting layer is removed: camera-context surface
+color is evaluated through an EMIT proxy that keeps the linked Base Color graph alive,
+while camera-context emission is baked in its own EMIT pass. Full scene lighting,
+metallic/specular reflections, and transmission remain the responsibility of Camera
+Projection.
 
 This module keeps those concerns separate:
 
-* material color evaluation keeps CAMERA scope but bakes through EMIT;
+* camera-context surface color and emission are independent typed passes;
+* material color evaluation keeps CAMERA scope but bakes texture data through EMIT;
 * exported geometry remains the ordinary Normal / UV Segments topology;
 * volume and true render displacement remain rejected;
 * bump-only Material Output displacement is accepted only when the production capability
@@ -54,28 +56,6 @@ from .strategies import (
 )
 
 
-_APPEARANCE_CHANNELS = frozenset(
-    {
-        MaterialSemanticChannel.SURFACE_COLOR,
-        MaterialSemanticChannel.SURFACE_EMISSION,
-    }
-)
-
-
-def _appearance_channels(
-    slots: Tuple[MaterialAnalysis, ...],
-) -> Tuple[MaterialSemanticChannel, ...]:
-    channels = {
-        channel
-        for slot in slots
-        for channel in slot.semantic_channels
-        if channel in _APPEARANCE_CHANNELS
-    }
-    if not channels:
-        channels.add(MaterialSemanticChannel.SURFACE_COLOR)
-    return tuple(sorted(channels, key=lambda value: value.value))
-
-
 def _material_preparations(
     matched_slots: Tuple[MaterialAnalysis, ...],
     usable_slots: Tuple[MaterialAnalysis, ...],
@@ -95,33 +75,79 @@ def _material_preparations(
 
 
 @dataclass(frozen=True, slots=True)
-class NormalUvCameraCombinedBakeStrategy:
-    """Evaluate camera/source-context surface color without scene-light BSDF shading.
+class NormalUvCameraSurfaceColorBakeStrategy:
+    """Evaluate camera/source-context Base Color without BSDF lighting."""
 
-    ``CAMERA_COMBINED`` remains the stable strategy identifier used by the surrounding
-    routing/statistics contract, but the executable Blender bake mode is deliberately
-    EMIT. The Blender adapter recognizes this typed combination and temporarily proxies
-    matched materials to straight surface color while preserving CAMERA evaluation scope.
-    """
-
-    strategy_id: BakeStrategyId = BakeStrategyId.CAMERA_COMBINED
+    strategy_id: BakeStrategyId = BakeStrategyId.CAMERA_SURFACE_COLOR
     priority: int = 25
     evaluation_scope: BakeEvaluationScope = BakeEvaluationScope.CAMERA
 
     def supports(self, slot: MaterialAnalysis) -> bool:
         if not isinstance(slot, MaterialAnalysis):
             raise TypeError("slot must be MaterialAnalysis")
-        return bool(set(slot.semantic_channels) & _APPEARANCE_CHANNELS)
+        return MaterialSemanticChannel.SURFACE_COLOR in slot.semantic_channels
 
     def semantic_channels(
         self,
         slots: Tuple[MaterialAnalysis, ...],
     ) -> Tuple[MaterialSemanticChannel, ...]:
-        if not isinstance(slots, tuple) or not all(
-            isinstance(slot, MaterialAnalysis) for slot in slots
-        ):
+        if not isinstance(slots, tuple) or not slots:
+            raise ValueError("slots must be a non-empty tuple")
+        if not all(isinstance(slot, MaterialAnalysis) for slot in slots):
             raise TypeError("slots must contain MaterialAnalysis values")
-        return _appearance_channels(slots)
+        return (MaterialSemanticChannel.SURFACE_COLOR,)
+
+    def select_mode(
+        self,
+        slots: Tuple[MaterialAnalysis, ...],
+        settings: BakeSettings,
+    ) -> BakeMode:
+        if not isinstance(slots, tuple) or not slots:
+            raise ValueError("slots must be a non-empty tuple")
+        if not all(isinstance(slot, MaterialAnalysis) for slot in slots):
+            raise TypeError("slots must contain MaterialAnalysis values")
+        if not isinstance(settings, BakeSettings):
+            raise TypeError("settings must be BakeSettings")
+        return BakeMode.EMIT
+
+    def material_preparations(
+        self,
+        matched_slots: Tuple[MaterialAnalysis, ...],
+        usable_slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSlotPreparation, ...]:
+        if not isinstance(matched_slots, tuple) or not all(
+            isinstance(slot, MaterialAnalysis) for slot in matched_slots
+        ):
+            raise TypeError("matched_slots must contain MaterialAnalysis values")
+        if not isinstance(usable_slots, tuple) or not all(
+            isinstance(slot, MaterialAnalysis) for slot in usable_slots
+        ):
+            raise TypeError("usable_slots must contain MaterialAnalysis values")
+        return _material_preparations(matched_slots, usable_slots)
+
+
+@dataclass(frozen=True, slots=True)
+class NormalUvCameraEmissionBakeStrategy:
+    """Bake camera/source-context emission independently from Base Color."""
+
+    strategy_id: BakeStrategyId = BakeStrategyId.CAMERA_EMISSION
+    priority: int = 30
+    evaluation_scope: BakeEvaluationScope = BakeEvaluationScope.CAMERA
+
+    def supports(self, slot: MaterialAnalysis) -> bool:
+        if not isinstance(slot, MaterialAnalysis):
+            raise TypeError("slot must be MaterialAnalysis")
+        return MaterialSemanticChannel.SURFACE_EMISSION in slot.semantic_channels
+
+    def semantic_channels(
+        self,
+        slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSemanticChannel, ...]:
+        if not isinstance(slots, tuple) or not slots:
+            raise ValueError("slots must be a non-empty tuple")
+        if not all(isinstance(slot, MaterialAnalysis) for slot in slots):
+            raise TypeError("slots must contain MaterialAnalysis values")
+        return (MaterialSemanticChannel.SURFACE_EMISSION,)
 
     def select_mode(
         self,
@@ -291,7 +317,8 @@ def build_normal_uv_camera_context_plan(
     )
     registry = BakeStrategyRegistry(
         strategies=(
-            NormalUvCameraCombinedBakeStrategy(),
+            NormalUvCameraSurfaceColorBakeStrategy(),
+            NormalUvCameraEmissionBakeStrategy(),
             SceneCombinedBakeStrategy(),
             SurfaceColorBakeStrategy(),
             EmissionBakeStrategy(),
@@ -322,6 +349,7 @@ def build_normal_uv_camera_context_plan(
 
 
 __all__ = [
-    "NormalUvCameraCombinedBakeStrategy",
+    "NormalUvCameraEmissionBakeStrategy",
+    "NormalUvCameraSurfaceColorBakeStrategy",
     "build_normal_uv_camera_context_plan",
 ]
