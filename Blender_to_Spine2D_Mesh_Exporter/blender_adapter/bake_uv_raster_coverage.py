@@ -14,7 +14,7 @@ four deterministic interior samples.
 
 from __future__ import annotations
 
-from math import floor, isfinite
+from math import ceil, floor, isfinite
 from typing import Iterable
 
 
@@ -117,6 +117,25 @@ def _triangle_intersects_pixel_cell(
     return True
 
 
+def _cell_range(
+    minimum: float,
+    maximum: float,
+    *,
+    size: int,
+) -> tuple[int, int]:
+    """Return inclusive texel indices touched by a non-empty continuous interval."""
+
+    first = floor(minimum)
+    # A maximum exactly on a texel boundary does not own area in the following cell.
+    # The SAT test remains the final authority for slanted edges inside this coarse box.
+    last = ceil(maximum - _SAT_EPSILON) - 1
+    first = max(0, min(size - 1, first))
+    last = max(0, min(size - 1, last))
+    if last < first:
+        last = first
+    return first, last
+
+
 def raster_footprint_pixels(
     triangle: Iterable[Iterable[float]],
     *,
@@ -148,10 +167,16 @@ def raster_footprint_pixels(
         (u * float(width), v * float(height)) for u, v in resolved
     )
 
-    minimum_x = max(0, min(width - 1, floor(min(point[0] for point in triangle_pixels))))
-    maximum_x = max(0, min(width - 1, floor(max(point[0] for point in triangle_pixels))))
-    minimum_y = max(0, min(height - 1, floor(min(point[1] for point in triangle_pixels))))
-    maximum_y = max(0, min(height - 1, floor(max(point[1] for point in triangle_pixels))))
+    minimum_x, maximum_x = _cell_range(
+        min(point[0] for point in triangle_pixels),
+        max(point[0] for point in triangle_pixels),
+        size=width,
+    )
+    minimum_y, maximum_y = _cell_range(
+        min(point[1] for point in triangle_pixels),
+        max(point[1] for point in triangle_pixels),
+        size=height,
+    )
 
     candidate_count = (maximum_x - minimum_x + 1) * (maximum_y - minimum_y + 1)
     if candidate_count > max_candidate_cells:
