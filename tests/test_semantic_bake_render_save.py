@@ -14,10 +14,15 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.semantic_bake_execution im
     _bake_single_frame,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.semantic_bake_render_save import (
+    _requires_render_color_management,
     _save_render_managed_image,
     save_semantic_bake_image,
 )
-from Blender_to_Spine2D_Mesh_Exporter.domain.baking import TextureFormat
+from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
+    BakeEvaluationScope,
+    BakeMode,
+    TextureFormat,
+)
 
 
 class _Image:
@@ -75,10 +80,22 @@ def test_render_managed_save_fails_closed_when_scene_format_drifted(tmp_path):
     assert image.save_render_calls == []
 
 
-def test_semantic_save_policy_keeps_local_texture_data_and_scene_render_paths_separate():
+def test_render_management_policy_requires_real_scene_or_camera_combined_pass():
+    source = inspect.getsource(_requires_render_color_management)
+
+    assert "pass_plan.bake_mode is BakeMode.COMBINED" in source
+    assert "BakeEvaluationScope.SCENE" in source
+    assert "BakeEvaluationScope.CAMERA" in source
+
+    # The policy must not regress to the old coarse plan.scene_aware boundary because
+    # CAMERA-scoped EMIT is contextual texture data, not rendered appearance.
+    assert "plan.scene_aware" not in source
+
+
+def test_semantic_save_policy_keeps_texture_data_and_render_appearance_paths_separate():
     source = inspect.getsource(save_semantic_bake_image)
 
-    assert "if not plan.scene_aware:" in source
+    assert "if not _requires_render_color_management(plan):" in source
     assert "_save_texture_data_image(image, reservation, plan)" in source
     assert "_flip_image_rows_for_spine(image)" in source
     assert "_save_render_managed_image(" in source
