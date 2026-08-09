@@ -9,6 +9,7 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.bake_uv_spine_validation import (
     BakedUvSpineValidationError,
     RgbaImageBuffer,
+    _inset_samples,
     validate_projection_uv_coverage,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.geometry import LoopId, VertexId
@@ -31,6 +32,22 @@ def _loaded_image_with_spine_lower_left_coverage():
         for x in range(4):
             offset = (y * width + x) * 4
             pixels[offset : offset + 4] = (1.0, 0.0, 0.0, 1.0)
+    return RgbaImageBuffer(width, height, tuple(pixels))
+
+
+def _loaded_image_with_single_spine_file_pixel(
+    *,
+    width: int,
+    height: int,
+    pixel_x: int,
+    pixel_y: int,
+):
+    """Return a loaded buffer with one opaque texel addressed in Spine file-space."""
+
+    pixels = [0.0] * (width * height * 4)
+    loaded_y = height - 1 - pixel_y
+    offset = (loaded_y * width + pixel_x) * 4
+    pixels[offset : offset + 4] = (0.25, 0.5, 0.75, 1.0)
     return RgbaImageBuffer(width, height, tuple(pixels))
 
 
@@ -114,6 +131,48 @@ def test_spine_file_space_sampling_inverts_only_the_loaded_image_v_axis():
     assert image.rgba(0.0, 0.0) == (1.0, 0.0, 0.0, 1.0)
     assert image.rgba_spine_file_space(0.0, 0.0) == (0.0, 0.0, 1.0, 1.0)
     assert image.rgba_spine_file_space(0.0, 1.0) == (1.0, 0.0, 0.0, 1.0)
+    assert image.rgba_spine_file_pixel(0, 0) == (0.0, 0.0, 1.0, 1.0)
+    assert image.rgba_spine_file_pixel(0, 1) == (1.0, 0.0, 0.0, 1.0)
+
+
+def test_small_triangle_uses_intersecting_raster_footprint_after_point_samples_miss():
+    image = _loaded_image_with_single_spine_file_pixel(
+        width=8,
+        height=8,
+        pixel_x=3,
+        pixel_y=2,
+    )
+    triangle = ((0.25, 0.25), (0.40, 0.25), (0.25, 0.40))
+    projection = _projection(triangle)
+
+    # The historical four-point validator samples only texel (2, 2) for this triangle.
+    # Pixel (3, 2) is nevertheless intersected by the triangle's real raster footprint.
+    assert all(
+        image.rgba_spine_file_space(u, v)[3] == 0.0
+        for u, v in _inset_samples(triangle)
+    )
+
+    samples = validate_projection_uv_coverage(image, (projection,))
+
+    assert len(samples) == 1
+    assert samples[0].maximum_alpha == 1.0
+    assert len(samples[0].rgba_samples) > 4
+
+
+def test_raster_footprint_does_not_accept_unrelated_opaque_texel():
+    image = _loaded_image_with_single_spine_file_pixel(
+        width=8,
+        height=8,
+        pixel_x=7,
+        pixel_y=7,
+    )
+    projection = _projection(((0.25, 0.25), (0.40, 0.25), (0.25, 0.40)))
+
+    with pytest.raises(
+        BakedUvSpineValidationError,
+        match="point only into empty baked pixels",
+    ):
+        validate_projection_uv_coverage(image, (projection,))
 
 
 @pytest.mark.parametrize(
