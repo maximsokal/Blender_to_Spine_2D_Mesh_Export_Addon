@@ -17,10 +17,12 @@ from ..domain.baking import (
 )
 from ..infrastructure import AtomicOutputReservation
 from .a1_preparation_contracts import PreparedA1Object
+from .bake_uv_raster_coverage import raster_footprint_pixels
 
 
 logger = logging.getLogger(__name__)
 _UV_UNIT_EPSILON = 1.0e-6
+_MAX_FAILURE_RASTER_DIAGNOSTIC_SAMPLES = 16
 
 
 class BakedUvSpineValidationError(RuntimeError):
@@ -115,6 +117,33 @@ class RgbaImageBuffer:
         if not all(isfinite(float(value)) for value in self.pixels):
             raise ValueError("pixels contain non-finite values")
 
+    def _rgba_loaded_pixel(
+        self,
+        pixel_x: int,
+        pixel_y: int,
+    ) -> tuple[float, float, float, float]:
+        if (
+            not isinstance(pixel_x, int)
+            or isinstance(pixel_x, bool)
+            or pixel_x < 0
+            or pixel_x >= self.width
+        ):
+            raise ValueError(
+                f"pixel_x must be an integer in [0, {self.width - 1}]"
+            )
+        if (
+            not isinstance(pixel_y, int)
+            or isinstance(pixel_y, bool)
+            or pixel_y < 0
+            or pixel_y >= self.height
+        ):
+            raise ValueError(
+                f"pixel_y must be an integer in [0, {self.height - 1}]"
+            )
+        offset = (pixel_y * self.width + pixel_x) * 4
+        values = tuple(float(self.pixels[offset + index]) for index in range(4))
+        return values[0], values[1], values[2], values[3]
+
     def rgba(self, u: float, v: float) -> tuple[float, float, float, float]:
         """Sample the raw Blender-loaded image buffer where ``v=0`` is the bottom."""
 
@@ -130,9 +159,7 @@ class RgbaImageBuffer:
             self.height - 1,
             max(0, int(round(resolved_v * (self.height - 1)))),
         )
-        offset = (y * self.width + x) * 4
-        values = tuple(float(self.pixels[offset + index]) for index in range(4))
-        return values[0], values[1], values[2], values[3]
+        return self._rgba_loaded_pixel(x, y)
 
     def rgba_spine_file_space(
         self,
@@ -143,6 +170,39 @@ class RgbaImageBuffer:
 
         loaded_u, loaded_v = _spine_uv_to_loaded_image_uv(u, v)
         return self.rgba(loaded_u, loaded_v)
+
+    def rgba_spine_file_pixel(
+        self,
+        pixel_x: int,
+        pixel_y: int,
+    ) -> tuple[float, float, float, float]:
+        """Read one exact PNG texel using top-down Spine file-space coordinates."""
+
+        if (
+            not isinstance(pixel_y, int)
+            or isinstance(pixel_y, bool)
+            or pixel_y < 0
+            or pixel_y >= self.height
+        ):
+            raise ValueError(
+                f"pixel_y must be an integer in [0, {self.height - 1}]"
+            )
+        loaded_y = self.height - 1 - pixel_y
+        return self._rgba_loaded_pixel(pixel_x, loaded_y)
+
+    def spine_file_pixel_center_uv(
+        self,
+        pixel_x: int,
+        pixel_y: int,
+    ) -> tuple[float, float]:
+        """Return the normalized top-down UV coordinate at one exact texel center."""
+
+        # Reuse exact-pixel validation without relying on its color payload.
+        self.rgba_spine_file_pixel(pixel_x, pixel_y)
+        return (
+            (float(pixel_x) + 0.5) / float(self.width),
+            (float(pixel_y) + 0.5) / float(self.height),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +266,47 @@ def _inset_samples(
     )
 
 
+def _raster_fallback_samples(
+    image: RgbaImageBuffer,
+    triangle: tuple[tuple[float, float], tuple[float, float], tuple[float, float]],
+    *,
+    alpha_threshold: float,
+) -> tuple[
+    tuple[tuple[float, float], ...],
+    tuple[tuple[float, float, float, float], ...],
+    bool,
+]:
+    """Inspect exact texels touched by one small triangle after point samples failed."""
+
+    footprint = raster_footprint_pixels(
+        triangle,
+        width=image.width,
+        height=image.height,
+    )
+    if footprint is None:
+        return (), (), False
+
+    diagnostic_uvs: list[tuple[float, float]] = []
+    diagnostic_rgba: list[tuple[float, float, float, float]] = []
+    covered = False
+    for pixel_x, pixel_y in footprint:
+        rgba = image.rgba_spine_file_pixel(pixel_x, pixel_y)
+        if len(diagnostic_rgba) < _MAX_FAILURE_RASTER_DIAGNOSTIC_SAMPLES:
+            diagnostic_uvs.append(
+                image.spine_file_pixel_center_uv(pixel_x, pixel_y)
+            )
+            diagnostic_rgba.append(rgba)
+        if rgba[3] > alpha_threshold:
+            covered = True
+            if diagnostic_rgba and diagnostic_rgba[-1] != rgba:
+                diagnostic_uvs.append(
+                    image.spine_file_pixel_center_uv(pixel_x, pixel_y)
+                )
+                diagnostic_rgba.append(rgba)
+            break
+    return tuple(diagnostic_uvs), tuple(diagnostic_rgba), covered
+
+
 def validate_projection_uv_coverage(
     image: RgbaImageBuffer,
     projections: Iterable[A1AttachmentProjectionResult],
@@ -213,7 +314,13 @@ def validate_projection_uv_coverage(
     alpha_threshold: float = 1.0 / 255.0,
     require_alpha_coverage: bool = True,
 ) -> tuple[TriangleCoverageSample, ...]:
-    """Validate every exported triangle against its saved Spine-oriented PNG."""
+    """Validate every exported triangle against its saved Spine-oriented PNG.
+
+    Four deterministic interior samples remain the fast path.  When all four are
+    transparent, small triangles get one resolution-aware raster-footprint pass so a
+    valid edge/sub-pixel triangle is not rejected merely because its covered texel lies
+    between the four point samples.  Large empty triangles remain fail-closed.
+    """
 
     if not isinstance(image, RgbaImageBuffer):
         raise TypeError("image must be RgbaImageBuffer")
@@ -259,6 +366,28 @@ def validate_projection_uv_coverage(
             rgba_samples = tuple(
                 image.rgba_spine_file_space(u, v) for u, v in uv_samples
             )
+            covered = any(sample[3] > threshold for sample in rgba_samples)
+
+            if require_alpha_coverage and not covered:
+                raster_uvs, raster_rgba, raster_covered = _raster_fallback_samples(
+                    image,
+                    triangle,
+                    alpha_threshold=threshold,
+                )
+                if raster_uvs:
+                    uv_samples = uv_samples + raster_uvs
+                    rgba_samples = rgba_samples + raster_rgba
+                covered = raster_covered
+                if raster_covered:
+                    logger.debug(
+                        "Raster footprint recovered baked alpha for attachment '%s' "
+                        "triangle %d at %dx%d after four interior samples were empty",
+                        request.attachment_name,
+                        offset // 3,
+                        image.width,
+                        image.height,
+                    )
+
             sample = TriangleCoverageSample(
                 attachment_name=request.attachment_name,
                 triangle_index=offset // 3,
@@ -266,7 +395,7 @@ def validate_projection_uv_coverage(
                 rgba_samples=rgba_samples,
             )
             samples.append(sample)
-            if require_alpha_coverage and sample.maximum_alpha <= threshold:
+            if require_alpha_coverage and not covered:
                 empty.append(
                     (
                         request.attachment_name,
@@ -279,7 +408,8 @@ def validate_projection_uv_coverage(
     if empty:
         raise BakedUvSpineValidationError(
             "Spine attachment UV triangles point only into empty baked pixels; "
-            f"threshold={threshold}, failures={tuple(empty)}"
+            f"threshold={threshold}, image_size=({image.width}, {image.height}), "
+            f"failures={tuple(empty)}"
         )
     return tuple(samples)
 
