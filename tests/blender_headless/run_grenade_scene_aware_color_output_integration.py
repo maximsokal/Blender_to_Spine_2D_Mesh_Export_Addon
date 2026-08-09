@@ -209,8 +209,12 @@ def _run(expected_blend: str, raw_output_directory: str) -> None:
         bake_mode = result.statistics.get(target_prefix + "bake_mode", "")
         scene_aware = result.statistics.get(target_prefix + "bake_scene_aware", 0)
         _assert(
-            "CAMERA_COMBINED" in str(strategy),
-            f"focused target lost the camera-context strategy: {strategy!r}",
+            "CAMERA_SURFACE_COLOR" in str(strategy),
+            f"focused target did not use camera surface-color strategy: {strategy!r}",
+        )
+        _assert(
+            "CAMERA_COMBINED" not in str(strategy),
+            f"Normal/UV target regressed to rendered CAMERA_COMBINED: {strategy!r}",
         )
         _assert(
             str(bake_mode) == "EMIT",
