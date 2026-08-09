@@ -1,10 +1,11 @@
 """Save semantic bake images according to texture-data vs render-appearance semantics.
 
-Blender bake buffers live in scene-linear space. Local surface/emission passes are
-texture data and intentionally retain the historical ``Image.save()`` path. Scene- and
-camera-aware Combined passes are render appearance: display formats such as PNG must be
-written with Blender's render color management so the Scene view transform, exposure,
-gamma, and display transform are applied instead of clipping HDR scene-linear values.
+Blender bake buffers live in scene-linear space. Local surface/emission passes and
+camera-context surface-color EMIT passes are texture data and intentionally retain the
+historical ``Image.save()`` path. Real Scene/Camera COMBINED passes are render appearance:
+display formats such as PNG must be written with Blender's render color management so
+the Scene view transform, exposure, gamma, and display transform are applied instead of
+clipping HDR scene-linear values.
 """
 
 from __future__ import annotations
@@ -13,7 +14,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ..domain.baking import BakePlan, TextureFormat
+from ..domain.baking import (
+    BakeEvaluationScope,
+    BakeMode,
+    BakePlan,
+    TextureFormat,
+)
 from ..infrastructure import AtomicOutputReservation
 from .bake_execution_error import BakeExecutionError
 from .semantic_bake_image_io import (
@@ -29,12 +35,12 @@ def _scene_output_file_format(scene: Any) -> str:
     """Return the active Blender Scene output file format or fail explicitly."""
 
     if scene is None:
-        raise BakeExecutionError("scene-aware semantic bake requires a Scene")
+        raise BakeExecutionError("render-managed semantic bake requires a Scene")
     try:
         value = str(scene.render.image_settings.file_format or "").strip().upper()
     except Exception as exc:
         raise BakeExecutionError(
-            "Unable to read Scene render image file format for scene-aware bake"
+            "Unable to read Scene render image file format for render-managed bake"
         ) from exc
     if not value:
         raise BakeExecutionError("Scene render image file format is empty")
@@ -92,12 +98,12 @@ def _save_render_managed_image(
         image.file_format = expected_format
     except Exception as exc:
         raise BakeExecutionError(
-            f"Unable to configure scene-aware bake image format {expected_format!r}"
+            f"Unable to configure render-managed bake image format {expected_format!r}"
         ) from exc
 
     view_transform, look, exposure, gamma = _render_color_management_summary(scene)
     logger.info(
-        "Saving scene-aware semantic bake with render color management: "
+        "Saving render-appearance semantic bake with render color management: "
         "format=%s view_transform=%s look=%s exposure=%s gamma=%s path=%s",
         expected_format,
         view_transform,
@@ -133,6 +139,25 @@ def _require_written_file(staged_path: Path) -> None:
         )
 
 
+def _requires_render_color_management(plan: BakePlan) -> bool:
+    """Return whether the final buffer represents lit Scene/Camera render appearance.
+
+    Evaluation scope alone is insufficient: Normal/UV may evaluate a Base Color graph in
+    CAMERA context while still producing straight texture data through EMIT. Render color
+    management is required only for a true COMBINED pass whose Scene/Camera contributions
+    are intentionally part of the exported appearance.
+    """
+
+    if not isinstance(plan, BakePlan):
+        raise TypeError("plan must be BakePlan")
+    return any(
+        pass_plan.bake_mode is BakeMode.COMBINED
+        and pass_plan.evaluation_scope
+        in {BakeEvaluationScope.SCENE, BakeEvaluationScope.CAMERA}
+        for pass_plan in plan.passes
+    )
+
+
 def save_semantic_bake_image(
     image: Any,
     reservation: AtomicOutputReservation,
@@ -142,9 +167,9 @@ def save_semantic_bake_image(
 ) -> None:
     """Save one staged bake without conflating texture data and rendered appearance.
 
-    ``BakePlan.scene_aware`` is the boundary. Local passes preserve the established
-    texture-data path. Scene/camera passes are HDR render appearance and therefore use
-    Blender's ``Image.save_render`` with the exact runtime Scene.
+    Contextual evaluation and rendered appearance are deliberately separate. Local passes
+    and CAMERA-scoped EMIT surface-color passes use the texture-data save path. Only a
+    real Scene/Camera COMBINED pass uses Blender ``Image.save_render``.
     """
 
     if image is None:
@@ -154,7 +179,7 @@ def save_semantic_bake_image(
     if not isinstance(plan, BakePlan):
         raise TypeError("plan must be BakePlan")
 
-    if not plan.scene_aware:
+    if not _requires_render_color_management(plan):
         _save_texture_data_image(image, reservation, plan)
         return
 
@@ -172,13 +197,14 @@ def save_semantic_bake_image(
         raise
     except Exception as exc:
         raise BakeExecutionError(
-            f"Unable to save scene-aware staged bake image '{staged_path}'"
+            f"Unable to save render-appearance staged bake image '{staged_path}'"
         ) from exc
 
     _require_written_file(staged_path)
 
 
 __all__ = [
+    "_requires_render_color_management",
     "_save_render_managed_image",
     "save_semantic_bake_image",
 ]
