@@ -13,6 +13,11 @@ smallest deterministic companion already covered by the grenade Bump regression.
 Cycles samples are reduced to one only to keep this gate fast; geometry, UV layout,
 texture dimensions, bake margin, staging and coverage validation remain on the
 production UI path.
+
+The historical triangles 44/45 are additionally proven to be finite but to contain no
+output texel sample centre at the persisted resolution. Successful staging must report
+those triangles through the resolution-unrepresentable coverage statistic instead of
+silently disabling validation.
 """
 
 from __future__ import annotations
@@ -54,6 +59,10 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_selection import (  
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_settings import (  # noqa: E402
     _settings_from_profiles,
 )
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.bake_uv_raster_coverage import (  # noqa: E402
+    raster_sample_pixels,
+    triangle_twice_area_pixels,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
     A1TextureExportMode,
 )
@@ -66,6 +75,7 @@ from run_grenade_bump_displacement_normal_uv_integration import (  # noqa: E402
 _EXPECTED_OBJECT_NAME = "Plane"
 _COMPANION_OBJECT_NAME = "Cube"
 _EXPECTED_ATTACHMENT_NAME = "Plane_Segment_56"
+_EXPECTED_PROBLEM_TRIANGLE_INDICES = (44, 45)
 _EXPECTED_OUTPUT_PNG_COUNT = 2
 
 
@@ -217,7 +227,23 @@ def _settings_from_ui_profile(source, scene_profile, persisted_texture_size: int
     )
 
 
-def _assert_problem_attachment(prepared) -> tuple[int, ...]:
+def _triangle_uvs(request, triangle_index: int) -> tuple[tuple[float, float], ...]:
+    offset = triangle_index * 3
+    indices = tuple(request.triangles[offset : offset + 3])
+    _assert(
+        len(indices) == 3,
+        f"attachment triangle {triangle_index} is incomplete: {indices!r}",
+    )
+    return tuple(
+        tuple(float(value) for value in request.vertices[index].uv)
+        for index in indices
+    )
+
+
+def _assert_problem_attachment(
+    prepared,
+    texture_size: int,
+) -> tuple[int, tuple[float, ...]]:
     matching = tuple(
         projection
         for projection in prepared.document_assembly.projections
@@ -229,12 +255,43 @@ def _assert_problem_attachment(prepared) -> tuple[int, ...]:
         f"the staging failure: expected={_EXPECTED_ATTACHMENT_NAME!r}, "
         f"available={tuple(p.request.attachment_name for p in prepared.document_assembly.projections)!r}",
     )
-    triangles = tuple(matching[0].request.triangles)
+    request = matching[0].request
+    triangle_count = len(request.triangles) // 3
     _assert(
-        len(triangles) >= 3 * 46,
+        len(request.triangles) % 3 == 0,
+        f"{_EXPECTED_ATTACHMENT_NAME} has malformed triangle stream",
+    )
+    _assert(
+        triangle_count > max(_EXPECTED_PROBLEM_TRIANGLE_INDICES),
         f"{_EXPECTED_ATTACHMENT_NAME} no longer contains historical triangles 44/45",
     )
-    return triangles
+
+    areas: list[float] = []
+    for triangle_index in _EXPECTED_PROBLEM_TRIANGLE_INDICES:
+        uvs = _triangle_uvs(request, triangle_index)
+        area = triangle_twice_area_pixels(
+            uvs,
+            width=texture_size,
+            height=texture_size,
+        )
+        samples = raster_sample_pixels(
+            uvs,
+            width=texture_size,
+            height=texture_size,
+        )
+        _assert(
+            area > 0.0,
+            f"historical triangle {triangle_index} became UV-degenerate",
+        )
+        _assert(
+            samples == (),
+            "historical regression triangle unexpectedly gained a texel sample centre; "
+            f"triangle={triangle_index}, texture={texture_size}, "
+            f"area_twice_pixels={area}, samples={samples!r}, uvs={uvs!r}",
+        )
+        areas.append(area)
+
+    return triangle_count, tuple(areas)
 
 
 def _multi_source(source, settings, index: int) -> A1MultiObjectSource:
@@ -279,15 +336,18 @@ def _run(expected_blend: str) -> None:
                 "UI profile produced different bake margins for the two sources",
             )
 
-            # Prepare the exact target first so fixture drift is reported before the
-            # broader two-object transaction starts.
+            # Prepare the exact target first so fixture drift and raster assumptions are
+            # proven before the broader two-object transaction starts.
             prepared = prepare_a1_object(
                 target,
                 target_settings,
                 context=bpy.context,
                 scene=scene,
             )
-            triangles = _assert_problem_attachment(prepared)
+            triangle_count, problem_areas = _assert_problem_attachment(
+                prepared,
+                texture_size,
+            )
 
             sources = (
                 _multi_source(target, target_settings, 1),
@@ -309,6 +369,25 @@ def _run(expected_blend: str) -> None:
                 "real grenade Plane UI export failed: "
                 f"issues={result.issues!r}, statistics={dict(result.statistics)!r}",
             )
+
+            result_statistics = dict(result.statistics)
+            subpixel_key = (
+                "component.object_1:Plane."
+                "bake_uv_resolution_unrepresentable_triangle_count"
+            )
+            _assert(
+                subpixel_key in result_statistics,
+                "successful UI export did not expose subpixel coverage statistics; "
+                f"available={tuple(sorted(result_statistics))!r}",
+            )
+            subpixel_count = int(result_statistics[subpixel_key])
+            _assert(
+                subpixel_count >= len(_EXPECTED_PROBLEM_TRIANGLE_INDICES),
+                "successful UI export did not classify the historical subpixel "
+                f"triangles; expected_at_least={len(_EXPECTED_PROBLEM_TRIANGLE_INDICES)}, "
+                f"actual={subpixel_count}",
+            )
+
             outputs = tuple(Path(path).resolve(strict=False) for path in result.output_files)
             json_files = tuple(path for path in outputs if path.suffix.lower() == ".json")
             png_files = tuple(path for path in outputs if path.suffix.lower() == ".png")
@@ -344,7 +423,9 @@ def _run(expected_blend: str) -> None:
             f"blend={loaded} object={target.name_full!r} "
             f"companion={companion.name_full!r} "
             f"attachment={_EXPECTED_ATTACHMENT_NAME!r} "
-            f"triangle_count={len(triangles) // 3} "
+            f"triangle_count={triangle_count} "
+            f"problem_twice_area_pixels={problem_areas!r} "
+            f"subpixel_triangles={subpixel_count} "
             f"texture={texture_size} margin={target_settings.export.bake_margin} "
             "staging=passed source=unchanged",
             flush=True,
