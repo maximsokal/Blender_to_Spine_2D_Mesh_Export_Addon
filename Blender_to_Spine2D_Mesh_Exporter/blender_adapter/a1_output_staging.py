@@ -158,12 +158,26 @@ def stage_and_finalize_a1_objects(
             reserve_layouts=reserve_layouts,
         )
         finalized_objects.append(finalized)
+
+        resolution_unrepresentable_count = sum(
+            1
+            for sample in coverage_samples
+            if not sample.resolution_representable
+        )
+        exact_raster_sample_count = sum(
+            sample.raster_sample_count
+            for sample in coverage_samples
+        )
         record_object_statistics(
             resolved_statistics,
             source.component_id,
             {
                 **dict(finalized.statistics),
                 "bake_uv_coverage_sample_count": len(coverage_samples),
+                "bake_uv_resolution_unrepresentable_triangle_count": (
+                    resolution_unrepresentable_count
+                ),
+                "bake_uv_exact_raster_sample_count": exact_raster_sample_count,
                 "parallax_texture_view_count": 1 + len(
                     staged.reserve_projection_stages
                 ),
