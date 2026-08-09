@@ -57,6 +57,8 @@ class BakeStrategyId(str, Enum):
     """Stable identifiers for independently executable bake strategies."""
 
     CAMERA_COMBINED = "CAMERA_COMBINED"
+    CAMERA_SURFACE_COLOR = "CAMERA_SURFACE_COLOR"
+    CAMERA_EMISSION = "CAMERA_EMISSION"
     SCENE_COMBINED = "SCENE_COMBINED"
     SURFACE_COLOR = "SURFACE_COLOR"
     EMISSION = "EMISSION"
