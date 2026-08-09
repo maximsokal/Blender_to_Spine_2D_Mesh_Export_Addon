@@ -39,8 +39,23 @@
       "status": "passed"
     },
     "non_manifold": {
-      "error": "Error: A1_PREPARE_GEOMETRY_FAILED: Segment 0 is non-manifold and cannot be safely decomposed without an explicit repair policy\n",
-      "status": "failed"
+      "images": [
+        {
+          "alpha_coverage": 0.85083,
+          "height": 64,
+          "mean_rgba": [
+            0.287912,
+            0.703464,
+            0.703464,
+            0.834343
+          ],
+          "name": "Hero_Baked.png",
+          "width": 64
+        }
+      ],
+      "json_sha256": "ca39d013e77af0d258a141af90cd872833c57c25bea80ad06b74f04f5e242cf4",
+      "json_size": 7848,
+      "status": "passed"
     },
     "overlapping_uv": {
       "images": [
