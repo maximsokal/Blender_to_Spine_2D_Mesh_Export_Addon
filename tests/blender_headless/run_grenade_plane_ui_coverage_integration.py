@@ -1,12 +1,18 @@
 """Reproduce the installed-UI Normal/UV coverage path on real grenade.blend.
 
 The manual 0.129.0 smoke exposed a staging-only coverage failure for
-``Plane_Segment_56``.  This runner deliberately does not hard-code a texture size: the
+``Plane_Segment_56``. This runner deliberately does not hard-code a texture size: the
 artist-authored ``grenade.blend`` owns its persisted Scene setting, and the production
 Scene/Object UI profile builders must carry that exact value into immutable export
-settings.  Cycles samples are reduced to one only to keep the regression fast; geometry,
-UV layout, texture dimensions, bake margin, staging and coverage validation remain on
-the production UI path.
+settings.
+
+The production multi-object contract requires at least two sources, so the focused
+regression exports ``Plane`` together with ``Cube``. ``Plane`` remains the target that
+must contain the historical ``Plane_Segment_56`` triangles, while ``Cube`` is the
+smallest deterministic companion already covered by the grenade Bump regression.
+Cycles samples are reduced to one only to keep this gate fast; geometry, UV layout,
+texture dimensions, bake margin, staging and coverage validation remain on the
+production UI path.
 """
 
 from __future__ import annotations
@@ -58,7 +64,9 @@ from run_grenade_bump_displacement_normal_uv_integration import (  # noqa: E402
 
 
 _EXPECTED_OBJECT_NAME = "Plane"
+_COMPANION_OBJECT_NAME = "Cube"
 _EXPECTED_ATTACHMENT_NAME = "Plane_Segment_56"
+_EXPECTED_OUTPUT_PNG_COUNT = 2
 
 
 def _parse_arguments() -> argparse.Namespace:
@@ -98,6 +106,14 @@ def _unregister_steps(completed: list[tuple]) -> None:
         except Exception as exc:
             failures.append(f"{label}: {exc}")
     _assert(not failures, f"Rewrite unregister failures: {failures!r}")
+
+
+def _require_mesh_object(name: str):
+    source = bpy.data.objects.get(name)
+    _assert(source is not None, f"missing grenade object: {name!r}")
+    _assert(source.type == "MESH", f"grenade object {name!r} must be a Mesh")
+    _assert(getattr(source, "data", None) is not None, f"{name!r} has no Mesh data")
+    return source
 
 
 def _source_fingerprint(source, scene) -> tuple:
@@ -147,7 +163,7 @@ def _persisted_texture_size(scene) -> int:
     return value
 
 
-def _settings_from_ui(source, scene, output_directory: Path):
+def _capture_ui_scene_profile(scene, output_directory: Path):
     persisted_texture_size = _persisted_texture_size(scene)
     profile = _capture_scene_profile(
         scene,
@@ -164,7 +180,10 @@ def _settings_from_ui(source, scene, output_directory: Path):
         "Scene profile changed the persisted UI texture size; "
         f"scene={persisted_texture_size}, profile={profile.texture_size}",
     )
+    return profile, persisted_texture_size
 
+
+def _settings_from_ui_profile(source, scene_profile, persisted_texture_size: int):
     bake = getattr(source, "spine2d_bake_settings", None)
     object_profile = _capture_object_profile(
         source,
@@ -172,12 +191,12 @@ def _settings_from_ui(source, scene, output_directory: Path):
         sequence_frame_count=int(getattr(bake, "frames_for_render", 0)),
         connect_enabled=_connect_enabled(source),
     )
-    settings = _settings_from_profiles(object_profile, profile)
+    settings = _settings_from_profiles(object_profile, scene_profile)
     _assert(
         settings.export.texture_width == persisted_texture_size
         and settings.export.texture_height == persisted_texture_size,
         "UI settings changed the captured Scene texture size: "
-        f"scene={persisted_texture_size}, "
+        f"object={source.name_full!r}, scene={persisted_texture_size}, "
         f"export=({settings.export.texture_width}, {settings.export.texture_height})",
     )
     _assert(
@@ -191,15 +210,10 @@ def _settings_from_ui(source, scene, output_directory: Path):
 
     # Sampling count affects shader convergence, not generated UV geometry or the alpha
     # raster footprint of this opaque object bake. Keep every other captured UI setting.
-    return (
-        replace(
-            settings,
-            bake_execution=replace(settings.bake_execution, samples=1),
-            prefix=_EXPECTED_OBJECT_NAME,
-            output_stem="Grenade_Plane_UI_Coverage",
-            json_output_stem=None,
-        ),
-        persisted_texture_size,
+    return replace(
+        settings,
+        bake_execution=replace(settings.bake_execution, samples=1),
+        json_output_stem=None,
     )
 
 
@@ -223,38 +237,61 @@ def _assert_problem_attachment(prepared) -> tuple[int, ...]:
     return triangles
 
 
+def _multi_source(source, settings, index: int) -> A1MultiObjectSource:
+    return A1MultiObjectSource(
+        source_object=source,
+        component_id=f"object_{index}:{source.name_full}",
+        animation_namespace=f"object_{index}",
+        settings=settings,
+    )
+
+
 def _run(expected_blend: str) -> None:
     loaded = _require_loaded_blend(expected_blend)
     completed = _register_steps()
     try:
         scene = bpy.context.scene
-        source = bpy.data.objects.get(_EXPECTED_OBJECT_NAME)
-        _assert(source is not None, f"missing grenade object: {_EXPECTED_OBJECT_NAME!r}")
-        _assert(source.type == "MESH", f"{_EXPECTED_OBJECT_NAME} must be a Mesh")
+        target = _require_mesh_object(_EXPECTED_OBJECT_NAME)
+        companion = _require_mesh_object(_COMPANION_OBJECT_NAME)
 
-        before = _source_fingerprint(source, scene)
+        target_before = _source_fingerprint(target, scene)
+        companion_before = _source_fingerprint(companion, scene)
         datablocks_before = _datablock_fingerprint()
 
         with tempfile.TemporaryDirectory(prefix="spine2d_grenade_plane_ui_coverage_") as root:
             output_directory = Path(root).resolve(strict=False)
-            settings, texture_size = _settings_from_ui(
-                source,
+            scene_profile, texture_size = _capture_ui_scene_profile(
                 scene,
                 output_directory,
             )
+            target_settings = _settings_from_ui_profile(
+                target,
+                scene_profile,
+                texture_size,
+            )
+            companion_settings = _settings_from_ui_profile(
+                companion,
+                scene_profile,
+                texture_size,
+            )
+            _assert(
+                target_settings.export.bake_margin == companion_settings.export.bake_margin,
+                "UI profile produced different bake margins for the two sources",
+            )
+
+            # Prepare the exact target first so fixture drift is reported before the
+            # broader two-object transaction starts.
             prepared = prepare_a1_object(
-                source,
-                settings,
+                target,
+                target_settings,
                 context=bpy.context,
                 scene=scene,
             )
             triangles = _assert_problem_attachment(prepared)
 
-            multi_source = A1MultiObjectSource(
-                source_object=source,
-                component_id="object_1:Plane",
-                animation_namespace="object_1",
-                settings=settings,
+            sources = (
+                _multi_source(target, target_settings, 1),
+                _multi_source(companion, companion_settings, 2),
             )
             multi_settings = A1MultiObjectExportSettings(
                 output_directory=output_directory,
@@ -262,7 +299,7 @@ def _run(expected_blend: str) -> None:
                 mode=A1MultiObjectMode.STANDALONE,
             )
             result = export_a1_multi_object(
-                (multi_source,),
+                sources,
                 multi_settings,
                 context=bpy.context,
                 scene=scene,
@@ -276,17 +313,26 @@ def _run(expected_blend: str) -> None:
             json_files = tuple(path for path in outputs if path.suffix.lower() == ".json")
             png_files = tuple(path for path in outputs if path.suffix.lower() == ".png")
             _assert(len(json_files) == 1, f"expected one JSON output: {json_files!r}")
-            _assert(len(png_files) == 1, f"expected one PNG output: {png_files!r}")
             _assert(
-                png_files[0].read_bytes().startswith(PNG_SIGNATURE),
-                f"Plane UI output is not PNG: {png_files[0]}",
+                len(png_files) == _EXPECTED_OUTPUT_PNG_COUNT,
+                "two-source UI regression produced unexpected PNG count: "
+                f"expected={_EXPECTED_OUTPUT_PNG_COUNT}, actual={len(png_files)}, "
+                f"files={png_files!r}",
+            )
+            _assert(
+                all(path.read_bytes().startswith(PNG_SIGNATURE) for path in png_files),
+                f"UI coverage outputs contain a non-PNG file: {png_files!r}",
             )
             parsed = json.loads(json_files[0].read_text(encoding="utf-8"))
             _assert(isinstance(parsed, dict) and bool(parsed.get("skins")), "invalid JSON")
 
         _assert(
-            _source_fingerprint(source, scene) == before,
-            "Plane UI export changed source/scene state",
+            _source_fingerprint(target, scene) == target_before,
+            "Plane UI export changed target source/scene state",
+        )
+        _assert(
+            _source_fingerprint(companion, scene) == companion_before,
+            "Plane UI export changed companion source/scene state",
         )
         _assert(
             _datablock_fingerprint() == datablocks_before,
@@ -295,10 +341,11 @@ def _run(expected_blend: str) -> None:
 
         print(
             "[GRENADE-PLANE-UI-COVERAGE] PASS "
-            f"blend={loaded} object={source.name_full!r} "
+            f"blend={loaded} object={target.name_full!r} "
+            f"companion={companion.name_full!r} "
             f"attachment={_EXPECTED_ATTACHMENT_NAME!r} "
             f"triangle_count={len(triangles) // 3} "
-            f"texture={texture_size} margin={settings.export.bake_margin} "
+            f"texture={texture_size} margin={target_settings.export.bake_margin} "
             "staging=passed source=unchanged",
             flush=True,
         )
