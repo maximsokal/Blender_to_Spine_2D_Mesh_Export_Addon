@@ -16,6 +16,7 @@ This module keeps those concerns separate:
 
 * camera-context surface color and emission are independent typed passes;
 * material color evaluation keeps CAMERA scope but bakes texture data through EMIT;
+* an explicit auxiliary alpha pass carries geometry coverage/material opacity in RGB;
 * exported geometry remains the ordinary Normal / UV Segments topology;
 * volume and true render displacement remain rejected;
 * bump-only Material Output displacement is accepted only when the production capability
@@ -47,7 +48,6 @@ from .model import (
     sanitize_filename_stem,
 )
 from .strategies import (
-    AlphaBakeStrategy,
     BakeStrategyRegistry,
     EmissionBakeStrategy,
     SceneCombinedBakeStrategy,
@@ -176,6 +176,82 @@ class NormalUvCameraEmissionBakeStrategy:
         ):
             raise TypeError("usable_slots must contain MaterialAnalysis values")
         return _material_preparations(matched_slots, usable_slots)
+
+
+@dataclass(frozen=True, slots=True)
+class NormalUvCoverageAlphaBakeStrategy:
+    """Bake deterministic geometry coverage and real material opacity into RGB.
+
+    Blender's EMIT/DIFFUSE/COMBINED image alpha is not a reliable coverage channel:
+    depending on bake type Blender can leave the whole temporary Image opaque after a
+    clear. This auxiliary pass therefore encodes alpha as emission intensity. Slots with
+    an actual ALPHA semantic extract their shader opacity; ordinary opaque slots emit 1.
+    The generic compositor already copies the red channel of the ALPHA pass into final
+    alpha, so background remains zero while every baked surface stays covered.
+    """
+
+    strategy_id: BakeStrategyId = BakeStrategyId.ALPHA
+    priority: int = 300
+    evaluation_scope: BakeEvaluationScope = BakeEvaluationScope.AUXILIARY
+
+    def supports(self, slot: MaterialAnalysis) -> bool:
+        if not isinstance(slot, MaterialAnalysis):
+            raise TypeError("slot must be MaterialAnalysis")
+        return slot.kind is not MaterialKind.EMPTY
+
+    def semantic_channels(
+        self,
+        slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSemanticChannel, ...]:
+        if not isinstance(slots, tuple) or not slots:
+            raise ValueError("slots must be a non-empty tuple")
+        if not all(isinstance(slot, MaterialAnalysis) for slot in slots):
+            raise TypeError("slots must contain MaterialAnalysis values")
+        return (MaterialSemanticChannel.ALPHA,)
+
+    def select_mode(
+        self,
+        slots: Tuple[MaterialAnalysis, ...],
+        settings: BakeSettings,
+    ) -> BakeMode:
+        if not isinstance(slots, tuple) or not slots:
+            raise ValueError("slots must be a non-empty tuple")
+        if not all(isinstance(slot, MaterialAnalysis) for slot in slots):
+            raise TypeError("slots must contain MaterialAnalysis values")
+        if not isinstance(settings, BakeSettings):
+            raise TypeError("settings must be BakeSettings")
+        return BakeMode.EMIT
+
+    def material_preparations(
+        self,
+        matched_slots: Tuple[MaterialAnalysis, ...],
+        usable_slots: Tuple[MaterialAnalysis, ...],
+    ) -> Tuple[MaterialSlotPreparation, ...]:
+        if not isinstance(matched_slots, tuple) or not all(
+            isinstance(slot, MaterialAnalysis) for slot in matched_slots
+        ):
+            raise TypeError("matched_slots must contain MaterialAnalysis values")
+        if not isinstance(usable_slots, tuple) or not all(
+            isinstance(slot, MaterialAnalysis) for slot in usable_slots
+        ):
+            raise TypeError("usable_slots must contain MaterialAnalysis values")
+
+        alpha_slots = {
+            slot.slot_index
+            for slot in matched_slots
+            if MaterialSemanticChannel.ALPHA in slot.semantic_channels
+        }
+        return tuple(
+            MaterialSlotPreparation(
+                slot_index=slot.slot_index,
+                mode=(
+                    MaterialPreparationMode.EXTRACT_ALPHA_TO_EMISSION
+                    if slot.slot_index in alpha_slots
+                    else MaterialPreparationMode.OPAQUE_ALPHA_TO_EMISSION
+                ),
+            )
+            for slot in usable_slots
+        )
 
 
 def _frame_tasks(settings: BakeSettings) -> Tuple[BakeFrameTask, ...]:
@@ -322,7 +398,7 @@ def build_normal_uv_camera_context_plan(
             SceneCombinedBakeStrategy(),
             SurfaceColorBakeStrategy(),
             EmissionBakeStrategy(),
-            AlphaBakeStrategy(),
+            NormalUvCoverageAlphaBakeStrategy(),
         )
     )
     passes, composite = resolve_bake_strategy_plan(
@@ -351,5 +427,6 @@ def build_normal_uv_camera_context_plan(
 __all__ = [
     "NormalUvCameraEmissionBakeStrategy",
     "NormalUvCameraSurfaceColorBakeStrategy",
+    "NormalUvCoverageAlphaBakeStrategy",
     "build_normal_uv_camera_context_plan",
 ]
