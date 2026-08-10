@@ -9,7 +9,9 @@ capability boundary:
 * Blender's live material mode must be ``BUMP``;
 * capability auditing must replace the blanket displacement blocker with
   ``DISPLACEMENT_BUMP_CONTEXT``;
-* Normal/UV planning must select a CAMERA-scoped ``CAMERA_COMBINED`` pass;
+* Normal/UV planning must flatten camera-context texture data through CAMERA-scoped EMIT
+  passes and must retain an explicit auxiliary coverage-alpha pass;
+* rendered ``CAMERA_COMBINED`` must not reappear in Normal/UV;
 * a real single-object export must produce non-empty Spine JSON and PNG output;
 * source object/material/scene state and Blender datablock namespaces must be restored.
 """
@@ -55,6 +57,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.production_shader_capabili
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
     A1TextureExportMode,
+    BakeCompositeMode,
     BakeEvaluationScope,
     BakeExecutionSettings,
     BakeMode,
@@ -257,26 +260,84 @@ def _assert_capability_route(source, material) -> tuple:
     return analysis, audits
 
 
-def _assert_prepared_plan(prepared) -> None:
+def _assert_prepared_plan(prepared) -> tuple[str, ...]:
     passes = tuple(prepared.bake_plan.passes)
-    camera_combined = tuple(
-        item
-        for item in passes
-        if item.strategy_id is BakeStrategyId.CAMERA_COMBINED
+    _assert(passes, "grenade Bump Only preparation produced no bake passes")
+
+    strategy_ids = tuple(item.strategy_id.value for item in passes)
+    _assert(
+        BakeStrategyId.CAMERA_SURFACE_COLOR.value in strategy_ids,
+        "grenade Bump Only preparation lost CAMERA_SURFACE_COLOR: "
+        f"strategies={strategy_ids!r}",
     )
     _assert(
-        camera_combined,
-        "grenade Bump Only preparation did not produce CAMERA_COMBINED",
+        BakeStrategyId.ALPHA.value in strategy_ids,
+        "grenade Bump Only preparation lost the explicit coverage ALPHA pass: "
+        f"strategies={strategy_ids!r}",
     )
-    for item in camera_combined:
+    _assert(
+        BakeStrategyId.CAMERA_COMBINED.value not in strategy_ids,
+        "Normal/UV Bump Only preparation regressed to rendered CAMERA_COMBINED: "
+        f"strategies={strategy_ids!r}",
+    )
+
+    camera_color_passes = tuple(
+        item
+        for item in passes
+        if item.strategy_id
+        in {
+            BakeStrategyId.CAMERA_SURFACE_COLOR,
+            BakeStrategyId.CAMERA_EMISSION,
+        }
+    )
+    _assert(
+        camera_color_passes,
+        "grenade Bump Only preparation produced no camera texture-data color pass",
+    )
+    for item in camera_color_passes:
         _assert(
-            item.bake_mode is BakeMode.COMBINED,
-            f"CAMERA_COMBINED pass uses wrong bake mode: {item.bake_mode}",
+            item.bake_mode is BakeMode.EMIT,
+            f"camera texture-data pass uses wrong bake mode: {item!r}",
         )
         _assert(
             item.evaluation_scope is BakeEvaluationScope.CAMERA,
-            f"CAMERA_COMBINED pass uses wrong scope: {item.evaluation_scope}",
+            f"camera texture-data pass uses wrong scope: {item!r}",
         )
+
+    alpha_passes = tuple(
+        item for item in passes if item.strategy_id is BakeStrategyId.ALPHA
+    )
+    _assert(
+        len(alpha_passes) == 1,
+        f"expected exactly one coverage ALPHA pass, got {alpha_passes!r}",
+    )
+    alpha_pass = alpha_passes[0]
+    _assert(
+        alpha_pass.bake_mode is BakeMode.EMIT,
+        f"coverage ALPHA pass uses wrong bake mode: {alpha_pass.bake_mode}",
+    )
+    _assert(
+        alpha_pass.evaluation_scope is BakeEvaluationScope.AUXILIARY,
+        f"coverage ALPHA pass uses wrong scope: {alpha_pass.evaluation_scope}",
+    )
+
+    composite = prepared.bake_plan.composite
+    _assert(
+        composite.mode is BakeCompositeMode.ADD_RGB_REPLACE_ALPHA,
+        "Bump Only Normal/UV plan must replace final alpha from the explicit coverage pass; "
+        f"actual={composite!r}",
+    )
+    _assert(
+        composite.alpha_pass_index == alpha_pass.pass_index,
+        "coverage ALPHA pass is not the composite alpha source: "
+        f"composite={composite!r}, alpha_pass={alpha_pass!r}",
+    )
+    _assert(
+        composite.unpremultiply_color_by_alpha is False,
+        "camera texture-data Normal/UV color must not be unpremultiplied as render appearance",
+    )
+
+    return strategy_ids
 
 
 def _assert_outputs(result) -> tuple[Path, Path]:
@@ -326,7 +387,7 @@ def _run(expected_blend: str) -> None:
             context=bpy.context,
             scene=scene,
         )
-        _assert_prepared_plan(prepared)
+        strategy_ids = _assert_prepared_plan(prepared)
 
         result = export_a1_single_object(
             source,
@@ -350,7 +411,8 @@ def _run(expected_blend: str) -> None:
             f"blend={loaded} object={source.name_full!r} "
             f"material={material.name_full!r} displacement_method=BUMP "
             "semantic=DISPLACEMENT capability=DISPLACEMENT_BUMP_CONTEXT "
-            "plan=CAMERA_COMBINED scope=CAMERA mode=COMBINED "
+            f"strategies={strategy_ids!r} scope=CAMERA color_mode=EMIT "
+            "alpha_mode=EMIT composite=ADD_RGB_REPLACE_ALPHA "
             f"json_bytes={json_path.stat().st_size} "
             f"png_bytes={png_path.stat().st_size} source=unchanged",
             flush=True,
