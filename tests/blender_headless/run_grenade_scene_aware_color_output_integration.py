@@ -43,6 +43,7 @@ from run_grenade_plane_ui_coverage_integration import (  # noqa: E402
 _TARGET_OBJECT = "Cylinder.019"
 _COMPANION_OBJECT = "Cube"
 _VISUAL_SMOKE_SAMPLES = 16
+_ALPHA_THRESHOLD = 1.0 / 255.0
 
 
 def _parse_arguments() -> argparse.Namespace:
@@ -89,10 +90,13 @@ def _image_metrics(path: Path) -> dict[str, float | int]:
     _assert(len(values) == width * height * 4, "unexpected baked RGBA buffer length")
 
     opaque = []
+    transparent_count = 0
     for offset in range(0, len(values), 4):
         r, g, b, a = values[offset : offset + 4]
-        if a > 1.0 / 255.0:
+        if a > _ALPHA_THRESHOLD:
             opaque.append((r, g, b, a))
+        else:
+            transparent_count += 1
     _assert(opaque, "focused baked image contains no non-transparent pixels")
 
     count = len(opaque)
@@ -111,6 +115,7 @@ def _image_metrics(path: Path) -> dict[str, float | int]:
         "width": width,
         "height": height,
         "opaque_pixels": count,
+        "transparent_pixels": transparent_count,
         "mean_r": mean_r,
         "mean_g": mean_g,
         "mean_b": mean_b,
@@ -203,6 +208,10 @@ def _run(expected_blend: str, raw_output_directory: str) -> None:
             f"unable to identify {_TARGET_OBJECT!r} PNG in {png_files!r}",
         )
         metrics = _image_metrics(target_png)
+        _assert(
+            int(metrics["transparent_pixels"]) > 0,
+            "camera-context PNG lost geometry coverage alpha; the whole texture is opaque",
+        )
 
         target_prefix = "component.object_1:Cylinder.019."
         strategy = result.statistics.get(target_prefix + "bake_strategy_ids", "")
@@ -215,6 +224,10 @@ def _run(expected_blend: str, raw_output_directory: str) -> None:
         _assert(
             "CAMERA_COMBINED" not in str(strategy),
             f"Normal/UV target regressed to rendered CAMERA_COMBINED: {strategy!r}",
+        )
+        _assert(
+            "ALPHA" in str(strategy),
+            f"Normal/UV target lost explicit geometry coverage alpha pass: {strategy!r}",
         )
         _assert(
             str(bake_mode) == "EMIT",
