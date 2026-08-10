@@ -10,9 +10,13 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     BakeMode,
     BakePassPlan,
     BakeStrategyId,
+    MaterialAnalysis,
+    MaterialKind,
+    MaterialPreparationMode,
     MaterialSemanticChannel,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking.normal_uv_camera_context import (
+    NormalUvCoverageAlphaBakeStrategy,
     _normalize_camera_texture_composite,
 )
 
@@ -32,6 +36,24 @@ def _pass(
         material_slot_indices=(0,),
         semantic_channels=(channel,),
         evaluation_scope=scope,
+    )
+
+
+def _material(
+    slot_index: int,
+    *channels: MaterialSemanticChannel,
+) -> MaterialAnalysis:
+    # Synthetic material analysis intentionally omits graph data. The strategy contract
+    # depends only on semantic channels and slot identity; Blender graph extraction is
+    # covered by the material-preparation regression suite.
+    node_types = ["BSDF_PRINCIPLED"]
+    if MaterialSemanticChannel.ALPHA in channels:
+        node_types.append("BSDF_TRANSPARENT")
+    return MaterialAnalysis(
+        slot_index=slot_index,
+        material_name=f"Material_{slot_index}",
+        kind=MaterialKind.SOLID_COLOR,
+        node_types=tuple(node_types),
     )
 
 
@@ -72,6 +94,27 @@ def test_true_camera_combined_pass_is_not_retagged_as_surface_color():
     )
 
     assert _material_preparation_pass(original) is original
+
+
+def test_camera_coverage_alpha_distinguishes_opaque_and_real_alpha_slots():
+    strategy = NormalUvCoverageAlphaBakeStrategy()
+    opaque = _material(0, MaterialSemanticChannel.SURFACE_COLOR)
+    transparent = _material(
+        1,
+        MaterialSemanticChannel.SURFACE_COLOR,
+        MaterialSemanticChannel.ALPHA,
+    )
+    usable = (opaque, transparent)
+
+    assert strategy.supports(opaque)
+    assert strategy.supports(transparent)
+    assert strategy.semantic_channels(usable) == (MaterialSemanticChannel.ALPHA,)
+
+    preparations = strategy.material_preparations(usable, usable)
+
+    assert tuple(item.slot_index for item in preparations) == (0, 1)
+    assert preparations[0].mode is MaterialPreparationMode.OPAQUE_ALPHA_TO_EMISSION
+    assert preparations[1].mode is MaterialPreparationMode.EXTRACT_ALPHA_TO_EMISSION
 
 
 def test_camera_texture_data_color_is_not_unpremultiplied_as_render_appearance():
