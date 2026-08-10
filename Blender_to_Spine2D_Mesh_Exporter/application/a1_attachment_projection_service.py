@@ -43,6 +43,7 @@ _DEFORMABLE_SETUP_MODES = frozenset(
     {
         A1RigSetupPoseMode.NORMALIZED_SINGLE,
         A1RigSetupPoseMode.PRESERVE_COMPOSITION,
+        A1RigSetupPoseMode.PROJECTED_AXIS_NORMAL,
         A1RigSetupPoseMode.CAMERA_VIEW_NORMAL,
         A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE,
     }
