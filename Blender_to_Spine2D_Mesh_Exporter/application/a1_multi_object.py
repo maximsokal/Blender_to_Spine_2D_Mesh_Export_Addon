@@ -6,12 +6,13 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
-from ..domain.baking import sanitize_filename_stem
+from ..domain.baking import A1TextureExportMode, sanitize_filename_stem
 from ..domain.spine import UniformScaleMode
 from ..domain.spine.export_capabilities import (
     SpineJsonExportScope,
     require_spine_json_export_capability,
 )
+from ..domain.spine.rig_profiles import A1RigSetupPoseMode
 from .a1_numeric_contracts import (
     require_finite_number,
     require_identity,
@@ -124,6 +125,45 @@ def _export_scope_for_multi_object_mode(
     )
 
 
+def _standalone_projected_object_root_settings(
+    settings: A1SingleObjectExportSettings,
+) -> A1SingleObjectExportSettings:
+    """Neutralize legacy setup calibration for already-projected standalone geometry.
+
+    Signed-axis Normal / UV source preparation has already transformed local geometry and
+    Blender Object Origin into canonical U/V/depth space. Applying the historical
+    ``PRESERVE_COMPOSITION`` setup rotations after that projection rotates the object a
+    second time. Different depth layouts then acquire different setup translations, which
+    makes separate object blocks appear to drift apart after standalone composition.
+
+    ``CAMERA_VIEW_NORMAL`` is the established projected Object-Root setup contract: it
+    keeps the projected ``main`` position, neutralizes setup-only X/Y/depth calibration,
+    and parents vertex bones through inverse depth-setup children while retaining live
+    deformation controls. Its stable identifier predates signed-axis projection support,
+    but the mechanics are projection-generic.
+
+    Explicit non-default setup modes are respected. Camera Projection and Depth Camera
+    Projection do not enter this policy because they are not Normal / UV object-bake
+    textures, and Active Camera keeps its dedicated routing in document preparation.
+    """
+
+    if not isinstance(settings, A1SingleObjectExportSettings):
+        raise TypeError("settings must be A1SingleObjectExportSettings")
+    if (
+        settings.bake_execution.texture_export_mode
+        is not A1TextureExportMode.NORMAL_UV_SEGMENTS
+    ):
+        return settings
+    if not settings.projection_direction.axis_aligned:
+        return settings
+    if settings.rig_setup_pose_mode is not A1RigSetupPoseMode.PRESERVE_COMPOSITION:
+        return settings
+    return replace(
+        settings,
+        rig_setup_pose_mode=A1RigSetupPoseMode.CAMERA_VIEW_NORMAL,
+    )
+
+
 def resolve_a1_multi_object_preparation_settings(
     settings: A1SingleObjectExportSettings,
     mode: A1MultiObjectMode,
@@ -132,12 +172,14 @@ def resolve_a1_multi_object_preparation_settings(
 
     The target capability is checked before geometry work. Connected documents omit each
     object's absolute projected translation; connected composition adds anchor-relative
-    projected translation later. Standalone documents preserve the caller's settings.
+    projected translation later. Standalone Normal / UV signed-axis documents preserve
+    absolute projected Object Origins but use the neutral projected Object-Root setup so
+    already-projected geometry is not transformed a second time in Spine Setup Pose.
     MIXED must be resolved into explicit connected and standalone subgroups first.
 
-    Normal / UV Segments signed-axis and Active Camera requests share this rule. The
-    projection stage has already converted evaluated Object Origins and vertices into the
-    canonical U/V/depth frame before connected composition owns hierarchy placement.
+    Active Camera Object Root continues to select its neutral setup in document
+    preparation because camera projection kind is resolved there. Rendered Camera
+    Projection and Depth Camera Projection retain their independent setup contracts.
     """
 
     if not isinstance(settings, A1SingleObjectExportSettings):
@@ -148,11 +190,13 @@ def resolve_a1_multi_object_preparation_settings(
         settings.export.rig_profile,
         scope,
     )
+    if mode is A1MultiObjectMode.STANDALONE:
+        return _standalone_projected_object_root_settings(settings)
     if mode is A1MultiObjectMode.CONNECTED:
         if not settings.use_world_location_for_main_bone:
             return settings
         return replace(settings, use_world_location_for_main_bone=False)
-    return settings
+    raise ValueError(f"Unsupported multi-object preparation mode: {mode!r}")
 
 
 __all__ = [
