@@ -47,15 +47,24 @@ class A1RigSetupPoseMode(str, Enum):
     It keeps the visible main and X/Y controls neutral while moving the existing object
     placement into internal rig coordinates.
 
-    ``PRESERVE_COMPOSITION`` retains the historical model-space setup used by ordinary
-    signed-axis Normal / UV Segments exports and connected composition.
+    ``PRESERVE_COMPOSITION`` retains the historical model-space setup used by connected
+    composition and compatibility paths.
+
+    ``PROJECTED_AXIS_NORMAL`` is used only for standalone signed-axis Normal / UV
+    Segments. Source geometry and Blender Object Origin have already been projected into
+    canonical U/V/depth space. The generated rig therefore keeps the ordinary deformable
+    model-space hierarchy, IK schedule, scale targets, and depth mapping, while X/Y setup
+    rotation calibration starts from the already-projected view. No camera-specific
+    inverse bones are inserted, and vertex bones remain direct children of their ordinary
+    depth bones so later X/Y/scale controls retain the historical deformation graph.
 
     ``CAMERA_VIEW_NORMAL`` is used only when Normal / UV Segments takes its setup view
     from Blender's active camera. The geometry has already been oriented and projected
     around Blender Object Origin, so historical non-zero setup rotation and depth-scale
     offsets must be neutral. Unlike ``PREPROJECTED_SCREEN``, this mode keeps the ordinary
     model-space hierarchy, the Object Origin pivot, and every per-vertex depth group.
-    Live X/Y/scale controls remain active after setup.
+    Active Camera additionally owns inverse setup children required by its camera-facing
+    setup contract.
 
     ``PREPROJECTED_SCREEN`` is reserved for camera-projected geometry. It represents one
     complete object as a rigid camera-relative layer: camera space is zero, projected
@@ -74,6 +83,7 @@ class A1RigSetupPoseMode(str, Enum):
 
     NORMALIZED_SINGLE = "NORMALIZED_SINGLE"
     PRESERVE_COMPOSITION = "PRESERVE_COMPOSITION"
+    PROJECTED_AXIS_NORMAL = "PROJECTED_AXIS_NORMAL"
     CAMERA_VIEW_NORMAL = "CAMERA_VIEW_NORMAL"
     PREPROJECTED_SCREEN = "PREPROJECTED_SCREEN"
     CAMERA_DEPTH_SURFACE = "CAMERA_DEPTH_SURFACE"
