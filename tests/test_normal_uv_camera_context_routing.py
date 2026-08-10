@@ -14,6 +14,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.render_engine_contract imp
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     A1TextureExportMode,
+    BakeCompositeMode,
     BakeEvaluationScope,
     BakeMode,
     BakePlan,
@@ -28,6 +29,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     MaterialDependencyKind,
     MaterialGraphSnapshot,
     MaterialKind,
+    MaterialPreparationMode,
     MaterialSemanticChannel,
     ObjectBakeContext,
     ObjectMaterialAnalysis,
@@ -232,10 +234,29 @@ def test_normal_uv_mode_keeps_camera_and_reflection_coordinates_on_object_bake()
     assert not isinstance(plan, CameraProjectionPlan)
     assert len(plan.frame_tasks) == 3
     assert tuple(task.timeline_frame for task in plan.frame_tasks) == (1, 2, 3)
-    assert len(plan.passes) == 1
-    assert plan.passes[0].strategy_id is BakeStrategyId.CAMERA_COMBINED
-    assert plan.passes[0].evaluation_scope is BakeEvaluationScope.CAMERA
-    assert plan.passes[0].bake_mode is BakeMode.COMBINED
+
+    assert len(plan.passes) == 2
+    surface_pass, alpha_pass = plan.passes
+
+    assert surface_pass.pass_index == 0
+    assert surface_pass.strategy_id is BakeStrategyId.CAMERA_SURFACE_COLOR
+    assert surface_pass.evaluation_scope is BakeEvaluationScope.CAMERA
+    assert surface_pass.bake_mode is BakeMode.EMIT
+    assert surface_pass.semantic_channels == (MaterialSemanticChannel.SURFACE_COLOR,)
+
+    assert alpha_pass.pass_index == 1
+    assert alpha_pass.strategy_id is BakeStrategyId.ALPHA
+    assert alpha_pass.evaluation_scope is BakeEvaluationScope.AUXILIARY
+    assert alpha_pass.bake_mode is BakeMode.EMIT
+    assert alpha_pass.semantic_channels == (MaterialSemanticChannel.ALPHA,)
+    assert tuple(
+        preparation.mode for preparation in alpha_pass.material_preparations
+    ) == (MaterialPreparationMode.OPAQUE_ALPHA_TO_EMISSION,)
+
+    assert plan.composite.mode is BakeCompositeMode.ADD_RGB_REPLACE_ALPHA
+    assert plan.composite.color_pass_indices == (0,)
+    assert plan.composite.alpha_pass_index == 1
+    assert plan.composite.unpremultiply_color_by_alpha is False
     assert plan.scene_aware is True
 
 
