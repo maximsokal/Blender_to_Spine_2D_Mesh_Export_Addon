@@ -56,7 +56,7 @@ def _settings(
         A1ProjectionDirection.NEGATIVE_Z,
     ),
 )
-def test_standalone_signed_axis_normal_uv_uses_neutral_projected_object_root_setup(
+def test_standalone_signed_axis_normal_uv_uses_projected_axis_setup(
     projection_direction: A1ProjectionDirection,
 ) -> None:
     settings = _settings(projection_direction=projection_direction)
@@ -67,7 +67,7 @@ def test_standalone_signed_axis_normal_uv_uses_neutral_projected_object_root_set
     )
 
     assert resolved is not settings
-    assert resolved.rig_setup_pose_mode is A1RigSetupPoseMode.CAMERA_VIEW_NORMAL
+    assert resolved.rig_setup_pose_mode is A1RigSetupPoseMode.PROJECTED_AXIS_NORMAL
     assert (
         replace(
             resolved,
