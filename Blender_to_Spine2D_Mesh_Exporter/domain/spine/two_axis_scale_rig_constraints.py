@@ -27,12 +27,11 @@ def build_two_axis_scale_constraints(
     vertex bones remain direct children of ordinary depth bones and the depth constraint
     must keep its historical scale mapping so live X rotation does not collapse depth.
 
-    Active-camera setup modes keep their camera-facing X/Y setup rotations neutral. For
-    ``CAMERA_VIEW_NORMAL`` the ordinary per-depth pair must also remain full-rank in
-    setup. A deterministic inverse-setup child below every depth pair cancels only the
-    authored setup translation before the projected vertex position is applied.
-    ``CAMERA_DEPTH_SURFACE`` and ``PREPROJECTED_SCREEN`` continue to own already-solved
-    camera depth placement and therefore keep neutral depth setup values.
+    Active-camera setup modes keep their established camera-facing X/Y setup behavior.
+    ``CAMERA_VIEW_NORMAL`` and ``CAMERA_DEPTH_SURFACE`` therefore continue through the
+    pre-existing neutral model-space camera setup contract. ``PROJECTED_AXIS_NORMAL`` is
+    deliberately excluded from that camera-depth contract: only its X/Y setup calibration
+    is neutralized, while its ordinary depth translation and scale mapping remain intact.
 
     Perspective rigid layers retain whole-layer depth foreshortening. Orthographic rigid
     layers disable automatic depth scale while preserving camera-relative translation.
@@ -50,17 +49,18 @@ def build_two_axis_scale_constraints(
     preprojected_screen = (
         setup_pose_mode is A1RigSetupPoseMode.PREPROJECTED_SCREEN
     )
-    neutral_rotation_setup = setup_pose_mode in {
-        A1RigSetupPoseMode.PROJECTED_AXIS_NORMAL,
+    neutral_model_space_camera_setup = setup_pose_mode in {
         A1RigSetupPoseMode.CAMERA_VIEW_NORMAL,
         A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE,
-        A1RigSetupPoseMode.PREPROJECTED_SCREEN,
     }
-    neutral_depth_setup = setup_pose_mode in {
-        A1RigSetupPoseMode.CAMERA_VIEW_NORMAL,
-        A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE,
-        A1RigSetupPoseMode.PREPROJECTED_SCREEN,
-    }
+    neutral_rotation_setup = (
+        setup_pose_mode is A1RigSetupPoseMode.PROJECTED_AXIS_NORMAL
+        or preprojected_screen
+        or neutral_model_space_camera_setup
+    )
+    neutral_depth_setup = (
+        preprojected_screen or neutral_model_space_camera_setup
+    )
     orthographic_camera_layer = (
         preprojected_screen
         and plan.request.camera_layer_projection_kind
