@@ -19,6 +19,8 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_multi_object_contracts 
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_selection import (
     _ObjectExportProfile,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.baking import A1TextureExportMode
+from Blender_to_Spine2D_Mesh_Exporter.domain.projection import A1ProjectionDirection
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import (
     A1RigSetupPoseMode,
 )
@@ -42,6 +44,17 @@ def _source(index: int, name: str) -> A1MultiObjectSource:
         component_id=f"object_{index}:{name}",
         animation_namespace=f"object_{index}",
         settings=_settings(name),
+    )
+
+
+def _scene_profile(
+    *,
+    direction: A1ProjectionDirection = A1ProjectionDirection.POSITIVE_Z,
+):
+    return SimpleNamespace(
+        output_directory=Path("ui-plan-output"),
+        texture_export_mode=A1TextureExportMode.NORMAL_UV_SEGMENTS,
+        projection_direction=direction,
     )
 
 
@@ -212,7 +225,7 @@ def test_public_selected_ui_plan_is_always_standalone(monkeypatch, profiles):
     monkeypatch.setattr(
         a1_ui_export_plan,
         "_capture_scene_profile",
-        lambda _scene: SimpleNamespace(output_directory=Path("ui-plan-output")),
+        lambda _scene: _scene_profile(),
     )
     monkeypatch.setattr(
         a1_ui_export_plan,
@@ -226,11 +239,74 @@ def test_public_selected_ui_plan_is_always_standalone(monkeypatch, profiles):
     )
 
     plan = a1_ui_export_plan.build_selected_ui_export_plan(
-        SimpleNamespace(scene=object())
+        SimpleNamespace(scene=SimpleNamespace(spine2d_shared_selection_pivot=True))
     )
 
     assert plan.settings.mode is A1MultiObjectMode.STANDALONE
     assert plan.settings.anchor_component_id is None
+    assert plan.settings.shared_pivot_enabled is True
     assert plan.connected_sources == ()
     assert plan.standalone_sources == sources
     assert plan.issues == ()
+
+
+def test_public_selected_ui_plan_respects_disabled_shared_pivot_toggle(monkeypatch):
+    profiles = (
+        _ObjectExportProfile(SimpleNamespace(name="First"), "First", 0, 0, False),
+        _ObjectExportProfile(SimpleNamespace(name="Second"), "Second", 0, 0, False),
+    )
+    objects = tuple(profile.source_object for profile in profiles)
+    sources = tuple(
+        _source(index, profile.object_name)
+        for index, profile in enumerate(profiles, start=1)
+    )
+    monkeypatch.setattr(a1_ui_export_plan, "_ordered_selected_meshes", lambda _ctx: objects)
+    monkeypatch.setattr(a1_ui_export_plan, "_capture_scene_profile", lambda _scene: _scene_profile())
+    monkeypatch.setattr(a1_ui_export_plan, "_capture_selected_profiles", lambda _objects: profiles)
+    monkeypatch.setattr(a1_ui_export_plan, "_build_sources_from_profiles", lambda *_args: sources)
+
+    plan = a1_ui_export_plan.build_selected_ui_export_plan(
+        SimpleNamespace(scene=SimpleNamespace(spine2d_shared_selection_pivot=False))
+    )
+
+    assert plan.settings.shared_pivot_enabled is False
+
+
+def test_public_selected_ui_plan_forces_shared_pivot_inert_for_active_camera(monkeypatch):
+    profiles = (
+        _ObjectExportProfile(SimpleNamespace(name="First"), "First", 0, 0, False),
+        _ObjectExportProfile(SimpleNamespace(name="Second"), "Second", 0, 0, False),
+    )
+    objects = tuple(profile.source_object for profile in profiles)
+    sources = tuple(
+        replace_source.settings
+        for replace_source in ()
+    )
+    del sources
+    camera_sources = tuple(
+        A1MultiObjectSource(
+            source_object=profile.source_object,
+            component_id=f"object_{index}:{profile.object_name}",
+            animation_namespace=f"object_{index}",
+            settings=A1SingleObjectExportSettings(
+                export=_settings(profile.object_name).export,
+                prefix=profile.object_name,
+                projection_direction=A1ProjectionDirection.ACTIVE_CAMERA,
+            ),
+        )
+        for index, profile in enumerate(profiles, start=1)
+    )
+    monkeypatch.setattr(a1_ui_export_plan, "_ordered_selected_meshes", lambda _ctx: objects)
+    monkeypatch.setattr(
+        a1_ui_export_plan,
+        "_capture_scene_profile",
+        lambda _scene: _scene_profile(direction=A1ProjectionDirection.ACTIVE_CAMERA),
+    )
+    monkeypatch.setattr(a1_ui_export_plan, "_capture_selected_profiles", lambda _objects: profiles)
+    monkeypatch.setattr(a1_ui_export_plan, "_build_sources_from_profiles", lambda *_args: camera_sources)
+
+    plan = a1_ui_export_plan.build_selected_ui_export_plan(
+        SimpleNamespace(scene=SimpleNamespace(spine2d_shared_selection_pivot=True))
+    )
+
+    assert plan.settings.shared_pivot_enabled is False
