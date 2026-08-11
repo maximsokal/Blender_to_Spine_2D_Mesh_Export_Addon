@@ -34,7 +34,12 @@ from ..domain.geometry import (
     project_a1_mesh_snapshot_axis,
     project_a1_mesh_snapshot_camera,
 )
-from ..domain.projection import A1ProjectedPoint, A1ProjectionDirection
+from ..domain.geometry.shared_pivot import rebase_a1_projected_snapshot_origin
+from ..domain.projection import (
+    A1ProjectedPoint,
+    A1ProjectionDirection,
+    resolve_a1_axis_projection_basis,
+)
 from ..domain.spine import calculate_uniform_scale
 from .a1_preparation_contracts import (
     A1ObjectPreparationError,
@@ -553,10 +558,22 @@ def _prepare_projection_route(
         )
         projected_snapshot = axis_projection.snapshot
         projected_origin = axis_projection.projected_origin
+        shared_pivot_applied = 0
+        if settings.shared_pivot_world is not None:
+            basis = resolve_a1_axis_projection_basis(settings.projection_direction)
+            shared_projected_origin = basis.project_point(settings.shared_pivot_world)
+            projected_snapshot = rebase_a1_projected_snapshot_origin(
+                projected_snapshot,
+                projected_origin,
+                shared_projected_origin,
+            )
+            projected_origin = shared_projected_origin
+            shared_pivot_applied = 1
         projection_statistics = {
             "projection_kind": "SIGNED_AXIS",
             "axis_projection_applied": int(axis_projection.changed),
             "active_camera_projection_applied": 0,
+            "shared_pivot_applied": shared_pivot_applied,
             "active_camera_name": "",
             "active_camera_type": "",
             "active_camera_clip_start": 0.0,
@@ -608,6 +625,7 @@ def _prepare_projection_route(
             "projection_kind": "ACTIVE_CAMERA",
             "axis_projection_applied": 0,
             "active_camera_projection_applied": 1,
+            "shared_pivot_applied": 0,
             "active_camera_name": frame.camera_id,
             "active_camera_type": frame.kind.value,
             "active_camera_clip_start": frame.clip_start,
@@ -709,7 +727,7 @@ def _log_prepared_source(
     logger.debug(
         "Prepared source geometry for %s: vertices=%d faces=%d regions=%d "
         "world_transform_baked=%s determinant=%s mirrored=%s "
-        "projection_direction=%s projection_kind=%s "
+        "projection_direction=%s projection_kind=%s shared_pivot=%s "
         "preprojection_triangulation=%s "
         "projected_origin=(%s, %s, %s) nearest=(%s, %s) "
         "source_uv_boundary_mode=%s source_uv_boundary_layer=%s "
@@ -723,6 +741,7 @@ def _log_prepared_source(
         normalized.world_transform.mirrored,
         settings.projection_direction.value,
         projection.statistics["projection_kind"],
+        bool(projection.statistics["shared_pivot_applied"]),
         projection.statistics["active_camera_preprojection_triangulation"],
         projection.projected_origin.u,
         projection.projected_origin.v,
