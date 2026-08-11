@@ -125,6 +125,14 @@ def _update_projection_direction(_self: Any, context: bpy.types.Context) -> None
     _update_ui_for_paths(_self, context)
 
 
+def _update_shared_selection_pivot(_self: Any, context: bpy.types.Context) -> None:
+    _invalidate_readiness_for_setting(
+        context,
+        reason="shared selection pivot changed",
+    )
+    _update_ui_for_paths(_self, context)
+
+
 def _update_bake_settings(_self: Any, context: bpy.types.Context) -> None:
     _invalidate_readiness_for_setting(
         context,
@@ -233,6 +241,18 @@ PROPERTIES = (
             items=projection_direction_rna_enum_items(),
             default=A1ProjectionDirection.POSITIVE_Z.value,
             update=_update_projection_direction,
+        ),
+    ),
+    (
+        "spine2d_shared_selection_pivot",
+        bpy.props.BoolProperty(
+            name="Shared Selection Pivot",
+            description=(
+                "Use the center of all selected exported Mesh geometry as one common "
+                "Spine rotation pivot for signed-axis Normal / UV multi-object export"
+            ),
+            default=True,
+            update=_update_shared_selection_pivot,
         ),
     ),
     (
