@@ -11,6 +11,7 @@ from ..application import (
     A1SingleObjectExportSettings,
     ExportIssue,
 )
+from ..application.a1_shared_pivot import supports_a1_shared_pivot
 from ..domain.baking import A1TextureExportMode, sanitize_filename_stem
 from ..domain.spine.rig_profiles import A1RigProfile, A1RigSetupPoseMode
 from ..domain.spine.version_target import spine_json_version_filename_token
@@ -182,11 +183,12 @@ def build_active_ui_export_plan(context: Any) -> A1UiSingleExportPlan:
 
 
 def build_selected_ui_export_plan(context: Any) -> A1UiMultiExportPlan:
-    """Build a public multi-object plan that is always standalone.
+    """Build a public standalone multi-object plan from one captured Scene state.
 
-    Connected/mixed composition remains available only through explicit internal APIs
-    and acceptance workers. The normal UI operator must not infer a hidden composition
-    mode from persistent object data.
+    Shared selection pivot is enabled only when the persisted toggle is on *and* the
+    current request is Normal / UV Segments with a signed-axis projection. Therefore an
+    old ``True`` value becomes inert when the user switches to Active Camera or either
+    camera-only export mode, exactly matching the conditional UI visibility contract.
     """
 
     if context is None:
@@ -207,11 +209,19 @@ def build_selected_ui_export_plan(context: Any) -> A1UiMultiExportPlan:
     output_stem = (
         f"{base_name}_plus_{len(object_profiles) - 1}_objects_{version_token}"
     )
+    shared_pivot_enabled = bool(
+        getattr(scene, "spine2d_shared_selection_pivot", True)
+    ) and supports_a1_shared_pivot(
+        scene_profile.texture_export_mode,
+        scene_profile.projection_direction,
+        len(object_profiles),
+    )
     settings = A1MultiObjectExportSettings(
         output_directory=scene_profile.output_directory,
         output_stem=output_stem,
         mode=A1MultiObjectMode.STANDALONE,
         anchor_component_id=None,
+        shared_pivot_enabled=shared_pivot_enabled,
     )
     return A1UiMultiExportPlan(
         connected_sources=(),
