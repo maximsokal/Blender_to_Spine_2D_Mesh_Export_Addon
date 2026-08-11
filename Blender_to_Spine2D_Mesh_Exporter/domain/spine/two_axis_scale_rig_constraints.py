@@ -20,18 +20,19 @@ def build_two_axis_scale_constraints(
 ) -> tuple[Tuple[IKConstraint, ...], Tuple[TransformConstraint, ...]]:
     """Build the exact five-phase schedule generalized from the reference rig.
 
-    Ordinary model-space compatibility documents retain the historical setup rotation
-    offsets and depth mapping. ``PROJECTED_AXIS_NORMAL`` keeps the same hierarchy, IK,
-    scale targets, and depth mapping, but starts X/Y rotation from the already-projected
-    signed-axis view. This is deliberately different from camera setup modes: signed-axis
-    vertex bones remain direct children of ordinary depth bones and the depth constraint
-    must keep its historical scale mapping so live X rotation does not collapse depth.
+    Ordinary signed-axis model-space documents retain the historical setup offsets and
+    scale target set. Rigid camera-relative documents place X and Y orbital transforms
+    above the projected Object Origin. Their independent Scale control targets only
+    ``base`` below that placement, so resizing the object cannot change its distance from
+    camera zero.
 
-    Active-camera setup modes keep their established camera-facing X/Y setup behavior.
-    ``CAMERA_VIEW_NORMAL`` and ``CAMERA_DEPTH_SURFACE`` therefore continue through the
-    pre-existing neutral model-space camera setup contract. ``PROJECTED_AXIS_NORMAL`` is
-    deliberately excluded from that camera-depth contract: only its X/Y setup calibration
-    is neutralized, while its ordinary depth translation and scale mapping remain intact.
+    Camera-facing setup modes keep their historical X/Y setup rotations neutral. For
+    ``CAMERA_VIEW_NORMAL`` the ordinary per-depth pair must also remain full-rank in
+    setup. A deterministic inverse-setup child below every depth pair cancels only the
+    authored setup translation before the projected vertex position is applied. This
+    preserves the exact camera-facing setup shape without discarding later depth-driven
+    deformation. ``CAMERA_DEPTH_SURFACE`` and ``PREPROJECTED_SCREEN`` continue to own
+    already-solved depth placement and likewise keep neutral depth setup values.
 
     Perspective rigid layers retain whole-layer depth foreshortening. Orthographic rigid
     layers disable automatic depth scale while preserving camera-relative translation.
@@ -54,9 +55,7 @@ def build_two_axis_scale_constraints(
         A1RigSetupPoseMode.CAMERA_DEPTH_SURFACE,
     }
     neutral_rotation_setup = (
-        setup_pose_mode is A1RigSetupPoseMode.PROJECTED_AXIS_NORMAL
-        or preprojected_screen
-        or neutral_model_space_camera_setup
+        preprojected_screen or neutral_model_space_camera_setup
     )
     neutral_depth_setup = (
         preprojected_screen or neutral_model_space_camera_setup
