@@ -6,14 +6,12 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
-from ..domain.baking import A1TextureExportMode, sanitize_filename_stem
+from ..domain.baking import sanitize_filename_stem
 from ..domain.spine import UniformScaleMode
 from ..domain.spine.export_capabilities import (
     SpineJsonExportScope,
     require_spine_json_export_capability,
 )
-from ..domain.spine.rig_profiles import A1RigSetupPoseMode
-from ..domain.spine.version_target import SpineJsonTarget
 from .a1_numeric_contracts import (
     require_finite_number,
     require_identity,
@@ -21,14 +19,6 @@ from .a1_numeric_contracts import (
     require_non_empty_string,
 )
 from .a1_single_object import A1SingleObjectExportSettings
-
-
-_PROJECTED_AXIS_SETUP_TARGETS = frozenset(
-    {
-        SpineJsonTarget.SPINE_4_2,
-        SpineJsonTarget.SPINE_4_3,
-    }
-)
 
 
 class A1MultiObjectMode(str, Enum):
@@ -134,45 +124,6 @@ def _export_scope_for_multi_object_mode(
     )
 
 
-def _standalone_projected_axis_settings(
-    settings: A1SingleObjectExportSettings,
-) -> A1SingleObjectExportSettings:
-    """Select the modern deformable baseline for projected signed-axis Normal/UV.
-
-    Spine 4.2/4.3 standalone signed-axis source preparation has already transformed
-    Blender geometry and Object Origin into canonical U/V/depth space. Those targets can
-    therefore use ``PROJECTED_AXIS_NORMAL``: the historical deformable hierarchy and
-    depth mapping stay intact while only the X/Y setup rotation calibration starts from
-    the already-projected view.
-
-    Spine 3.8/4.0/4.1 are intentionally left on their established compatibility settings.
-    Their standalone capability contracts predate this setup policy and must not be
-    silently rewritten as a side effect of the modern 4.2 grenade fix.
-
-    Explicit non-default setup policies are respected. Active Camera remains owned by
-    document preparation, while rendered Camera Projection and Depth Camera Projection
-    never enter this Normal/UV signed-axis policy.
-    """
-
-    if not isinstance(settings, A1SingleObjectExportSettings):
-        raise TypeError("settings must be A1SingleObjectExportSettings")
-    if settings.export.spine_target not in _PROJECTED_AXIS_SETUP_TARGETS:
-        return settings
-    if (
-        settings.bake_execution.texture_export_mode
-        is not A1TextureExportMode.NORMAL_UV_SEGMENTS
-    ):
-        return settings
-    if not settings.projection_direction.axis_aligned:
-        return settings
-    if settings.rig_setup_pose_mode is not A1RigSetupPoseMode.PRESERVE_COMPOSITION:
-        return settings
-    return replace(
-        settings,
-        rig_setup_pose_mode=A1RigSetupPoseMode.PROJECTED_AXIS_NORMAL,
-    )
-
-
 def resolve_a1_multi_object_preparation_settings(
     settings: A1SingleObjectExportSettings,
     mode: A1MultiObjectMode,
@@ -181,15 +132,12 @@ def resolve_a1_multi_object_preparation_settings(
 
     The target capability is checked before geometry work. Connected documents omit each
     object's absolute projected translation; connected composition adds anchor-relative
-    projected translation later. Modern standalone signed-axis Normal/UV documents
-    preserve absolute projected Object Origins and select the deformable projected-axis
-    baseline without changing the historical depth/IK hierarchy. Limited legacy targets
-    retain their established standalone settings unchanged. MIXED must be resolved into
-    explicit connected and standalone subgroups first.
+    projected translation later. Standalone documents preserve the caller's settings.
+    MIXED must be resolved into explicit connected and standalone subgroups first.
 
-    Active Camera Object Root continues to select its camera-specific setup in document
-    preparation because camera projection kind is resolved there. Rendered Camera
-    Projection and Depth Camera Projection retain their independent setup contracts.
+    Normal / UV Segments signed-axis and Active Camera requests share this rule. The
+    projection stage has already converted evaluated Object Origins and vertices into the
+    canonical U/V/depth frame before connected composition owns hierarchy placement.
     """
 
     if not isinstance(settings, A1SingleObjectExportSettings):
@@ -200,13 +148,11 @@ def resolve_a1_multi_object_preparation_settings(
         settings.export.rig_profile,
         scope,
     )
-    if mode is A1MultiObjectMode.STANDALONE:
-        return _standalone_projected_axis_settings(settings)
     if mode is A1MultiObjectMode.CONNECTED:
         if not settings.use_world_location_for_main_bone:
             return settings
         return replace(settings, use_world_location_for_main_bone=False)
-    raise ValueError(f"Unsupported multi-object preparation mode: {mode!r}")
+    return settings
 
 
 __all__ = [
