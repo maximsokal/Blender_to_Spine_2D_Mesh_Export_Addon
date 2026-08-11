@@ -9,6 +9,7 @@ from typing import Set
 import bpy
 
 from . import ui
+from .application.a1_shared_pivot import supports_a1_shared_pivot
 from .domain.baking import A1TextureExportMode
 from .domain.projection import (
     A1ProjectionDirection,
@@ -27,6 +28,73 @@ _ORIGINAL_RESET_REMOVED = False
 _REGISTERED_CLASSES: tuple[type, ...] = ()
 
 
+def _selected_mesh_count(context: bpy.types.Context) -> int:
+    """Count the Mesh objects that the public selected-export route can consume."""
+
+    return sum(
+        1
+        for candidate in getattr(context, "selected_objects", ())
+        if getattr(candidate, "type", None) == "MESH"
+        and getattr(candidate, "data", None) is not None
+    )
+
+
+def _resolved_projection_direction(
+    scene: bpy.types.Scene,
+) -> A1ProjectionDirection | None:
+    try:
+        return resolve_a1_projection_direction(
+            getattr(
+                scene,
+                "spine2d_projection_direction",
+                A1ProjectionDirection.POSITIVE_Z.value,
+            )
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _shared_pivot_available(
+    context: bpy.types.Context,
+    texture_mode: A1TextureExportMode,
+) -> bool:
+    """Mirror the pure exporter capability contract for conditional UI visibility."""
+
+    direction = _resolved_projection_direction(context.scene)
+    if direction is None:
+        return False
+    return supports_a1_shared_pivot(
+        texture_mode,
+        direction,
+        _selected_mesh_count(context),
+    )
+
+
+def _draw_shared_selection_pivot(
+    layout: bpy.types.UILayout,
+    context: bpy.types.Context,
+) -> None:
+    """Draw the default-on toggle only for multi-object signed-axis Normal export."""
+
+    if not _shared_pivot_available(
+        context,
+        A1TextureExportMode.NORMAL_UV_SEGMENTS,
+    ):
+        return
+
+    scene = context.scene
+    layout.prop(
+        scene,
+        "spine2d_shared_selection_pivot",
+        text="Shared selection pivot",
+    )
+    if bool(getattr(scene, "spine2d_shared_selection_pivot", True)):
+        layout.label(
+            text="Pivot: center of all selected exported Mesh geometry",
+            icon="CON_PIVOT",
+        )
+
+
 def _draw_projection_direction(
     layout: bpy.types.UILayout,
     scene: bpy.types.Scene,
@@ -38,15 +106,8 @@ def _draw_projection_direction(
         "spine2d_projection_direction",
         text="Projection direction",
     )
-    try:
-        direction = resolve_a1_projection_direction(
-            getattr(
-                scene,
-                "spine2d_projection_direction",
-                A1ProjectionDirection.POSITIVE_Z.value,
-            )
-        )
-    except (TypeError, ValueError):
+    direction = _resolved_projection_direction(scene)
+    if direction is None:
         layout.label(
             text="Invalid projection direction; Reset restores +Z",
             icon="ERROR",
@@ -141,6 +202,7 @@ def draw_rig_settings(
             icon="UV",
         )
         _draw_projection_direction(layout, scene)
+        _draw_shared_selection_pivot(layout, context)
 
     # Keep the historical RNA value loadable, but do not expose a profile selector
     # until Three Axis receives the same Object Origin implementation and validation.
@@ -159,19 +221,21 @@ def draw_rig_settings(
         description.label(text="Depth geometry and rig depth use the active camera")
         description.label(text="Main bone matches projected Blender Object Origin")
     else:
-        try:
-            direction = resolve_a1_projection_direction(
-                getattr(
-                    scene,
-                    "spine2d_projection_direction",
-                    A1ProjectionDirection.POSITIVE_Z.value,
-                )
-            )
-        except (TypeError, ValueError):
+        direction = _resolved_projection_direction(scene)
+        if direction is None:
             direction = A1ProjectionDirection.POSITIVE_Z
         if direction.camera_root:
             description.label(text="Main bone uses active-camera space as its pivot")
             description.label(text="Object placement is stored below one rigid layer")
+        elif (
+            _shared_pivot_available(
+                context,
+                A1TextureExportMode.NORMAL_UV_SEGMENTS,
+            )
+            and bool(getattr(scene, "spine2d_shared_selection_pivot", True))
+        ):
+            description.label(text="All selected parts share one geometry-center pivot")
+            description.label(text="Blender Object origins remain unchanged")
         else:
             description.label(text="Main bone matches projected Blender Object Origin")
             description.label(text="Depth uses the selected axis or active camera")
@@ -201,11 +265,14 @@ class SPINE2D_OT_ResetSettingsWithProjection(bpy.types.Operator):
             context.scene.spine2d_projection_direction = (
                 A1ProjectionDirection.POSITIVE_Z.value
             )
+            context.scene.spine2d_shared_selection_pivot = True
             context.scene.spine2d_depth_parallax_horizon_angle = 0.0
             return result
         except Exception as exc:
-            logger.exception("Unable to reset Spine2D projection and parallax settings")
-            self.report({"ERROR"}, f"Projection/parallax reset error: {exc}")
+            logger.exception(
+                "Unable to reset Spine2D projection, shared pivot, and parallax settings"
+            )
+            self.report({"ERROR"}, f"Projection/shared-pivot reset error: {exc}")
             return {"CANCELLED"}
 
 
