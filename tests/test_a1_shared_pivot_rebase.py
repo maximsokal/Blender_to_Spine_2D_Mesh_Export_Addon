@@ -118,7 +118,8 @@ def test_shared_pivot_rebase_preserves_world_geometry_for_every_signed_axis(
     assert rebased.world_matrix[3] == pytest.approx(target.u)
     assert rebased.world_matrix[7] == pytest.approx(target.v)
     assert rebased.world_matrix[11] == pytest.approx(target.depth)
-    assert after_world == pytest.approx(before_world)
+    for expected, actual in zip(before_world, after_world, strict=True):
+        assert actual == pytest.approx(expected)
     assert after_depth.minimum_depth == pytest.approx(before_depth.minimum_depth)
     assert after_depth.maximum_depth == pytest.approx(before_depth.maximum_depth)
     assert tuple(vertex.normal for vertex in rebased.vertices) == tuple(
