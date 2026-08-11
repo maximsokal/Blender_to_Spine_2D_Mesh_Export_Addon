@@ -7,6 +7,7 @@ preparation implementation merely to import dataclasses.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Tuple
@@ -24,6 +25,7 @@ from ..application import (
     resolve_a1_multi_object_preparation_settings,
     scale_a1_export_progress_callback,
 )
+from ..application.a1_shared_pivot import A1SharedPivotWorld
 from ..domain.baking import windows_path_identity
 from .a1_multi_object_contracts import (
     A1MultiObjectPreparationError,
@@ -36,6 +38,10 @@ from .a1_object_preparation import (
     PreparedA1Object,
     StatisticsValue,
     prepare_a1_object,
+)
+from .a1_shared_pivot import (
+    A1SharedPivotResolution,
+    resolve_a1_shared_pivot_world,
 )
 
 
@@ -120,12 +126,50 @@ def _validate_sources(
 def _settings_for_preparation(
     source: A1MultiObjectSource,
     mode: A1MultiObjectMode,
+    *,
+    shared_pivot_world: A1SharedPivotWorld | None = None,
 ) -> A1SingleObjectExportSettings:
-    """Adapt one live source contract to the shared pure settings policy."""
+    """Adapt one live source contract to the shared pure settings policy.
+
+    The legacy path returns the exact resolved settings object. Shared-pivot mode creates
+    one immutable replacement carrying only the transaction pivot, leaving every other
+    geometry, rig, bake, and target-version setting untouched.
+    """
 
     if not isinstance(source, A1MultiObjectSource):
         raise TypeError("source must be A1MultiObjectSource")
-    return resolve_a1_multi_object_preparation_settings(source.settings, mode)
+    resolved = resolve_a1_multi_object_preparation_settings(source.settings, mode)
+    if shared_pivot_world is None:
+        return resolved
+    return replace(resolved, shared_pivot_world=shared_pivot_world)
+
+
+def _shared_pivot_statistics(
+    resolution: A1SharedPivotResolution | None,
+) -> dict[str, StatisticsValue]:
+    """Return stable transaction diagnostics for enabled and disabled modes."""
+
+    if resolution is None:
+        return {
+            "shared_pivot_enabled": 0,
+            "shared_pivot_vertex_count": 0,
+            "shared_pivot_world_x": 0.0,
+            "shared_pivot_world_y": 0.0,
+            "shared_pivot_world_z": 0.0,
+        }
+    return {
+        "shared_pivot_enabled": 1,
+        "shared_pivot_vertex_count": resolution.vertex_count,
+        "shared_pivot_world_x": resolution.pivot_world[0],
+        "shared_pivot_world_y": resolution.pivot_world[1],
+        "shared_pivot_world_z": resolution.pivot_world[2],
+        "shared_pivot_bounds_min_x": resolution.minimum_world[0],
+        "shared_pivot_bounds_min_y": resolution.minimum_world[1],
+        "shared_pivot_bounds_min_z": resolution.minimum_world[2],
+        "shared_pivot_bounds_max_x": resolution.maximum_world[0],
+        "shared_pivot_bounds_max_y": resolution.maximum_world[1],
+        "shared_pivot_bounds_max_z": resolution.maximum_world[2],
+    }
 
 
 def _validate_prepared_outputs(
@@ -213,6 +257,11 @@ def prepare_a1_multi_object(
             message="Checking predicted output paths",
         )
         predicted_texture_paths = _preflight_sources(sources, settings)
+        shared_pivot = (
+            resolve_a1_shared_pivot_world(sources, scene=scene)
+            if settings.shared_pivot_enabled
+            else None
+        )
         statistics.update(
             {
                 "object_count": len(sources),
@@ -221,6 +270,7 @@ def prepare_a1_multi_object(
                 "predicted_texture_output_count": len(predicted_texture_paths),
             }
         )
+        statistics.update(_shared_pivot_statistics(shared_pivot))
 
         stage = A1MultiObjectStage.PREPARE_OBJECTS
         prepared_objects: list[PreparedA1Object] = []
@@ -228,6 +278,9 @@ def prepare_a1_multi_object(
         preparation_start = 10.0
         preparation_end = 90.0
         preparation_span = preparation_end - preparation_start
+        shared_pivot_world = (
+            None if shared_pivot is None else shared_pivot.pivot_world
+        )
         for index, source in enumerate(sources):
             current_component = source.component_id
             object_start = preparation_start + preparation_span * index / object_count
@@ -244,7 +297,11 @@ def prepare_a1_multi_object(
             try:
                 prepared = prepare_a1_object(
                     source.source_object,
-                    _settings_for_preparation(source, settings.mode),
+                    _settings_for_preparation(
+                        source,
+                        settings.mode,
+                        shared_pivot_world=shared_pivot_world,
+                    ),
                     context=context,
                     scene=scene,
                     progress_callback=object_progress,
