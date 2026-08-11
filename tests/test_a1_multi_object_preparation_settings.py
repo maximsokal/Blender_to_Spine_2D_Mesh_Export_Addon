@@ -12,8 +12,10 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import A1TextureExportMode
 from Blender_to_Spine2D_Mesh_Exporter.domain.projection import A1ProjectionDirection
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import (
+    A1RigProfile,
     A1RigSetupPoseMode,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.version_target import SpineJsonTarget
 
 
 def _settings(
@@ -22,12 +24,16 @@ def _settings(
     projection_direction: A1ProjectionDirection = A1ProjectionDirection.POSITIVE_Z,
     texture_export_mode: A1TextureExportMode = A1TextureExportMode.NORMAL_UV_SEGMENTS,
     rig_setup_pose_mode: A1RigSetupPoseMode = A1RigSetupPoseMode.PRESERVE_COMPOSITION,
+    spine_target: SpineJsonTarget = SpineJsonTarget.SPINE_4_2,
+    rig_profile: A1RigProfile = A1RigProfile.THREE_AXIS_ROTATION,
 ) -> A1SingleObjectExportSettings:
     base = A1SingleObjectExportSettings(
         export=ExportSettings(
             texture_width=128,
             texture_height=96,
             output_directory=Path("multi-object-settings-test-output"),
+            spine_version=spine_target.exact_version,
+            rig_profile=rig_profile.value,
         ),
         prefix="SettingsPolicy",
         use_world_location_for_main_bone=use_world_location_for_main_bone,
@@ -56,10 +62,21 @@ def _settings(
         A1ProjectionDirection.NEGATIVE_Z,
     ),
 )
-def test_standalone_signed_axis_normal_uv_uses_projected_axis_setup(
+@pytest.mark.parametrize(
+    "spine_target",
+    (
+        SpineJsonTarget.SPINE_4_2,
+        SpineJsonTarget.SPINE_4_3,
+    ),
+)
+def test_standalone_modern_signed_axis_normal_uv_uses_projected_axis_setup(
     projection_direction: A1ProjectionDirection,
+    spine_target: SpineJsonTarget,
 ) -> None:
-    settings = _settings(projection_direction=projection_direction)
+    settings = _settings(
+        projection_direction=projection_direction,
+        spine_target=spine_target,
+    )
 
     resolved = resolve_a1_multi_object_preparation_settings(
         settings,
@@ -75,6 +92,32 @@ def test_standalone_signed_axis_normal_uv_uses_projected_axis_setup(
         )
         == settings
     )
+
+
+@pytest.mark.parametrize(
+    "spine_target",
+    (
+        SpineJsonTarget.SPINE_3_8,
+        SpineJsonTarget.SPINE_4_0,
+        SpineJsonTarget.SPINE_4_1,
+    ),
+)
+def test_standalone_legacy_signed_axis_normal_uv_preserves_settings_identity(
+    spine_target: SpineJsonTarget,
+) -> None:
+    settings = _settings(
+        spine_target=spine_target,
+        rig_profile=A1RigProfile.TWO_AXIS_ROTATION_SCALE,
+    )
+
+    resolved = resolve_a1_multi_object_preparation_settings(
+        settings,
+        A1MultiObjectMode.STANDALONE,
+    )
+
+    assert resolved is settings
+    assert resolved.rig_setup_pose_mode is A1RigSetupPoseMode.PRESERVE_COMPOSITION
+    assert resolved.use_world_location_for_main_bone is True
 
 
 def test_standalone_camera_projection_preserves_settings_identity() -> None:
@@ -149,7 +192,6 @@ def test_mixed_preparation_requires_explicit_subgroup_mode():
 
 def test_multi_object_preparation_settings_reject_invalid_types():
     settings = _settings()
-
     with pytest.raises(TypeError, match="settings"):
         resolve_a1_multi_object_preparation_settings(
             object(),
