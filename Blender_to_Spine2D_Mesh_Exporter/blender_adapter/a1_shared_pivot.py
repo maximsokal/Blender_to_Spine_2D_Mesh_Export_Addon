@@ -54,14 +54,10 @@ class A1SharedPivotResolution:
             raise ValueError("vertex_count must be positive")
         if self.object_count < 2:
             raise ValueError("object_count must be at least two")
-        if any(
-            minimum[index] > maximum[index]
-            for index in range(3)
-        ):
+        if any(minimum[index] > maximum[index] for index in range(3)):
             raise ValueError("minimum_world cannot exceed maximum_world")
         expected = tuple(
-            (minimum[index] + maximum[index]) / 2.0
-            for index in range(3)
+            (minimum[index] + maximum[index]) / 2.0 for index in range(3)
         )
         if pivot != expected:
             raise ValueError(
@@ -89,6 +85,16 @@ def _validate_shared_source_contract(
 
     for index, source in enumerate(sources):
         settings = source.settings
+        if settings.shared_pivot_world is not None:
+            raise ValueError(
+                "Shared pivot override is owned by the multi-object transaction; "
+                f"component {source.component_id!r} already carries shared_pivot_world"
+            )
+        if not settings.use_world_location_for_main_bone:
+            raise ValueError(
+                "Shared selection pivot requires world-location main-bone placement; "
+                f"component={source.component_id!r}"
+            )
         if not supports_a1_shared_pivot(
             settings.bake_execution.texture_export_mode,
             settings.projection_direction,
