@@ -1,5 +1,6 @@
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -8,6 +9,12 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1SingleObjectExportSettings,
     ExportSettings,
     resolve_a1_multi_object_preparation_settings,
+)
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_multi_object_contracts import (
+    A1MultiObjectSource,
+)
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_multi_object_export import (
+    _settings_for_preparation,
 )
 
 
@@ -23,6 +30,15 @@ def _settings(
         ),
         prefix="SettingsPolicy",
         use_world_location_for_main_bone=use_world_location_for_main_bone,
+    )
+
+
+def _source(settings: A1SingleObjectExportSettings) -> A1MultiObjectSource:
+    source_object = SimpleNamespace(type="MESH", name="SettingsSource", data=object())
+    return A1MultiObjectSource(
+        source_object=source_object,
+        component_id="settings-source",
+        settings=settings,
     )
 
 
@@ -79,6 +95,37 @@ def test_multi_object_preparation_settings_reject_invalid_types():
         )
     with pytest.raises(TypeError, match="mode"):
         resolve_a1_multi_object_preparation_settings(settings, object())
+
+
+def test_shared_pivot_disabled_keeps_exact_standalone_settings_object():
+    settings = _settings()
+
+    resolved = _settings_for_preparation(
+        _source(settings),
+        A1MultiObjectMode.STANDALONE,
+    )
+
+    assert resolved is settings
+    assert resolved.shared_pivot_world is None
+
+
+def test_shared_pivot_replacement_changes_only_export_pivot_field():
+    settings = _settings()
+    pivot = (1.25, -4.5, 9.0)
+
+    resolved = _settings_for_preparation(
+        _source(settings),
+        A1MultiObjectMode.STANDALONE,
+        shared_pivot_world=pivot,
+    )
+
+    assert resolved is not settings
+    assert settings.shared_pivot_world is None
+    assert resolved.shared_pivot_world == pivot
+    assert replace(resolved, shared_pivot_world=None) == settings
+    assert resolved.rig_setup_pose_mode is settings.rig_setup_pose_mode
+    assert resolved.projection_direction is settings.projection_direction
+    assert resolved.export is settings.export
 
 
 def test_preparation_and_composition_share_one_settings_policy_owner():
