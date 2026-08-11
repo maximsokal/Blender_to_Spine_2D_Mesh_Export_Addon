@@ -41,6 +41,10 @@ from .a1_numeric_contracts import (
     require_integer,
     require_non_empty_string,
 )
+from .a1_shared_pivot import (
+    A1SharedPivotWorld,
+    validate_a1_shared_pivot_world,
+)
 from .contracts import ExportSettings
 
 
@@ -143,6 +147,10 @@ class A1SingleObjectExportSettings:
     projection_direction: A1ProjectionDirection = (
         A1ProjectionDirection.POSITIVE_Z
     )
+    # Appended for 0.150.0. None is the exact legacy path. Multi-object signed-axis
+    # preparation may replace it with one common world-space export pivot without
+    # mutating Blender Object origins or source Mesh data.
+    shared_pivot_world: A1SharedPivotWorld | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.export, ExportSettings):
@@ -227,6 +235,21 @@ class A1SingleObjectExportSettings:
                 self,
                 "rig_setup_pose_mode",
                 A1RigSetupPoseMode.PREPROJECTED_SCREEN,
+            )
+        if self.shared_pivot_world is not None:
+            if (
+                self.bake_execution.texture_export_mode
+                is not A1TextureExportMode.NORMAL_UV_SEGMENTS
+                or not self.projection_direction.axis_aligned
+            ):
+                raise ValueError(
+                    "shared_pivot_world is valid only for Normal / UV Segments "
+                    "signed-axis projection"
+                )
+            object.__setattr__(
+                self,
+                "shared_pivot_world",
+                validate_a1_shared_pivot_world(self.shared_pivot_world),
             )
         for field_name in (
             "use_world_location_for_main_bone",
