@@ -68,6 +68,9 @@ class A1MultiObjectExportSettings:
     connected_camera_render_policy: ConnectedCameraRenderPolicy = (
         ConnectedCameraRenderPolicy.INDIVIDUAL_LAYERS
     )
+    # Appended so existing internal/API callers retain exact historical behavior.
+    # The public selected-object UI opts in by default when the route supports it.
+    shared_pivot_enabled: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.output_directory, Path):
@@ -96,6 +99,12 @@ class A1MultiObjectExportSettings:
         ):
             raise TypeError(
                 "connected_camera_render_policy must be ConnectedCameraRenderPolicy"
+            )
+        if not isinstance(self.shared_pivot_enabled, bool):
+            raise TypeError("shared_pivot_enabled must be bool")
+        if self.shared_pivot_enabled and self.mode is not A1MultiObjectMode.STANDALONE:
+            raise ValueError(
+                "shared_pivot_enabled is supported only for STANDALONE multi-object export"
             )
 
     @property
