@@ -18,7 +18,7 @@ Blender to Spine2D Mesh Exporter converts Blender Mesh objects into Spine-ready 
 weighted mesh attachments, baked or camera-rendered textures, generated animation controls,
 and optional texture sequences.
 
-Current extension version: **0.129.0**.
+Current extension version: **0.150.0**.
 
 ## Requirements
 
@@ -49,7 +49,7 @@ Spine 4.2 capability combinations.
 | Rig | Generates a 2-Axis Rotation + Scale control rig with per-vertex/depth ownership appropriate to the selected projection mode. |
 | Materials | Analyzes source shader graphs, bakes supported materials, and can generate temporary fallback materials. |
 | Sequences | Exports static textures or per-object texture sequences with target-specific Spine sequence encoding. |
-| Multi-object | Exports multiple selected Mesh objects in one standalone request while preserving independent object timing and rigs. |
+| Multi-object | Exports multiple selected Mesh objects in one standalone request, with optional shared assembly pivot for signed-axis Normal / UV and independent object timing. |
 | Analysis | Runs production preparation without committing files and reports blockers, warnings, geometry, material, texture, rig, and depth statistics. |
 | Output safety | Stages JSON and textures atomically, validates staged output, rolls back partial failures, and recovers stale work files. |
 | Blender safety | Restores source Mesh, UV, material, selection, mode, frame, camera, render, and temporary datablock state after success or failure. |
@@ -91,6 +91,13 @@ Normal / UV Segments supports:
 | `-Z` | `NEGATIVE_Z` | World -X -> Spine X, world +Y -> Spine Y, world -Z -> depth. |
 | `Active Camera — Object Root Bone` | `ACTIVE_CAMERA` | Camera-projected geometry with each Blender Object Origin retained as the object's Spine pivot. |
 | `Active Camera — Camera Root Bone` | `ACTIVE_CAMERA_CAMERA_ROOT` | Camera-projected geometry owned by a camera-relative root hierarchy. |
+
+For two or more selected Mesh objects using one of the six signed-axis directions, **Shared
+Selection Pivot** is visible and enabled by default. The exporter computes one center from
+the aggregate world-space geometry bounds, uses it as the generated Spine pivot for every
+part, and compensates each object's local U/V/depth coordinates so setup world geometry does
+not move. Blender Object Origins and source Mesh data are never modified. Disable the toggle
+to retain independent per-object pivots.
 
 The two Active Camera choices share the same Perspective/Orthographic camera projection and
 the same material-bake geometry. They differ only in rig ownership.
@@ -196,8 +203,10 @@ Projection.
 
 Additional rig behavior:
 
-- per-object Blender Object Origin pivots for ordinary Normal projection and Active Camera
-  Object Root mode;
+- per-object Blender Object Origin pivots for ordinary Normal projection when Shared
+  Selection Pivot is disabled, and for Active Camera Object Root mode;
+- one export-only common assembly pivot for eligible multi-object signed-axis Normal / UV
+  when Shared Selection Pivot is enabled;
 - camera-relative hierarchy for Active Camera Camera Root mode;
 - deterministic constraint ordering;
 - optional control icons;
@@ -382,12 +391,14 @@ Blender geometry or bake work begins.
 
 ## Quick start
 
-1. Install `blender_to_spine2d_mesh_exporter-0.129.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
+1. Install `blender_to_spine2d_mesh_exporter-0.150.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
 2. Save the `.blend` file.
 3. Select one or more Mesh objects in Object Mode.
 4. Open **3D View > Sidebar > Blender to Spine2D Mesh Exporter**.
 5. Choose **Normal / UV Segments**, **Camera Projection**, or **Depth Camera Projection**.
-6. For Normal / UV Segments, choose the required Projection Direction.
+6. For Normal / UV Segments, choose the required Projection Direction. With two or more
+   selected Mesh objects and a signed-axis direction, Shared Selection Pivot is enabled by
+   default.
 7. Choose the exact Spine target.
 8. Configure Cut, material, camera/depth, and Bake settings as required by the selected
    mode. Texture resolution is configured as **Texture size** inside **Bake**.
@@ -420,7 +431,7 @@ From the repository root:
 ```powershell
 $Blender = "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 $Source = ".\Blender_to_Spine2D_Mesh_Exporter"
-$Output = ".\dist\blender_to_spine2d_mesh_exporter-0.129.0.zip"
+$Output = ".\dist\blender_to_spine2d_mesh_exporter-0.150.0.zip"
 
 New-Item -ItemType Directory -Force ".\dist" | Out-Null
 & $Blender --command extension build --source-dir $Source --output-filepath $Output
