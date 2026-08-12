@@ -120,8 +120,20 @@ def test_shared_pivot_rebase_preserves_world_geometry_for_every_signed_axis(
     assert rebased.world_matrix[11] == pytest.approx(target.depth)
     for expected, actual in zip(before_world, after_world, strict=True):
         assert actual == pytest.approx(expected)
-    assert after_depth.minimum_depth == pytest.approx(before_depth.minimum_depth)
-    assert after_depth.maximum_depth == pytest.approx(before_depth.maximum_depth)
+
+    # Shared Pivot intentionally changes the projected Object Origin depth. The invariant
+    # we need is that every world-space depth sample stays unchanged after compensating
+    # local U/V/Depth coordinates, including the deterministic nearest/farthest owners.
+    assert after_depth.nearest_vertex_depth == pytest.approx(
+        before_depth.nearest_vertex_depth
+    )
+    assert after_depth.farthest_vertex_depth == pytest.approx(
+        before_depth.farthest_vertex_depth
+    )
+    assert after_depth.nearest_vertex_id == before_depth.nearest_vertex_id
+    assert after_depth.farthest_vertex_id == before_depth.farthest_vertex_id
+    assert after_depth.depth_span == pytest.approx(before_depth.depth_span)
+
     assert tuple(vertex.normal for vertex in rebased.vertices) == tuple(
         vertex.normal for vertex in projected.snapshot.vertices
     )
