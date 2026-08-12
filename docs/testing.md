@@ -1,7 +1,7 @@
 # Testing and Release Validation
 
 This document defines the current validation policy for Blender to Spine2D Mesh Exporter
-**0.129.0**.
+**0.150.0**.
 
 A focused test is not a release claim. Release evidence must be generated from one exact
 clean commit and the archive built from that same commit.
@@ -14,6 +14,7 @@ clean commit and the archive built from that same commit.
 - Camera Projection.
 - Depth Camera Projection.
 - Six signed-axis Normal projection directions.
+- Shared Selection Pivot for eligible multi-object signed-axis Normal / UV exports.
 - Active Camera — Object Root Bone.
 - Active Camera — Camera Root Bone.
 - Static and per-object texture sequences.
@@ -72,6 +73,10 @@ Important current contracts include:
 
 - projection enum and UI routing;
 - signed-axis projection bases;
+- Shared Selection Pivot capability/visibility/default behavior;
+- aggregate world-space selection bounds and export-only pivot resolution;
+- U/V/depth rebase preserving every world-space vertex and nearest/farthest depth owner;
+- legacy per-object settings identity when Shared Selection Pivot is disabled;
 - Active Camera Object Root/Camera Root normalization;
 - camera-projected Object Origin placement;
 - Object Root inverse-setup bone generation;
@@ -88,13 +93,24 @@ Important current contracts include:
 - Blender-state/resource lifecycle contracts;
 - manifest/documentation version synchronization.
 
-Focused UI coverage includes:
+Focused Shared Pivot coverage includes:
+
+```text
+tests/test_a1_shared_pivot_contract.py
+tests/test_a1_shared_pivot_rebase.py
+tests/test_a1_shared_pivot_resolution.py
+tests/test_a1_shared_pivot_ui.py
+tests/test_a1_multi_object_preparation_settings.py
+tests/test_a1_ui_export_plan.py
+```
+
+Focused UI/release coverage includes:
 
 ```text
 tests/test_texture_size_bake_ui.py
 tests/test_documentation_contract.py
 tests/test_manifest_version.py
-tests/test_extension_version_0129.py
+tests/test_extension_version_0150.py
 ```
 
 Focused Object Root tests include:
@@ -106,6 +122,30 @@ tests/test_active_camera_root_modes.py
 tests/test_active_camera_normal_object_pivot.py
 tests/test_normal_projection_parity_contract.py
 ```
+
+## Real Blender Shared Pivot gate
+
+The real multi-object gate must use the artist project that exposed the assembly-pivot bug,
+not a synthetic replacement:
+
+```powershell
+& $Blender `
+    --factory-startup `
+    --background `
+    $GrenadeBlend `
+    --python-exit-code 1 `
+    --python tests\blender_headless\run_grenade_shared_pivot_real_export.py `
+    -- `
+    --expected-blend $GrenadeBlend `
+    --output-directory $SharedPivotOutput
+
+if ($LASTEXITCODE -ne 0) { throw "Shared Pivot grenade gate failed" }
+```
+
+The gate must prove that the persisted selected Mesh set enters the public selected-object
+route, the aggregate pivot matches independent world-space geometry bounds, all generated
+object main bones use the same projected pivot, X/Y controls remain present, production
+JSON/PNG outputs are non-empty, and source object/scene/datablock state is unchanged.
 
 ## Real Blender Active Camera gates
 
@@ -228,11 +268,11 @@ if ($LASTEXITCODE -ne 0) { throw "Real bpy suite failed" }
 
 A missing real-bpy environment must not be reported as successful release validation.
 
-## Build 0.129.0
+## Build 0.150.0
 
 ```powershell
 $SourceDir = ".\Blender_to_Spine2D_Mesh_Exporter"
-$Archive = ".\dist\blender_to_spine2d_mesh_exporter-0.129.0.zip"
+$Archive = ".\dist\blender_to_spine2d_mesh_exporter-0.150.0.zip"
 
 New-Item -ItemType Directory -Force ".\dist" | Out-Null
 Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue
@@ -260,9 +300,11 @@ Before packaging, verify in a saved `.blend`:
 
 1. Expand **Paths and Spine 2D version** and confirm `Texture size` is absent.
 2. Expand **Bake** and confirm `Texture size` is the first setting.
-3. Change Texture size and confirm Analyze becomes stale/invalidated.
-4. Confirm Frames/Start remain per-object in selected-object export while Texture size is shared.
-5. Reset settings and confirm Texture size returns to `1024`.
+3. Select at least two Mesh objects in signed-axis Normal / UV and confirm **Shared Selection Pivot** is visible and enabled by default.
+4. Reduce the selection to one Mesh or select an unsupported camera route and confirm the Shared Selection Pivot control is hidden.
+5. Change Texture size and confirm Analyze becomes stale/invalidated.
+6. Confirm Frames/Start remain per-object in selected-object export while Texture size is shared.
+7. Reset settings and confirm Texture size returns to `1024` and Shared Selection Pivot returns to enabled.
 
 ## Manual Spine validation
 
@@ -272,6 +314,8 @@ For representative outputs in the exact selected Spine version, verify:
 - texture paths resolve;
 - UVs match texture orientation;
 - signed-axis controls behave as expected;
+- Shared Selection Pivot multi-object parts rotate around the same assembly pivot when matching X/Y values are applied;
+- disabling Shared Selection Pivot restores independent per-object pivots;
 - Active Camera Object Root setup matches the Blender camera view without stretching;
 - Object Root X/Y controls rotate around the projected Blender Object Origin;
 - Active Camera Camera Root keeps correct camera-relative placement;
