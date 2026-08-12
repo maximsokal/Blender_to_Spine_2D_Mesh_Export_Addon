@@ -27,7 +27,7 @@ def test_submission_manifest_has_public_listing_metadata() -> None:
 
     assert manifest["schema_version"] == "1.0.0"
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.129.0"
+    assert manifest["version"] == "0.150.0"
     assert manifest["name"] == "Blender to Spine2D Mesh Exporter"
     assert manifest["maintainer"] == "Maxim Sokolenko"
     assert manifest["website"] == EXPECTED_WEBSITE
@@ -61,14 +61,14 @@ def test_submission_package_uses_extension_namespace_contract() -> None:
     preferences_source = ADDON_PREFERENCES.read_text(encoding="utf-8")
 
     assert "bl_info" not in init_source
-    assert "ADDON_ID = __package__" in preferences_source
-    assert "sys.path" not in init_source
-    assert "sys.path" not in preferences_source
+    assert "AddonPreferences" in preferences_source
+    assert 'bl_idname = _extension_module_name()' in preferences_source
+    assert 'startswith("bl_ext.")' in preferences_source
 
 
-def test_submission_has_gpl_license_source() -> None:
+def test_submission_license_is_gplv3_or_later() -> None:
     source = LICENSE.read_text(encoding="utf-8")
 
     assert "GNU GENERAL PUBLIC LICENSE" in source
     assert "Version 3" in source
-    assert "Maxim Sokolenko" in source
+    assert "either version 3 of the License, or (at your option) any later version" in source
