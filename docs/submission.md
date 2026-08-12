@@ -1,7 +1,7 @@
 # Blender Extensions Platform Submission
 
 This document describes the current publication candidate for Blender to Spine2D Mesh
-Exporter **0.129.0**.
+Exporter **0.150.0**.
 
 The extension is prepared for an initial Blender Extensions Platform submission on
 **Windows x64**. Other platforms must be added to `platforms` only after the same install,
@@ -12,7 +12,7 @@ registration, export, cleanup, and package gates have been run on those platform
 Build and upload only this extension archive:
 
 ```text
-dist/blender_to_spine2d_mesh_exporter-0.129.0.zip
+dist/blender_to_spine2d_mesh_exporter-0.150.0.zip
 ```
 
 Do not upload the repository ZIP. The extension archive must be produced by Blender's
@@ -27,7 +27,7 @@ documentation.
 
 ```text
 Name: Blender to Spine2D Mesh Exporter
-Version: 0.129.0
+Version: 0.150.0
 Minimum Blender: 5.2.0
 Platform: Windows x64
 License: GPL-3.0-or-later
