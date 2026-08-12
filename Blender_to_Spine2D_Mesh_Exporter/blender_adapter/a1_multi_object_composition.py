@@ -16,6 +16,10 @@ from ..application import (
     A1SingleObjectExportSettings,
     resolve_a1_multi_object_preparation_settings,
 )
+from ..application.a1_shared_pivot import (
+    A1SharedPivotWorld,
+    validate_a1_shared_pivot_world,
+)
 from ..domain.baking import CameraProjectionPlan
 from ..domain.projection import A1ProjectionDirection
 from ..domain.spine import (
@@ -43,15 +47,91 @@ from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_object_preparation import PreparedA1Object
 
 
+def _resolve_composition_shared_pivot_world(
+    prepared_settings: Tuple[A1SingleObjectExportSettings, ...],
+    settings: A1MultiObjectExportSettings,
+) -> A1SharedPivotWorld | None:
+    """Resolve the one transaction-owned pivot accepted by composition.
+
+    Preparation is the only stage allowed to inject ``shared_pivot_world`` into otherwise
+    immutable per-object settings. Composition must therefore accept that one deliberate
+    difference without weakening equality checks for any other setting. When Shared Pivot
+    is enabled, every prepared object must carry the same finite canonical pivot. When it
+    is disabled, no prepared object may carry a pivot at all.
+    """
+
+    if not isinstance(settings, A1MultiObjectExportSettings):
+        raise TypeError("settings must be A1MultiObjectExportSettings")
+    if not isinstance(prepared_settings, tuple) or not prepared_settings:
+        raise ValueError("prepared_settings must be a non-empty tuple")
+    if not all(
+        isinstance(item, A1SingleObjectExportSettings) for item in prepared_settings
+    ):
+        raise TypeError(
+            "prepared_settings must contain A1SingleObjectExportSettings values"
+        )
+
+    pivots = tuple(item.shared_pivot_world for item in prepared_settings)
+
+    if not settings.shared_pivot_enabled:
+        unexpected_indices = tuple(
+            index for index, pivot in enumerate(pivots) if pivot is not None
+        )
+        if unexpected_indices:
+            raise ValueError(
+                "Shared Pivot is disabled but prepared object settings contain "
+                f"shared_pivot_world at indices {unexpected_indices}"
+            )
+        return None
+
+    missing_indices = tuple(
+        index for index, pivot in enumerate(pivots) if pivot is None
+    )
+    if missing_indices:
+        raise ValueError(
+            "Shared Pivot is enabled but prepared object settings are missing "
+            f"shared_pivot_world at indices {missing_indices}"
+        )
+
+    validated: list[A1SharedPivotWorld] = []
+    for index, pivot in enumerate(pivots):
+        try:
+            validated.append(validate_a1_shared_pivot_world(pivot))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "prepared object settings contain invalid shared_pivot_world at "
+                f"index {index}: {exc}"
+            ) from exc
+
+    shared_pivot_world = validated[0]
+    mismatched_indices = tuple(
+        index
+        for index, pivot in enumerate(validated[1:], start=1)
+        if pivot != shared_pivot_world
+    )
+    if mismatched_indices:
+        raise ValueError(
+            "Shared Pivot composition requires one identical transaction pivot for "
+            f"every prepared object; mismatched indices={mismatched_indices}"
+        )
+
+    return shared_pivot_world
+
+
 def _expected_prepared_settings(
     source: A1MultiObjectSource,
     mode: A1MultiObjectMode,
+    shared_pivot_world: A1SharedPivotWorld | None = None,
 ) -> A1SingleObjectExportSettings:
-    """Resolve expected settings through the shared preparation policy owner."""
+    """Resolve exact preparation settings including the transaction-owned pivot."""
 
     if not isinstance(source, A1MultiObjectSource):
         raise TypeError("source must be A1MultiObjectSource")
-    return resolve_a1_multi_object_preparation_settings(source.settings, mode)
+    resolved = resolve_a1_multi_object_preparation_settings(source.settings, mode)
+    if shared_pivot_world is None:
+        return resolved
+    validated_pivot = validate_a1_shared_pivot_world(shared_pivot_world)
+    return replace(resolved, shared_pivot_world=validated_pivot)
 
 
 def _validate_source_prepared_pair(
@@ -60,8 +140,9 @@ def _validate_source_prepared_pair(
     mode: A1MultiObjectMode,
     *,
     pair_index: int,
+    shared_pivot_world: A1SharedPivotWorld | None = None,
 ) -> None:
-    """Reject tuple reordering and settings drift before component IDs are assigned."""
+    """Reject tuple reordering and every settings drift except the approved pivot."""
 
     if not isinstance(pair_index, int) or isinstance(pair_index, bool) or pair_index < 0:
         raise ValueError("pair_index must be a non-negative integer")
@@ -70,7 +151,11 @@ def _validate_source_prepared_pair(
             f"sources[{pair_index}] component '{source.component_id}' does not match "
             "the prepared object's live source_object"
         )
-    expected_settings = _expected_prepared_settings(source, mode)
+    expected_settings = _expected_prepared_settings(
+        source,
+        mode,
+        shared_pivot_world,
+    )
     if prepared.settings != expected_settings:
         raise ValueError(
             f"sources[{pair_index}] component '{source.component_id}' settings do not "
@@ -116,6 +201,11 @@ def _validate_composition_inputs(
         ):
             raise ValueError("anchor_component_id is not present in composition sources")
 
+    shared_pivot_world = _resolve_composition_shared_pivot_world(
+        tuple(item.settings for item in prepared),
+        settings,
+    )
+
     for pair_index, (source, item) in enumerate(
         zip(sources, prepared, strict=True)
     ):
@@ -124,6 +214,7 @@ def _validate_composition_inputs(
             item,
             settings.mode,
             pair_index=pair_index,
+            shared_pivot_world=shared_pivot_world,
         )
 
     profiles = tuple(
