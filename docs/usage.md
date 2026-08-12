@@ -1,6 +1,6 @@
 # Usage Guide
 
-This guide describes Blender to Spine2D Mesh Exporter **0.129.0**.
+This guide describes Blender to Spine2D Mesh Exporter **0.150.0**.
 
 ## Open the exporter
 
@@ -81,6 +81,12 @@ Normal / UV Segments exposes eight projection choices.
 
 These use deterministic orthonormal world-axis projection bases. The selected axis defines
 Spine X, Spine Y, and depth while preserving deformable per-depth rig ownership.
+
+When two or more Mesh objects are selected for a signed-axis Normal / UV export, **Shared
+Selection Pivot** is available and enabled by default. It computes one export-only pivot
+from the world-space bounds of the selected geometry and rebases each projected snapshot so
+its world-space vertices remain unchanged. Blender Object Origins and source Mesh data are
+not modified. Disable the toggle to retain independent per-object origins.
 
 ### Active Camera — Object Root Bone
 
@@ -262,9 +268,11 @@ images/<ObjectName>_Baked.png
 
 1. Select at least two Mesh objects.
 2. Configure shared Scene settings, including Texture size in Bake.
-3. Configure per-object Frames and Start values.
-4. Run Analyze.
-5. Run **Export Selected Objects**.
+3. For signed-axis Normal / UV exports, keep **Shared Selection Pivot** enabled when the
+   parts must rotate around one assembly pivot; disable it for independent object pivots.
+4. Configure per-object Frames and Start values.
+5. Run Analyze.
+6. Run **Export Selected Objects**.
 
 Public selected-object export is standalone composition. Connected and mixed composition
 remain explicit internal/development routes and are validated only for their supported
@@ -277,11 +285,13 @@ capability combinations.
 3. Import the generated JSON.
 4. Point Spine to the exported images directory when required.
 5. Verify setup pose, slot order, UV placement, generated controls, and sequences.
-6. For Active Camera Object Root, verify the setup pose matches the Blender camera view and
+6. For signed-axis multi-object exports with Shared Selection Pivot, set matching X/Y
+   control values on different parts and verify they rotate around the same assembly axis.
+7. For Active Camera Object Root, verify the setup pose matches the Blender camera view and
    rotating X/Y occurs around the projected Blender Object Origin.
-7. For Active Camera Camera Root, verify the object remains correctly positioned below the
+8. For Active Camera Camera Root, verify the object remains correctly positioned below the
    camera-relative root.
-8. For positive Depth parallax, verify reserve slots remain below FRONT.
+9. For positive Depth parallax, verify reserve slots remain below FRONT.
 
 ## Reset settings
 
@@ -289,6 +299,7 @@ The main reset restores the current defaults, including:
 
 - Normal / UV Segments;
 - `+Z` projection;
+- Shared Selection Pivot enabled for eligible multi-object signed-axis exports;
 - Bake Texture size `1024`;
 - Seam Maker Auto;
 - current-frame static baking;
