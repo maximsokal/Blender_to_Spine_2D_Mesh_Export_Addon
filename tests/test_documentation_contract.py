@@ -246,12 +246,13 @@ def test_texture_size_is_documented_as_bake_owned_setting() -> None:
 def test_submission_document_matches_current_public_manifest() -> None:
     submission = _read(DOCS / "submission.md")
     manifest = _read(MANIFEST)
+    current_version = _manifest_version()
 
     assert "Windows x64" in submission
     assert "Import-Export, Mesh, UV, Animation" in submission
     assert "License: GPL-3.0-or-later" in submission
     assert "Permission: Files" in submission
-    assert "blender_to_spine2d_mesh_exporter-0.129.0.zip" in submission
+    assert f"blender_to_spine2d_mesh_exporter-{current_version}.zip" in submission
     assert 'platforms = ["windows-x64"]' in manifest
     assert 'website = "https://github.com/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon"' in manifest
 
