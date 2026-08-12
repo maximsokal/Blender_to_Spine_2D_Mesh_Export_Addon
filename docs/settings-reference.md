@@ -1,7 +1,7 @@
 # Settings Reference
 
 This document describes the maintained public settings in Blender to Spine2D Mesh Exporter
-**0.129.0**. Fresh-Scene defaults are listed below. The current Scene settings schema is
+**0.150.0**. Fresh-Scene defaults are listed below. The current Scene settings schema is
 **8**.
 
 ## Export
@@ -34,6 +34,26 @@ Visible only for **Normal / UV Segments**.
 Both Active Camera modes support evaluated Perspective and Orthographic cameras. They do
 not become Camera Projection or Depth Camera Projection; they remain Normal / UV Segments
 representations.
+
+### Shared Selection Pivot
+
+Visible only when **two or more Mesh objects** are selected and Normal / UV Segments uses a
+signed-axis projection (`+X`, `-X`, `+Y`, `-Y`, `+Z`, or `-Z`).
+
+| Type | Default | Behavior |
+| --- | --- | --- |
+| Boolean | Enabled | Uses one export-only world-space pivot for the complete selected-object transaction. |
+
+The pivot is the center of the aggregate world-space geometry bounds of all selected Mesh
+sources. Each projected object snapshot is rebased around that shared point while its local
+U/V/depth coordinates receive the inverse compensation. Therefore every exported world
+vertex stays in the same setup location even though each object's generated Spine `main`
+bone now uses the common pivot.
+
+The option never changes Blender Object Origins, source Mesh coordinates, object transforms,
+selection, or cursor state. Disable it to retain the historical independent per-object
+origin behavior. It is not available for either Active Camera Normal mode, Camera
+Projection, Depth Camera Projection, or single-object export.
 
 #### Object Root setup contract
 
@@ -303,6 +323,6 @@ with a safe `0°` default. Persisted `ACTIVE_CAMERA` continues to mean **Active 
 Object Root Bone**; the Camera Root mode uses the separate
 `ACTIVE_CAMERA_CAMERA_ROOT` identifier.
 
-`spine2d_texture_size` remains the same persisted Scene property in 0.129.0; only its visual
+`spine2d_texture_size` remains the same persisted Scene property in 0.150.0; only its visual
 owner moved from the paths/version foldout to Bake, so no Scene migration is required for
 this UI change.
