@@ -3,7 +3,7 @@
 The `examples` directory contains Blender scenes for learning and manual validation of the
 current exporter. Examples do not replace automated regression tests.
 
-Use Blender 5.2 or newer with Blender to Spine2D Mesh Exporter **0.129.0**.
+Use Blender 5.2 or newer with Blender to Spine2D Mesh Exporter **0.150.0**.
 
 ## General workflow
 
@@ -113,9 +113,15 @@ examples/03_spine_text_multi/text_spine.blend
 Good for:
 
 - public selected-object standalone export;
+- Shared Selection Pivot in signed-axis Normal / UV mode;
 - one shared Scene-level Bake Texture size;
 - per-object Frames/Start settings;
 - output namespace and atomic transaction checks.
+
+With two or more Mesh objects selected in a signed-axis Normal / UV export, Shared Selection
+Pivot is enabled by default. Apply matching X/Y values to controls from different parts in
+Spine and verify they rotate around the same assembly pivot. Disable the toggle to compare
+against independent per-object origins.
 
 Public selected-object export is standalone composition. Connected and mixed composition
 are explicit internal/development routes and are not configured as ordinary public UI
