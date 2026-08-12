@@ -5,10 +5,15 @@ from types import SimpleNamespace
 import pytest
 
 from Blender_to_Spine2D_Mesh_Exporter.application import (
+    A1MultiObjectExportSettings,
     A1MultiObjectMode,
     A1SingleObjectExportSettings,
     ExportSettings,
     resolve_a1_multi_object_preparation_settings,
+)
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_multi_object_composition import (
+    _expected_prepared_settings,
+    _resolve_composition_shared_pivot_world,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_multi_object_contracts import (
     A1MultiObjectSource,
@@ -39,6 +44,15 @@ def _source(settings: A1SingleObjectExportSettings) -> A1MultiObjectSource:
         source_object=source_object,
         component_id="settings-source",
         settings=settings,
+    )
+
+
+def _multi_settings(*, shared_pivot_enabled: bool) -> A1MultiObjectExportSettings:
+    return A1MultiObjectExportSettings(
+        output_directory=Path("multi-object-composition-test-output"),
+        output_stem="settings-composition",
+        mode=A1MultiObjectMode.STANDALONE,
+        shared_pivot_enabled=shared_pivot_enabled,
     )
 
 
@@ -126,6 +140,79 @@ def test_shared_pivot_replacement_changes_only_export_pivot_field():
     assert resolved.rig_setup_pose_mode is settings.rig_setup_pose_mode
     assert resolved.projection_direction is settings.projection_direction
     assert resolved.export is settings.export
+
+
+def test_composition_accepts_one_identical_transaction_shared_pivot():
+    pivot = (1.25, -4.5, 9.0)
+    first = replace(_settings(), shared_pivot_world=pivot)
+    second = replace(_settings(), shared_pivot_world=pivot)
+
+    resolved = _resolve_composition_shared_pivot_world(
+        (first, second),
+        _multi_settings(shared_pivot_enabled=True),
+    )
+
+    assert resolved == pivot
+
+
+def test_composition_rejects_missing_shared_pivot_when_enabled():
+    pivot = (1.25, -4.5, 9.0)
+
+    with pytest.raises(ValueError, match="missing shared_pivot_world"):
+        _resolve_composition_shared_pivot_world(
+            (replace(_settings(), shared_pivot_world=pivot), _settings()),
+            _multi_settings(shared_pivot_enabled=True),
+        )
+
+
+def test_composition_rejects_different_shared_pivots_when_enabled():
+    with pytest.raises(ValueError, match="one identical transaction pivot"):
+        _resolve_composition_shared_pivot_world(
+            (
+                replace(_settings(), shared_pivot_world=(1.0, 2.0, 3.0)),
+                replace(_settings(), shared_pivot_world=(1.0, 2.0, 4.0)),
+            ),
+            _multi_settings(shared_pivot_enabled=True),
+        )
+
+
+def test_composition_rejects_unexpected_shared_pivot_when_disabled():
+    with pytest.raises(ValueError, match="Shared Pivot is disabled"):
+        _resolve_composition_shared_pivot_world(
+            (
+                replace(_settings(), shared_pivot_world=(1.0, 2.0, 3.0)),
+                _settings(),
+            ),
+            _multi_settings(shared_pivot_enabled=False),
+        )
+
+
+def test_composition_legacy_path_requires_no_shared_pivot():
+    resolved = _resolve_composition_shared_pivot_world(
+        (_settings(), _settings()),
+        _multi_settings(shared_pivot_enabled=False),
+    )
+
+    assert resolved is None
+
+
+def test_composition_expected_settings_add_only_transaction_shared_pivot():
+    source_settings = _settings()
+    source = _source(source_settings)
+    pivot = (1.25, -4.5, 9.0)
+
+    expected = _expected_prepared_settings(
+        source,
+        A1MultiObjectMode.STANDALONE,
+        pivot,
+    )
+
+    assert expected is not source_settings
+    assert expected.shared_pivot_world == pivot
+    assert replace(expected, shared_pivot_world=None) == source_settings
+    assert expected.export is source_settings.export
+    assert expected.rig_setup_pose_mode is source_settings.rig_setup_pose_mode
+    assert expected.projection_direction is source_settings.projection_direction
 
 
 def test_preparation_and_composition_share_one_settings_policy_owner():
