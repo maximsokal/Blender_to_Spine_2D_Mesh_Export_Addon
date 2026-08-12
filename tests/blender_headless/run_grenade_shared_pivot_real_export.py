@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from math import isfinite
 from pathlib import Path
 import sys
 import traceback
@@ -197,6 +198,37 @@ def _bone_position(bone: dict[str, object]) -> tuple[float, float]:
     return float(bone.get("x", 0.0)), float(bone.get("y", 0.0))
 
 
+def _canonical_legacy_main_position(
+    value: tuple[float, float],
+) -> tuple[float, float]:
+    """Mirror the historical final setup quantization used by the production rig.
+
+    ``calculate_a1_main_position_pixels`` and the independent Shared Pivot projection
+    math intentionally operate at full precision. The production legacy rig subsequently
+    canonicalizes ``main_position_pixels`` to two decimal places in
+    ``resolve_main_position`` before creating the Spine main bone. The real gate must
+    compare serialized setup coordinates against that final public contract rather than
+    against the pre-rig intermediate floats.
+    """
+
+    if not isinstance(value, tuple) or len(value) != 2:
+        raise TypeError("legacy main position must be a two-value tuple")
+
+    resolved: list[float] = []
+    for index, component in enumerate(value):
+        if isinstance(component, bool) or not isinstance(component, (int, float)):
+            raise TypeError(
+                f"legacy main position[{index}] must be a finite number"
+            )
+        numeric = float(component)
+        if not isfinite(numeric):
+            raise ValueError(f"legacy main position[{index}] must be finite")
+        rounded = round(numeric, 2)
+        resolved.append(0.0 if rounded == 0.0 else rounded)
+
+    return resolved[0], resolved[1]
+
+
 def _assert_close_pair(
     actual: tuple[float, float],
     expected: tuple[float, float],
@@ -345,9 +377,12 @@ def _run(expected_blend: str, output_directory_arg: str) -> None:
                 first_settings.export.texture_height,
                 first_settings.rig_scale_mode,
             )
-            expected_main_position = (
+            raw_expected_main_position = (
                 float(projected_pivot.u) * uniform_scale,
                 float(projected_pivot.v) * uniform_scale,
+            )
+            expected_main_position = _canonical_legacy_main_position(
+                raw_expected_main_position
             )
             prefixes = tuple(
                 resolve_a1_names(
@@ -383,7 +418,8 @@ def _run(expected_blend: str, output_directory_arg: str) -> None:
                 f"blend={loaded} selected_meshes={len(selected)} "
                 f"projection={direction.value!r} "
                 f"pivot_world={resolution.pivot_world!r} "
-                f"projected_main={expected_main_position!r} "
+                f"raw_projected_main={raw_expected_main_position!r} "
+                f"serialized_main={expected_main_position!r} "
                 f"vertices={resolution.vertex_count} outputs={len(outputs)} "
                 f"json={str(json_path)!r} source=unchanged",
                 flush=True,
