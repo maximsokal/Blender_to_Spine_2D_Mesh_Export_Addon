@@ -1,7 +1,7 @@
 # Architecture
 
 This document describes the production architecture of Blender to Spine2D Mesh Exporter
-**0.129.0**.
+**0.150.0**.
 
 ## Package boundaries
 
@@ -97,7 +97,7 @@ Analysis
 ```
 
 Control placement is semantic rather than based on where the RNA property was originally
-defined. In 0.129.0, the existing Scene property `spine2d_texture_size` is drawn by the
+defined. In 0.150.0, the existing Scene property `spine2d_texture_size` is drawn by the
 ordered **Bake** foldout before frame/sequence controls. It is not duplicated in **Paths
 and Spine 2D version**. The RNA property, reset value, readiness dependency, and downstream
 bake/render consumers remain unchanged.
