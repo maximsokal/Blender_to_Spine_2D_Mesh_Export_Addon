@@ -147,6 +147,37 @@ route, the aggregate pivot matches independent world-space geometry bounds, all 
 object main bones use the same projected pivot, X/Y controls remain present, production
 JSON/PNG outputs are non-empty, and source object/scene/datablock state is unchanged.
 
+## Real grenade all-target Spine matrix
+
+The same artist-authored grenade project must also be exported through every codec that the
+production Spine JSON registry declares ready. The runner obtains its target set directly
+from `registered_spine_json_codecs()`; do not duplicate a target list in the test.
+
+```powershell
+& $Blender `
+    --factory-startup `
+    --background `
+    $GrenadeBlend `
+    --python-exit-code 1 `
+    --python tests\blender_headless\run_grenade_all_spine_targets_real_export.py `
+    -- `
+    --expected-blend $GrenadeBlend `
+    --output-directory $GrenadeAllTargetsOutput
+
+if ($LASTEXITCODE -ne 0) { throw "Grenade all-target Spine matrix failed" }
+```
+
+Each registered target receives an isolated output directory. For every target the gate must
+prove that the Scene target reaches the public selected-object plan as the expected exact
+version, the real production export succeeds, the serialized `skeleton.spine` equals that
+exact version, Shared Pivot main/control bones remain valid, PNG outputs are real, and the
+source object/scene/context/datablock state is unchanged before the next target runs.
+
+Because the matrix is registry-driven, adding a future production-ready codec automatically
+adds another real grenade export to this gate without editing the runner. A target must not
+be removed from this gate merely to make a failing export green; either its capability must
+be corrected or the production export bug must be fixed.
+
 ## Real Blender Active Camera gates
 
 Use a representative 3D asset with visible depth. The repository's coin integration asset
