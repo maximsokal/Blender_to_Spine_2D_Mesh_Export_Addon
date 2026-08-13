@@ -58,6 +58,9 @@ from run_grenade_shared_pivot_real_export import (  # noqa: E402
 )
 
 
+_SCENE_TARGET_PROPERTY = "spine2d_target_spine_version"
+
+
 def _parse_arguments() -> argparse.Namespace:
     arguments = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     parser = argparse.ArgumentParser(description=__doc__)
@@ -144,7 +147,14 @@ def _assert_serialized_exact_version(json_path: Path, target) -> None:
     )
 
 
-def _assert_source_state_unchanged(scene, selected, before, datablocks_before, *, label: str) -> None:
+def _assert_source_state_unchanged(
+    scene,
+    selected,
+    before,
+    datablocks_before,
+    *,
+    label: str,
+) -> None:
     _assert(
         _scene_fingerprint(scene, selected) == before,
         f"{label} changed source object/scene/context state",
@@ -172,15 +182,15 @@ def _run(expected_blend: str, output_directory_arg: str) -> None:
             "Shared Selection Pivot RNA default must be enabled",
         )
         _assert(
-            hasattr(scene, "spine2d_json_target"),
-            "Spine JSON target Scene property is not registered",
+            hasattr(scene, _SCENE_TARGET_PROPERTY),
+            f"Spine JSON target Scene property is not registered: {_SCENE_TARGET_PROPERTY}",
         )
 
         original_output_path = str(getattr(scene, "spine2d_json_path", ""))
         original_shared_pivot = bool(
             getattr(scene, "spine2d_shared_selection_pivot", True)
         )
-        original_target = str(getattr(scene, "spine2d_json_target"))
+        original_target = str(getattr(scene, _SCENE_TARGET_PROPERTY))
 
         try:
             for target, codec in codecs.items():
@@ -191,11 +201,12 @@ def _run(expected_blend: str, output_directory_arg: str) -> None:
                 target_output = _target_output_directory(output_root, target)
                 scene.spine2d_json_path = str(target_output)
                 scene.spine2d_shared_selection_pivot = True
-                scene.spine2d_json_target = target.value
+                setattr(scene, _SCENE_TARGET_PROPERTY, target.value)
+                actual_scene_target = str(getattr(scene, _SCENE_TARGET_PROPERTY))
                 _assert(
-                    str(scene.spine2d_json_target) == target.value,
+                    actual_scene_target == target.value,
                     "Blender Scene rejected a registered Spine JSON target: "
-                    f"expected={target.value!r}, actual={scene.spine2d_json_target!r}",
+                    f"expected={target.value!r}, actual={actual_scene_target!r}",
                 )
 
                 before = _scene_fingerprint(scene, selected)
@@ -250,6 +261,10 @@ def _run(expected_blend: str, output_directory_arg: str) -> None:
                     expected_main_position=expected_main_position,
                 )
                 _assert_serialized_exact_version(json_path, target)
+                _assert(
+                    str(getattr(scene, _SCENE_TARGET_PROPERTY)) == target.value,
+                    "production export changed the persisted Spine target during the transaction",
+                )
                 _assert_source_state_unchanged(
                     scene,
                     selected,
@@ -268,7 +283,7 @@ def _run(expected_blend: str, output_directory_arg: str) -> None:
         finally:
             scene.spine2d_json_path = original_output_path
             scene.spine2d_shared_selection_pivot = original_shared_pivot
-            scene.spine2d_json_target = original_target
+            setattr(scene, _SCENE_TARGET_PROPERTY, original_target)
 
         print(
             "[GRENADE-ALL-SPINE-TARGETS] PASS "
