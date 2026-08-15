@@ -1,7 +1,7 @@
 # Architecture
 
 This document describes the production architecture of Blender to Spine2D Mesh Exporter
-**0.150.0**.
+**0.151.0**.
 
 ## Package boundaries
 
@@ -25,7 +25,7 @@ resource lifetime.
 
 Owns every Blender-facing boundary:
 
-- Scene and object RNA capture;
+- Scene, object, and Add-on Preferences RNA capture;
 - source/evaluated Mesh access;
 - temporary Mesh/Object creation;
 - UV preparation;
@@ -49,43 +49,59 @@ Contains Blender-independent contracts and algorithms:
 - UV contracts;
 - bake/camera/depth planning models;
 - Spine bones, constraints, slots, attachments, skins, animation, validation, target
-  adaptation, weighted streams, and serialization.
+  adaptation, weighted streams, serialization, and exact-version family validation.
 
 Domain modules do not import `bpy` or `bmesh`.
 
 ### `infrastructure`
 
-Owns cross-cutting services:
-
-- transactional registration;
-- durable atomic output;
-- interprocess locking;
-- stale-stage/backup recovery;
-- diagnostics, logging, tracing, and audit services.
+Owns cross-cutting services such as transactional registration, durable atomic output,
+interprocess locking, stale-stage/backup recovery, diagnostics, logging, tracing, and audit
+services.
 
 ## Public request flow
 
 ```text
 Blender UI
 -> capture immutable Scene/object settings
+-> resolve schema family + persistent exact project version
 -> capability validation
 -> readiness or export request
 -> object preparation
 -> Spine document assembly
--> target-specific adaptation
+-> target-family adaptation
 -> texture/JSON staging
 -> staged validation
 -> atomic commit
 ```
 
-Later stages consume typed immutable settings rather than repeatedly reading mutable Scene
+Later stages consume typed immutable settings rather than repeatedly reading mutable Blender
 RNA.
+
+## Spine family versus exact project version
+
+`domain/spine/version_target.py` owns the five supported schema families and their immutable
+default exact versions. The family is the codec/capability identity. A canonical exact patch
+inside the same family is metadata, not another codec.
+
+`blender_adapter/spine_version_preferences.py` is the only boundary that connects that pure
+domain registry to Blender `AddonPreferences`. It owns one persistent exact-version field
+for each family and validates that values remain canonical `major.minor.patch` strings inside
+the selected family.
+
+`a1_ui_settings.py` resolves the effective exact version once while building immutable
+`ExportSettings`. Downstream code receives `ExportSettings.spine_version`; its
+`spine_target` property resolves the schema family. Consequently the same effective value
+feeds the viewport label, versioned JSON filename and serialized `skeleton.spine`, while the
+family continues to choose the serializer codec.
+
+Preference update callbacks invalidate readiness and redraw the UI but never call
+`wm.save_userpref`; global Blender preference persistence remains owned by Blender.
 
 ## Ordered UI ownership
 
-`ui.py` owns the reusable base panel controls and operators. `ui_layout.py` owns the actual
-ordered production panel registered for successful extension startup and composes the
-user-facing foldouts in this order:
+`ui.py` owns reusable base panel controls/operators. `ui_layout.py` owns the ordered
+production panel and composes the user-facing foldouts in this order:
 
 ```text
 Paths and Spine 2D version
@@ -96,11 +112,10 @@ Bake
 Analysis
 ```
 
-Control placement is semantic rather than based on where the RNA property was originally
-defined. In 0.150.0, the existing Scene property `spine2d_texture_size` is drawn by the
-ordered **Bake** foldout before frame/sequence controls. It is not duplicated in **Paths
-and Spine 2D version**. The RNA property, reset value, readiness dependency, and downstream
-bake/render consumers remain unchanged.
+Control placement is semantic. The existing Scene property `spine2d_texture_size` is drawn
+by **Bake** before frame/sequence controls and is not duplicated in **Paths and Spine 2D
+version**. Exact Spine project versions are global Add-on Preferences and therefore are not
+Scene migration data.
 
 ## Object preparation
 
@@ -144,62 +159,36 @@ Z-group separation.
 
 ### Active Camera shared geometry stage
 
-Both Active Camera Normal modes use the same evaluated camera frame and the same projected
-snapshot. Perspective and Orthographic projection are resolved by the Blender camera
-adapter before rig selection.
-
-The projected snapshot contains:
-
-- camera-projected U/V positions;
-- camera-space per-vertex depth;
-- projected Blender Object Origin;
-- source identity/UV lineage.
-
-Rig ownership is selected later during document preparation.
+Both Active Camera Normal modes use the same evaluated camera frame and projected snapshot.
+Perspective and Orthographic projection are resolved by the Blender camera adapter before
+rig selection. The snapshot carries camera-projected U/V, camera-space depth, projected
+Blender Object Origin, and source identity/UV lineage.
 
 ### Active Camera — Object Root Bone
 
-Persisted projection ID: `ACTIVE_CAMERA`.
-
-Setup mode: `CAMERA_VIEW_NORMAL`.
-
-Contract:
+Persisted projection ID: `ACTIVE_CAMERA`. Setup mode: `CAMERA_VIEW_NORMAL`.
 
 ```text
 root
 └── <prefix>_main                  projected Blender Object Origin
-    └── <prefix>                   object-local base
+    └── <prefix>
         └── <prefix>_scale_rotate_X
             └── <prefix>_rotate_X
                 ├── <prefix>_<z>_scale
                 │   └── <prefix>_<z>
                 │       └── <prefix>_<z>_camera_setup
-                │           └── generated vertex bones for this depth
+                │           └── generated vertex bones
                 └── ...
 ```
 
 The camera-facing setup pose is already solved by projection, so X/Y setup rotation and
-depth Transform setup values are neutral. Each `_camera_setup` child applies the inverse
-of its depth-group setup Y translation. Vertex bones are parented below that child.
-
-This produces two required properties simultaneously:
-
-1. setup world XY equals the active-camera projection;
-2. live depth separation remains available to X/Y pseudo-rotation around the object's
-   projected Blender Object Origin.
-
-This is intentionally not implemented by collapsing the depth-scale transform with a
-setup `scaleX=-1`, because that mixes camera depth into setup XY and deforms camera-facing
-meshes.
+depth Transform setup values are neutral. Each `_camera_setup` child applies the inverse of
+its depth-group setup translation while live depth remains available to X/Y pseudo-rotation.
 
 ### Active Camera — Camera Root Bone
 
-Persisted projection ID: `ACTIVE_CAMERA_CAMERA_ROOT`.
-
-Application settings normalize geometry projection back to `ACTIVE_CAMERA` while selecting
-setup mode `PREPROJECTED_SCREEN`.
-
-Contract:
+Persisted projection ID: `ACTIVE_CAMERA_CAMERA_ROOT`. The application normalizes geometry
+projection back to `ACTIVE_CAMERA` while selecting setup mode `PREPROJECTED_SCREEN`.
 
 ```text
 root
@@ -209,9 +198,8 @@ root
             └── generated vertex bones
 ```
 
-All attachment vertices bind through one rigid camera-depth group. Perspective and
-Orthographic layer behavior is carried explicitly in the rig request. This mode reuses the
-same camera-projected geometry and material-bake input as Object Root.
+All attachment vertices bind through one rigid camera-depth group. This mode reuses the same
+camera-projected geometry and material-bake input as Object Root.
 
 ## Camera Projection
 
@@ -225,7 +213,7 @@ active camera render tasks
 -> target-specific document
 ```
 
-Camera Projection is an explicit representation. It never silently replaces Normal / UV
+Camera Projection is an explicit representation and never silently replaces Normal / UV
 Segments.
 
 ## Depth Camera Projection
@@ -242,86 +230,60 @@ active camera visible surface
 -> target-specific document
 ```
 
-The public relief base is Farthest Visible Point. A positive Parallax Horizon Angle can
-retain connected reserve surfaces by accumulated unsigned dihedral cost. FRONT and reserve
-attachments use one union geometry/rig where source identity is shared.
-
-Temporary virtual cameras and render proxies are isolated Blender resources and are removed
-on success and failure.
+The public relief base is Farthest Visible Point. Positive Parallax Horizon Angle can retain
+connected reserve surfaces. Temporary virtual cameras/render proxies are isolated Blender
+resources and are removed on success and failure.
 
 ## Attachment projection
 
 Blender UV identity belongs to loops. The attachment projector therefore preserves
-`(SourceVertexId, UV)` identity instead of assuming one UV per geometric vertex.
-
-Final mesh attachments preserve:
-
-- UV-specific attachment vertices;
-- triangulation corner order;
-- physical Spine hull semantics;
-- explicit Z-group binding;
-- deterministic generated vertex-bone ownership.
-
-Setup-degenerate side geometry is retained for deformable rig modes because later control
-movement can restore visible area.
+`(SourceVertexId, UV)` identity instead of assuming one UV per geometric vertex. Final mesh
+attachments preserve UV-specific vertices, triangulation corner order, physical Spine hull
+semantics, explicit depth binding, and deterministic generated vertex-bone ownership.
 
 ## Shared generated vertex bones
 
 Segmentation can duplicate the same source point across attachments. The optimizer shares
 only generated component vertex bones whose final setup semantics are identical. Parent
-identity is part of the key, so different depth groups never collapse together.
-
-Only weighted bone indices are remapped. UVs, triangles, hull, edges, paths, local
-influence positions, and weights remain unchanged.
+identity is part of the key, so different depth groups never collapse together. Only
+weighted bone indices are remapped.
 
 ## Target-specific Spine adaptation
 
-Canonical rig/document construction happens before target adaptation. The target layer then
-encodes the selected Spine version and any required bone-index or sequence representation
-changes.
-
-Supported standalone target versions are 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23.
-Unsupported scope/profile/target combinations fail before expensive work.
+Canonical rig/document construction happens before target adaptation. The selected schema
+family then chooses its production codec. Supported standalone families are 3.8, 4.0, 4.1,
+4.2, and 4.3; their built-in exact defaults are 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23.
+A user-selected same-family exact patch changes emitted project metadata, not codec topology.
+Unsupported scope/profile/family combinations fail before expensive work.
 
 ## Multi-object composition
 
 Public selected-object export creates standalone composition. Internal connected and mixed
-composition routes are explicit and capability-gated.
-
-Each object owns its preparation and generated vertex-bone optimization before outer
-composition. Generated bones are never shared across unrelated object boundaries.
-
-The outer request owns one atomic transaction for the final JSON and every texture.
+composition routes are explicit and capability-gated. Each object owns preparation and
+vertex-bone optimization before outer composition; generated bones are never shared across
+unrelated object boundaries. The outer request owns one atomic transaction for final JSON
+and every texture.
 
 ## Readiness
 
 Readiness executes production preparation without final commit and records immutable
-blockers/warnings/statistics. Relevant source or settings changes stale or invalidate the
-cached report.
-
-Readiness diagnostics do not weaken export validation; production export still validates
-all required contracts.
+blockers/warnings/statistics. Relevant source/settings changes stale or invalidate the
+cached report. Exact-version preference edits explicitly invalidate all open Scene readiness
+caches.
 
 ## Atomic output
 
 Output files are reserved and staged before installation. Existing finals may be protected
-with backups.
-
-Required properties:
-
-1. deterministic path reservation;
-2. complete staged files before installation;
-3. rollback/restoration on partial failure;
-4. stale stage/backup recovery;
-5. no deletion of work owned by another live process.
+with backups. Required properties are deterministic path reservation, complete staged files,
+rollback/restoration, stale work recovery, and no deletion of work owned by another live
+process.
 
 ## Source-state integrity
 
 Production export must not permanently change source topology, UVs, materials, transforms,
 active object, selection, mode, renderer, frame, active camera, View Layer, or visibility
-state outside the intended transaction.
-
-Temporary Blender datablocks are removed on success and failure paths.
+state outside the intended transaction. Temporary Blender datablocks are removed on success
+and failure paths.
 
 ## Related documents
 
