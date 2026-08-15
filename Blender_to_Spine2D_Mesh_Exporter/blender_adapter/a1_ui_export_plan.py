@@ -204,7 +204,7 @@ def build_selected_ui_export_plan(context: Any) -> A1UiMultiExportPlan:
 
     base_name = sanitize_filename_stem(object_profiles[0].object_name)
     version_token = spine_json_version_filename_token(
-        sources[0].settings.export.spine_target
+        sources[0].settings.export.spine_version
     )
     output_stem = (
         f"{base_name}_plus_{len(object_profiles) - 1}_objects_{version_token}"
