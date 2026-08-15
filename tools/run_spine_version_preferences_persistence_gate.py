@@ -88,6 +88,8 @@ def run_gate(
     )
     save_report = work / "save-report.json"
     verify_report = work / "verify-report.json"
+    save_output = work / "save-output"
+    verify_output = work / "verify-exports"
     save_command = (
         executable,
         "--background",
@@ -102,6 +104,8 @@ def run_gate(
         "save",
         "--report-json",
         str(save_report),
+        "--output-root",
+        str(save_output),
     )
     verify_command = (
         executable,
@@ -117,6 +121,8 @@ def run_gate(
         "verify",
         "--report-json",
         str(verify_report),
+        "--output-root",
+        str(verify_output),
     )
 
     commands = (
@@ -130,6 +136,7 @@ def run_gate(
 
     results = []
     primary_error: str | None = None
+    verified_exports: list[dict[str, object]] = []
     try:
         for name, command in commands[:4]:
             result = _run_step(
@@ -153,6 +160,22 @@ def run_gate(
         if saved.get("actual") != verified.get("actual"):
             raise ExtensionInstallGateError(
                 "saved exact-version preferences differ after Blender restart"
+            )
+        raw_exports = verified.get("exports")
+        if not isinstance(raw_exports, list) or len(raw_exports) != 5:
+            raise ExtensionInstallGateError(
+                "restart verification must complete five real target exports; "
+                f"actual={raw_exports!r}"
+            )
+        verified_exports = raw_exports
+        exact_versions = {
+            str(item.get("exact_version", ""))
+            for item in verified_exports
+            if isinstance(item, dict)
+        }
+        if len(exact_versions) != 5 or "" in exact_versions:
+            raise ExtensionInstallGateError(
+                f"verified exports contain invalid exact versions: {verified_exports!r}"
             )
     except Exception as exc:
         primary_error = str(exc)
@@ -178,6 +201,7 @@ def run_gate(
         "work_directory": str(work),
         "save_report": str(save_report),
         "verify_report": str(verify_report),
+        "verified_exports": verified_exports,
         "steps": [
             {
                 "name": item.name,
@@ -211,9 +235,15 @@ def main() -> None:
         namespace.output_root,
         keep_work=namespace.keep_work,
     )
+    versions = tuple(
+        str(item.get("exact_version", ""))
+        for item in payload["verified_exports"]
+        if isinstance(item, dict)
+    )
     print(
         "[SPINE-VERSION-PREFERENCES-PERSISTENCE] PASS "
-        f"extension={payload['extension_id']}",
+        f"extension={payload['extension_id']} exports={len(versions)} "
+        f"versions={versions!r}",
         flush=True,
     )
 
