@@ -83,6 +83,13 @@ def get_spine_addon_preferences(
     *,
     required: bool = False,
 ) -> Any | None:
+    """Return the installed extension's AddonPreferences for the active Blender profile.
+
+    Source-registered development tests intentionally have no installed add-on entry;
+    callers may therefore request a non-required lookup and fall back to descriptor
+    defaults without manufacturing a fake preferences object.
+    """
+
     runtime_context = bpy.context if context is None else context
     preferences = getattr(runtime_context, "preferences", None)
     addons = getattr(preferences, "addons", None)
@@ -91,6 +98,30 @@ def get_spine_addon_preferences(
     if result is None and required:
         raise RuntimeError("Spine2D AddonPreferences are unavailable")
     return result
+
+
+def read_spine_project_exact_version_raw(
+    target: object,
+    *,
+    preferences: Any | None = None,
+    context: Any | None = None,
+) -> object:
+    """Read one preference without validating it.
+
+    Readiness/cache code needs the raw persisted value in its signature so a scripted
+    preference mutation invalidates cached diagnostics even when Blender's RNA update
+    callback is bypassed. Validation remains centralized in
+    :func:`resolve_spine_project_exact_version`.
+    """
+
+    resolved_target = resolve_spine_json_target(target)
+    spec = spine_exact_version_preference_spec(resolved_target)
+    prefs = preferences
+    if prefs is None:
+        prefs = get_spine_addon_preferences(context, required=False)
+    if prefs is None:
+        return spec.default_version
+    return getattr(prefs, spec.property_name, spec.default_version)
 
 
 def resolve_spine_project_exact_version(
@@ -102,13 +133,11 @@ def resolve_spine_project_exact_version(
     """Resolve the user's exact project version for one schema family."""
 
     resolved_target = resolve_spine_json_target(target)
-    spec = spine_exact_version_preference_spec(resolved_target)
-    prefs = preferences
-    if prefs is None:
-        prefs = get_spine_addon_preferences(context, required=False)
-    if prefs is None:
-        return spec.default_version
-    raw = getattr(prefs, spec.property_name, spec.default_version)
+    raw = read_spine_project_exact_version_raw(
+        resolved_target,
+        preferences=preferences,
+        context=context,
+    )
     return validate_spine_json_exact_version_for_target(resolved_target, raw)
 
 
@@ -117,6 +146,8 @@ def assign_spine_project_exact_version(
     target: object,
     value: object,
 ) -> str:
+    """Validate and assign one exact project version to AddonPreferences."""
+
     if preferences is None:
         raise ValueError("preferences cannot be None")
     resolved_target = resolve_spine_json_target(target)
@@ -136,6 +167,7 @@ __all__ = [
     "addon_root_package_name",
     "assign_spine_project_exact_version",
     "get_spine_addon_preferences",
+    "read_spine_project_exact_version_raw",
     "resolve_spine_project_exact_version",
     "spine_exact_version_preference_spec",
 ]
