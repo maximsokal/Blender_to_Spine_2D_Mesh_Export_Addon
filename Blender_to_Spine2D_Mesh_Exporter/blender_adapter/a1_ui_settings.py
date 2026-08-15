@@ -13,7 +13,10 @@ from ..application import (
 from ..domain.baking import A1TextureExportMode, sanitize_filename_stem
 from ..domain.projection import A1ProjectionDirection
 from ..domain.spine.rig_profiles import A1RigSetupPoseMode
-from ..domain.spine.version_target import spine_json_version_filename_token
+from ..domain.spine.version_target import (
+    spine_json_version_filename_token,
+    validate_spine_json_exact_version_for_target,
+)
 from ..domain.uv import UvUnwrapSettings
 from .a1_multi_object_contracts import A1MultiObjectSource
 from .a1_ui_scene_capture import (
@@ -48,7 +51,10 @@ def _versioned_json_output_stem(
     resolved_version = (
         resolve_spine_project_exact_version(scene.spine_target)
         if spine_version is None
-        else spine_version
+        else validate_spine_json_exact_version_for_target(
+            scene.spine_target,
+            spine_version,
+        )
     )
     sanitized_base = sanitize_filename_stem(base_stem)
     token = spine_json_version_filename_token(resolved_version)
@@ -119,7 +125,16 @@ def _settings_from_profiles(
     rig_setup_pose_mode: A1RigSetupPoseMode = (
         A1RigSetupPoseMode.PRESERVE_COMPOSITION
     ),
+    spine_version: str | None = None,
 ) -> A1SingleObjectExportSettings:
+    """Build one immutable source settings snapshot.
+
+    ``spine_version`` may be supplied by a multi-object caller that has already read
+    AddonPreferences once for the whole request. This guarantees every source in one
+    export carries the same exact project version without moving Blender preference
+    access into the captured pure Scene profile.
+    """
+
     if not isinstance(obj, _ObjectExportProfile):
         raise TypeError("obj must be _ObjectExportProfile")
     if not isinstance(scene, _SceneExportProfile):
@@ -130,14 +145,21 @@ def _settings_from_profiles(
         scene,
         rig_setup_pose_mode,
     )
-    spine_version = resolve_spine_project_exact_version(scene.spine_target)
+    resolved_spine_version = (
+        resolve_spine_project_exact_version(scene.spine_target)
+        if spine_version is None
+        else validate_spine_json_exact_version_for_target(
+            scene.spine_target,
+            spine_version,
+        )
+    )
     return A1SingleObjectExportSettings(
         export=ExportSettings(
             texture_width=scene.texture_size,
             texture_height=scene.texture_size,
             output_directory=scene.output_directory,
             images_relative_path=scene.images_relative_path,
-            spine_version=spine_version,
+            spine_version=resolved_spine_version,
             rig_profile=scene.rig_profile.value,
             seam_mode=scene.seam_mode,
             angle_limit_degrees=scene.angle_limit_degrees,
@@ -151,7 +173,7 @@ def _settings_from_profiles(
         json_output_stem=_versioned_json_output_stem(
             json_output_stem,
             scene,
-            spine_version=spine_version,
+            spine_version=resolved_spine_version,
         ),
         source_geometry_mode=_effective_source_geometry_mode(scene),
         geometry=scene.geometry,
@@ -254,12 +276,15 @@ def _build_sources_from_profiles(
     objects: Tuple[_ObjectExportProfile, ...],
     scene: _SceneExportProfile,
 ) -> Tuple[A1MultiObjectSource, ...]:
+    """Build all sources from one exact-version preference snapshot."""
+
     if not isinstance(objects, tuple) or not objects:
         raise ValueError("objects must be a non-empty tuple")
     if not all(isinstance(item, _ObjectExportProfile) for item in objects):
         raise TypeError("objects must contain _ObjectExportProfile values")
     if not isinstance(scene, _SceneExportProfile):
         raise TypeError("scene must be _SceneExportProfile")
+    spine_version = resolve_spine_project_exact_version(scene.spine_target)
     return tuple(
         A1MultiObjectSource(
             source_object=obj.source_object,
@@ -269,6 +294,7 @@ def _build_sources_from_profiles(
                 obj,
                 scene,
                 rig_setup_pose_mode=A1RigSetupPoseMode.PRESERVE_COMPOSITION,
+                spine_version=spine_version,
             ),
         )
         for index, obj in enumerate(objects, start=1)
