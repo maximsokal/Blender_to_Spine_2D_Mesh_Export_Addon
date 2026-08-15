@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import re
 from types import MappingProxyType
 from typing import Mapping, Tuple
 
@@ -95,6 +96,13 @@ class SpineJsonTarget(str, Enum):
 
     @property
     def exact_version(self) -> str:
+        """Return the default exact project version for this schema family.
+
+        Runtime/user configuration may select another patch version inside the same
+        family. Keeping this descriptor value immutable preserves codec identity and
+        provides a stable default for new installations and non-Blender callers.
+        """
+
         return self.descriptor.exact_version
 
     @property
@@ -214,6 +222,9 @@ _TARGET_BY_EXACT_VERSION = MappingProxyType(
 _TARGET_BY_FAMILY = MappingProxyType(
     {target.family: target for target in SpineJsonTarget}
 )
+_EXACT_VERSION_PATTERN = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
+)
 
 if len(_TARGET_BY_EXACT_VERSION) != len(SpineJsonTarget):
     raise RuntimeError("Spine JSON exact versions must be unique")
@@ -228,6 +239,24 @@ def spine_json_target_enum_items() -> Tuple[Tuple[str, str, str], ...]:
     )
 
 
+def _parse_spine_json_exact_version(value: object) -> tuple[str, str]:
+    """Return ``(canonical_exact, family)`` for one strict semantic version."""
+
+    if not isinstance(value, str):
+        raise TypeError("Spine JSON exact version must be str")
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("Spine JSON exact version cannot be empty")
+    match = _EXACT_VERSION_PATTERN.fullmatch(normalized)
+    if match is None:
+        raise ValueError(
+            "Spine JSON exact version must use canonical major.minor.patch notation; "
+            f"got {value!r}"
+        )
+    family = f"{match.group(1)}.{match.group(2)}"
+    return normalized, family
+
+
 def resolve_spine_json_target(value: object) -> SpineJsonTarget:
     if isinstance(value, SpineJsonTarget):
         return value
@@ -240,11 +269,21 @@ def resolve_spine_json_target(value: object) -> SpineJsonTarget:
         return SpineJsonTarget(normalized)
     except ValueError:
         pass
+
     target = _TARGET_BY_EXACT_VERSION.get(normalized)
     if target is None:
         target = _TARGET_BY_FAMILY.get(normalized)
     if target is not None:
         return target
+
+    try:
+        _exact, family = _parse_spine_json_exact_version(normalized)
+    except ValueError:
+        family = ""
+    target = _TARGET_BY_FAMILY.get(family)
+    if target is not None:
+        return target
+
     supported = tuple(target.value for target in SpineJsonTarget)
     raise ValueError(
         f"Unsupported Spine JSON target {value!r}; supported identifiers={supported}"
@@ -252,21 +291,46 @@ def resolve_spine_json_target(value: object) -> SpineJsonTarget:
 
 
 def resolve_spine_json_exact_version(value: object) -> SpineJsonTarget:
-    if not isinstance(value, str):
-        raise TypeError("Spine JSON exact version must be str")
-    normalized = value.strip()
-    if not normalized:
-        raise ValueError("Spine JSON exact version cannot be empty")
-    target = _TARGET_BY_EXACT_VERSION.get(normalized)
+    """Resolve any canonical exact patch version to its supported schema family."""
+
+    normalized, family = _parse_spine_json_exact_version(value)
+    target = _TARGET_BY_FAMILY.get(family)
     if target is None:
-        supported = tuple(item.exact_version for item in SpineJsonTarget)
+        supported = tuple(item.family for item in SpineJsonTarget)
         raise ValueError(
-            f"Unsupported Spine JSON exact version {value!r}; supported={supported}"
+            f"Unsupported Spine JSON exact version {normalized!r}; "
+            f"supported families={supported}"
         )
     return target
 
 
+def validate_spine_json_exact_version_for_target(
+    target: object,
+    value: object,
+) -> str:
+    """Validate and return one canonical exact version inside ``target`` family."""
+
+    resolved_target = resolve_spine_json_target(target)
+    normalized, family = _parse_spine_json_exact_version(value)
+    if family != resolved_target.family:
+        raise ValueError(
+            f"Spine JSON exact version {normalized!r} belongs to family {family!r}, "
+            f"not selected family {resolved_target.family!r}"
+        )
+    return normalized
+
+
 def spine_json_version_filename_token(value: object) -> str:
+    """Return a stable filename token for a family identifier or exact version."""
+
+    if isinstance(value, str):
+        try:
+            normalized, family = _parse_spine_json_exact_version(value)
+        except ValueError:
+            normalized = ""
+            family = ""
+        if normalized and family in _TARGET_BY_FAMILY:
+            return f"spine_{normalized}"
     target = resolve_spine_json_target(value)
     return f"spine_{target.exact_version}"
 
@@ -293,4 +357,5 @@ __all__ = [
     "resolve_spine_json_target",
     "spine_json_target_enum_items",
     "spine_json_version_filename_token",
+    "validate_spine_json_exact_version_for_target",
 ]
