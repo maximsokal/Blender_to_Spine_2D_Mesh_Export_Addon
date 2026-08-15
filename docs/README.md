@@ -1,7 +1,7 @@
 # Documentation
 
 This directory contains the maintained documentation for Blender to Spine2D Mesh Exporter
-**0.150.0**.
+**0.151.0**.
 
 The documentation describes the current product only. Historical release notes, milestone
 journals, and superseded implementation checkpoints belong in Git history and tags rather
@@ -9,7 +9,7 @@ than in the maintained documentation tree.
 
 ## Current product baseline
 
-- Extension version: **0.150.0**.
+- Extension version: **0.151.0**.
 - Minimum Blender version: **5.2.0**.
 - Initial Blender Extensions package: **Windows x64**.
 - Scene settings schema: **8**.
@@ -17,12 +17,9 @@ than in the maintained documentation tree.
 - Default export mode: **Normal / UV Segments**.
 - Default Normal projection direction: **+Z**.
 - `Texture size` is a Scene-level **Bake** setting shared by the complete export request.
-- Supported standalone Spine targets:
-  - 3.8.99
-  - 4.0.64
-  - 4.1.24
-  - 4.2.43
-  - 4.3.23
+- Supported standalone Spine schema families: 3.8, 4.0, 4.1, 4.2, and 4.3.
+- Default exact project versions: 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23.
+- Each family's exact `major.minor.patch` project version is configurable in Add-on Preferences and persists with Blender Preferences rather than the `.blend` Scene.
 - Connected and mixed composition: supported only by explicitly allowed Spine 4.2 routes.
 
 ## Export modes
@@ -59,7 +56,7 @@ parallax reserve surfaces with `Parallax Horizon Angle`.
 
 - [Installation](installation.md) — installation, update, local build, and archive validation.
 - [Usage](usage.md) — complete Blender-to-Spine workflow for all public export modes.
-- [Settings Reference](settings-reference.md) — public Scene and object settings.
+- [Settings Reference](settings-reference.md) — public Scene, object, and global Add-on Preference settings.
 - [Output Format](output-format.md) — JSON, textures, sequences, rig ownership, naming, and atomic output.
 - [Troubleshooting](troubleshooting.md) — readiness diagnostics, camera/UV/material issues, and output recovery.
 - [Examples](../examples/examples.md) — repository examples and validation goals.
@@ -68,7 +65,7 @@ parallax reserve surfaces with `Parallax Horizon Angle`.
 
 - [Architecture](architecture.md) — package boundaries and production data flow.
 - [Rig Profiles](rig-profiles.md) — current generated rig topology and setup-pose policies.
-- [Testing](testing.md) — pure Python, real bpy, Blender headless, and packaging gates.
+- [Testing](testing.md) — pure Python, real bpy, Blender headless, preference-restart, and packaging gates.
 - [Blender Extensions Submission](submission.md) — current store metadata, reviewer path, and pre-upload gate.
 - [Contributing](CONTRIBUTING.md) — coding, Blender-state, testing, and documentation requirements.
 
