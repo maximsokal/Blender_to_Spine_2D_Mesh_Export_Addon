@@ -43,7 +43,9 @@ from .a1_ui_export_plan import (
     build_active_ui_export_plan,
     build_selected_ui_export_plan,
 )
+from .a1_ui_scene_capture import _resolve_spine_target
 from .a1_ui_selection import _ordered_selected_meshes, _rna_identity
+from .spine_version_preferences import read_spine_project_exact_version_raw
 
 
 logger = logging.getLogger(__name__)
@@ -241,6 +243,12 @@ def build_a1_readiness_signature(context: Any) -> str:
     )
     render = getattr(scene, "render", None)
     camera = getattr(scene, "camera", None)
+    spine_target_raw = getattr(scene, "spine2d_target_spine_version", "SPINE_4_2")
+    spine_target = _resolve_spine_target(scene)
+    spine_exact_version_raw = read_spine_project_exact_version_raw(
+        spine_target,
+        context=context,
+    )
     payload = {
         "blend_file": _blend_file_path(),
         "scene": _rna_identity(scene),
@@ -259,9 +267,8 @@ def build_a1_readiness_signature(context: Any) -> str:
             "projection_direction": str(
                 getattr(scene, "spine2d_projection_direction", "POSITIVE_Z")
             ),
-            "spine_target": str(
-                getattr(scene, "spine2d_target_spine_version", "SPINE_4_2")
-            ),
+            "spine_target": str(spine_target_raw),
+            "spine_exact_version_raw": spine_exact_version_raw,
             "texture_size": _safe_int(
                 getattr(scene, "spine2d_texture_size", 1024)
             ),
