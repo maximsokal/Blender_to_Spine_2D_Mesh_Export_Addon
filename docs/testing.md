@@ -1,7 +1,7 @@
 # Testing and Release Validation
 
 This document defines the current validation policy for Blender to Spine2D Mesh Exporter
-**0.150.0**.
+**0.151.0**.
 
 A focused test is not a release claim. Release evidence must be generated from one exact
 clean commit and the archive built from that same commit.
@@ -9,7 +9,10 @@ clean commit and the archive built from that same commit.
 ## Product scope under test
 
 - Blender 5.2.0 or newer.
-- Spine targets 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23 according to the capability registry.
+- Spine schema families 3.8, 4.0, 4.1, 4.2, and 4.3 according to the capability/codec registry.
+- Default exact project versions 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23.
+- User-configurable canonical exact patch versions inside each supported family.
+- Global Add-on Preference persistence for those five exact versions.
 - Normal / UV Segments.
 - Camera Projection.
 - Depth Camera Projection.
@@ -75,23 +78,32 @@ Important current contracts include:
 - signed-axis projection bases;
 - Shared Selection Pivot capability/visibility/default behavior;
 - aggregate world-space selection bounds and export-only pivot resolution;
-- U/V/depth rebase preserving every world-space vertex and nearest/farthest depth owner;
+- U/V/depth rebase preserving world-space vertices;
 - legacy per-object settings identity when Shared Selection Pivot is disabled;
 - Active Camera Object Root/Camera Root normalization;
-- camera-projected Object Origin placement;
-- Object Root inverse-setup bone generation;
-- Object Root vertex parenting below inverse setup bones;
-- neutral camera-facing setup constraints;
-- Camera Root single rigid depth-layer ownership;
+- Object Root inverse-setup bone generation and vertex parenting;
+- Camera Root rigid depth-layer ownership;
 - material-bake geometry independence from Normal projection direction;
-- Texture size rendered by the ordered Bake foldout and absent from Paths and Spine 2D version;
-- Texture size remaining Scene-owned rather than becoming a per-object sequence setting;
+- Texture size Scene ownership inside Bake;
 - loop-level UV identity and weighted attachment construction;
-- target-specific Spine version adaptation;
+- target-specific Spine schema adaptation;
+- arbitrary canonical same-family exact project patches;
+- exact-version propagation into immutable ExportSettings and versioned JSON names;
+- one persistent Add-on Preference field per supported Spine family;
+- no production call to `wm.save_userpref` from preference update callbacks;
 - sequence ownership;
 - parallax reserve topology/camera planning;
 - Blender-state/resource lifecycle contracts;
 - manifest/documentation version synchronization.
+
+Focused Spine exact-version coverage includes:
+
+```text
+tests/test_spine_project_exact_versions.py
+tests/test_spine_version_preferences_contract.py
+tests/test_spine_version_preferences_persistence_gate_standalone.py
+tests/test_grenade_all_spine_targets_runner_contract.py
+```
 
 Focused Shared Pivot coverage includes:
 
@@ -110,18 +122,63 @@ Focused UI/release coverage includes:
 tests/test_texture_size_bake_ui.py
 tests/test_documentation_contract.py
 tests/test_manifest_version.py
-tests/test_extension_version_0150.py
+tests/test_extension_version_0151.py
 ```
 
-Focused Object Root tests include:
+## Installed extension exact-version persistence gate
+
+Exact project versions are `AddonPreferences`, so a pure Python mock cannot prove their
+real Blender persistence semantics. The release gate installs the built source as a Blender
+Extension into an isolated Blender user configuration and launches two separate Blender
+processes.
+
+Process A:
+
+1. installs/enables the extension;
+2. assigns a deliberately non-default exact patch inside every supported family;
+3. calls Blender's preference-save operator only inside this isolated deterministic test;
+4. exits completely.
+
+Process B starts from scratch using the same isolated Blender user configuration. It must:
+
+1. read back all five exact values from the installed extension's real AddonPreferences;
+2. create a real Mesh and material;
+3. select each Spine schema family in turn;
+4. build the public active-object export plan;
+5. prove `ExportSettings.spine_version` equals the persisted custom exact patch;
+6. run the real production export;
+7. prove the versioned JSON filename and serialized `skeleton.spine` use that same patch;
+8. require a real PNG output for every family.
+
+Run it with:
+
+```powershell
+& $Python tools\run_spine_version_preferences_persistence_gate.py `
+    --blender $Blender `
+    --source .\Blender_to_Spine2D_Mesh_Exporter `
+    --output-root $PreferencePersistenceOutput
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Spine exact-version preference persistence gate failed"
+}
+```
+
+The gate owns an isolated `BLENDER_USER_CONFIG`; it must never read or write the developer's
+ordinary Blender Preferences. It removes the temporary installed extension/repository after
+a successful run.
+
+The current deterministic custom exact versions are one patch below each registry default:
 
 ```text
-tests/test_active_camera_inverse_setup_parenting.py
-tests/test_active_camera_normal_setup_pose.py
-tests/test_active_camera_root_modes.py
-tests/test_active_camera_normal_object_pivot.py
-tests/test_normal_projection_parity_contract.py
+3.8.98
+4.0.63
+4.1.23
+4.2.42
+4.3.22
 ```
+
+These values intentionally differ from defaults so a hidden hardcoded exact version cannot
+pass the gate.
 
 ## Real Blender Shared Pivot gate
 
@@ -151,7 +208,7 @@ JSON/PNG outputs are non-empty, and source object/scene/datablock state is uncha
 
 The same artist-authored grenade project must also be exported through every codec that the
 production Spine JSON registry declares ready. The runner obtains its target set directly
-from `registered_spine_json_codecs()`; do not duplicate a target list in the test.
+from `registered_spine_json_codecs()`; do not duplicate a target list inside the runner.
 
 ```powershell
 & $Blender `
@@ -167,104 +224,38 @@ from `registered_spine_json_codecs()`; do not duplicate a target list in the tes
 if ($LASTEXITCODE -ne 0) { throw "Grenade all-target Spine matrix failed" }
 ```
 
-Each registered target receives an isolated output directory. For every target the gate must
-prove that the Scene target reaches the public selected-object plan as the expected exact
-version, the real production export succeeds, the serialized `skeleton.spine` equals that
-exact version, Shared Pivot main/control bones remain valid, PNG outputs are real, and the
-source object/scene/context/datablock state is unchanged before the next target runs.
+This source-registration runner deliberately uses registry default exact versions because it
+does not install the extension into Blender Preferences. Its job is the heavyweight real
+asset regression: every codec family must export the same 14-object artist asset with Shared
+Pivot and leave source object/scene/context/datablock state unchanged.
 
-Because the matrix is registry-driven, adding a future production-ready codec automatically
-adds another real grenade export to this gate without editing the runner. A target must not
-be removed from this gate merely to make a failing export green; either its capability must
-be corrected or the production export bug must be fixed.
+The separate installed-extension persistence gate is the authority for custom exact patch
+propagation. Keeping these responsibilities separate avoids fake AddonPreferences objects in
+the grenade test.
+
+Because the grenade matrix is registry-driven, adding a future production-ready codec
+automatically adds another real grenade export. A target must not be removed merely to make
+a failing release green.
 
 ## Real Blender Active Camera gates
 
-Use a representative 3D asset with visible depth. The repository's coin integration asset
-is used by the dedicated runners.
-
-### Projection parity
-
-```powershell
-& $Blender `
-    --factory-startup `
-    --background `
-    $CoinBlend `
-    --python-exit-code 1 `
-    --python tests\blender_headless\run_coin_star_normal_projection_parity_integration.py `
-    -- `
-    --expected-blend $CoinBlend
-
-if ($LASTEXITCODE -ne 0) { throw "Projection parity gate failed" }
-```
-
-The gate validates retained side geometry, complete depth-group assignment, neutral
-active-camera setup, and projection-independent material-bake geometry.
-
-### Camera root modes
-
-```powershell
-& $Blender `
-    --factory-startup `
-    --background `
-    $CoinBlend `
-    --python-exit-code 1 `
-    --python tests\blender_headless\run_coin_star_normal_camera_root_modes_integration.py `
-    -- `
-    --expected-blend $CoinBlend
-
-if ($LASTEXITCODE -ne 0) { throw "Camera root mode gate failed" }
-```
-
-The gate must prove that Object Root and Camera Root share projected geometry/material
-input while using different depth ownership:
+Maintain real Blender coverage for projection parity, both camera root modes, and Object
+Root inverse setup. Representative runners include:
 
 ```text
-Object Root -> per-depth groups, CAMERA_VIEW_NORMAL
-Camera Root -> one rigid depth group, PREPROJECTED_SCREEN
+tests/blender_headless/run_coin_star_normal_projection_parity_integration.py
+tests/blender_headless/run_coin_star_normal_camera_root_modes_integration.py
+tests/blender_headless/run_coin_star_normal_object_root_setup_compensation_integration.py
 ```
 
-### Object Root inverse setup
-
-```powershell
-& $Blender `
-    --factory-startup `
-    --background `
-    $CoinBlend `
-    --python-exit-code 1 `
-    --python tests\blender_headless\run_coin_star_normal_object_root_setup_compensation_integration.py `
-    -- `
-    --expected-blend $CoinBlend
-
-if ($LASTEXITCODE -ne 0) { throw "Object Root inverse setup gate failed" }
-```
-
-The current gate verifies the complete setup chain rather than individual JSON fields. It
-must prove:
-
-- one inverse `*_camera_setup` bone for every Object Root depth group;
-- every Object Root generated vertex bone is parented below the correct inverse setup bone;
-- inverse setup Y cancels the matching depth setup Y;
-- X/Y camera-facing setup rotation is neutral;
-- depth Transform setup translation/scale are neutral;
-- weighted vertices resolve to the expected camera-projected setup XY;
-- the source Blender object and temporary datablock inventory remain unchanged after export.
-
-This gate exists specifically to prevent a projected mesh from passing texture/geometry
-checks while still being stretched by the generated Spine setup hierarchy.
+The gates prove shared projected geometry/material input, route-specific rig ownership,
+valid inverse setup parenting, camera-projected setup XY, and source-state restoration.
 
 ## Depth Camera Projection gates
 
-Maintain real Blender coverage for:
-
-- Perspective front-only output;
-- Orthographic output;
-- supported target matrix;
-- two-frame sequence output;
-- positive Perspective parallax;
-- Orthographic/sequence parallax;
-- multi-object parallax and rollback;
-- FRONT/reserve slot order and shared rig ownership.
+Maintain real Blender coverage for Perspective/Orthographic output, target matrix,
+sequences, positive parallax, multi-object parallax/rollback, FRONT/reserve slot order, and
+shared rig ownership.
 
 Current runners include:
 
@@ -288,7 +279,7 @@ run_connected_mixed_static_sequence_matrix_integration.py
 ```
 
 The capability registry, not documentation prose, is the authority for supported
-scope/profile/target combinations.
+scope/profile/schema-family combinations.
 
 ## Real bpy suite
 
@@ -299,11 +290,11 @@ if ($LASTEXITCODE -ne 0) { throw "Real bpy suite failed" }
 
 A missing real-bpy environment must not be reported as successful release validation.
 
-## Build 0.150.0
+## Build 0.151.0
 
 ```powershell
 $SourceDir = ".\Blender_to_Spine2D_Mesh_Exporter"
-$Archive = ".\dist\blender_to_spine2d_mesh_exporter-0.150.0.zip"
+$Archive = ".\dist\blender_to_spine2d_mesh_exporter-0.151.0.zip"
 
 New-Item -ItemType Directory -Force ".\dist" | Out-Null
 Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue
@@ -329,29 +320,21 @@ by the manifest build rules.
 
 Before packaging, verify in a saved `.blend`:
 
-1. Expand **Paths and Spine 2D version** and confirm `Texture size` is absent.
-2. Expand **Bake** and confirm `Texture size` is the first setting.
-3. Select at least two Mesh objects in signed-axis Normal / UV and confirm **Shared Selection Pivot** is visible and enabled by default.
-4. Reduce the selection to one Mesh or select an unsupported camera route and confirm the Shared Selection Pivot control is hidden.
-5. Change Texture size and confirm Analyze becomes stale/invalidated.
-6. Confirm Frames/Start remain per-object in selected-object export while Texture size is shared.
-7. Reset settings and confirm Texture size returns to `1024` and Shared Selection Pivot returns to enabled.
+1. Add-on Preferences contain exactly one exact project-version field for each family 3.8 through 4.3.
+2. Configure a non-default exact patch for the selected family and confirm the viewport **Exact JSON version** changes immediately.
+3. Run Analyze, change the exact patch again, and confirm readiness becomes stale/invalidated.
+4. Close and reopen Blender after saving Preferences and confirm all five values persist.
+5. Expand **Paths and Spine 2D version** and confirm `Texture size` is absent.
+6. Expand **Bake** and confirm `Texture size` is the first setting.
+7. Select at least two Mesh objects in signed-axis Normal / UV and confirm **Shared Selection Pivot** is visible and enabled by default.
+8. Reduce the selection to one Mesh or select an unsupported camera route and confirm Shared Selection Pivot is hidden.
+9. Reset Scene settings and confirm Texture size returns to `1024`; global exact-version Preferences must not be reset.
 
 ## Manual Spine validation
 
-For representative outputs in the exact selected Spine version, verify:
-
-- JSON imports without schema/reference errors;
-- texture paths resolve;
-- UVs match texture orientation;
-- signed-axis controls behave as expected;
-- Shared Selection Pivot multi-object parts rotate around the same assembly pivot when matching X/Y values are applied;
-- disabling Shared Selection Pivot restores independent per-object pivots;
-- Active Camera Object Root setup matches the Blender camera view without stretching;
-- Object Root X/Y controls rotate around the projected Blender Object Origin;
-- Active Camera Camera Root keeps correct camera-relative placement;
-- Depth FRONT/reserve slot order is correct;
-- static/sequence ownership is correct for the selected target.
+For representative outputs in the configured exact Spine project version, verify JSON import,
+texture paths, UV orientation, signed-axis controls, Shared Selection Pivot behavior, both
+Active Camera root modes, Depth FRONT/reserve order, and static/sequence ownership.
 
 ## Release evidence
 
@@ -361,6 +344,7 @@ Record:
 - clean worktree before and after the gate;
 - Python/bpy/Blender versions;
 - complete pytest result;
+- installed-extension preference save/restart/custom-export gate report;
 - required Blender-headless gate markers;
 - real-bpy result;
 - archive path, size, and SHA256;
