@@ -24,10 +24,7 @@ def _assigned_string_property_names(source: str) -> set[str]:
         if not isinstance(value, ast.Call):
             continue
         function = value.func
-        if (
-            isinstance(function, ast.Attribute)
-            and function.attr == "StringProperty"
-        ):
+        if isinstance(function, ast.Attribute) and function.attr == "StringProperty":
             result.add(node.target.id)
     return result
 
@@ -55,8 +52,15 @@ def test_production_preferences_never_force_save_all_blender_preferences() -> No
 def test_export_settings_resolve_effective_exact_version_from_preferences() -> None:
     source = _source("blender_adapter/a1_ui_settings.py")
     assert "resolve_spine_project_exact_version(scene.spine_target)" in source
-    assert "spine_version=spine_version" in source
+    assert "spine_version=resolved_spine_version" in source
     assert "spine_json_version_filename_token(resolved_version)" in source
+
+
+def test_multi_object_sources_share_one_exact_version_preference_snapshot() -> None:
+    source = _source("blender_adapter/a1_ui_settings.py")
+    assert "spine_version = resolve_spine_project_exact_version(scene.spine_target)" in source
+    assert "spine_version=spine_version" in source
+    assert "Build all sources from one exact-version preference snapshot" in source
 
 
 def test_multi_object_filename_uses_resolved_export_exact_version() -> None:
@@ -70,6 +74,7 @@ def test_viewport_exact_version_label_uses_same_preference_resolver() -> None:
     assert "resolve_spine_project_exact_version(" in source
     assert 'text=f"Exact JSON version: {exact_version}"' in source
     assert 'text=f"Exact JSON version: {target.exact_version}"' not in source
+    assert "Invalid Spine version settings" in source
 
 
 def test_preference_resolver_covers_every_current_family_without_fallback_aliases() -> None:
