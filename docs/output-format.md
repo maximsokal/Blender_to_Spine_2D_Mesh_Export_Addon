@@ -1,23 +1,26 @@
 # Output Format
 
 This document describes the current output contract for Blender to Spine2D Mesh Exporter
-**0.150.0**.
+**0.151.0**.
 
-## Spine targets
+## Spine targets and exact project versions
 
-The exporter builds a canonical typed Spine document and adapts it to the selected target.
-Supported standalone target metadata versions are:
+The exporter builds a canonical typed Spine document and adapts it through the selected
+schema-family codec. Supported standalone families and built-in default exact versions are:
 
 ```text
-3.8.99
-4.0.64
-4.1.24
-4.2.43
-4.3.23
+3.8 -> 3.8.99
+4.0 -> 4.0.64
+4.1 -> 4.1.24
+4.2 -> 4.2.43
+4.3 -> 4.3.23
 ```
 
-Target adaptation may change version-specific bone indices, sequence representation, or
-other schema details while preserving the validated geometry/rig semantics.
+The exact project patch is a separate Add-on Preference. A canonical same-family value such
+as `4.2.35` still uses the 4.2 codec. The effective exact value is written to
+`skeleton.spine` and included in the versioned JSON filename. Target adaptation may change
+version-specific bone indices, sequence representation, or other schema details while
+preserving validated geometry/rig semantics.
 
 ## Output directories
 
@@ -34,19 +37,19 @@ Images Subfolder: images/
 Typical result:
 
 ```text
-D:/project/export/Hero_merged.json
+D:/project/export/Hero_merged_spine_4.2.35.json
 D:/project/export/images/Hero_Baked.png
 ```
 
 Texture resolution is controlled by the Scene-level `Texture size` setting in the **Bake**
-foldout. Its UI location does not change output naming or path semantics.
+foldout. Its UI location does not change output path semantics.
 
 ## Naming
 
 Single-object JSON:
 
 ```text
-<ObjectName>_merged.json
+<ObjectName>_merged_spine_<exact-version>.json
 ```
 
 Static texture:
@@ -64,29 +67,15 @@ Sequence textures:
 ```
 
 Multi-object JSON uses the first ordered source name plus the number of additional selected
-objects.
-
-Output stems are sanitized for ordinary Windows filesystem restrictions. Invalid filename
-characters and reserved device-name collisions are normalized or rejected before staging.
+objects and the effective exact version. Output stems are sanitized for ordinary Windows
+filesystem restrictions.
 
 ## Normal / UV Segments attachments
 
-Each final manifold region becomes a Spine mesh attachment containing:
-
-- UVs;
-- triangle indices;
-- physical hull count;
-- optional edges;
-- target-relative texture path;
-- weighted vertex stream;
-- dimensions;
-- optional sequence metadata.
-
-UV identity is loop-aware. One geometric source vertex can therefore produce more than one
-attachment vertex when UV seams require distinct UV values.
-
-Setup-degenerate side geometry may remain present because deformable rig controls can make
-it visible later.
+Each final manifold region becomes a Spine mesh attachment containing UVs, triangle indices,
+physical hull count, optional edges, target-relative texture path, weighted vertex stream,
+dimensions, and optional sequence metadata. UV identity is loop-aware, so one source vertex
+can produce several attachment vertices when UV seams require distinct values.
 
 ## Generated vertex-bone weights
 
@@ -109,20 +98,9 @@ Generated vertex bones are parented to the matching depth rotation bone.
 ### Active Camera — Object Root Bone
 
 Generated vertex bones are parented to the matching generated
-`<depth-bone>_camera_setup` inverse child.
-
-For each depth group:
-
-```text
-depth scale bone
--> depth rotation bone
--> camera setup inverse bone
--> generated vertex bone
-```
-
-The depth translation and inverse setup translation cancel in setup pose, so attachment
-world XY remains the camera-projected XY. Live depth ownership remains in the ancestors for
-later X/Y control deformation.
+`<depth-bone>_camera_setup` inverse child. The depth translation and inverse setup
+translation cancel in setup pose while live depth ownership remains available for later X/Y
+deformation.
 
 ### Active Camera — Camera Root Bone
 
@@ -131,100 +109,49 @@ camera-relative depth layer. The exported main bone represents camera-space zero
 
 ## Shared generated vertex bones
 
-Equivalent generated vertex bones can be compacted across segmented attachments of the
-same object when their complete setup semantics match. Parent identity is part of the
-comparison.
-
-Compaction changes only weighted bone indices and generated-bone inventory. It does not
-change:
-
-- UV values;
-- triangle order;
-- hull;
-- edges;
-- local influence X/Y;
-- influence weight;
-- attachment texture path.
+Equivalent generated vertex bones can be compacted across segmented attachments when their
+complete setup semantics match. Parent identity is part of the comparison. Compaction changes
+only weighted bone indices/generated-bone inventory, not UVs, triangles, hull, edges, local
+influence coordinates, weight, or texture path.
 
 ## Camera Projection attachment
 
-Camera Projection produces a flat screen-space mesh from the active camera render.
-
-The attachment is based on:
-
-- usable alpha coverage;
-- stable crop across sequence frames;
-- contour simplification/fallback;
-- deterministic triangulation;
-- crop-local UV coordinates.
-
-It is a separate representation and does not reuse Normal region attachments.
+Camera Projection produces a flat screen-space mesh from the active camera render using
+usable alpha coverage, stable crop, contour construction and deterministic triangulation.
+It does not reuse Normal region attachments.
 
 ## Depth Camera Projection attachments
 
-Depth Camera Projection emits weighted relief attachments.
-
-At `Parallax Horizon Angle = 0°`, the object has the FRONT representation only.
-
-With positive parallax:
-
-- retained surfaces share one union geometry/rig;
-- every non-empty reserve view receives its own texture namespace and attachment;
-- each view owns an independent stable crop;
-- reserve slots are serialized before FRONT;
-- sequence frame tasks are shared while texture/crop ownership stays per view.
+Depth Camera Projection emits weighted relief attachments. At
+`Parallax Horizon Angle = 0°` the object has FRONT only. With positive parallax, retained
+surfaces share one union geometry/rig, each non-empty reserve view receives its own texture
+namespace/attachment/crop, and reserve slots are serialized before FRONT.
 
 ## Sequence encoding
 
-Spine 3.8 and 4.0 use the supported attachment-swap representation.
-
-Spine 4.1, 4.2, and 4.3 use native sequence metadata/timelines where supported by the
-selected target contract.
-
-A static object does not receive sequence metadata merely because another object in the
-same export request is animated.
+Spine 3.8 and 4.0 use the supported attachment-swap representation. Spine 4.1, 4.2 and 4.3
+use native sequence metadata/timelines where supported by the selected family contract. A
+custom exact patch never changes the family's sequence encoding policy.
 
 ## Bones, slots, constraints, and skins
 
-Before serialization the document validates:
-
-- unique bone names and valid parents;
-- slot-to-bone references;
-- skin/attachment references;
-- IK and Transform constraint references/order;
-- weighted mesh bone indices;
-- finite numeric payloads;
-- target-specific sequence data;
-- generated control references.
+Before serialization the document validates unique bone names/parents, slot-to-bone
+references, skin/attachment references, IK/Transform constraint references/order, weighted
+mesh indices, finite numeric payloads, target-specific sequence data, and generated control
+references.
 
 ## Texture-space contract
 
 Normal / UV semantic bake images are saved in the file-space orientation expected by the
-exported Spine UV values.
-
-Rendered-camera modes remap full-frame camera UV into the final crop without changing the
-validated attachment topology unexpectedly.
+exported Spine UV values. Rendered-camera modes remap full-frame camera UV into the final
+crop without changing validated attachment topology unexpectedly.
 
 ## Atomic output
 
-Export stages candidate files before installation. Temporary transaction files can look
-like:
-
-```text
-.spine2d-stage-*
-.spine2d-backup-*
-```
-
-They are not final Spine assets.
-
-The transaction is responsible for:
-
-1. deterministic output reservation;
-2. complete staged JSON/textures before installation;
-3. backup of replaced finals when required;
-4. rollback/restoration after partial failure;
-5. stale work recovery;
-6. avoiding work owned by another live process.
+Export stages candidate files before installation. Temporary transaction files such as
+`.spine2d-stage-*` and `.spine2d-backup-*` are not final Spine assets. The transaction owns
+deterministic reservation, staged JSON/textures, backup, rollback/restoration, stale-work
+recovery and live-process ownership checks.
 
 ## Related documents
 
