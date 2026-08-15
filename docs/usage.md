@@ -1,6 +1,6 @@
 # Usage Guide
 
-This guide describes Blender to Spine2D Mesh Exporter **0.150.0**.
+This guide describes Blender to Spine2D Mesh Exporter **0.151.0**.
 
 ## Open the exporter
 
@@ -11,7 +11,8 @@ This guide describes Blender to Spine2D Mesh Exporter **0.150.0**.
 5. Open **3D View > Sidebar > Blender to Spine2D Mesh Exporter**.
 
 Run **Analyze** after changing selection, geometry, modifiers, UVs, seams, materials,
-renderer, camera, frame settings, texture size, or other exporter settings.
+renderer, camera, frame settings, texture size, Spine exact project versions, or other
+exporter settings.
 
 ## Choose an export mode
 
@@ -101,11 +102,7 @@ Behavior:
 - X/Y setup rotation is neutral because the geometry is already camera-facing.
 - Every depth group receives a generated `<group>_camera_setup` inverse-setup bone.
 - Vertex bones are parented below the inverse-setup bone.
-- The inverse setup cancels only the setup depth translation; live X/Y pseudo-rotation
-  still sees the original depth separation.
-
-This prevents camera-facing meshes from being stretched in their setup pose while keeping
-the Blender Object Origin as the control pivot.
+- The inverse setup cancels only the setup depth translation; live X/Y pseudo-rotation still sees the original depth separation.
 
 ### Active Camera — Camera Root Bone
 
@@ -119,9 +116,6 @@ Behavior:
 - all attachment vertices bind through one rigid camera-depth layer;
 - Perspective and Orthographic camera-layer behavior remains explicit;
 - material bake geometry is unchanged from Object Root.
-
-The two Active Camera choices therefore differ in rig hierarchy and depth ownership, not
-in the camera projection or baked material input.
 
 ## Configure cutting
 
@@ -138,8 +132,7 @@ Custom uses Blender edges marked as seams and disables angular splitting. The to
 pipeline may still decompose a seam-defined region when required to produce valid manifold
 disk attachments.
 
-Depth Camera Projection creates its own relief topology and does not use source seam
-controls.
+Depth Camera Projection creates its own relief topology and does not use source seam controls.
 
 ## Configure Depth Camera Projection
 
@@ -163,8 +156,7 @@ unsigned dihedral cost. Retained reserve faces are assigned to deterministic vir
 directions. Each non-empty reserve view receives its own face-isolated render, crop,
 texture namespace, and weighted attachment while sharing the generated rig with FRONT.
 
-Reserve slots are emitted before the FRONT slot so FRONT remains above them in Spine draw
-order.
+Reserve slots are emitted before the FRONT slot so FRONT remains above them in Spine draw order.
 
 If the union surface exceeds **Max depth points**, Analyze and Export fail instead of
 silently dropping requested reserve geometry.
@@ -195,8 +187,7 @@ rendered-camera texture targets.
 
 - Default: `1024`.
 - Valid range: even values from `64` through `4096`.
-- Ownership: Scene-level; all objects in one selected-object export request share the same
-  texture resolution.
+- Ownership: Scene-level; all objects in one selected-object export request share the same texture resolution.
 - Changing Texture size invalidates cached Analyze results.
 
 The control is intentionally located in **Bake**, not **Paths and Spine 2D version**,
@@ -218,41 +209,43 @@ animated. Texture size remains shared even when frame timing is per object.
 For Depth Camera Projection with reserve views, FRONT and reserve views use the same frame
 tasks but keep independent stable crops and image namespaces.
 
-## Choose the Spine target
+## Choose the Spine target and exact project version
 
-Supported public target labels map to exact metadata versions:
+The 3D View selector chooses a schema family/codec. The built-in defaults are:
 
 ```text
-Spine 3.8 -> 3.8.99
-Spine 4.0 -> 4.0.64
-Spine 4.1 -> 4.1.24
-Spine 4.2 -> 4.2.43
-Spine 4.3 -> 4.3.23
+Spine 3.8 -> default 3.8.99
+Spine 4.0 -> default 4.0.64
+Spine 4.1 -> default 4.1.24
+Spine 4.2 -> default 4.2.43
+Spine 4.3 -> default 4.3.23
 ```
 
-Unsupported target/profile/composition combinations fail before expensive geometry or bake
-work.
+The exact Editor/project patch is configured independently in **Edit > Preferences >
+Add-ons > Blender to Spine2D Mesh Exporter > Spine project JSON versions**. Each family owns
+one persistent global exact-version field. Use canonical `major.minor.patch` notation and
+keep the same major/minor family; for example, `4.2.35` is valid for the Spine 4.2 field.
+
+Changing an exact project version invalidates cached Analyze results. The viewport **Exact
+JSON version** label, `ExportSettings.spine_version`, versioned JSON filename and serialized
+`skeleton.spine` all use that same effective value. The family still chooses the codec;
+changing only the patch does not switch schema families.
+
+Unsupported target/profile/composition combinations fail before expensive geometry or bake work.
 
 ## Analyze
 
-Analyze runs the production preparation path without final file commit. Review:
-
-- blockers and warnings;
-- source/exported geometry statistics;
-- region and attachment counts;
-- material and bake strategy;
-- camera/depth statistics;
-- sequence ownership;
-- ignored modifier diagnostics.
-
-A stale report should be regenerated after any relevant source or settings change.
+Analyze runs the production preparation path without final file commit. Review blockers,
+warnings, geometry statistics, material/bake strategy, camera/depth statistics, sequence
+ownership, and ignored modifier diagnostics. A stale report should be regenerated after any
+relevant source or settings change.
 
 ## Export one object
 
 1. Make the Mesh active.
 2. Configure Export Mode and mode-specific settings.
-3. Choose the Spine target.
-4. Configure Texture size and any frame settings in Bake.
+3. Choose the Spine schema family and confirm **Exact JSON version**.
+4. Configure Texture size and frame settings in Bake.
 5. Run Analyze.
 6. Review diagnostics.
 7. Run **Export Current Object**.
@@ -260,7 +253,7 @@ A stale report should be regenerated after any relevant source or settings chang
 Typical output:
 
 ```text
-<ObjectName>_merged.json
+<ObjectName>_merged_spine_<exact-version>.json
 images/<ObjectName>_Baked.png
 ```
 
@@ -268,8 +261,7 @@ images/<ObjectName>_Baked.png
 
 1. Select at least two Mesh objects.
 2. Configure shared Scene settings, including Texture size in Bake.
-3. For signed-axis Normal / UV exports, keep **Shared Selection Pivot** enabled when the
-   parts must rotate around one assembly pivot; disable it for independent object pivots.
+3. For signed-axis Normal / UV exports, keep **Shared Selection Pivot** enabled when the parts must rotate around one assembly pivot; disable it for independent object pivots.
 4. Configure per-object Frames and Start values.
 5. Run Analyze.
 6. Run **Export Selected Objects**.
@@ -281,29 +273,21 @@ capability combinations.
 ## Import into Spine
 
 1. Keep the JSON/image relative directory relationship unchanged.
-2. Open the exact selected Spine version.
+2. Open the configured exact Spine project version.
 3. Import the generated JSON.
 4. Point Spine to the exported images directory when required.
 5. Verify setup pose, slot order, UV placement, generated controls, and sequences.
-6. For signed-axis multi-object exports with Shared Selection Pivot, set matching X/Y
-   control values on different parts and verify they rotate around the same assembly axis.
-7. For Active Camera Object Root, verify the setup pose matches the Blender camera view and
-   rotating X/Y occurs around the projected Blender Object Origin.
-8. For Active Camera Camera Root, verify the object remains correctly positioned below the
-   camera-relative root.
+6. For signed-axis multi-object exports with Shared Selection Pivot, set matching X/Y control values on different parts and verify they rotate around the same assembly axis.
+7. For Active Camera Object Root, verify the setup pose matches the Blender camera view and rotating X/Y occurs around the projected Blender Object Origin.
+8. For Active Camera Camera Root, verify the object remains correctly positioned below the camera-relative root.
 9. For positive Depth parallax, verify reserve slots remain below FRONT.
 
 ## Reset settings
 
-The main reset restores the current defaults, including:
-
-- Normal / UV Segments;
-- `+Z` projection;
-- Shared Selection Pivot enabled for eligible multi-object signed-axis exports;
-- Bake Texture size `1024`;
-- Seam Maker Auto;
-- current-frame static baking;
-- Parallax Horizon Angle `0°`.
+The main reset restores Scene defaults including Normal / UV Segments, `+Z` projection,
+Shared Selection Pivot enabled for eligible exports, Bake Texture size `1024`, Seam Maker
+Auto, current-frame static baking, and Parallax Horizon Angle `0°`. It does not reset global
+AddonPreferences exact project versions.
 
 ## Continue reading
 
