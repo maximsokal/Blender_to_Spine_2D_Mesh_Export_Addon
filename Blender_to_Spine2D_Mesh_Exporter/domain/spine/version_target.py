@@ -130,9 +130,9 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             exact_version="3.8.99",
             label="Spine 3.8",
             description=(
-                "Limited Spine 3.8.99 export: single-object and standalone "
-                "multi-object for 2-Axis and 3-Axis rigs; texture animation uses "
-                "one keyed attachment per baked frame"
+                "Limited Spine 3.8 schema-family export (default project version "
+                "3.8.99): single-object and standalone multi-object for 2-Axis and "
+                "3-Axis rigs; texture animation uses one keyed attachment per baked frame"
             ),
             uses_legacy_bone_transform_field=True,
             uses_legacy_constraint_mix_fields=True,
@@ -148,8 +148,9 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             exact_version="4.0.64",
             label="Spine 4.0",
             description=(
-                "Limited Spine 4.0.64 export: 2-Axis single-object and standalone "
-                "multi-object; texture animation uses one keyed attachment per frame"
+                "Limited Spine 4.0 schema-family export (default project version "
+                "4.0.64): 2-Axis single-object and standalone multi-object; texture "
+                "animation uses one keyed attachment per frame"
             ),
             uses_legacy_bone_transform_field=True,
             uses_legacy_constraint_mix_fields=False,
@@ -165,8 +166,9 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             exact_version="4.1.24",
             label="Spine 4.1",
             description=(
-                "Limited Spine 4.1.24 export: 2-Axis single-object and standalone "
-                "multi-object only; native loop texture sequences are supported"
+                "Limited Spine 4.1 schema-family export (default project version "
+                "4.1.24): 2-Axis single-object and standalone multi-object only; "
+                "native loop texture sequences are supported"
             ),
             uses_legacy_bone_transform_field=True,
             uses_legacy_constraint_mix_fields=False,
@@ -182,8 +184,8 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             exact_version="4.2.43",
             label="Spine 4.2",
             description=(
-                "Export setup-pose JSON and native loop texture sequences for "
-                "Spine 4.2.43"
+                "Spine 4.2 schema-family setup-pose export (default project version "
+                "4.2.43) with native loop texture sequences"
             ),
             uses_legacy_bone_transform_field=False,
             uses_legacy_constraint_mix_fields=False,
@@ -199,8 +201,9 @@ _DESCRIPTORS: Mapping[SpineJsonTarget, SpineJsonVersionDescriptor] = MappingProx
             exact_version="4.3.23",
             label="Spine 4.3",
             description=(
-                "Limited Spine 4.3.23 unified-constraint export: single-object and "
-                "standalone multi-object with native loop texture sequences"
+                "Limited Spine 4.3 schema-family unified-constraint export (default "
+                "project version 4.3.23): single-object and standalone multi-object "
+                "with native loop texture sequences"
             ),
             uses_legacy_bone_transform_field=False,
             uses_legacy_constraint_mix_fields=False,
