@@ -26,6 +26,7 @@ from .a1_ui_selection import (
     _connect_enabled,
     _object_name,
 )
+from .spine_version_preferences import resolve_spine_project_exact_version
 
 
 _DEFAULT_BAKE_MARGIN = 4
@@ -35,15 +36,22 @@ _DEFAULT_UV_LAYER_NAME = "SpineBakeUV"
 def _versioned_json_output_stem(
     base_stem: str | None,
     scene: _SceneExportProfile,
+    *,
+    spine_version: str | None = None,
 ) -> str | None:
-    """Append the exact required Spine Editor version to a final JSON stem."""
+    """Append the effective exact Spine Editor version to a final JSON stem."""
 
     if base_stem is None:
         return None
     if not isinstance(scene, _SceneExportProfile):
         raise TypeError("scene must be _SceneExportProfile")
+    resolved_version = (
+        resolve_spine_project_exact_version(scene.spine_target)
+        if spine_version is None
+        else spine_version
+    )
     sanitized_base = sanitize_filename_stem(base_stem)
-    token = spine_json_version_filename_token(scene.spine_target)
+    token = spine_json_version_filename_token(resolved_version)
     suffix = f"_{token}"
     if sanitized_base.casefold().endswith(suffix.casefold()):
         return sanitized_base
@@ -122,13 +130,14 @@ def _settings_from_profiles(
         scene,
         rig_setup_pose_mode,
     )
+    spine_version = resolve_spine_project_exact_version(scene.spine_target)
     return A1SingleObjectExportSettings(
         export=ExportSettings(
             texture_width=scene.texture_size,
             texture_height=scene.texture_size,
             output_directory=scene.output_directory,
             images_relative_path=scene.images_relative_path,
-            spine_version=scene.spine_target.exact_version,
+            spine_version=spine_version,
             rig_profile=scene.rig_profile.value,
             seam_mode=scene.seam_mode,
             angle_limit_degrees=scene.angle_limit_degrees,
@@ -139,7 +148,11 @@ def _settings_from_profiles(
         ),
         prefix=obj.object_name,
         output_stem=sanitize_filename_stem(obj.object_name),
-        json_output_stem=_versioned_json_output_stem(json_output_stem, scene),
+        json_output_stem=_versioned_json_output_stem(
+            json_output_stem,
+            scene,
+            spine_version=spine_version,
+        ),
         source_geometry_mode=_effective_source_geometry_mode(scene),
         geometry=scene.geometry,
         uv=UvUnwrapSettings(layer_name=_DEFAULT_UV_LAYER_NAME),
