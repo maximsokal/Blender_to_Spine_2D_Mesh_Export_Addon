@@ -1,7 +1,7 @@
 # Rig Profiles
 
 This document describes the current generated Spine rig behavior in Blender to Spine2D
-Mesh Exporter **0.150.0**.
+Mesh Exporter **0.151.0**.
 
 Historical reference skeleton dumps are not maintained here. Executable fixtures and Git
 history provide regression provenance; this document describes the current production
@@ -229,6 +229,9 @@ Rig regression coverage must prove:
 - Camera Root uses one rigid camera-depth layer and camera-space-zero main placement;
 - Object Root and Camera Root share projected geometry and material-bake input;
 - Depth Camera Projection does not receive Normal Object Root compensation accidentally.
+
+Exact project patch versions do not alter rig topology; they select metadata inside an
+already chosen schema-family codec.
 
 ## Related documents
 
