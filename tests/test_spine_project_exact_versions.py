@@ -65,6 +65,24 @@ def test_exact_version_requires_canonical_major_minor_patch(value: str) -> None:
         resolve_spine_json_exact_version(value)
 
 
+@pytest.mark.parametrize("value", (None, 4.2, 42, object()))
+def test_exact_version_rejects_non_string_values(value: object) -> None:
+    with pytest.raises(TypeError, match="must be str"):
+        resolve_spine_json_exact_version(value)
+
+
+def test_exact_version_trims_surrounding_whitespace_to_canonical_value() -> None:
+    value = "  4.2.11  "
+    assert resolve_spine_json_exact_version(value) is SpineJsonTarget.SPINE_4_2
+    assert (
+        validate_spine_json_exact_version_for_target(
+            SpineJsonTarget.SPINE_4_2,
+            value,
+        )
+        == "4.2.11"
+    )
+
+
 def test_exact_version_must_match_selected_codec_family() -> None:
     with pytest.raises(ValueError, match="not selected family"):
         validate_spine_json_exact_version_for_target(
@@ -85,6 +103,7 @@ def test_future_patch_inside_supported_family_is_not_artificially_capped() -> No
     )
 
 
-def test_unsupported_family_is_rejected_even_with_valid_semver() -> None:
+@pytest.mark.parametrize("value", ("3.7.99", "4.4.0", "5.0.1"))
+def test_unsupported_family_is_rejected_even_with_valid_semver(value: str) -> None:
     with pytest.raises(ValueError, match="supported families"):
-        resolve_spine_json_exact_version("5.0.1")
+        resolve_spine_json_exact_version(value)
