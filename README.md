@@ -18,7 +18,7 @@ Blender to Spine2D Mesh Exporter converts Blender Mesh objects into Spine-ready 
 weighted mesh attachments, baked or camera-rendered textures, generated animation controls,
 and optional texture sequences.
 
-Current extension version: **0.150.0**.
+Current extension version: **0.151.0**.
 
 ## Requirements
 
@@ -26,12 +26,13 @@ Current extension version: **0.150.0**.
 - Windows is the currently tested desktop platform.
 - A saved `.blend` file.
 - A writable output directory.
-- A matching supported Spine target:
-  - Spine 3.8.99
-  - Spine 4.0.64
-  - Spine 4.1.24
-  - Spine 4.2.43
-  - Spine 4.3.23
+- A supported Spine schema family: 3.8, 4.0, 4.1, 4.2, or 4.3.
+- The exact Spine Editor/project patch version configured for that family in Add-on Preferences.
+
+The built-in default exact versions are 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23.
+They are defaults, not hard limits: the user can configure another canonical
+`major.minor.patch` value inside the selected family, for example `4.2.35` while continuing
+to use the Spine 4.2 codec.
 
 Public single-object and selected-object export are standalone routes. Connected and mixed
 composition remain explicit internal/development paths and are accepted only by supported
@@ -107,10 +108,8 @@ the same material-bake geometry. They differ only in rig ownership.
 - keeps each Blender Object Origin as the object's Spine main-bone pivot;
 - retains camera-space depth per generated depth group;
 - inserts one `*_camera_setup` inverse-setup bone below each model-space depth group;
-- cancels setup-only camera-depth translation without collapsing the live deformation
-  hierarchy;
-- reproduces the active-camera setup projection while preserving object-root animation
-  controls.
+- cancels setup-only camera-depth translation without collapsing the live deformation hierarchy;
+- reproduces the active-camera setup projection while preserving object-root animation controls.
 
 Conceptually:
 
@@ -169,18 +168,15 @@ active-camera visible surface
 Supported controls:
 
 - **Depth smoothing** — edge-aware smoothing of retained depth samples.
-- **Depth edge threshold** — prevents smoothing and generated triangles from crossing large
-  depth discontinuities.
+- **Depth edge threshold** — prevents smoothing and generated triangles from crossing large depth discontinuities.
 - **Depth mesh error (px)** — requested screen-space spacing for generated relief points.
 - **Max depth points** — hard upper bound for generated depth points.
-- **Parallax Horizon Angle** — optionally retains connected surfaces around the visible
-  horizon.
+- **Parallax Horizon Angle** — optionally retains connected surfaces around the visible horizon.
 
 `Parallax Horizon Angle = 0°` produces the front-only result. A positive value can generate
 reserve views for retained side surfaces. Reserve views use fitted Perspective or
 Orthographic camera copies, face-isolated render proxies, independent crops and textures,
-and reserve weighted attachments that reuse the same generated rig as the FRONT
-attachment.
+and reserve weighted attachments that reuse the same generated rig as the FRONT attachment.
 
 Depth Camera Projection is a 2.5D representation of camera-visible geometry. Large later
 rotations can reveal surfaces that were never visible or retained during export.
@@ -198,21 +194,17 @@ Generated primary controls:
 ```
 
 The rig keeps X/Y pseudo-rotation and uniform scale as explicit Spine controls while depth
-groups provide the spatial response needed by Normal / UV Segments and Depth Camera
-Projection.
+groups provide the spatial response needed by Normal / UV Segments and Depth Camera Projection.
 
 Additional rig behavior:
 
-- per-object Blender Object Origin pivots for ordinary Normal projection when Shared
-  Selection Pivot is disabled, and for Active Camera Object Root mode;
-- one export-only common assembly pivot for eligible multi-object signed-axis Normal / UV
-  when Shared Selection Pivot is enabled;
+- per-object Blender Object Origin pivots for ordinary Normal projection when Shared Selection Pivot is disabled, and for Active Camera Object Root mode;
+- one export-only common assembly pivot for eligible multi-object signed-axis Normal / UV when Shared Selection Pivot is enabled;
 - camera-relative hierarchy for Active Camera Camera Root mode;
 - deterministic constraint ordering;
 - optional control icons;
 - optional generated preview animation;
-- connected five-phase constraint scheduling on the explicitly supported internal Spine
-  4.2 route.
+- connected five-phase constraint scheduling on the explicitly supported internal Spine 4.2 route.
 
 ## Geometry, segmentation, and UV
 
@@ -237,8 +229,7 @@ The exporter:
 - creates a generated `SpineBakeUV` layout for output baking;
 - preserves source-loop lineage instead of matching geometry by rounded coordinates;
 - validates required source UV dependencies used by materials;
-- keeps generated Spine attachment UVs synchronized with the baked file-space texture
-  orientation.
+- keeps generated Spine attachment UVs synchronized with the baked file-space texture orientation.
 
 ## Materials and baking
 
@@ -247,8 +238,7 @@ path. It does not silently replace the selected export mode.
 
 The **Bake** foldout owns the scene-wide **Texture size** setting. Texture size controls the
 resolution used by generated bake textures and rendered-camera texture targets; it remains
-one shared Scene setting for the complete export request rather than a per-object sequence
-setting.
+one shared Scene setting for the complete export request rather than a per-object sequence setting.
 
 Supported behavior includes:
 
@@ -262,8 +252,7 @@ Supported behavior includes:
 Generated Material policies:
 
 - **Require Source** — block when required source material data is unavailable.
-- **Generate If Missing** — generate a temporary material only when required source material
-  data is missing.
+- **Generate If Missing** — generate a temporary material only when required source material data is missing.
 - **Force Generated** — ignore source shading and use the selected generated pattern.
 
 Generated patterns:
@@ -327,14 +316,15 @@ It can report:
 - structured blockers and warnings.
 
 Changing relevant geometry, UV, material, selection, camera, frame, renderer, projection,
-Depth settings, or export settings makes the cached analysis stale.
+Depth settings, or export settings makes the cached analysis stale. Changing any configured
+exact Spine project version invalidates cached analysis for all scenes immediately.
 
 ## Output and transaction safety
 
 Typical static single-object output:
 
 ```text
-<ObjectName>_merged.json
+<ObjectName>_merged_spine_<exact-version>.json
 images/<ObjectName>_Baked.png
 ```
 
@@ -353,8 +343,7 @@ The exporter:
 - validates staged output;
 - commits all files atomically;
 - restores previous finals after partial installation failures when possible;
-- can recover stale `.spine2d-stage-*` and `.spine2d-backup-*` work files left by an
-  interrupted process.
+- can recover stale `.spine2d-stage-*` and `.spine2d-backup-*` work files left by an interrupted process.
 
 Temporary stage and backup files are transaction data, not Spine assets.
 
@@ -373,12 +362,11 @@ The transaction verifies or restores relevant:
 - current frame;
 - active camera;
 - render engine and render settings;
-- temporary objects, meshes, images, collections, materials, node trees, camera proxies,
-  render proxies, and generated attributes.
+- temporary objects, meshes, images, collections, materials, node trees, camera proxies, render proxies, and generated attributes.
 
-## Supported Spine targets
+## Supported Spine targets and exact project versions
 
-| UI target | Exact JSON version | Public standalone export |
+| UI target | Default exact JSON version | Public standalone export |
 | --- | --- | --- |
 | Spine 3.8 | 3.8.99 | Yes |
 | Spine 4.0 | 4.0.64 | Yes |
@@ -386,26 +374,39 @@ The transaction verifies or restores relevant:
 | Spine 4.2 | 4.2.43 | Yes |
 | Spine 4.3 | 4.3.23 | Yes, according to the capability registry |
 
+The Scene-level **Spine version** selector chooses the schema family and therefore the
+production codec. The exact Editor/project patch version is configured separately in
+**Edit > Preferences > Add-ons > Blender to Spine2D Mesh Exporter > Spine project JSON
+versions**. There is one persistent global setting per supported family.
+
+Only canonical `major.minor.patch` values from the same family are accepted. For example,
+`4.2.35` is valid for Spine 4.2, while `4.1.24` is rejected for that field. The effective
+exact version is used consistently by `ExportSettings.spine_version`, the JSON filename,
+the viewport **Exact JSON version** label, and `skeleton.spine`. Changing the patch does not
+switch or emulate another schema family.
+
+These fields are Blender Add-on Preferences rather than `.blend` Scene properties, so they
+are shared by projects using the same Blender user configuration. Blender's normal
+Preferences persistence owns saving them; the exporter does not force-save unrelated Blender
+preferences whenever the user types in a version field.
+
 The target/profile capability registry rejects unsupported combinations before expensive
 Blender geometry or bake work begins.
 
 ## Quick start
 
-1. Install `blender_to_spine2d_mesh_exporter-0.150.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
-2. Save the `.blend` file.
-3. Select one or more Mesh objects in Object Mode.
-4. Open **3D View > Sidebar > Blender to Spine2D Mesh Exporter**.
-5. Choose **Normal / UV Segments**, **Camera Projection**, or **Depth Camera Projection**.
-6. For Normal / UV Segments, choose the required Projection Direction. With two or more
-   selected Mesh objects and a signed-axis direction, Shared Selection Pivot is enabled by
-   default.
-7. Choose the exact Spine target.
-8. Configure Cut, material, camera/depth, and Bake settings as required by the selected
-   mode. Texture resolution is configured as **Texture size** inside **Bake**.
-9. Run **Analyze** and resolve blockers.
-10. Export the current object or selected objects.
-11. Import the generated JSON and matching texture directory into the selected Spine
-    version.
+1. Install `blender_to_spine2d_mesh_exporter-0.151.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
+2. In Add-on Preferences, set the exact project patch for every Spine family you use.
+3. Save the `.blend` file.
+4. Select one or more Mesh objects in Object Mode.
+5. Open **3D View > Sidebar > Blender to Spine2D Mesh Exporter**.
+6. Choose **Normal / UV Segments**, **Camera Projection**, or **Depth Camera Projection**.
+7. For Normal / UV Segments, choose the required Projection Direction. With two or more selected Mesh objects and a signed-axis direction, Shared Selection Pivot is enabled by default.
+8. Choose the Spine schema family. Confirm the displayed **Exact JSON version** matches the project version configured in Preferences.
+9. Configure Cut, material, camera/depth, and Bake settings as required by the selected mode. Texture resolution is configured as **Texture size** inside **Bake**.
+10. Run **Analyze** and resolve blockers.
+11. Export the current object or selected objects.
+12. Import the generated JSON and matching texture directory into the configured Spine project version.
 
 ## Documentation
 
@@ -431,7 +432,7 @@ From the repository root:
 ```powershell
 $Blender = "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 $Source = ".\Blender_to_Spine2D_Mesh_Exporter"
-$Output = ".\dist\blender_to_spine2d_mesh_exporter-0.150.0.zip"
+$Output = ".\dist\blender_to_spine2d_mesh_exporter-0.151.0.zip"
 
 New-Item -ItemType Directory -Force ".\dist" | Out-Null
 & $Blender --command extension build --source-dir $Source --output-filepath $Output
