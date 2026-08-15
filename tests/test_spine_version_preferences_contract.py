@@ -94,3 +94,12 @@ def test_preference_resolver_covers_every_current_family_without_fallback_aliase
         "spine2d_exact_version_4_2",
         "spine2d_exact_version_4_3",
     }
+
+
+def test_readiness_signature_tracks_raw_exact_spine_version() -> None:
+    source = _source("blender_adapter/a1_export_readiness.py")
+
+    assert "read_spine_project_exact_version_raw" in source
+    assert "spine_target = _resolve_spine_target(scene)" in source
+    assert "context=context" in source
+    assert '"spine_exact_version_raw": spine_exact_version_raw' in source
