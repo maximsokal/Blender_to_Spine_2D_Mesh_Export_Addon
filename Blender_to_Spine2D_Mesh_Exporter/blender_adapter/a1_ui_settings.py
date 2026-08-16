@@ -36,6 +36,22 @@ _DEFAULT_BAKE_MARGIN = 4
 _DEFAULT_UV_LAYER_NAME = "SpineBakeUV"
 
 
+def _resolve_profile_spine_version(
+    scene: _SceneExportProfile,
+    spine_version: str | None,
+) -> str:
+    """Resolve one exact-version snapshot for a captured Scene profile."""
+
+    if not isinstance(scene, _SceneExportProfile):
+        raise TypeError("scene must be _SceneExportProfile")
+    if spine_version is None:
+        return resolve_spine_project_exact_version(scene.spine_target)
+    return validate_spine_json_exact_version_for_target(
+        scene.spine_target,
+        spine_version,
+    )
+
+
 def _versioned_json_output_stem(
     base_stem: str | None,
     scene: _SceneExportProfile,
@@ -46,16 +62,7 @@ def _versioned_json_output_stem(
 
     if base_stem is None:
         return None
-    if not isinstance(scene, _SceneExportProfile):
-        raise TypeError("scene must be _SceneExportProfile")
-    resolved_version = (
-        resolve_spine_project_exact_version(scene.spine_target)
-        if spine_version is None
-        else validate_spine_json_exact_version_for_target(
-            scene.spine_target,
-            spine_version,
-        )
-    )
+    resolved_version = _resolve_profile_spine_version(scene, spine_version)
     sanitized_base = sanitize_filename_stem(base_stem)
     token = spine_json_version_filename_token(resolved_version)
     suffix = f"_{token}"
@@ -117,6 +124,30 @@ def _effective_source_geometry_mode(
     return A1SourceGeometryMode.ORIGINAL
 
 
+def _export_settings_from_profiles(
+    obj: _ObjectExportProfile,
+    scene: _SceneExportProfile,
+    *,
+    spine_version: str,
+) -> ExportSettings:
+    """Build the immutable application export settings for one source profile."""
+
+    return ExportSettings(
+        texture_width=scene.texture_size,
+        texture_height=scene.texture_size,
+        output_directory=scene.output_directory,
+        images_relative_path=scene.images_relative_path,
+        spine_version=spine_version,
+        rig_profile=scene.rig_profile.value,
+        seam_mode=scene.seam_mode,
+        angle_limit_degrees=scene.angle_limit_degrees,
+        bake_margin=_DEFAULT_BAKE_MARGIN,
+        sequence_start_frame=obj.sequence_start_frame,
+        sequence_frame_count=obj.sequence_frame_count,
+        sequence_timing=scene.sequence_timing,
+    )
+
+
 def _settings_from_profiles(
     obj: _ObjectExportProfile,
     scene: _SceneExportProfile,
@@ -127,13 +158,7 @@ def _settings_from_profiles(
     ),
     spine_version: str | None = None,
 ) -> A1SingleObjectExportSettings:
-    """Build one immutable source settings snapshot.
-
-    ``spine_version`` may be supplied by a multi-object caller that has already read
-    AddonPreferences once for the whole request. This guarantees every source in one
-    export carries the same exact project version without moving Blender preference
-    access into the captured pure Scene profile.
-    """
+    """Build one immutable source settings snapshot from captured UI profiles."""
 
     if not isinstance(obj, _ObjectExportProfile):
         raise TypeError("obj must be _ObjectExportProfile")
@@ -141,32 +166,18 @@ def _settings_from_profiles(
         raise TypeError("scene must be _SceneExportProfile")
     if not isinstance(rig_setup_pose_mode, A1RigSetupPoseMode):
         raise TypeError("rig_setup_pose_mode must be A1RigSetupPoseMode")
+
     resolved_setup_pose_mode = _effective_rig_setup_pose_mode(
         scene,
         rig_setup_pose_mode,
     )
-    resolved_spine_version = (
-        resolve_spine_project_exact_version(scene.spine_target)
-        if spine_version is None
-        else validate_spine_json_exact_version_for_target(
-            scene.spine_target,
-            spine_version,
-        )
-    )
+    resolved_spine_version = _resolve_profile_spine_version(scene, spine_version)
+
     return A1SingleObjectExportSettings(
-        export=ExportSettings(
-            texture_width=scene.texture_size,
-            texture_height=scene.texture_size,
-            output_directory=scene.output_directory,
-            images_relative_path=scene.images_relative_path,
+        export=_export_settings_from_profiles(
+            obj,
+            scene,
             spine_version=resolved_spine_version,
-            rig_profile=scene.rig_profile.value,
-            seam_mode=scene.seam_mode,
-            angle_limit_degrees=scene.angle_limit_degrees,
-            bake_margin=_DEFAULT_BAKE_MARGIN,
-            sequence_start_frame=obj.sequence_start_frame,
-            sequence_frame_count=obj.sequence_frame_count,
-            sequence_timing=scene.sequence_timing,
         ),
         prefix=obj.object_name,
         output_stem=sanitize_filename_stem(obj.object_name),
