@@ -72,9 +72,9 @@ def _minimal_version_document(exact_version: str) -> SpineDocument:
 def _v41_document() -> SpineDocument:
     attachment = MeshAttachment(
         name="mesh",
-        uvs=(0.0, 0.0, 1.0, 0.0, 1.0, 1.0),
+        uvs=(0.0, 0.0, 1.0, 0.0, 0.0, 1.0),
         triangles=(0, 1, 2),
-        vertices=(0.0, 0.0, 1.0, 0.0, 1.0, 1.0),
+        vertices=(0.0, 0.0, 1.0, 0.0, 0.0, 1.0),
         hull=3,
         edges=(0, 1),
         width=64.0,
