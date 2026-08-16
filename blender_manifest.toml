@@ -1,0 +1,51 @@
+schema_version = "1.0.0"
+id = "blender_to_spine2d_mesh_exporter"
+version = "0.152.0"
+name = "Blender to Spine2D Mesh Exporter"
+tagline = "Export Blender meshes, UVs, textures, and animation-ready JSON for Spine 2D"
+maintainer = "Maxim Sokolenko"
+type = "add-on"
+website = "https://github.com/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon"
+tags = ["Import-Export"]
+blender_version_min = "5.2.0"
+license = ["SPDX:MIT"]
+
+[permissions]
+files = "Read/write export files and baked textures chosen by the user"
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  ".git/",
+  ".github/",
+  ".idea/",
+  ".vscode/",
+  ".pytest_cache/",
+  ".ruff_cache/",
+  ".venv*/",
+  "artifacts/",
+  "build/",
+  "dist/",
+  "docs/",
+  "tests/",
+  "tmp/",
+  "*.blend",
+  "*.blend1",
+  "*.log",
+  "*.pyc",
+  "*.pyo",
+  "*.zip",
+  "/Blender_to_Spine2D_Mesh_Exporter/Legacy/",
+  "/Blender_to_Spine2D_Mesh_Exporter/legacy_loader.py",
+  "/Blender_to_Spine2D_Mesh_Exporter/legacy_multi_facade.py",
+  "/Blender_to_Spine2D_Mesh_Exporter/json_export.py",
+  "/Blender_to_Spine2D_Mesh_Exporter/json_merger.py",
+  "/Blender_to_Spine2D_Mesh_Exporter/main.py",
+  "/Blender_to_Spine2D_Mesh_Exporter/multi_object_export.py",
+  "/Blender_to_Spine2D_Mesh_Exporter/plane_cut.py",
+  "/Blender_to_Spine2D_Mesh_Exporter/seam_marker.py",
+  "/Blender_to_Spine2D_Mesh_Exporter/texture_baker.py",
+  "/Blender_to_Spine2D_Mesh_Exporter/texture_baker_integration.py",
+  "/Blender_to_Spine2D_Mesh_Exporter/utils.py",
+  "/Blender_to_Spine2D_Mesh_Exporter/uv_operations.py",
+]
