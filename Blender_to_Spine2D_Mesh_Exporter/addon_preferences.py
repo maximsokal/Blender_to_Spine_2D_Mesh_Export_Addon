@@ -155,6 +155,10 @@ class ModelToSpine2DAddonPreferences(bpy.types.AddonPreferences):
         versions_box.label(
             text="These are global add-on preferences and are reused across .blend files.",
         )
+        versions_box.label(
+            text="With Auto-Save Preferences off, use Blender's Save Preferences button.",
+            icon="INFO",
+        )
         for spec in SPINE_EXACT_VERSION_PREFERENCE_SPECS:
             versions_box.prop(self, spec.property_name, text=spec.label)
             raw_value = getattr(self, spec.property_name, "")
