@@ -190,6 +190,18 @@ def test_every_codec_preserves_document_owned_custom_exact_version(
     assert document.skeleton["spine"] == exact_version
 
 
+@pytest.mark.parametrize("target", tuple(SpineJsonTarget))
+def test_canonical_document_marker_translates_to_target_default_without_mutation(
+    target: SpineJsonTarget,
+) -> None:
+    document = _minimal_version_document("4.2.43")
+
+    payload = json.loads(serialize_spine_document(document, target))
+
+    assert payload["skeleton"]["spine"] == target.exact_version
+    assert document.skeleton["spine"] == "4.2.43"
+
+
 def test_codec_rejects_document_exact_version_from_another_family() -> None:
     document = _minimal_version_document("4.1.23")
 
