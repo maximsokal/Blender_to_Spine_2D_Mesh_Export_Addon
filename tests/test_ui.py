@@ -261,6 +261,8 @@ def test_ui_runtime_uses_only_rewrite_export_operators():
     assert 'row.operator("object.save_uv_as_json"' not in source
     assert '"spine2d_target_spine_version"' in source
     assert 'text="Spine version"' in source
-    assert 'text=f"Exact JSON version: {target.exact_version}"' in source
+    assert "resolve_spine_project_exact_version(" in source
+    assert 'text=f"Exact JSON version: {exact_version}"' in source
+    assert 'text=f"Exact JSON version: {target.exact_version}"' not in source
     assert not hasattr(ui, "resolve_multi_backend")
     assert not hasattr(ui, "MULTI_BACKEND_PROPERTY")
