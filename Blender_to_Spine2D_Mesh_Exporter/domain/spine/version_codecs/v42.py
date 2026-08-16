@@ -8,7 +8,11 @@ from typing import Any
 from ..model import SpineDocument
 from ..serializer import SpineSerializer
 from ..version_target import SpineJsonTarget
-from .base import SpineJsonCodecContext, SpineJsonVersionCodec
+from .base import (
+    SpineJsonCodecContext,
+    SpineJsonVersionCodec,
+    validate_document_spine_version_for_target,
+)
 from .runtime_constraint_order import normalize_runtime_constraint_orders
 
 
@@ -19,14 +23,14 @@ def _require_dict(value: Any, *, path: str) -> dict[str, Any]:
 
 
 class Spine42JsonCodec(SpineJsonVersionCodec):
-    """Serialize exact Spine 4.2.43 JSON with a complete runtime update schedule.
+    """Serialize Spine 4.2-family JSON with a complete runtime update schedule.
 
     Canonical builders retain historical dependency numbers because the same typed
     document can target multiple Spine families. The 4.2 runtime, however, scans phases
     ``0..constraint_count-1`` and processes one constraint per phase. This codec therefore
     normalizes only the detached serialized constraint ``order`` fields. Rig topology,
     constraint payloads, animations, skins, attachments, and the canonical document stay
-    unchanged.
+    unchanged. The document-owned exact patch version is validated and preserved.
     """
 
     @property
@@ -49,6 +53,7 @@ class Spine42JsonCodec(SpineJsonVersionCodec):
                 f"Spine42JsonCodec requires {self.target.value}, "
                 f"got {context.target.value}"
             )
+        validate_document_spine_version_for_target(document, self.target)
 
         canonical_json = SpineSerializer(validator=context.validator).to_json(
             document,
