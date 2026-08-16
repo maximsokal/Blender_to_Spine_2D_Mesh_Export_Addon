@@ -1,6 +1,6 @@
 # Usage Guide
 
-This guide describes Blender to Spine2D Mesh Exporter **0.151.0**.
+This guide describes Blender to Spine2D Mesh Exporter **0.152.0**.
 
 ## Open the exporter
 

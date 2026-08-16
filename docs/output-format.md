@@ -1,7 +1,7 @@
 # Output Format
 
 This document describes the current output contract for Blender to Spine2D Mesh Exporter
-**0.151.0**.
+**0.152.0**.
 
 ## Spine targets and exact project versions
 
