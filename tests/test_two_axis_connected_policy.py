@@ -278,4 +278,5 @@ def test_public_settings_keep_connected_composition_as_explicit_development_scop
     assert "TWO_AXIS_ROTATION_SCALE" in source
     assert "Connected composition remains blocked" not in source
     assert "explicit development composition paths" in source
-    assert "Target/profile/composition compatibility is validated" in source
+    assert "Target/profile/composition compatibility is" in source
+    assert "validated from the schema family" in source
