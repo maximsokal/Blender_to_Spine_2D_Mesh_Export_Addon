@@ -13,8 +13,11 @@ from typing import Any
 from ..model import SpineDocument
 from ..serializer import SpineSerializer
 from ..version_target import SpineJsonTarget
-from .base import SpineJsonCodecContext, SpineJsonVersionCodec
-
+from .base import (
+    SpineJsonCodecContext,
+    SpineJsonVersionCodec,
+    validate_document_spine_version_for_target,
+)
 
 
 def _require_dict(value: Any, *, path: str) -> dict[str, Any]:
@@ -23,12 +26,10 @@ def _require_dict(value: Any, *, path: str) -> dict[str, Any]:
     return value
 
 
-
 def _require_list(value: Any, *, path: str) -> list[Any]:
     if not isinstance(value, list):
         raise TypeError(f"{path} must be a JSON array")
     return value
-
 
 
 def _extend_unique_names(
@@ -83,6 +84,7 @@ class Spine41JsonCodec(SpineJsonVersionCodec):
                 f"Spine41JsonCodec requires {self.target.value}, "
                 f"got {context.target.value}"
             )
+        validate_document_spine_version_for_target(document, self.target)
 
         canonical_json = SpineSerializer(validator=context.validator).to_json(
             document,
@@ -105,9 +107,12 @@ class Spine41JsonCodec(SpineJsonVersionCodec):
             allow_nan=False,
         )
 
-    def _rewrite_skeleton(self, output: dict[str, Any]) -> None:
+    @staticmethod
+    def _rewrite_skeleton(output: dict[str, Any]) -> None:
         skeleton = _require_dict(output.get("skeleton"), path="document.skeleton")
-        skeleton["spine"] = self.target.exact_version
+        # The exact project patch version is authored by the immutable export settings
+        # and already serialized in ``skeleton.spine``. Schema translation must preserve
+        # it rather than replacing it with the codec family's descriptor default.
         skeleton.pop("referenceScale", None)
 
     @staticmethod
