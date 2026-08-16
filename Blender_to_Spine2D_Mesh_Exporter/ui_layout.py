@@ -15,6 +15,9 @@ from .blender_adapter.normal_uv_modifier_warnings import (
     collect_normal_uv_ignored_modifiers,
     group_ignored_modifiers_by_object,
 )
+from .blender_adapter.spine_version_preferences import (
+    resolve_spine_project_exact_version,
+)
 from .config import get_default_output_dir
 from .domain.baking import A1TextureExportMode
 from .domain.spine.version_target import (
@@ -246,8 +249,12 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
                     DEFAULT_SPINE_JSON_TARGET.value,
                 )
             )
+            exact_version = resolve_spine_project_exact_version(
+                target,
+                context=context,
+            )
             column.label(
-                text=f"Exact JSON version: {target.exact_version}",
+                text=f"Exact JSON version: {exact_version}",
                 icon="INFO",
             )
             if not target.descriptor.serializer_ready:
@@ -255,9 +262,9 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
                     text="Codec implementation in progress; Analyze blocks export",
                     icon="ERROR",
                 )
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, RuntimeError) as exc:
             column.label(
-                text="Invalid Spine target; reset settings to Spine 4.2",
+                text=f"Invalid Spine version settings: {exc}",
                 icon="ERROR",
             )
         column.separator()

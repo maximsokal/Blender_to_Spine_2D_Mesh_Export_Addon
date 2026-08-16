@@ -3,7 +3,7 @@
 The `examples` directory contains Blender scenes for learning and manual validation of the
 current exporter. Examples do not replace automated regression tests.
 
-Use Blender 5.2 or newer with Blender to Spine2D Mesh Exporter **0.153.0**.
+Use Blender 5.2 or newer with Blender to Spine2D Mesh Exporter **0.154.0**.
 
 ## General workflow
 

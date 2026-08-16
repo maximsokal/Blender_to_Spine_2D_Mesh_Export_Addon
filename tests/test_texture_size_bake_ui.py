@@ -20,6 +20,34 @@ def test_ordered_paths_foldout_does_not_draw_texture_size() -> None:
     assert '"spine2d_images_path"' in source
 
 
+def test_ordered_paths_foldout_draws_the_preference_exact_version(monkeypatch) -> None:
+    column = MagicMock()
+    scene = SimpleNamespace(
+        spine2d_target_spine_version="SPINE_4_2",
+        spine2d_json_path="output",
+        spine2d_images_path="images",
+    )
+    context = SimpleNamespace(scene=scene)
+    monkeypatch.setattr(
+        ui_layout,
+        "resolve_spine_project_exact_version",
+        lambda target, *, context: "4.2.20",
+    )
+
+    ui_layout.OBJECT_PT_Spine2DOrderedMeshPanel._draw_export_settings(
+        None,
+        column,
+        context,
+    )
+
+    labels = tuple(
+        call.kwargs.get("text")
+        for call in column.label.call_args_list
+    )
+    assert "Exact JSON version: 4.2.20" in labels
+    assert "Exact JSON version: 4.2.43" not in labels
+
+
 def test_ordered_bake_foldout_draws_texture_size_before_shared_bake_controls(
     monkeypatch,
 ) -> None:

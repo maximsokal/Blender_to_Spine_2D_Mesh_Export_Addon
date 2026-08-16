@@ -91,16 +91,22 @@ def test_exact_version_must_match_selected_codec_family() -> None:
         )
 
 
-def test_future_patch_inside_supported_family_is_not_artificially_capped() -> None:
-    value = "4.2.9999"
-    assert resolve_spine_json_exact_version(value) is SpineJsonTarget.SPINE_4_2
-    assert (
-        validate_spine_json_exact_version_for_target(
-            SpineJsonTarget.SPINE_4_2,
-            value,
-        )
-        == value
-    )
+@pytest.mark.parametrize(
+    ("target", "value"),
+    (
+        (SpineJsonTarget.SPINE_4_2, "4.2.9999"),
+        # Spine 4.3 is still receiving patches; accepting a future patch must not
+        # require changing the schema-family registry for every release.
+        (SpineJsonTarget.SPINE_4_3, "4.3.24"),
+        (SpineJsonTarget.SPINE_4_3, "4.3.9999"),
+    ),
+)
+def test_future_patch_inside_supported_family_is_not_artificially_capped(
+    target: SpineJsonTarget,
+    value: str,
+) -> None:
+    assert resolve_spine_json_exact_version(value) is target
+    assert validate_spine_json_exact_version_for_target(target, value) == value
 
 
 @pytest.mark.parametrize("value", ("3.7.99", "4.4.0", "5.0.1"))

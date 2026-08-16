@@ -18,7 +18,7 @@ Blender to Spine2D Mesh Exporter converts Blender Mesh objects into Spine-ready 
 weighted mesh attachments, baked or camera-rendered textures, generated animation controls,
 and optional texture sequences.
 
-Current extension version: **0.153.0**.
+Current extension version: **0.154.0**.
 
 ## Requirements
 
@@ -32,7 +32,9 @@ Current extension version: **0.153.0**.
 The built-in default exact versions are 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23.
 They are defaults, not hard limits: the user can configure another canonical
 `major.minor.patch` value inside the selected family, for example `4.2.35` while continuing
-to use the Spine 4.2 codec.
+to use the Spine 4.2 codec. This deliberately includes future 4.3 patch releases above the
+current default; the validator checks the family and canonical version shape, not a frozen
+maximum patch number.
 
 Public single-object and selected-object export are standalone routes. Connected and mixed
 composition remain explicit internal/development paths and are accepted only by supported
@@ -395,7 +397,7 @@ Blender geometry or bake work begins.
 
 ## Quick start
 
-1. Install `blender_to_spine2d_mesh_exporter-0.153.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
+1. Install `blender_to_spine2d_mesh_exporter-0.154.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
 2. In Add-on Preferences, set the exact project patch for every Spine family you use.
 3. Save the `.blend` file.
 4. Select one or more Mesh objects in Object Mode.
@@ -432,7 +434,7 @@ From the repository root:
 ```powershell
 $Blender = "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 $Source = ".\Blender_to_Spine2D_Mesh_Exporter"
-$Output = ".\dist\blender_to_spine2d_mesh_exporter-0.153.0.zip"
+$Output = ".\dist\blender_to_spine2d_mesh_exporter-0.154.0.zip"
 
 New-Item -ItemType Directory -Force ".\dist" | Out-Null
 & $Blender --command extension build --source-dir $Source --output-filepath $Output

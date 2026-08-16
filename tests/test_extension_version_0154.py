@@ -1,4 +1,4 @@
-"""Release-version contract for the 0.153.0 submission candidate."""
+"""Release-version contract for the 0.154.0 submission candidate."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "blender_manifest.toml"
 
 
-def test_extension_manifest_uses_version_0_153_0() -> None:
+def test_extension_manifest_uses_version_0_154_0() -> None:
     with MANIFEST.open("rb") as stream:
         manifest = tomllib.load(stream)
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.153.0"
+    assert manifest["version"] == "0.154.0"

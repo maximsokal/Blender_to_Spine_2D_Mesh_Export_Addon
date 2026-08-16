@@ -1,7 +1,7 @@
 # Settings Reference
 
 This document describes the maintained public settings in Blender to Spine2D Mesh Exporter
-**0.153.0**. Fresh-Scene defaults are listed below. The current Scene settings schema is
+**0.154.0**. Fresh-Scene defaults are listed below. The current Scene settings schema is
 **8**.
 
 ## Export
@@ -326,6 +326,6 @@ Scene schema **8** preserves valid saved values and initializes missing Depth pa
 with a safe `0°` default. Persisted `ACTIVE_CAMERA` continues to mean **Active Camera —
 Object Root Bone**; Camera Root uses `ACTIVE_CAMERA_CAMERA_ROOT`.
 
-`spine2d_texture_size` remains the same persisted Scene property in 0.153.0; only its visual
+`spine2d_texture_size` remains the same persisted Scene property in 0.154.0; only its visual
 owner moved from the paths/version foldout to Bake. Exact Spine project versions are global
 AddonPreferences and therefore require no Scene schema migration.

@@ -78,7 +78,8 @@ def test_final_ordered_export_panel_resolves_and_reports_target_capabilities() -
     }
 
     assert "resolve_spine_json_target" in called_names
-    assert "exact_version" in attributes
+    assert "resolve_spine_project_exact_version" in called_names
+    assert "exact_version" not in attributes
     assert "descriptor" in attributes
     assert "serializer_ready" in attributes
     assert "Spine version" in strings
