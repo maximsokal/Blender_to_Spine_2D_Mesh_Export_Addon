@@ -203,31 +203,51 @@ def _installed_extension_preferences_fallback(
     )
 
 
+def _preferences_from_runtime_context(
+    runtime_context: Any,
+    root_package: str,
+) -> Any | None:
+    preferences = getattr(runtime_context, "preferences", None)
+    addons = getattr(preferences, "addons", None)
+    if addons is None:
+        return None
+
+    exact_addon = _addon_entry_from_key(addons, root_package)
+    exact_preferences = (
+        None if exact_addon is None else getattr(exact_addon, "preferences", None)
+    )
+    if exact_preferences is not None:
+        if not root_package.startswith("bl_ext."):
+            return exact_preferences
+        resolved = _spine_preferences_from_addon(exact_addon)
+        if resolved is not None:
+            return resolved
+
+    if root_package.startswith("bl_ext."):
+        return _installed_extension_preferences_fallback(addons, root_package)
+    return None
+
+
 def get_spine_addon_preferences(
     context: Any | None = None,
     *,
     required: bool = False,
 ) -> Any | None:
-    """Return the installed extension's AddonPreferences for the active Blender profile."""
+    """Return the installed extension's AddonPreferences for the active Blender profile.
 
-    runtime_context = bpy.context if context is None else context
-    preferences = getattr(runtime_context, "preferences", None)
-    addons = getattr(preferences, "addons", None)
+    UI draw callbacks may provide an area-local context whose ``preferences.addons`` view
+    does not expose the enabled extension entry even though Blender's global context does.
+    Explicit context lookup is therefore attempted first, then the same global context used
+    by production export/settings resolution is used as a deterministic fallback.
+    """
+
     root_package = addon_root_package_name()
+    runtime_context = bpy.context if context is None else context
+    result = _preferences_from_runtime_context(runtime_context, root_package)
 
-    result = None
-    if addons is not None:
-        exact_addon = _addon_entry_from_key(addons, root_package)
-        exact_preferences = (
-            None if exact_addon is None else getattr(exact_addon, "preferences", None)
-        )
-        if exact_preferences is not None:
-            if not root_package.startswith("bl_ext."):
-                result = exact_preferences
-            else:
-                result = _spine_preferences_from_addon(exact_addon)
-        if result is None and root_package.startswith("bl_ext."):
-            result = _installed_extension_preferences_fallback(addons, root_package)
+    global_context = getattr(bpy, "context", None)
+    if result is None and context is not None and global_context is not runtime_context:
+        result = _preferences_from_runtime_context(global_context, root_package)
 
     if result is None and required:
         raise RuntimeError(
