@@ -58,6 +58,33 @@ def test_installed_extension_uses_authoritative_root_package_for_preferences(
     )
 
 
+def test_ui_context_miss_falls_back_to_global_production_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_package = "bl_ext.user_default.blender_to_spine2d_mesh_exporter"
+    addon_preferences = _spine_preferences(spine2d_exact_version_4_2="4.2.32")
+    panel_context = _context_with_addons({})
+    global_context = _context_with_addons(
+        {
+            runtime_package: SimpleNamespace(
+                module=runtime_package,
+                preferences=addon_preferences,
+            ),
+        }
+    )
+
+    monkeypatch.setattr(preferences_module, "_ADDON_BASE_PACKAGE", runtime_package)
+    monkeypatch.setattr(preferences_module.bpy, "context", global_context)
+
+    assert (
+        preferences_module.resolve_spine_project_exact_version(
+            SpineJsonTarget.SPINE_4_2,
+            context=panel_context,
+        )
+        == "4.2.32"
+    )
+
+
 def test_installed_extension_finds_semantic_preferences_after_namespace_miss(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -118,6 +145,7 @@ def test_installed_extension_never_masks_missing_preferences_with_default(
     context = _context_with_addons({})
 
     monkeypatch.setattr(preferences_module, "_ADDON_BASE_PACKAGE", runtime_package)
+    monkeypatch.setattr(preferences_module.bpy, "context", context)
 
     with pytest.raises(RuntimeError, match="cannot resolve its AddonPreferences"):
         preferences_module.resolve_spine_project_exact_version(
@@ -136,6 +164,7 @@ def test_source_registered_development_context_keeps_descriptor_default_fallback
         "_ADDON_BASE_PACKAGE",
         "Blender_to_Spine2D_Mesh_Exporter",
     )
+    monkeypatch.setattr(preferences_module.bpy, "context", context)
 
     assert (
         preferences_module.resolve_spine_project_exact_version(
