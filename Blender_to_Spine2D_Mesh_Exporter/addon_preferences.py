@@ -24,6 +24,12 @@ from .infrastructure.blender_registration import (
 logger = logging.getLogger(__name__)
 ADDON_ID = __package__ or __name__.rpartition(".")[0]
 
+# Blender may edit AddonPreferences in a separate native Preferences window while
+# the exporter panel lives in the main window.  The immediate tag below marks the
+# area dirty, while the one-shot application timer guarantees another redraw after
+# the RNA update event has returned to Blender's event loop.
+_view3d_redraw_scheduled = False
+
 
 def initialize_logging_preferences(prefs: Any) -> tuple[str, ...]:
     """Discover every Python module and preserve existing per-file log levels."""
@@ -33,25 +39,94 @@ def initialize_logging_preferences(prefs: Any) -> tuple[str, ...]:
     return config.synchronize_logging_preferences(prefs)
 
 
-def _tag_all_view3d_areas_for_redraw(context: Any | None) -> None:
-    """Refresh visible exporter panels after a global exact-version edit."""
+def _tag_all_view3d_areas_for_redraw(context: Any | None) -> int:
+    """Request redraw for every visible 3D View area in every Blender window.
+
+    Add-on Preferences can be edited in a window other than the main Blender
+    window.  Iterating ``WindowManager.windows`` instead of only ``context.area``
+    keeps every exporter sidebar synchronized with the global preference value.
+
+    Returns the number of VIEW_3D areas tagged.  Returning the count makes the
+    helper observable in tests without changing Blender state beyond redraw tags.
+    """
 
     window_manager = getattr(context, "window_manager", None)
     if window_manager is None:
         window_manager = getattr(bpy.context, "window_manager", None)
+    if window_manager is None:
+        return 0
+
+    redraw_count = 0
     for window in tuple(getattr(window_manager, "windows", ())):
         screen = getattr(window, "screen", None)
         for area in tuple(getattr(screen, "areas", ())):
-            if getattr(area, "type", None) == "VIEW_3D":
-                area.tag_redraw()
+            if getattr(area, "type", None) != "VIEW_3D":
+                continue
+            tag_redraw = getattr(area, "tag_redraw", None)
+            if not callable(tag_redraw):
+                continue
+            tag_redraw()
+            redraw_count += 1
+    return redraw_count
+
+
+def _deferred_view3d_redraw() -> None:
+    """One-shot Blender timer callback used after an AddonPreferences edit."""
+
+    global _view3d_redraw_scheduled
+
+    try:
+        redraw_count = _tag_all_view3d_areas_for_redraw(None)
+        logger.debug(
+            "Deferred Spine project-version redraw tagged %d VIEW_3D area(s)",
+            redraw_count,
+        )
+    except Exception:
+        logger.exception("Deferred Spine project-version VIEW_3D redraw failed")
+    finally:
+        _view3d_redraw_scheduled = False
+
+    # Returning None unregisters a bpy.app.timers one-shot callback.
+    return None
+
+
+def _schedule_view3d_redraw() -> None:
+    """Coalesce exact-version UI refreshes into one event-loop redraw."""
+
+    global _view3d_redraw_scheduled
+
+    if _view3d_redraw_scheduled:
+        return
+
+    try:
+        timers = getattr(getattr(bpy, "app", None), "timers", None)
+        register_timer = getattr(timers, "register", None)
+        if not callable(register_timer):
+            logger.debug(
+                "bpy.app.timers.register is unavailable; immediate redraw remains active"
+            )
+            return
+
+        _view3d_redraw_scheduled = True
+        register_timer(
+            _deferred_view3d_redraw,
+            first_interval=0.0,
+        )
+    except Exception:
+        _view3d_redraw_scheduled = False
+        logger.exception("Unable to schedule Spine project-version VIEW_3D redraw")
 
 
 def _update_spine_project_version(_self: Any, context: Any) -> None:
-    """Invalidate readiness immediately while allowing users to finish typing.
+    """Invalidate readiness and refresh all exporter sidebars after preference edits.
 
     Validation intentionally happens at draw/export resolution. Raising from a Blender
     StringProperty update callback on intermediate text such as ``"4.2."`` would make
     normal editing hostile and can leave the UI in a partially applied RNA state.
+
+    Readiness invalidation and UI redraw are intentionally isolated. A failure while
+    clearing one scene cache must never prevent the current exact version from becoming
+    visible in an already-open exporter panel.
     """
 
     try:
@@ -59,11 +134,24 @@ def _update_spine_project_version(_self: Any, context: Any) -> None:
 
         for scene in tuple(getattr(bpy.data, "scenes", ())):
             clear_a1_export_readiness(scene)
-        _tag_all_view3d_areas_for_redraw(context)
     except Exception:
         logger.exception(
             "Unable to invalidate export readiness after Spine project version change"
         )
+
+    try:
+        redraw_count = _tag_all_view3d_areas_for_redraw(context)
+        logger.debug(
+            "Spine project-version edit tagged %d VIEW_3D area(s) for redraw",
+            redraw_count,
+        )
+    except Exception:
+        logger.exception("Immediate Spine project-version VIEW_3D redraw failed")
+
+    # The Preferences editor can be a separate Blender window. A deferred redraw
+    # runs after the RNA update event and keeps the main-window sidebar in sync even
+    # when that window did not receive the input event itself.
+    _schedule_view3d_redraw()
 
 
 class SPINE2D_OT_RefreshLoggingModules(bpy.types.Operator):
