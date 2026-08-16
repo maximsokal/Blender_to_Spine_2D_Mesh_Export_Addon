@@ -8,6 +8,7 @@ from typing import Any, Mapping, Tuple
 
 import bpy
 
+from .. import __package__ as _ADDON_BASE_PACKAGE
 from ..domain.spine.version_target import (
     SpineJsonTarget,
     resolve_spine_json_target,
@@ -68,11 +69,15 @@ def spine_exact_version_preference_spec(target: object) -> SpineExactVersionPref
 
 
 def addon_root_package_name() -> str:
-    package = str(__package__ or "").strip()
-    marker = ".blender_adapter"
-    if marker not in package:
-        raise RuntimeError(f"Unable to resolve add-on root package from {package!r}")
-    root = package.split(marker, 1)[0].strip()
+    """Return Blender's authoritative root add-on package identifier.
+
+    Blender Extensions add the repository to the runtime module namespace, for example
+    ``bl_ext.user_default.blender_to_spine2d_mesh_exporter``.  Subpackages must therefore
+    reuse the root package's own ``__package__`` value instead of reconstructing it from
+    their local package string.  This is also the identifier used by AddonPreferences.
+    """
+
+    root = str(_ADDON_BASE_PACKAGE or "").strip()
     if not root:
         raise RuntimeError("Resolved add-on root package is empty")
     return root
@@ -93,10 +98,14 @@ def get_spine_addon_preferences(
     runtime_context = bpy.context if context is None else context
     preferences = getattr(runtime_context, "preferences", None)
     addons = getattr(preferences, "addons", None)
-    addon = None if addons is None else addons.get(addon_root_package_name())
+    root_package = addon_root_package_name()
+    addon = None if addons is None else addons.get(root_package)
     result = None if addon is None else getattr(addon, "preferences", None)
     if result is None and required:
-        raise RuntimeError("Spine2D AddonPreferences are unavailable")
+        raise RuntimeError(
+            "Spine2D AddonPreferences are unavailable for "
+            f"runtime package {root_package!r}"
+        )
     return result
 
 
@@ -120,6 +129,12 @@ def read_spine_project_exact_version_raw(
     if prefs is None:
         prefs = get_spine_addon_preferences(context, required=False)
     if prefs is None:
+        root_package = addon_root_package_name()
+        if root_package.startswith("bl_ext."):
+            raise RuntimeError(
+                "Installed Spine2D extension cannot resolve its AddonPreferences entry: "
+                f"{root_package!r}"
+            )
         return spec.default_version
     return getattr(prefs, spec.property_name, spec.default_version)
 
