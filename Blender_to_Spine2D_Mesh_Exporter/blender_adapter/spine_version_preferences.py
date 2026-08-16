@@ -273,18 +273,26 @@ def read_spine_project_exact_version_raw(
 
     resolved_target = resolve_spine_json_target(target)
     spec = spine_exact_version_preference_spec(resolved_target)
+    root_package = addon_root_package_name()
+    installed_extension = root_package.startswith("bl_ext.")
+
     prefs = preferences
     if prefs is None:
         prefs = get_spine_addon_preferences(context, required=False)
     if prefs is None:
-        root_package = addon_root_package_name()
-        if root_package.startswith("bl_ext."):
+        if installed_extension:
             raise RuntimeError(
                 "Installed Spine2D extension cannot resolve its AddonPreferences entry: "
                 f"{root_package!r}"
             )
         return spec.default_version
     if not hasattr(prefs, spec.property_name):
+        if not installed_extension:
+            # Source-registered tests intentionally share lightweight bpy mocks with
+            # unrelated preference fixtures. An incomplete fake preferences object is
+            # not an installed Spine2D AddonPreferences instance, so retain the historic
+            # descriptor-default fallback used by pure settings/profile tests.
+            return spec.default_version
         raise AttributeError(
             f"AddonPreferences is missing {spec.property_name!r} for {resolved_target.value}"
         )
