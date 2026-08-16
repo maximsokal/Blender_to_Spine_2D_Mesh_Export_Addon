@@ -17,7 +17,11 @@ from typing import Any, Iterable
 from ..model import SpineDocument
 from ..serializer import SpineSerializer
 from ..version_target import SpineJsonTarget
-from .base import SpineJsonCodecContext, SpineJsonVersionCodec
+from .base import (
+    SpineJsonCodecContext,
+    SpineJsonVersionCodec,
+    validate_document_spine_version_for_target,
+)
 
 
 _TRANSFORM_PROPERTIES = (
@@ -86,7 +90,7 @@ def _same_property_mapping() -> dict[str, dict[str, dict[str, dict[str, Any]]]]:
 
 
 class Spine43JsonCodec(SpineJsonVersionCodec):
-    """Translate one canonical Spine 4.2-shaped document to exact Spine 4.3.23 JSON."""
+    """Translate one canonical Spine 4.2-shaped document to Spine 4.3-family JSON."""
 
     @property
     def target(self) -> SpineJsonTarget:
@@ -108,6 +112,7 @@ class Spine43JsonCodec(SpineJsonVersionCodec):
                 f"Spine43JsonCodec requires {self.target.value}, "
                 f"got {context.target.value}"
             )
+        validate_document_spine_version_for_target(document, self.target)
 
         canonical_json = SpineSerializer(validator=context.validator).to_json(
             document,
@@ -126,9 +131,11 @@ class Spine43JsonCodec(SpineJsonVersionCodec):
             allow_nan=False,
         )
 
-    def _rewrite_skeleton(self, output: dict[str, Any]) -> None:
-        skeleton = _require_dict(output.get("skeleton"), path="document.skeleton")
-        skeleton["spine"] = self.target.exact_version
+    @staticmethod
+    def _rewrite_skeleton(output: dict[str, Any]) -> None:
+        # Validate the detached serialized shape without changing the document-owned
+        # exact patch version. The family was already checked before serialization.
+        _require_dict(output.get("skeleton"), path="document.skeleton")
 
     @staticmethod
     def _rewrite_skin_constraint_membership(
