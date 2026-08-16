@@ -57,12 +57,24 @@ def _document() -> SpineDocument:
     )
 
 
+def _minimal_version_document(exact_version: str) -> SpineDocument:
+    """Build one schema-neutral document usable by every registered codec family."""
+
+    return SpineDocument(
+        skeleton={"spine": exact_version, "images": "images/"},
+        bones=(Bone("root"),),
+        slots=(),
+        skins=(),
+        animations={},
+    )
+
+
 def _v41_document() -> SpineDocument:
     attachment = MeshAttachment(
         name="mesh",
-        uvs=(0.0, 0.0, 1.0, 0.0, 0.0, 1.0),
+        uvs=(0.0, 0.0, 1.0, 0.0, 1.0, 1.0),
         triangles=(0, 1, 2),
-        vertices=(0.0, 0.0, 1.0, 0.0, 0.0, 1.0),
+        vertices=(0.0, 0.0, 1.0, 0.0, 1.0, 1.0),
         hull=3,
         edges=(0, 1),
         width=64.0,
@@ -77,7 +89,7 @@ def _v41_document() -> SpineDocument:
     }
     return SpineDocument(
         skeleton={
-            "spine": "4.2.43",
+            "spine": "4.1.24",
             "images": "images/",
             "referenceScale": 100,
         },
@@ -154,6 +166,35 @@ def test_all_ready_targets_have_registered_production_codecs() -> None:
     for target, codec in codecs.items():
         assert codec.target is target
         assert target.descriptor.serializer_ready is True
+
+
+@pytest.mark.parametrize(
+    ("target", "exact_version"),
+    (
+        (SpineJsonTarget.SPINE_3_8, "3.8.98"),
+        (SpineJsonTarget.SPINE_4_0, "4.0.63"),
+        (SpineJsonTarget.SPINE_4_1, "4.1.23"),
+        (SpineJsonTarget.SPINE_4_2, "4.2.42"),
+        (SpineJsonTarget.SPINE_4_3, "4.3.22"),
+    ),
+)
+def test_every_codec_preserves_document_owned_custom_exact_version(
+    target: SpineJsonTarget,
+    exact_version: str,
+) -> None:
+    document = _minimal_version_document(exact_version)
+
+    payload = json.loads(serialize_spine_document(document, target))
+
+    assert payload["skeleton"]["spine"] == exact_version
+    assert document.skeleton["spine"] == exact_version
+
+
+def test_codec_rejects_document_exact_version_from_another_family() -> None:
+    document = _minimal_version_document("4.1.23")
+
+    with pytest.raises(ValueError, match="not selected family"):
+        serialize_spine_document(document, SpineJsonTarget.SPINE_4_2)
 
 
 @pytest.mark.parametrize(
