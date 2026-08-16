@@ -14,24 +14,101 @@ def _source(relative_path: str) -> str:
     return (PACKAGE / relative_path).read_text(encoding="utf-8")
 
 
-def _assigned_string_property_names(source: str) -> set[str]:
+def _is_string_property_call(node: ast.AST | None) -> bool:
+    """Return whether ``node`` is a Blender ``StringProperty(...)`` call.
+
+    Blender RNA properties are normally declared with annotation syntax, for example
+    ``value: bpy.props.StringProperty(...)``. Supporting both annotation and assigned
+    call forms keeps this static contract focused on the property declaration itself
+    instead of one Python spelling of it.
+    """
+
+    if not isinstance(node, ast.Call):
+        return False
+    function = node.func
+    if isinstance(function, ast.Attribute):
+        return function.attr == "StringProperty"
+    return isinstance(function, ast.Name) and function.id == "StringProperty"
+
+
+def _declared_string_property_names(source: str) -> set[str]:
+    """Collect class-level names declared as Blender StringProperty RNA fields."""
+
     tree = ast.parse(source)
     result: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
             continue
-        value = node.value
-        if not isinstance(value, ast.Call):
-            continue
-        function = value.func
-        if isinstance(function, ast.Attribute) and function.attr == "StringProperty":
+        if _is_string_property_call(node.annotation) or _is_string_property_call(node.value):
             result.add(node.target.id)
     return result
 
 
+def _exact_version_preference_spec_property_names(source: str) -> set[str]:
+    """Read property names from the canonical exact-version preference registry."""
+
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        value: ast.AST | None = None
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "SPINE_EXACT_VERSION_PREFERENCE_SPECS"
+        ):
+            value = node.value
+        elif isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name)
+            and target.id == "SPINE_EXACT_VERSION_PREFERENCE_SPECS"
+            for target in node.targets
+        ):
+            value = node.value
+
+        if value is None:
+            continue
+        if not isinstance(value, (ast.Tuple, ast.List)):
+            raise AssertionError(
+                "SPINE_EXACT_VERSION_PREFERENCE_SPECS must be a tuple/list literal"
+            )
+
+        result: set[str] = set()
+        for entry in value.elts:
+            if not isinstance(entry, ast.Call):
+                raise AssertionError(
+                    "Every exact-version preference spec must be a constructor call"
+                )
+            function = entry.func
+            function_name = (
+                function.id
+                if isinstance(function, ast.Name)
+                else function.attr
+                if isinstance(function, ast.Attribute)
+                else ""
+            )
+            if function_name != "SpineExactVersionPreferenceSpec":
+                raise AssertionError(
+                    "Unexpected exact-version preference registry entry"
+                )
+            if len(entry.args) < 2:
+                raise AssertionError(
+                    "SpineExactVersionPreferenceSpec must receive a property name"
+                )
+            property_name = entry.args[1]
+            if not (
+                isinstance(property_name, ast.Constant)
+                and isinstance(property_name.value, str)
+            ):
+                raise AssertionError(
+                    "Exact-version preference property name must be a string literal"
+                )
+            result.add(property_name.value)
+        return result
+
+    raise AssertionError("Missing SPINE_EXACT_VERSION_PREFERENCE_SPECS registry")
+
+
 def test_addon_preferences_owns_one_exact_version_field_per_supported_family() -> None:
     source = _source("addon_preferences.py")
-    actual = _assigned_string_property_names(source)
+    actual = _declared_string_property_names(source)
     expected = {
         "spine2d_exact_version_3_8",
         "spine2d_exact_version_4_0",
@@ -85,15 +162,9 @@ def test_viewport_exact_version_label_uses_same_preference_resolver() -> None:
 
 def test_preference_resolver_covers_every_current_family_without_fallback_aliases() -> None:
     source = _source("blender_adapter/spine_version_preferences.py")
-    tree = ast.parse(source)
-    literal_names = {
-        node.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and node.value.startswith("spine2d_exact_version_")
-    }
-    assert literal_names == {
+    property_names = _exact_version_preference_spec_property_names(source)
+
+    assert property_names == {
         "spine2d_exact_version_3_8",
         "spine2d_exact_version_4_0",
         "spine2d_exact_version_4_1",
