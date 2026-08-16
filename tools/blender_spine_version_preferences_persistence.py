@@ -81,6 +81,24 @@ def _prepare_scene(output_root: Path) -> None:
     scene.spine2d_projection_direction = "POSITIVE_Z"
 
 
+def _verify_ui_context_resolution(helper, expected: dict[str, str]) -> dict[str, str]:
+    """Exercise the same explicit-context resolver route used by the sidebar UI."""
+
+    actual = {
+        spec.target.value: helper.resolve_spine_project_exact_version(
+            spec.target,
+            context=bpy.context,
+        )
+        for spec in helper.SPINE_EXACT_VERSION_PREFERENCE_SPECS
+    }
+    if actual != expected:
+        raise RuntimeError(
+            "Explicit Blender UI context resolved wrong exact Spine versions: "
+            f"expected={expected!r}, actual={actual!r}"
+        )
+    return actual
+
+
 def _verify_real_exports(
     namespace: argparse.Namespace,
     helper,
@@ -199,6 +217,7 @@ def _run(namespace: argparse.Namespace) -> dict[str, object]:
             f"{namespace.mode}: expected={expected!r}, actual={actual!r}"
         )
 
+    ui_context_actual = _verify_ui_context_resolution(helper, expected)
     exports = (
         _verify_real_exports(namespace, helper, expected)
         if namespace.mode == "verify"
@@ -210,6 +229,7 @@ def _run(namespace: argparse.Namespace) -> dict[str, object]:
         "module": module.__name__,
         "expected": expected,
         "actual": actual,
+        "ui_context_actual": ui_context_actual,
         "save_operator_result": sorted(save_result),
         "exports": exports,
     }
@@ -233,6 +253,7 @@ def main() -> None:
     print(
         "[SPINE-VERSION-PREFERENCES] PASS "
         f"mode={namespace.mode} values={payload['actual']!r} "
+        f"ui_context={payload['ui_context_actual']!r} "
         f"exports={len(payload['exports'])}",
         flush=True,
     )
