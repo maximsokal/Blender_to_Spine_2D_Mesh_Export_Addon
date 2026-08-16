@@ -11,7 +11,10 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1GeometryPreparationSettings,
     resolve_a1_output_paths,
 )
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import a1_ui_export_plan
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (
+    a1_ui_export_plan,
+    a1_ui_settings,
+)
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_scene_capture import (
     _SceneExportProfile,
 )
@@ -83,15 +86,20 @@ def test_single_ui_settings_append_exact_spine_version_once(
     profile = _ObjectExportProfile(source, "Hero", 0, 0, False)
     scene = _scene_profile(tmp_path, target)
 
+    # Filename behavior is pure once the exact project version has been snapshotted.
+    # Supplying the descriptor default keeps this unit test independent from the
+    # process-global bpy mock; real AddonPreferences persistence has its own Blender gate.
     settings = _settings_from_profiles(
         profile,
         scene,
         json_output_stem="Hero_merged",
+        spine_version=target.exact_version,
     )
     repeated = _settings_from_profiles(
         profile,
         scene,
         json_output_stem=settings.json_output_stem,
+        spine_version=target.exact_version,
     )
 
     assert resolve_a1_output_paths("Hero", settings).json_path.name == expected_name
@@ -143,6 +151,11 @@ def test_multi_ui_plan_appends_exact_spine_version(
         a1_ui_export_plan,
         "_capture_selected_profiles",
         lambda _objects: profiles,
+    )
+    monkeypatch.setattr(
+        a1_ui_settings,
+        "resolve_spine_project_exact_version",
+        lambda selected_target: selected_target.exact_version,
     )
 
     plan = a1_ui_export_plan.build_selected_ui_export_plan(
