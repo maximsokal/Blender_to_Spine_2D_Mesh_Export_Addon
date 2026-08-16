@@ -56,6 +56,12 @@ def test_export_settings_resolve_effective_exact_version_from_preferences() -> N
     assert "spine_json_version_filename_token(resolved_version)" in source
 
 
+def test_skeleton_metadata_uses_effective_exact_export_version() -> None:
+    source = _source("blender_adapter/a1_preparation_contracts.py")
+    assert '"spine": settings.export.spine_version' in source
+    assert '"spine": settings.export.spine_target.exact_version' not in source
+
+
 def test_multi_object_sources_share_one_exact_version_preference_snapshot() -> None:
     source = _source("blender_adapter/a1_ui_settings.py")
     assert "spine_version = resolve_spine_project_exact_version(scene.spine_target)" in source
