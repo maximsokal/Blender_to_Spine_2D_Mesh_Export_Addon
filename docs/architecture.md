@@ -1,7 +1,7 @@
 # Architecture
 
 This document describes the production architecture of Blender to Spine2D Mesh Exporter
-**0.152.0**.
+**0.153.0**.
 
 ## Package boundaries
 

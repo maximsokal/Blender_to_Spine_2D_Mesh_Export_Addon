@@ -1,7 +1,7 @@
 # Testing and Release Validation
 
 This document defines the current validation policy for Blender to Spine2D Mesh Exporter
-**0.152.0**.
+**0.153.0**.
 
 A focused test is not a release claim. Release evidence must be generated from one exact
 clean commit and the archive built from that same commit.
@@ -290,11 +290,11 @@ if ($LASTEXITCODE -ne 0) { throw "Real bpy suite failed" }
 
 A missing real-bpy environment must not be reported as successful release validation.
 
-## Build 0.152.0
+## Build 0.153.0
 
 ```powershell
 $SourceDir = ".\Blender_to_Spine2D_Mesh_Exporter"
-$Archive = ".\dist\blender_to_spine2d_mesh_exporter-0.152.0.zip"
+$Archive = ".\dist\blender_to_spine2d_mesh_exporter-0.153.0.zip"
 
 New-Item -ItemType Directory -Force ".\dist" | Out-Null
 Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue

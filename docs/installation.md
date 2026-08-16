@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide describes Blender to Spine2D Mesh Exporter **0.152.0**.
+This guide describes Blender to Spine2D Mesh Exporter **0.153.0**.
 
 ## Requirements
 
@@ -23,7 +23,7 @@ The minimum Blender version is declared in
 2. Open Blender 5.2 or newer.
 3. Open **Edit > Preferences > Extensions**.
 4. Choose **Install from Disk**.
-5. Select `blender_to_spine2d_mesh_exporter-0.152.0.zip`.
+5. Select `blender_to_spine2d_mesh_exporter-0.153.0.zip`.
 6. Enable **Blender to Spine2D Mesh Exporter**.
 7. In the add-on Preferences, expand **Spine project JSON versions** and set the exact
    Editor/project version for every Spine family you use.
@@ -137,7 +137,7 @@ From the repository root in PowerShell:
 $Blender = "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 $SourceDir = ".\Blender_to_Spine2D_Mesh_Exporter"
 $DistDir = ".\dist"
-$Archive = Join-Path $DistDir "blender_to_spine2d_mesh_exporter-0.152.0.zip"
+$Archive = Join-Path $DistDir "blender_to_spine2d_mesh_exporter-0.153.0.zip"
 
 if (-not (Test-Path -LiteralPath $Blender -PathType Leaf)) {
     throw "Blender executable not found: $Blender"
@@ -166,7 +166,7 @@ Get-FileHash -LiteralPath $Archive -Algorithm SHA256
 Expected archive:
 
 ```text
-dist/blender_to_spine2d_mesh_exporter-0.152.0.zip
+dist/blender_to_spine2d_mesh_exporter-0.153.0.zip
 ```
 
 ## After installation
