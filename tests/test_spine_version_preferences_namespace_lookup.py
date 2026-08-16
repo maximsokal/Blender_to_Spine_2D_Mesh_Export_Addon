@@ -173,3 +173,33 @@ def test_source_registered_development_context_keeps_descriptor_default_fallback
         )
         == SpineJsonTarget.SPINE_4_2.exact_version
     )
+
+
+def test_source_registered_incomplete_shared_preferences_mock_keeps_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_package = "Blender_to_Spine2D_Mesh_Exporter"
+    incomplete_preferences = SimpleNamespace(logging_settings=SimpleNamespace())
+    context = _context_with_addons(
+        {
+            runtime_package: SimpleNamespace(
+                module=runtime_package,
+                preferences=incomplete_preferences,
+            ),
+        }
+    )
+
+    monkeypatch.setattr(preferences_module, "_ADDON_BASE_PACKAGE", runtime_package)
+    monkeypatch.setattr(preferences_module.bpy, "context", context)
+
+    assert (
+        preferences_module.get_spine_addon_preferences(context, required=True)
+        is incomplete_preferences
+    )
+    assert (
+        preferences_module.resolve_spine_project_exact_version(
+            SpineJsonTarget.SPINE_4_2,
+            context=context,
+        )
+        == SpineJsonTarget.SPINE_4_2.exact_version
+    )
