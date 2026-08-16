@@ -72,9 +72,9 @@ def addon_root_package_name() -> str:
     """Return Blender's authoritative root add-on package identifier.
 
     Blender Extensions add the repository to the runtime module namespace, for example
-    ``bl_ext.user_default.blender_to_spine2d_mesh_exporter``.  Subpackages must therefore
+    ``bl_ext.user_default.blender_to_spine2d_mesh_exporter``. Subpackages must therefore
     reuse the root package's own ``__package__`` value instead of reconstructing it from
-    their local package string.  This is also the identifier used by AddonPreferences.
+    their local package string. This is also the identifier used by AddonPreferences.
     """
 
     root = str(_ADDON_BASE_PACKAGE or "").strip()
@@ -83,24 +83,152 @@ def addon_root_package_name() -> str:
     return root
 
 
+def _addon_entry_from_key(addons: Any, key: str) -> Any | None:
+    """Read one Blender Addon collection entry without assuming a concrete collection."""
+
+    getter = getattr(addons, "get", None)
+    if callable(getter):
+        try:
+            result = getter(key)
+        except Exception:
+            result = None
+        if result is not None:
+            return result
+    try:
+        return addons[key]
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return None
+
+
+def _iter_addon_entries(addons: Any) -> tuple[tuple[str, Any], ...]:
+    """Return deterministic ``(module-key, Addon)`` entries from Blender or test doubles."""
+
+    entries: list[tuple[str, Any]] = []
+    seen: set[int] = set()
+
+    keys_method = getattr(addons, "keys", None)
+    if callable(keys_method):
+        try:
+            keys = tuple(str(key) for key in keys_method())
+        except Exception:
+            keys = ()
+        for key in keys:
+            addon = _addon_entry_from_key(addons, key)
+            if addon is None or id(addon) in seen:
+                continue
+            seen.add(id(addon))
+            entries.append((key, addon))
+
+    try:
+        iterable = tuple(addons)
+    except (TypeError, RuntimeError):
+        iterable = ()
+    for raw_entry in iterable:
+        addon = raw_entry
+        key = str(getattr(addon, "module", "") or "").strip()
+        if isinstance(raw_entry, str):
+            key = raw_entry
+            addon = _addon_entry_from_key(addons, key)
+        if addon is None or id(addon) in seen:
+            continue
+        seen.add(id(addon))
+        entries.append((key, addon))
+
+    return tuple(entries)
+
+
+def _spine_preferences_from_addon(addon: Any) -> Any | None:
+    preferences = getattr(addon, "preferences", None)
+    if preferences is None:
+        return None
+    if not all(
+        hasattr(preferences, spec.property_name)
+        for spec in SPINE_EXACT_VERSION_PREFERENCE_SPECS
+    ):
+        return None
+    return preferences
+
+
+def _installed_extension_preferences_fallback(
+    addons: Any,
+    root_package: str,
+) -> Any | None:
+    """Find our installed Preferences when Blender exposes an unexpected collection key.
+
+    The semantic fallback is intentionally restricted to installed ``bl_ext.*`` runtimes.
+    It identifies this add-on by the complete stable set of exact-version RNA fields, then
+    uses module identity only to disambiguate multiple installed copies.
+    """
+
+    candidates: list[tuple[str, Any, Any]] = []
+    for key, addon in _iter_addon_entries(addons):
+        preferences = _spine_preferences_from_addon(addon)
+        if preferences is None:
+            continue
+        candidates.append((key, addon, preferences))
+
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0][2]
+
+    root_casefold = root_package.casefold()
+    root_leaf = root_package.rsplit(".", 1)[-1].casefold()
+    ranked: list[tuple[int, Any]] = []
+    for key, addon, preferences in candidates:
+        module = str(getattr(addon, "module", "") or "").strip()
+        identifiers = tuple(value for value in (key, module) if value)
+        score = 0
+        if any(value.casefold() == root_casefold for value in identifiers):
+            score = 2
+        elif any(
+            value.rsplit(".", 1)[-1].casefold() == root_leaf
+            for value in identifiers
+        ):
+            score = 1
+        ranked.append((score, preferences))
+
+    best_score = max(score for score, _preferences in ranked)
+    best = tuple(
+        preferences
+        for score, preferences in ranked
+        if score == best_score
+    )
+    if best_score > 0 and len(best) == 1:
+        return best[0]
+
+    raise RuntimeError(
+        "Multiple Spine2D AddonPreferences entries are enabled; "
+        f"unable to select runtime package {root_package!r}"
+    )
+
+
 def get_spine_addon_preferences(
     context: Any | None = None,
     *,
     required: bool = False,
 ) -> Any | None:
-    """Return the installed extension's AddonPreferences for the active Blender profile.
-
-    Source-registered development tests intentionally have no installed add-on entry;
-    callers may therefore request a non-required lookup and fall back to descriptor
-    defaults without manufacturing a fake preferences object.
-    """
+    """Return the installed extension's AddonPreferences for the active Blender profile."""
 
     runtime_context = bpy.context if context is None else context
     preferences = getattr(runtime_context, "preferences", None)
     addons = getattr(preferences, "addons", None)
     root_package = addon_root_package_name()
-    addon = None if addons is None else addons.get(root_package)
-    result = None if addon is None else getattr(addon, "preferences", None)
+
+    result = None
+    if addons is not None:
+        exact_addon = _addon_entry_from_key(addons, root_package)
+        exact_preferences = (
+            None if exact_addon is None else getattr(exact_addon, "preferences", None)
+        )
+        if exact_preferences is not None:
+            if not root_package.startswith("bl_ext."):
+                result = exact_preferences
+            else:
+                result = _spine_preferences_from_addon(exact_addon)
+        if result is None and root_package.startswith("bl_ext."):
+            result = _installed_extension_preferences_fallback(addons, root_package)
+
     if result is None and required:
         raise RuntimeError(
             "Spine2D AddonPreferences are unavailable for "
@@ -136,7 +264,11 @@ def read_spine_project_exact_version_raw(
                 f"{root_package!r}"
             )
         return spec.default_version
-    return getattr(prefs, spec.property_name, spec.default_version)
+    if not hasattr(prefs, spec.property_name):
+        raise AttributeError(
+            f"AddonPreferences is missing {spec.property_name!r} for {resolved_target.value}"
+        )
+    return getattr(prefs, spec.property_name)
 
 
 def resolve_spine_project_exact_version(
