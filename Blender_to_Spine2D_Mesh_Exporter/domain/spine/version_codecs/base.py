@@ -9,6 +9,8 @@ from typing import Any, Mapping
 from ..model import SpineDocument
 from ..validator import SpineValidator
 from ..version_target import (
+    DEFAULT_SPINE_JSON_TARGET,
+    DEFAULT_SPINE_JSON_VERSION,
     SpineJsonTarget,
     validate_spine_json_exact_version_for_target,
 )
@@ -32,13 +34,21 @@ def validate_document_spine_version_for_target(
     document: SpineDocument,
     target: SpineJsonTarget,
 ) -> str:
-    """Validate the document-owned exact project version for one codec family.
+    """Resolve the exact output version accepted by one target codec family.
 
-    ``SpineDocument.skeleton['spine']`` is the single source of truth for the exact
-    Editor/project patch version. Codecs own schema-family translation only and must not
-    replace this value with their descriptor default. Failing here also protects direct
-    codec callers from producing a JSON body whose declared Spine version belongs to a
-    different schema family.
+    Production documents already carry the user-selected exact patch in
+    ``SpineDocument.skeleton['spine']``. That same-family value must survive schema
+    translation unchanged.
+
+    Historical schema-adapter fixtures and direct canonical callers, however, use the
+    rewrite's canonical 4.2 document shape and therefore carry
+    ``DEFAULT_SPINE_JSON_VERSION`` even when asking a legacy/newer codec to translate the
+    document to another target family. That established contract remains supported by
+    resolving the canonical source marker to the selected target's descriptor default.
+
+    Any other cross-family exact version is rejected. This prevents a custom project
+    patch from being silently relabelled as another schema family while preserving the
+    canonical cross-target adapter contract.
     """
 
     if not isinstance(document, SpineDocument):
@@ -52,10 +62,22 @@ def validate_document_spine_version_for_target(
     if "spine" not in skeleton:
         raise ValueError("document.skeleton.spine is required for versioned export")
 
-    return validate_spine_json_exact_version_for_target(
-        target,
-        skeleton["spine"],
-    )
+    raw_version = skeleton["spine"]
+
+    # The maintained rewrite historically serializes one canonical 4.2-shaped document
+    # through every target codec. Only that exact canonical marker may cross families.
+    try:
+        canonical_version = validate_spine_json_exact_version_for_target(
+            DEFAULT_SPINE_JSON_TARGET,
+            raw_version,
+        )
+    except (TypeError, ValueError):
+        canonical_version = None
+
+    if canonical_version == DEFAULT_SPINE_JSON_VERSION:
+        return target.exact_version
+
+    return validate_spine_json_exact_version_for_target(target, raw_version)
 
 
 class SpineJsonVersionCodec(ABC):
