@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import MappingProxyType
 from typing import Mapping
 
@@ -11,7 +12,11 @@ from ..version_target import (
     SpineJsonTarget,
     require_spine_json_target_serializable,
 )
-from .base import SpineJsonCodecContext, SpineJsonVersionCodec
+from .base import (
+    SpineJsonCodecContext,
+    SpineJsonVersionCodec,
+    validate_document_spine_version_for_target,
+)
 from .v38_camera_relative import Spine38CameraRelativeJsonCodec
 from .v40 import Spine40JsonCodec
 from .v41 import Spine41JsonCodec
@@ -78,6 +83,47 @@ def resolve_spine_json_codec(value: object) -> SpineJsonVersionCodec:
     return codec
 
 
+def _with_resolved_exact_version(
+    encoded: str,
+    *,
+    exact_version: str,
+    indent: int,
+) -> str:
+    """Patch only a legacy canonical cross-target serialization result.
+
+    Same-family production documents already serialize their custom patch correctly, so
+    they return byte-for-byte unchanged. Historical canonical 4.2-shaped documents may
+    require the facade to replace the source marker with the target descriptor default.
+    The replacement happens only on the detached JSON payload and never mutates the
+    canonical ``SpineDocument``.
+    """
+
+    if not isinstance(encoded, str):
+        raise TypeError("encoded must be str")
+    if not isinstance(exact_version, str) or not exact_version:
+        raise ValueError("exact_version must be a non-empty string")
+    if isinstance(indent, bool) or not isinstance(indent, int):
+        raise TypeError("indent must be int")
+
+    payload = json.loads(encoded)
+    if not isinstance(payload, dict):
+        raise TypeError("Serialized Spine document must be a JSON object")
+    skeleton = payload.get("skeleton")
+    if not isinstance(skeleton, dict):
+        raise TypeError("Serialized Spine document.skeleton must be a JSON object")
+
+    if skeleton.get("spine") == exact_version:
+        return encoded
+
+    skeleton["spine"] = exact_version
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=indent,
+        allow_nan=False,
+    )
+
+
 def serialize_spine_document(
     document: SpineDocument,
     target: object,
@@ -91,13 +137,22 @@ def serialize_spine_document(
         raise TypeError("validator must be SpineValidator or None")
 
     resolved_target = require_spine_json_target_serializable(target)
+    exact_version = validate_document_spine_version_for_target(
+        document,
+        resolved_target,
+    )
     codec = resolve_spine_json_codec(resolved_target)
-    return codec.to_json(
+    encoded = codec.to_json(
         document,
         context=SpineJsonCodecContext(
             target=resolved_target,
             validator=validator,
         ),
+        indent=indent,
+    )
+    return _with_resolved_exact_version(
+        encoded,
+        exact_version=exact_version,
         indent=indent,
     )
 
