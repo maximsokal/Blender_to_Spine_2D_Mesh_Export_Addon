@@ -9,6 +9,8 @@ only registers independent child panels in the normal Blender pattern.
 
 from __future__ import annotations
 
+from typing import Any
+
 import bpy
 
 from . import rig_ui
@@ -17,7 +19,6 @@ from .domain.baking import A1TextureExportMode
 
 
 _PARENT_PANEL_ID = "OBJECT_PT_spine2d_mesh"
-_PANEL_CATEGORY = "Spine2D Mesh Exporter"
 
 
 def _texture_mode(scene: bpy.types.Scene) -> A1TextureExportMode:
@@ -41,7 +42,6 @@ class OBJECT_PT_Spine2DRigPanel(bpy.types.Panel):
     bl_label = "Rig"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = _PANEL_CATEGORY
     bl_parent_id = _PARENT_PANEL_ID
     bl_order = 10
 
@@ -56,7 +56,6 @@ class OBJECT_PT_Spine2DGeneratedMaterialsPanel(bpy.types.Panel):
     bl_label = "Generated Materials"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = _PANEL_CATEGORY
     bl_parent_id = _PARENT_PANEL_ID
     bl_order = 20
 
@@ -71,7 +70,6 @@ class OBJECT_PT_Spine2DDepthParallaxPanel(bpy.types.Panel):
     bl_label = "Depth Parallax"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = _PANEL_CATEGORY
     bl_parent_id = _PARENT_PANEL_ID
     bl_order = 30
 
@@ -95,10 +93,7 @@ class OBJECT_PT_Spine2DDepthParallaxPanel(bpy.types.Panel):
             getattr(scene, "spine2d_depth_parallax_horizon_angle", 0.0) or 0.0
         )
         if angle <= 1.0e-12:
-            layout.label(
-                text="0°: front surface only",
-                icon="INFO",
-            )
+            layout.label(text="0°: front surface only", icon="INFO")
         else:
             layout.label(
                 text="Retains connected surfaces beyond the camera horizon",
@@ -116,9 +111,8 @@ CLASSES = (
     OBJECT_PT_Spine2DDepthParallaxPanel,
 )
 
-# Kept as an empty compatibility surface for source-level tests/importers that used the
-# old name. Child panels no longer need custom Scene RNA foldout state.
-RNA_PROPERTIES: tuple[()] = ()
+# Compatibility symbol only. Child panels no longer require custom foldout RNA state.
+RNA_PROPERTIES: tuple[Any, ...] = ()
 
 
 def register() -> None:
