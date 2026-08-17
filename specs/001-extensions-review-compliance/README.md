@@ -1,54 +1,54 @@
 # Spec Kit — Blender Extensions Review Compliance
 
-This directory is the planning/evidence package for closing the Blender Extensions moderation feedback against the current Blender 5.2+ Rewrite.
+This directory is the planning, implementation, and release-evidence package for closing the current Blender Extensions moderation feedback against the Blender 5.2+ Rewrite.
 
-**Documentation baseline:** `main@f0a0f879d639dad860c0c8c56ddba0845aa69f17`  
-**Documentation branch:** `001-extensions-review-compliance`  
-**Production changes in this branch:** none.
+**Base:** `main@f0a0f879d639dad860c0c8c56ddba0845aa69f17`  
+**Working branch:** `001-extensions-review-compliance`  
+**Target corrected version:** `0.155.0`
 
 ## Documents
 
 | File | Purpose |
 | --- | --- |
-| `review-feedback.md` | Reviewer-comment ledger, current baseline status, and required closure evidence. |
-| `spec.md` | Mandatory functional/non-functional requirements and acceptance matrix. |
-| `research.md` | Current-main source/manifest/docs audit, Blender constraints, risks, and open implementation research. |
-| `plan.md` | Ordered implementation slices with test/release gates and rollback strategy. |
-| `tasks.md` | Fine-grained execution ledger; this is the “every change” checklist during implementation. |
+| `review-feedback.md` | Exact current seven-point reviewer ledger and closure evidence. |
+| `spec.md` | Functional/non-functional compliance requirements and acceptance matrix. |
+| `research.md` | Source/manifest/docs audit, Blender constraints, risks, and open research. |
+| `plan.md` | Ordered implementation slices and release gates. |
+| `tasks.md` | Fine-grained execution ledger. |
+| `implementation-log.md` | Production changes actually made, with reasons and pending evidence. |
 | `checklists/extensions-review.md` | Exact-release-candidate moderator closure checklist. |
-| `quickstart.md` | How to start the future implementation branch and run the existing repository gates. |
+| `quickstart.md` | Local test/build/install gate commands. |
 
-## Governing rules
+## Non-negotiable current-review rules
 
-1. Reviewer intent wins over obsolete historical line numbers.
-2. Current Rewrite source is the implementation target.
-3. No persistent Python background thread/thread-timer may be left running while Blender resumes normal execution.
-4. No `bpy`/Blender data access may occur from a non-main Python thread.
-5. Trace/diagnostic persistence must have an explicit deterministic request owner.
-6. Registration complexity must be justified by real Blender resource ownership and partial-failure behavior.
-7. UI settings must have canonical owners; duplicate `_dup` drawing paths are forbidden.
-8. Built ZIP inventory, not source exclusions alone, decides package hygiene.
-9. Platform support is an evidence-backed release claim.
-10. Public title can change without casually changing stable technical package identity.
-11. Corrected package is uploaded as a new version of the **same existing declined submission**.
-12. Retained legacy repository code is not modified merely to make the extension ZIP smaller; exclude non-runtime legacy from the package instead.
-13. Every implementation slice updates `tasks.md` and maps to `RF-*` / `FR-*` IDs.
-14. Any edit after a candidate ZIP is built invalidates that artifact and requires a rebuild/package revalidation.
+1. `PipelineTraceSession`/development-only material must not be shipped unless it has a real user runtime purpose.
+2. Shipped runtime must not use `threading` or `queue`.
+3. Re-Polish advertising/integration must not be shipped; the extension must be self-contained.
+4. Registration must use straightforward Blender ownership; no root state machine or `ui_layout.py` panel unregister/re-register/restore dance.
+5. Manifest tags must contain only `Import-Export`.
+6. Do not keep a Windows-only manifest restriction without an actual runtime requirement.
+7. The public title must not contain `Blender`; technical `id` may stay unchanged.
+8. Upload the corrected higher version to the **same existing submission**; do not create another extension listing.
+9. Built ZIP inventory, Blender validation, and clean installed-extension tests are final evidence.
+10. Retained legacy repository code is not modified merely for package cleanup; non-runtime legacy stays excluded from the ZIP.
+11. Every implementation change is recorded in this Spec Kit before release.
 
-## Baseline snapshot
+## Implementation status
 
-At the baseline commit, the most important current facts are:
+Already changed on this branch:
 
-- extension version: `0.154.0`;
-- public name: `Blender to Spine2D Mesh Exporter` — reviewer rename still open;
-- tags: `Import-Export`, `Mesh`, `UV`, `Animation` — historical irrelevant tags are already gone;
-- platform: `windows-x64` — reviewer platform question still open;
-- build exclusions: substantially improved, but exact ZIP inventory is still mandatory;
-- historical `spine_core/chat_persistence.py` is not a current Rewrite path;
-- current `ui_layout.py` no longer contains the reviewer-named duplicate drawing functions;
-- current root registration remains a non-trivial transactional lifecycle and needs resource-by-resource simplification review;
-- current submission documentation still says “initial submission” and must be changed before moderator re-upload.
+- manifest target moved to `0.155.0`, public name `Spine2D Mesh Exporter`, only `Import-Export` tag, no Windows-only platform declaration;
+- `threading` removed from the exclusive-operation runtime guard;
+- Re-Polish runtime panel removed;
+- root registration state machine removed;
+- `ui_layout.py` panel swapping replaced with ordinary child panels;
+- rig UI no longer swaps the base Reset operator during registration;
+- focused compliance tests added.
 
-## Implementation handoff
+Still required before release:
 
-When production work is approved, do not continue committing runtime changes to this documentation branch. Create a fresh implementation branch from the approved `main`, bring this Spec Kit package with it, and execute `tasks.md` in the order constrained by `plan.md`.
+- run focused/full/bpy suites and adapt tests that intentionally encoded the rejected architecture;
+- audit/simplify remaining unnecessary module-local registration wrappers;
+- synchronize public docs/submission/testing with 0.155.0 and same-submission workflow;
+- build the exact ZIP with Blender, inspect its full inventory, validate it, install it in an isolated profile, and run lifecycle/export gates;
+- record exact Git SHA + ZIP SHA256 and upload that ZIP to the existing Blender Extensions submission.
