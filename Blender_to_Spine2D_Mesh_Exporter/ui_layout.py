@@ -1,90 +1,92 @@
 # pylint: disable=import-error
-"""Own the exact visual order of Rewrite controls in the main Blender panel."""
+"""Additional exporter UI sections using ordinary Blender child panels.
+
+The previous implementation temporarily unregistered the main panel and replaced it
+with another class during add-on registration. Blender Extensions review explicitly
+rejected that lifecycle. The main panel now remains owned by :mod:`ui`; this module
+only registers independent child panels in the normal Blender pattern.
+"""
 
 from __future__ import annotations
 
-import logging
-import os
-from typing import Callable
-
 import bpy
 
-from . import rig_ui, ui
+from . import rig_ui
 from .blender_adapter import generated_material_ui
-from .blender_adapter.normal_uv_modifier_warnings import (
-    collect_normal_uv_ignored_modifiers,
-    group_ignored_modifiers_by_object,
-)
-from .blender_adapter.spine_version_preferences import (
-    resolve_spine_project_exact_version,
-)
-from .config import get_default_output_dir
 from .domain.baking import A1TextureExportMode
-from .domain.spine.version_target import (
-    DEFAULT_SPINE_JSON_TARGET,
-    resolve_spine_json_target,
-)
-from .infrastructure.blender_registration import (
-    RnaPropertyRegistration,
-    register_rna_properties_transactionally,
-    rna_property_cleanup_actions,
-    unregister_all_best_effort,
-)
 
 
-logger = logging.getLogger(__name__)
-
-_ORIGINAL_PANEL_REMOVED = False
-_ORDERED_PANEL_REGISTERED = False
-_REGISTERED_RNA: tuple[RnaPropertyRegistration, ...] = ()
-_MAX_VISIBLE_MODIFIERS_PER_OBJECT = 8
+_PARENT_PANEL_ID = "OBJECT_PT_spine2d_mesh"
+_PANEL_CATEGORY = "Spine2D Mesh Exporter"
 
 
-class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
-    """Render every user-facing section with one standard foldout implementation.
-
-    The class deliberately derives directly from ``bpy.types.Panel`` rather than from
-    the replaceable base panel Python class. Blender development reloads may reload
-    modules in reverse order; direct inheritance prevents this owner from retaining a
-    stale, already-unregistered RNA parent class.
-    """
-
-    bl_idname = ui.OBJECT_PT_Spine2DMeshPanel.bl_idname
-    bl_label = ui.OBJECT_PT_Spine2DMeshPanel.bl_label
-    bl_space_type = ui.OBJECT_PT_Spine2DMeshPanel.bl_space_type
-    bl_region_type = ui.OBJECT_PT_Spine2DMeshPanel.bl_region_type
-    bl_category = ui.OBJECT_PT_Spine2DMeshPanel.bl_category
-
-    def _draw_foldout(
-        self,
-        layout: bpy.types.UILayout,
-        scene: bpy.types.Scene,
-        *,
-        property_name: str,
-        title: str,
-        draw_content: Callable[[bpy.types.UILayout], None],
-    ) -> None:
-        """Delegate the standard foldout appearance to the current UI module."""
-
-        ui.OBJECT_PT_Spine2DMeshPanel._draw_foldout(
-            self,
-            layout,
+def _texture_mode(scene: bpy.types.Scene) -> A1TextureExportMode:
+    raw = str(
+        getattr(
             scene,
-            property_name=property_name,
-            title=title,
-            draw_content=draw_content,
+            "spine2d_texture_export_mode",
+            A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
+        )
+    ).strip().upper()
+    try:
+        return A1TextureExportMode(raw)
+    except ValueError:
+        return A1TextureExportMode.NORMAL_UV_SEGMENTS
+
+
+class OBJECT_PT_Spine2DRigPanel(bpy.types.Panel):
+    """Expose rig/projection controls below the canonical exporter panel."""
+
+    bl_idname = "OBJECT_PT_spine2d_rig"
+    bl_label = "Rig"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = _PANEL_CATEGORY
+    bl_parent_id = _PARENT_PANEL_ID
+    bl_order = 10
+
+    def draw(self, context: bpy.types.Context) -> None:
+        rig_ui.draw_rig_settings(self.layout, context)
+
+
+class OBJECT_PT_Spine2DGeneratedMaterialsPanel(bpy.types.Panel):
+    """Expose generated-material controls without replacing the main panel."""
+
+    bl_idname = "OBJECT_PT_spine2d_generated_materials"
+    bl_label = "Generated Materials"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = _PANEL_CATEGORY
+    bl_parent_id = _PARENT_PANEL_ID
+    bl_order = 20
+
+    def draw(self, context: bpy.types.Context) -> None:
+        generated_material_ui.draw_generated_material_settings(self.layout, context)
+
+
+class OBJECT_PT_Spine2DDepthParallaxPanel(bpy.types.Panel):
+    """Expose depth-only parallax reserve settings when that mode is active."""
+
+    bl_idname = "OBJECT_PT_spine2d_depth_parallax"
+    bl_label = "Depth Parallax"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = _PANEL_CATEGORY
+    bl_parent_id = _PARENT_PANEL_ID
+    bl_order = 30
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context) -> bool:
+        scene = getattr(context, "scene", None)
+        return bool(
+            scene is not None
+            and _texture_mode(scene) is A1TextureExportMode.DEPTH_CAMERA_PROJECTION
         )
 
-    @staticmethod
-    def _draw_depth_parallax_cut_settings(
-        column: bpy.types.UILayout,
-        scene: bpy.types.Scene,
-    ) -> None:
-        """Draw the Depth horizon reserve beside the topology-cut controls."""
-
-        box = column.box()
-        box.label(text="Parallax reserve", icon="ORIENTATION_GIMBAL")
-        box.prop(
+    def draw(self, context: bpy.types.Context) -> None:
+        scene = context.scene
+        layout = self.layout
+        layout.prop(
             scene,
             "spine2d_depth_parallax_horizon_angle",
             text="Parallax Horizon Angle",
@@ -93,418 +95,51 @@ class OBJECT_PT_Spine2DOrderedMeshPanel(bpy.types.Panel):
             getattr(scene, "spine2d_depth_parallax_horizon_angle", 0.0) or 0.0
         )
         if angle <= 1.0e-12:
-            box.label(
-                text="0°: current front surface and one camera texture",
+            layout.label(
+                text="0°: front surface only",
                 icon="INFO",
-            )
-            return
-
-        box.label(
-            text="Adds angular surface reserve beyond the camera horizon",
-            icon="MESH_DATA",
-        )
-        box.label(
-            text="Fitted virtual views create textured reserve attachments",
-            icon="IMAGE_DATA",
-        )
-        box.label(
-            text="Max Depth Points limits combined front + reserve geometry",
-            icon="BONE_DATA",
-        )
-
-    @staticmethod
-    def _draw_cut_settings(
-        column: bpy.types.UILayout,
-        scene: bpy.types.Scene,
-    ) -> None:
-        ui.OBJECT_PT_Spine2DMeshPanel._draw_cut_settings(column, scene)
-        texture_mode = ui.OBJECT_PT_Spine2DMeshPanel._texture_mode(scene)
-        if texture_mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
-            OBJECT_PT_Spine2DOrderedMeshPanel._draw_depth_parallax_cut_settings(
-                column,
-                scene,
-            )
-
-    @staticmethod
-    def _draw_bake_settings(
-        column: bpy.types.UILayout,
-        context: bpy.types.Context,
-    ) -> None:
-        """Draw texture resolution before the shared frame and render controls."""
-
-        scene = context.scene
-        column.prop(scene, "spine2d_texture_size", text="Texture size")
-        column.separator()
-        ui.OBJECT_PT_Spine2DMeshPanel._draw_bake_settings(column, context)
-
-    @staticmethod
-    def _issue_icon(severity) -> str:
-        return ui.OBJECT_PT_Spine2DMeshPanel._issue_icon(severity)
-
-    @staticmethod
-    def _state_icon(state) -> str:
-        return ui.OBJECT_PT_Spine2DMeshPanel._state_icon(state)
-
-    def _draw_object_readiness(self, layout: bpy.types.UILayout, item) -> None:
-        ui.OBJECT_PT_Spine2DMeshPanel._draw_object_readiness(self, layout, item)
-
-    @staticmethod
-    def _analysis_mesh_objects(
-        context: bpy.types.Context,
-    ) -> tuple[bpy.types.Object, ...]:
-        """Resolve the exact single/multi Mesh request shown by the main panel."""
-
-        selected = tuple(
-            candidate
-            for candidate in getattr(context, "selected_objects", ())
-            if getattr(candidate, "type", None) == "MESH"
-        )
-        if len(selected) > 1:
-            return selected
-
-        active = getattr(context, "active_object", None)
-        if active is not None and getattr(active, "type", None) == "MESH":
-            return (active,)
-        return selected
-
-    @staticmethod
-    def _draw_modifier_analysis_warning(
-        layout: bpy.types.UILayout,
-        context: bpy.types.Context,
-    ) -> None:
-        """Warn when Normal mode cannot reproduce viewport modifier geometry."""
-
-        scene = getattr(context, "scene", None)
-        if scene is None:
-            return
-        texture_mode = ui.OBJECT_PT_Spine2DMeshPanel._texture_mode(scene)
-        descriptors = collect_normal_uv_ignored_modifiers(
-            OBJECT_PT_Spine2DOrderedMeshPanel._analysis_mesh_objects(context),
-            texture_mode,
-        )
-        if not descriptors:
-            return
-
-        box = layout.box()
-        box.alert = True
-        box.label(
-            text="Normal / UV Segments ignores active modifiers",
-            icon="ERROR",
-        )
-        box.label(text="Viewport and Spine geometry can look different.")
-        box.label(text="Apply or convert modifiers before export.", icon="INFO")
-
-        for object_name, modifiers in group_ignored_modifiers_by_object(descriptors):
-            box.separator()
-            box.label(text=object_name, icon="MESH_DATA")
-            visible = modifiers[:_MAX_VISIBLE_MODIFIERS_PER_OBJECT]
-            for modifier in visible:
-                states: list[str] = []
-                if modifier.show_viewport:
-                    states.append("viewport")
-                if modifier.show_render:
-                    states.append("render")
-                box.label(
-                    text=(
-                        f"{modifier.modifier_name} ({modifier.modifier_type}) — "
-                        + "/".join(states)
-                    ),
-                    icon="MODIFIER",
-                )
-            hidden_count = len(modifiers) - len(visible)
-            if hidden_count > 0:
-                box.label(text=f"... and {hidden_count} more modifier(s)")
-
-    def _draw_readiness(
-        self,
-        layout: bpy.types.UILayout,
-        context: bpy.types.Context,
-    ) -> bool:
-        self._draw_modifier_analysis_warning(layout, context)
-        return ui.OBJECT_PT_Spine2DMeshPanel._draw_readiness(self, layout, context)
-
-    def _draw_export_settings(
-        self,
-        column: bpy.types.UILayout,
-        context: bpy.types.Context,
-    ) -> None:
-        """Draw the target Spine schema and output paths.
-
-        Export mode and connected-object controls are owned by the Rig foldout. Texture
-        resolution is a bake/render setting and is owned by the Bake foldout. The target
-        schema remains an output-format setting and therefore belongs here.
-        """
-
-        scene = context.scene
-        column.prop(
-            scene,
-            "spine2d_target_spine_version",
-            text="Spine version",
-        )
-        try:
-            target = resolve_spine_json_target(
-                getattr(
-                    scene,
-                    "spine2d_target_spine_version",
-                    DEFAULT_SPINE_JSON_TARGET.value,
-                )
-            )
-            exact_version = resolve_spine_project_exact_version(
-                target,
-                context=context,
-            )
-            column.label(
-                text=f"Exact JSON version: {exact_version}",
-                icon="INFO",
-            )
-            if not target.descriptor.serializer_ready:
-                column.label(
-                    text="Codec implementation in progress; Analyze blocks export",
-                    icon="ERROR",
-                )
-        except (TypeError, ValueError, RuntimeError) as exc:
-            column.label(
-                text=f"Invalid Spine version settings: {exc}",
-                icon="ERROR",
-            )
-        column.separator()
-
-        column.prop(scene, "spine2d_json_path", text="JSON")
-        json_full_path = bpy.path.abspath(scene.spine2d_json_path)
-        if not json_full_path or json_full_path == bpy.path.abspath("//"):
-            json_full_path = get_default_output_dir()
-        column.label(text=json_full_path)
-        column.separator()
-
-        column.prop(scene, "spine2d_images_path", text="Images Subfolder")
-        images_full_path = os.path.join(json_full_path, scene.spine2d_images_path)
-        column.label(text=os.path.normpath(images_full_path))
-
-    def _draw_export_action(
-        self,
-        column: bpy.types.UILayout,
-        context: bpy.types.Context,
-    ) -> None:
-        """Keep the production export action in the paths/version foldout."""
-
-        row = column.row()
-        row.alert = True
-        row.scale_y = 1.25
-        selected_meshes = tuple(
-            candidate
-            for candidate in getattr(context, "selected_objects", ())
-            if getattr(candidate, "type", None) == "MESH"
-        )
-        if len(selected_meshes) <= 1:
-            row.operator(
-                "object.spine2d_single_export",
-                text="Export Current Object",
-                icon="EXPORT",
             )
         else:
-            row.operator(
-                "object.spine2d_multi_export",
-                text="Export Selected Objects",
-                icon="EXPORT",
+            layout.label(
+                text="Retains connected surfaces beyond the camera horizon",
+                icon="MESH_DATA",
+            )
+            layout.label(
+                text="Max Depth Points limits front + reserve geometry",
+                icon="BONE_DATA",
             )
 
-    def draw(self, context: bpy.types.Context) -> None:
-        """Draw the exact requested order using one visual foldout style."""
 
-        layout = self.layout
-        scene = context.scene
-        try:
-            if not bpy.data.filepath:
-                layout.label(text="Blend file not saved!", icon="ERROR")
-                layout.label(text="Please save your .blend first.")
-                layout.enabled = False
-                return
-
-            header = layout.row(align=True)
-            header.label(text="Rewrite settings:")
-            header.operator("spine2d.reset_settings", text="Reset")
-
-            # User-facing order is an explicit UI contract.
-            self._draw_foldout(
-                layout,
-                scene,
-                property_name="spine2d_show_settings",
-                title="Paths and Spine 2D version",
-                draw_content=lambda content: self._draw_export_settings(
-                    content,
-                    context,
-                ),
-            )
-            self._draw_foldout(
-                layout,
-                scene,
-                property_name="spine2d_show_rig_settings",
-                title="Rig",
-                draw_content=lambda content: rig_ui.draw_rig_settings(
-                    content,
-                    context,
-                ),
-            )
-            self._draw_foldout(
-                layout,
-                scene,
-                property_name="spine2d_show_generated_material_settings",
-                title="Rewrite Generated Materials",
-                draw_content=lambda content: (
-                    generated_material_ui.draw_generated_material_settings(
-                        content,
-                        context,
-                    )
-                ),
-            )
-            self._draw_foldout(
-                layout,
-                scene,
-                property_name="spine2d_show_cut_settings",
-                title="Cut",
-                draw_content=lambda content: self._draw_cut_settings(
-                    content,
-                    scene,
-                ),
-            )
-            self._draw_foldout(
-                layout,
-                scene,
-                property_name="spine2d_show_bake_settings",
-                title="Bake",
-                draw_content=lambda content: self._draw_bake_settings(
-                    content,
-                    context,
-                ),
-            )
-            self._draw_foldout(
-                layout,
-                scene,
-                property_name="spine2d_show_analysis",
-                title="Analysis",
-                draw_content=lambda content: self._draw_readiness(
-                    content,
-                    context,
-                ),
-            )
-            layout.separator()
-            self._draw_export_action(layout, context)
-        except Exception:
-            logger.exception("Unable to draw ordered Spine2D Rewrite UI")
-            layout.label(text="UI error (see console)", icon="ERROR")
-
-
-RNA_PROPERTIES = (
-    RnaPropertyRegistration(
-        owner=bpy.types.Scene,
-        name="spine2d_show_rig_settings",
-        value=bpy.props.BoolProperty(
-            name="Show Rig Settings",
-            default=False,
-            description="Show or hide rig-profile controls",
-        ),
-    ),
-    RnaPropertyRegistration(
-        owner=bpy.types.Scene,
-        name="spine2d_show_generated_material_settings",
-        value=bpy.props.BoolProperty(
-            name="Show Generated Material Settings",
-            default=False,
-            description="Show or hide generated-material controls",
-        ),
-    ),
-    RnaPropertyRegistration(
-        owner=bpy.types.Scene,
-        name="spine2d_show_analysis",
-        value=bpy.props.BoolProperty(
-            name="Show Analysis",
-            default=False,
-            description="Show or hide the manually triggered readiness analysis",
-        ),
-    ),
+CLASSES = (
+    OBJECT_PT_Spine2DRigPanel,
+    OBJECT_PT_Spine2DGeneratedMaterialsPanel,
+    OBJECT_PT_Spine2DDepthParallaxPanel,
 )
 
-
-def _restore_original_panel() -> None:
-    global _ORIGINAL_PANEL_REMOVED
-    if not _ORIGINAL_PANEL_REMOVED:
-        return
-    bpy.utils.register_class(ui.OBJECT_PT_Spine2DMeshPanel)
-    _ORIGINAL_PANEL_REMOVED = False
+# Kept as an empty compatibility surface for source-level tests/importers that used the
+# old name. Child panels no longer need custom Scene RNA foldout state.
+RNA_PROPERTIES: tuple[()] = ()
 
 
 def register() -> None:
-    """Replace the base panel transactionally while preserving its operators/RNA."""
+    """Register child panels in declaration order."""
 
-    global _ORIGINAL_PANEL_REMOVED, _ORDERED_PANEL_REGISTERED, _REGISTERED_RNA
-    if _ORDERED_PANEL_REGISTERED:
-        return
-
-    registered_rna = register_rna_properties_transactionally(RNA_PROPERTIES)
-    try:
-        bpy.utils.unregister_class(ui.OBJECT_PT_Spine2DMeshPanel)
-        _ORIGINAL_PANEL_REMOVED = True
-        bpy.utils.register_class(OBJECT_PT_Spine2DOrderedMeshPanel)
-        _ORDERED_PANEL_REGISTERED = True
-        _REGISTERED_RNA = tuple(registered_rna)
-    except Exception as exc:
-        logger.exception("Ordered Spine2D UI registration failed")
-        if _ORDERED_PANEL_REGISTERED:
-            try:
-                bpy.utils.unregister_class(OBJECT_PT_Spine2DOrderedMeshPanel)
-            except Exception:
-                logger.exception("Unable to remove partial ordered panel")
-            _ORDERED_PANEL_REGISTERED = False
-        try:
-            _restore_original_panel()
-        except Exception:
-            logger.exception("Unable to restore base panel during rollback")
-        unregister_all_best_effort(
-            rna_property_cleanup_actions(tuple(registered_rna)),
-            operation="ordered UI RNA registration rollback",
-            primary_error=exc,
-        )
-        _REGISTERED_RNA = ()
-        raise
-    logger.debug("Ordered Spine2D UI registered")
+    for cls in CLASSES:
+        bpy.utils.register_class(cls)
 
 
 def unregister() -> None:
-    """Remove the ordered panel, restore the base panel, and release RNA state."""
+    """Unregister child panels in reverse declaration order."""
 
-    global _ORDERED_PANEL_REGISTERED, _REGISTERED_RNA
-    errors: list[BaseException] = []
-    if _ORDERED_PANEL_REGISTERED:
-        try:
-            bpy.utils.unregister_class(OBJECT_PT_Spine2DOrderedMeshPanel)
-        except Exception as exc:
-            logger.exception("Unable to unregister ordered Spine2D panel")
-            errors.append(exc)
-        else:
-            _ORDERED_PANEL_REGISTERED = False
-
-    try:
-        _restore_original_panel()
-    except Exception as exc:
-        logger.exception("Unable to restore base Spine2D panel")
-        errors.append(exc)
-
-    try:
-        unregister_all_best_effort(
-            rna_property_cleanup_actions(_REGISTERED_RNA or RNA_PROPERTIES),
-            operation="ordered UI RNA unregistration",
-            primary_error=errors[0] if errors else None,
-        )
-    finally:
-        _REGISTERED_RNA = ()
-
-    if errors:
-        raise RuntimeError("Ordered Spine2D UI unregistration failed") from errors[0]
-    logger.debug("Ordered Spine2D UI unregistered")
+    for cls in reversed(CLASSES):
+        bpy.utils.unregister_class(cls)
 
 
 __all__ = [
-    "OBJECT_PT_Spine2DOrderedMeshPanel",
+    "CLASSES",
+    "OBJECT_PT_Spine2DDepthParallaxPanel",
+    "OBJECT_PT_Spine2DGeneratedMaterialsPanel",
+    "OBJECT_PT_Spine2DRigPanel",
     "RNA_PROPERTIES",
     "register",
     "unregister",
