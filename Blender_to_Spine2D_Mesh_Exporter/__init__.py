@@ -4,30 +4,10 @@
 from __future__ import annotations
 
 import logging
-from enum import Enum
-from typing import Any, Callable, Tuple
+from typing import Any
 
 
 logger = logging.getLogger(__package__ or __name__)
-
-
-class ExtensionRegistrationState(str, Enum):
-    """Process-local lifecycle state for the root Rewrite extension owner."""
-
-    UNREGISTERED = "UNREGISTERED"
-    REGISTERING = "REGISTERING"
-    REGISTERED = "REGISTERED"
-    UNREGISTERING = "UNREGISTERING"
-    DEGRADED = "DEGRADED"
-
-
-_REGISTRATION_STATE = ExtensionRegistrationState.UNREGISTERED
-
-
-def get_registration_state() -> ExtensionRegistrationState:
-    """Return the current root registration state for diagnostics and tests."""
-
-    return _REGISTRATION_STATE
 
 
 try:
@@ -48,7 +28,6 @@ if bpy is not None:
         addon_preferences,
         auto_readiness,
         config,
-        repolish_ui,
         rig_ui,
         single_object_operator,
         ui,
@@ -60,26 +39,17 @@ if bpy is not None:
         scene_properties,
         scene_settings_migration,
     )
-    from .infrastructure.blender_registration import (
-        RegistrationCleanupAction,
-        RnaPropertyRegistration,
-        register_rna_properties_transactionally,
-        rna_property_cleanup_actions,
-        unregister_all_best_effort,
-    )
     from .infrastructure.blender_version import require_supported_blender_runtime
 
     AddonLoggingSettings = addon_preferences.AddonLoggingSettings
     CLASSES_TO_REGISTER = addon_preferences.CLASSES_TO_REGISTER
     LoggingModuleSettings = addon_preferences.LoggingModuleSettings
     ModelToSpine2DAddonPreferences = addon_preferences.ModelToSpine2DAddonPreferences
-    SPINE2D_OT_RefreshLoggingModules = (
-        addon_preferences.SPINE2D_OT_RefreshLoggingModules
-    )
+    SPINE2D_OT_RefreshLoggingModules = addon_preferences.SPINE2D_OT_RefreshLoggingModules
     initialize_logging_preferences = addon_preferences.initialize_logging_preferences
 
-    # Only owners of the Blender 5.2+ Rewrite runtime are imported at startup.
-    # Legacy implementation modules are deliberately outside this extension surface.
+    # Keep the root owner intentionally boring: each module owns its Blender resources
+    # and exposes the standard register()/unregister() pair.
     MODULES = (
         addon_preferences,
         scene_settings_migration,
@@ -89,218 +59,75 @@ if bpy is not None:
         auto_readiness,
         generated_material_ui,
         ui_layout,
-        repolish_ui,
         single_object_operator,
     )
 
-    CONFIG_RNA_PROPERTIES = tuple(
-        RnaPropertyRegistration(
-            owner=bpy.types.Scene,
-            name=name,
-            value=prop,
-        )
-        for name, prop in scene_properties.PROPERTIES
-    )
-
-    RegistrationCallback = Callable[[], None]
-    RegistrationStep = Tuple[str, RegistrationCallback, RegistrationCallback]
+    CONFIG_RNA_PROPERTIES = tuple(scene_properties.PROPERTIES)
 
     def _module_owns_runtime_registration(module: Any) -> bool:
         return module in MODULES
 
     def _register_config_rna() -> None:
+        """Register Scene properties through the normal Blender RNA pattern."""
+
         scene_settings_migration.capture_pre_registration_scene_state()
-        try:
-            register_rna_properties_transactionally(CONFIG_RNA_PROPERTIES)
-        except Exception:
-            scene_settings_migration.clear_pre_registration_scene_state()
-            raise
+        for name, value in CONFIG_RNA_PROPERTIES:
+            setattr(bpy.types.Scene, name, value)
 
     def _unregister_config_rna() -> None:
-        unregister_all_best_effort(
-            rna_property_cleanup_actions(CONFIG_RNA_PROPERTIES),
-            operation="config RNA unregistration",
-        )
+        """Remove Scene properties owned by this extension in reverse order."""
 
-    REGISTRATION_STEPS: tuple[RegistrationStep, ...] = (
-        (
-            "addon preferences",
-            addon_preferences.register,
-            addon_preferences.unregister,
-        ),
-        (
-            "Scene RNA properties",
-            _register_config_rna,
-            _unregister_config_rna,
-        ),
-        (
-            "Scene settings migration",
-            scene_settings_migration.register,
-            scene_settings_migration.unregister,
-        ),
-        (
-            "UI",
-            ui.register,
-            ui.unregister,
-        ),
-        (
-            "Rig UI",
-            rig_ui.register,
-            rig_ui.unregister,
-        ),
-        (
-            "readiness invalidation",
-            a1_readiness_invalidation.register,
-            a1_readiness_invalidation.unregister,
-        ),
-        (
-            "automatic readiness",
-            auto_readiness.register,
-            auto_readiness.unregister,
-        ),
-        (
-            "generated material UI",
-            generated_material_ui.register,
-            generated_material_ui.unregister,
-        ),
-        (
-            "ordered UI layout",
-            ui_layout.register,
-            ui_layout.unregister,
-        ),
-        (
-            "Re-Polish UI",
-            repolish_ui.register,
-            repolish_ui.unregister,
-        ),
-        (
-            "single-object operator",
-            single_object_operator.register,
-            single_object_operator.unregister,
-        ),
-    )
+        for name, _value in reversed(CONFIG_RNA_PROPERTIES):
+            if hasattr(bpy.types.Scene, name):
+                delattr(bpy.types.Scene, name)
 
-    def _registration_cleanup_actions(
-        completed_steps: tuple[RegistrationStep, ...],
-    ) -> tuple[RegistrationCleanupAction, ...]:
-        return tuple(
-            RegistrationCleanupAction(
-                label=label,
-                callback=unregister_callback,
-            )
-            for label, _register_callback, unregister_callback in reversed(
-                completed_steps
-            )
-        )
-
-    def _initialize_registered_logging() -> bool:
-        """Apply user preferences when available, otherwise keep safe defaults.
-
-        Blender creates an entry in ``preferences.addons`` only when a package is
-        enabled through the add-on/extension manager. Repository headless tests import
-        and register the package directly, so the registered AddonPreferences class may
-        exist without a corresponding enabled-add-on entry. That is a valid lifecycle
-        state and must not roll back otherwise successful RNA registration.
-        """
+    def _initialize_registered_logging() -> None:
+        """Apply enabled add-on preferences when Blender exposes them."""
 
         prefs = config._addon_preferences()
-        if prefs is None:
-            config.setup_logging()
-            logger.debug(
-                "No enabled-addon preference entry is available; using default "
-                "Rewrite logging and diagnostics settings"
-            )
-            return False
-
-        initialize_logging_preferences(prefs)
+        if prefs is not None:
+            initialize_logging_preferences(prefs)
         config.setup_logging()
-        logger.info("User logging and diagnostics preferences applied")
-        return True
 
     def register() -> None:
-        """Register the complete Blender 5.2+ Rewrite extension transactionally."""
+        """Register the extension using the standard ordered Blender add-on pattern."""
 
-        global _REGISTRATION_STATE
-        if _REGISTRATION_STATE is ExtensionRegistrationState.REGISTERED:
-            logger.debug("Rewrite extension is already registered")
-            return
-        if _REGISTRATION_STATE in {
-            ExtensionRegistrationState.REGISTERING,
-            ExtensionRegistrationState.UNREGISTERING,
-        }:
-            raise RuntimeError(
-                "Rewrite extension registration lifecycle is already active: "
-                f"{_REGISTRATION_STATE.value}"
-            )
-        if _REGISTRATION_STATE is ExtensionRegistrationState.DEGRADED:
-            raise RuntimeError(
-                "Rewrite extension is in a degraded registration state; "
-                "run unregister() before registering again"
-            )
+        require_supported_blender_runtime(bpy)
+        config._setup_default_logging()
 
-        _REGISTRATION_STATE = ExtensionRegistrationState.REGISTERING
-        completed: list[RegistrationStep] = []
-        try:
-            require_supported_blender_runtime(bpy)
-            config._setup_default_logging()
-            logger.debug("Registering Blender_to_Spine2D_Mesh_Exporter Rewrite")
+        addon_preferences.register()
+        _register_config_rna()
+        scene_settings_migration.register()
+        ui.register()
+        rig_ui.register()
+        a1_readiness_invalidation.register()
+        auto_readiness.register()
+        generated_material_ui.register()
+        ui_layout.register()
+        single_object_operator.register()
 
-            for step in REGISTRATION_STEPS:
-                _label, register_callback, _unregister_callback = step
-                register_callback()
-                completed.append(step)
-
-            _initialize_registered_logging()
-        except Exception as exc:
-            logger.exception("Rewrite extension registration failed")
-            try:
-                unregister_all_best_effort(
-                    _registration_cleanup_actions(tuple(completed)),
-                    operation="Rewrite extension registration rollback",
-                    primary_error=exc,
-                )
-            except Exception:
-                _REGISTRATION_STATE = ExtensionRegistrationState.DEGRADED
-                raise
-            _REGISTRATION_STATE = ExtensionRegistrationState.UNREGISTERED
-            raise
-
-        _REGISTRATION_STATE = ExtensionRegistrationState.REGISTERED
+        _initialize_registered_logging()
+        logger.info("Spine2D Mesh Exporter registered")
 
     def unregister() -> None:
-        """Run every Rewrite owner cleanup in reverse order before reporting failures."""
+        """Unregister extension owners in the reverse of registration order."""
 
-        global _REGISTRATION_STATE
-        if _REGISTRATION_STATE is ExtensionRegistrationState.UNREGISTERED:
-            logger.debug("Rewrite extension is already unregistered")
-            return
-        if _REGISTRATION_STATE in {
-            ExtensionRegistrationState.REGISTERING,
-            ExtensionRegistrationState.UNREGISTERING,
-        }:
-            raise RuntimeError(
-                "Rewrite extension registration lifecycle is already active: "
-                f"{_REGISTRATION_STATE.value}"
-            )
-
-        _REGISTRATION_STATE = ExtensionRegistrationState.UNREGISTERING
-        logger.debug("Unregistering Blender_to_Spine2D_Mesh_Exporter Rewrite")
-        try:
-            unregister_all_best_effort(
-                _registration_cleanup_actions(REGISTRATION_STEPS),
-                operation="Rewrite extension unregistration",
-            )
-        except Exception:
-            _REGISTRATION_STATE = ExtensionRegistrationState.DEGRADED
-            raise
-        _REGISTRATION_STATE = ExtensionRegistrationState.UNREGISTERED
-
+        single_object_operator.unregister()
+        ui_layout.unregister()
+        generated_material_ui.unregister()
+        auto_readiness.unregister()
+        a1_readiness_invalidation.unregister()
+        rig_ui.unregister()
+        ui.unregister()
+        scene_settings_migration.unregister()
+        _unregister_config_rna()
+        addon_preferences.unregister()
+        logger.info("Spine2D Mesh Exporter unregistered")
 
 else:
     MODULES: tuple[Any, ...] = ()
     CLASSES_TO_REGISTER: tuple[Any, ...] = ()
     CONFIG_RNA_PROPERTIES: tuple[Any, ...] = ()
-    REGISTRATION_STEPS: tuple[Any, ...] = ()
 
     def _module_owns_runtime_registration(_module: Any) -> bool:
         return False
@@ -309,9 +136,13 @@ else:
         return ()
 
     def register() -> None:
-        raise RuntimeError("Blender bpy module is required to register the extension")
+        """Outside Blender there is nothing to register."""
+
+        return None
 
     def unregister() -> None:
+        """Outside Blender there is nothing to unregister."""
+
         return None
 
 
