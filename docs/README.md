@@ -1,7 +1,6 @@
 # Documentation
 
-This directory contains the maintained documentation for Blender to Spine2D Mesh Exporter
-**0.154.0**.
+This directory contains the maintained documentation for **Spine2D Mesh Exporter 0.155.0**.
 
 The documentation describes the current product only. Historical release notes, milestone
 journals, and superseded implementation checkpoints belong in Git history and tags rather
@@ -9,9 +8,11 @@ than in the maintained documentation tree.
 
 ## Current product baseline
 
-- Extension version: **0.154.0**.
+- Extension version: **0.155.0**.
+- Public extension name: **Spine2D Mesh Exporter**.
+- Technical extension ID: `blender_to_spine2d_mesh_exporter`.
 - Minimum Blender version: **5.2.0**.
-- Initial Blender Extensions package: **Windows x64**.
+- Manifest platform restriction: **none declared**.
 - Scene settings schema: **8**.
 - Fresh Scene rig profile: **2-Axis Rotation + Scale**.
 - Default export mode: **Normal / UV Segments**.
@@ -21,6 +22,7 @@ than in the maintained documentation tree.
 - Default exact project versions: 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23.
 - Each family's exact `major.minor.patch` project version is configurable in Add-on Preferences and persists with Blender Preferences rather than the `.blend` Scene.
 - Connected and mixed composition: supported only by explicitly allowed Spine 4.2 routes.
+- Analyze is an explicit synchronous diagnostic action; no automatic background readiness scheduler is shipped.
 
 ## Export modes
 
@@ -66,7 +68,7 @@ parallax reserve surfaces with `Parallax Horizon Angle`.
 - [Architecture](architecture.md) — package boundaries and production data flow.
 - [Rig Profiles](rig-profiles.md) — current generated rig topology and setup-pose policies.
 - [Testing](testing.md) — pure Python, real bpy, Blender headless, preference-restart, and packaging gates.
-- [Blender Extensions Submission](submission.md) — current store metadata, reviewer path, and pre-upload gate.
+- [Blender Extensions Submission](submission.md) — current store metadata, reviewer path, same-submission update workflow, and pre-upload gate.
 - [Contributing](CONTRIBUTING.md) — coding, Blender-state, testing, and documentation requirements.
 
 ## Documentation policy
@@ -78,4 +80,5 @@ Maintained documents must:
 3. avoid release-history sections and superseded implementation narratives;
 4. link to executable tests when behavior needs regression evidence;
 5. match the current manifest version and public UI labels;
-6. avoid documenting hidden development paths as ordinary public UI features.
+6. keep the public display title separate from the stable technical extension ID;
+7. avoid documenting hidden development paths as ordinary public UI features.
