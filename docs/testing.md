@@ -1,6 +1,6 @@
 # Testing and Release Validation
 
-This document defines the current validation policy for **Spine2D Mesh Exporter 0.155.0**.
+This document defines the current validation policy for **Spine Mesh Exporter 0.155.0**.
 
 A focused test is not a release claim. Release evidence must be generated from one exact
 clean commit and the archive built from that same commit.
