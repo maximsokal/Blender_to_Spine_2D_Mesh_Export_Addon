@@ -188,11 +188,11 @@ class Spine2DBakeSettings(bpy.types.PropertyGroup):
 class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
     """Main Blender 5.2+ Rewrite exporter panel."""
 
-    bl_label = "Blender to Spine2D Mesh Exporter"
+    bl_label = "Spine2D Mesh Exporter"
     bl_idname = "OBJECT_PT_spine2d_mesh"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Blender to Spine2D Mesh Exporter"
+    bl_category = "Spine2D Mesh Exporter"
 
     @staticmethod
     def _scale_applied(obj: bpy.types.Object, tolerance: float = 1e-4) -> bool:
@@ -406,7 +406,7 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             )
             if not target.descriptor.serializer_ready:
                 column.label(
-                    text="Codec implementation in progress; Analyze blocks export",
+                    text="Codec implementation unavailable for this target",
                     icon="ERROR",
                 )
         except (TypeError, ValueError, RuntimeError) as exc:
@@ -416,8 +416,6 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             )
         column.separator()
 
-        column.prop(scene, "spine2d_texture_size", text="Texture size")
-        column.separator()
         column.prop(scene, "spine2d_json_path", text="JSON")
         json_full_path = bpy.path.abspath(scene.spine2d_json_path)
         if not json_full_path or json_full_path == bpy.path.abspath("//"):
@@ -519,6 +517,9 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         context: bpy.types.Context,
     ) -> None:
         scene = context.scene
+        column.prop(scene, "spine2d_texture_size", text="Texture size")
+        column.separator()
+
         selected_meshes = tuple(
             candidate
             for candidate in context.selected_objects
