@@ -136,15 +136,31 @@ def test_runtime_does_not_import_forbidden_python_concurrency() -> None:
     assert offenders == [], "Forbidden Blender runtime imports:\n" + "\n".join(offenders)
 
 
-def test_auto_readiness_does_not_install_background_polling_callbacks() -> None:
+def test_manual_readiness_bridge_contains_no_automatic_scheduler_surface() -> None:
     path = PACKAGE / "auto_readiness.py"
+    source = path.read_text(encoding="utf-8")
+
+    for forbidden in (
+        "bpy.app.timers",
+        "monotonic",
+        "_automatic_timer",
+        "request_auto_analysis",
+        "a1_auto_readiness_depsgraph_update_post",
+        "a1_auto_readiness_load_pre",
+        "a1_auto_readiness_load_post",
+        "_install_handlers",
+        "_remove_handlers",
+        "_register_timer",
+        "_unregister_timer",
+        "_PENDING",
+        "_PENDING_DEADLINE",
+    ):
+        assert forbidden not in source
+
     register_source = _function_source(path, "register")
     unregister_source = _function_source(path, "unregister")
-
-    assert "_register_timer()" not in register_source
-    assert "_install_handlers()" not in register_source
-    assert "_unregister_timer()" not in unregister_source
-    assert "_remove_handlers()" not in unregister_source
+    assert "_patch_ui(ui)" in register_source
+    assert "_restore_ui(ui_module)" in unregister_source
 
 
 def test_preferences_release_owned_one_shot_blender_timer() -> None:
@@ -232,6 +248,20 @@ def test_simple_class_only_registration_owners_use_normal_blender_pattern() -> N
         assert "class_cleanup_actions" not in source, relative
         assert "bpy.utils.register_class" in source, relative
         assert "bpy.utils.unregister_class" in source, relative
+
+
+def test_shipped_ui_has_no_duplicate_workaround_functions() -> None:
+    offenders: list[str] = []
+    for path in _shipped_python_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.endswith(
+                "_dup"
+            ):
+                offenders.append(
+                    f"{path.relative_to(ROOT).as_posix()}:{node.lineno}:{node.name}"
+                )
+    assert offenders == [], "Duplicate workaround functions:\n" + "\n".join(offenders)
 
 
 def test_ui_layout_uses_child_panels_without_panel_replacement() -> None:
