@@ -271,16 +271,18 @@ def test_generated_material_resources_are_removed_in_finally():
     assert "_remove_materials" in cleanup
 
 
-def test_generated_controls_are_owned_by_ordered_rewrite_foldout():
+def test_generated_controls_are_owned_by_standard_child_panel():
     generated_source = _source("blender_adapter/generated_material_ui.py")
-    ordered_source = _source("ui_layout.py")
+    layout_source = _source("ui_layout.py")
     root_source = _source("__init__.py")
 
     assert "def draw_generated_material_settings(" in generated_source
     assert "class OBJECT_PT_Spine2DGeneratedMaterials" not in generated_source
     assert 'bl_parent_id = "OBJECT_PT_spine2d_mesh"' not in generated_source
-    assert 'title="Rewrite Generated Materials"' in ordered_source
-    assert "generated_material_ui.draw_generated_material_settings(" in ordered_source
+    assert "class OBJECT_PT_Spine2DGeneratedMaterialsPanel" in layout_source
+    assert 'bl_label = "Generated Materials"' in layout_source
+    assert 'bl_parent_id = _PARENT_PANEL_ID' in layout_source
+    assert "generated_material_ui.draw_generated_material_settings(self.layout, context)" in layout_source
     assert "spine2d_material_source_policy" in generated_source
     assert "spine2d_generated_material_pattern" in generated_source
     assert "spine2d_generated_gray_color" in generated_source
