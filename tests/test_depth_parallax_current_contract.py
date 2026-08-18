@@ -14,6 +14,7 @@ SCENE_PROPERTIES = PACKAGE / "blender_adapter" / "scene_properties.py"
 SCENE_CAPTURE = PACKAGE / "blender_adapter" / "a1_ui_scene_capture.py"
 SCENE_MIGRATION = PACKAGE / "blender_adapter" / "scene_settings_migration.py"
 RIG_UI = PACKAGE / "rig_ui.py"
+UI = PACKAGE / "ui.py"
 UI_LAYOUT = PACKAGE / "ui_layout.py"
 GEOMETRY = PACKAGE / "domain" / "geometry" / "depth_parallax.py"
 CAMERA_VIEWS = PACKAGE / "blender_adapter" / "depth_parallax_camera_views.py"
@@ -89,6 +90,7 @@ def test_scene_rna_stores_radians_and_child_panel_displays_rotation_angle() -> N
     properties = _read(SCENE_PROPERTIES)
     capture = _read(SCENE_CAPTURE)
     rig_ui = _read(RIG_UI)
+    ui = _read(UI)
     ui_layout = _read(UI_LAYOUT)
 
     assert '"spine2d_depth_parallax_horizon_angle"' in properties
@@ -110,7 +112,8 @@ def test_scene_rna_stores_radians_and_child_panel_displays_rotation_angle() -> N
     assert 'bl_parent_id = _PARENT_PANEL_ID' in ui_layout
     assert "_draw_depth_parallax_horizon" not in rig_ui
     assert 'text="Depth Parallax"' not in rig_ui
-    assert "spine2d_depth_parallax_horizon_angle = 0.0" in rig_ui
+    assert "spine2d_depth_parallax_horizon_angle = 0.0" not in rig_ui
+    assert "scene.spine2d_depth_parallax_horizon_angle = 0.0" in ui
 
 
 def test_geometry_contract_uses_accumulated_dihedral_angle_and_union_snapshot() -> None:
