@@ -1,7 +1,8 @@
-"""Focused tests for automatic, diagnostic-only Rewrite readiness."""
+"""Focused tests for synchronous, diagnostic-only Rewrite readiness."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -15,59 +16,25 @@ from Blender_to_Spine2D_Mesh_Exporter.application import (
 )
 
 
-def _mesh_object(name: str, pointer: int):
-    data = SimpleNamespace(
-        id_type="MESH",
-        name=f"{name}Mesh",
-        name_full=f"{name}Mesh",
-        as_pointer=lambda: pointer + 10_000,
-    )
+ROOT = Path(__file__).resolve().parents[1]
+AUTO_READINESS_PATH = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "auto_readiness.py"
+
+
+def _mesh_object(name: str):
     return SimpleNamespace(
-        id_type="OBJECT",
         type="MESH",
         name=name,
         name_full=name,
-        as_pointer=lambda: pointer,
-        data=data,
-        spine2d_bake_settings=SimpleNamespace(
-            bake_frame_start=0,
-            frames_for_render=0,
-        ),
-        spine2d_connect_settings=SimpleNamespace(enabled=False),
+        data=SimpleNamespace(name=f"{name}Mesh"),
     )
 
 
-def _context(pointer: int = 100):
-    source = _mesh_object("Hero", pointer)
-    scene = SimpleNamespace(
-        id_type="SCENE",
-        name="Scene",
-        name_full="Scene",
-        as_pointer=lambda: pointer + 20_000,
-        frame_current=0,
-        camera=None,
-        render=SimpleNamespace(engine="BLENDER_EEVEE"),
-        spine2d_texture_size=1024,
-        spine2d_json_path="//exports",
-        spine2d_images_path="images",
-        spine2d_control_icons=True,
-        spine2d_export_preview_animation=True,
-        spine2d_seam_maker_mode="AUTO",
-        spine2d_angle_limit=30.0,
-        spine2d_angular_mode="SEED_CONE",
-        spine2d_local_angle_limit=30.0,
-        spine2d_frames_for_render=0,
-        spine2d_bake_frame_start=0,
-        spine2d_material_source_policy="REQUIRE_SOURCE",
-        spine2d_generated_material_pattern="SOLID_GRAY",
-        spine2d_generated_gray_color=(0.5, 0.5, 0.5),
-        spine2d_projection_alpha_threshold=1.0 / 255.0,
-    )
+def _context():
+    source = _mesh_object("Hero")
     return SimpleNamespace(
-        scene=scene,
+        scene=SimpleNamespace(name="Scene"),
         active_object=source,
         selected_objects=(source,),
-        mode="OBJECT",
     )
 
 
@@ -82,54 +49,15 @@ def _report() -> A1ExportReadinessReport:
 def _clean_process_state(monkeypatch):
     monkeypatch.setattr(auto_readiness, "_REGISTERED", False)
     monkeypatch.setattr(auto_readiness, "_ANALYSIS_RUNNING", False)
-    monkeypatch.setattr(auto_readiness, "_ANALYSIS_ORIGIN", None)
-    monkeypatch.setattr(auto_readiness, "_EXPORT_DEPTH", 0)
-    monkeypatch.setattr(auto_readiness, "_FILE_LOADING", False)
-    monkeypatch.setattr(auto_readiness, "_LAST_KEY", None)
-    monkeypatch.setattr(auto_readiness, "_FAILED_KEY", None)
-    monkeypatch.setattr(auto_readiness, "_LAST_ERROR", None)
     monkeypatch.setattr(auto_readiness, "_UI_MODULE", None)
+    auto_readiness._BASE_METHODS.clear()
     monkeypatch.setattr(auto_readiness, "_redraw", lambda: None)
-    auto_readiness._cancel_pending()
     yield
-    auto_readiness._cancel_pending()
+    auto_readiness._BASE_METHODS.clear()
 
 
-def test_request_key_tracks_selection_and_rewrite_settings():
-    context = _context(101)
-    first = auto_readiness._request_key(context)
-
-    context.scene.spine2d_texture_size = 2048
-    second = auto_readiness._request_key(context)
-
-    other = _mesh_object("Other", 202)
-    context.active_object = other
-    context.selected_objects = (other,)
-    third = auto_readiness._request_key(context)
-
-    assert first is not None
-    assert second is not None
-    assert third is not None
-    assert first != second
-    assert second != third
-
-
-def test_debounce_coalesces_repeated_requests(monkeypatch):
-    context = _context(201)
-    times = iter((10.0, 10.2))
-    monkeypatch.setattr(auto_readiness, "monotonic", lambda: next(times))
-
-    assert auto_readiness.request_auto_analysis(context, reason="first") is True
-    first_deadline = auto_readiness._PENDING_DEADLINE
-    assert auto_readiness.request_auto_analysis(context, reason="second") is True
-
-    assert auto_readiness._PENDING is True
-    assert auto_readiness._PENDING_REASON == "second"
-    assert auto_readiness._PENDING_DEADLINE > first_deadline
-
-
-def test_manual_and_automatic_paths_share_one_analysis_service(monkeypatch):
-    context = _context(301)
+def test_manual_analysis_runs_once_and_stores_valid_report(monkeypatch):
+    context = _context()
     report = _report()
     calls: list[tuple[str, object]] = []
 
@@ -151,10 +79,19 @@ def test_manual_and_automatic_paths_share_one_analysis_service(monkeypatch):
         ("analyse", context),
         ("store", (context, report)),
     ]
+    assert auto_readiness._ANALYSIS_RUNNING is False
+
+
+def test_manual_analysis_rejects_reentry_without_background_synchronization(monkeypatch):
+    context = _context()
+    monkeypatch.setattr(auto_readiness, "_ANALYSIS_RUNNING", True)
+
+    with pytest.raises(RuntimeError, match="already running"):
+        auto_readiness.run_a1_readiness_analysis(context)
 
 
 def test_manual_operator_reports_blockers_but_keeps_export_available(monkeypatch):
-    context = _context(401)
+    context = _context()
     report = SimpleNamespace(
         state=A1ReadinessState.BLOCKED,
         blocker_count=2,
@@ -195,8 +132,27 @@ class _RecordingLayout:
         return SimpleNamespace()
 
 
+def test_not_analyzed_ui_requires_explicit_analyze_and_never_blocks_export(monkeypatch):
+    context = _context()
+    monkeypatch.setattr(
+        auto_readiness._readiness,
+        "current_a1_export_readiness",
+        lambda _context: (A1ReadinessState.NOT_ANALYSED, None),
+    )
+    panel = SimpleNamespace()
+    layout = _RecordingLayout()
+
+    allowed = auto_readiness._draw_nonblocking(panel, layout, context)
+
+    assert allowed is True
+    texts = tuple(str(item.get("text", "")) for item in layout.labels)
+    assert "Run Analyze for diagnostics" in texts
+    assert "Export remains available" in texts
+    assert not any("automatic" in text.casefold() for text in texts)
+
+
 def test_blocked_diagnostics_never_disable_export(monkeypatch):
-    context = _context(501)
+    context = _context()
     report = SimpleNamespace(
         blocker_count=1,
         warning_count=0,
@@ -207,11 +163,6 @@ def test_blocked_diagnostics_never_disable_export(monkeypatch):
         auto_readiness._readiness,
         "current_a1_export_readiness",
         lambda _context: (A1ReadinessState.BLOCKED, report),
-    )
-    monkeypatch.setattr(
-        auto_readiness,
-        "current_auto_readiness_status",
-        lambda _context: auto_readiness.AutoReadinessStatus("IDLE", ""),
     )
     panel = SimpleNamespace(
         _state_icon=lambda _state: "CANCEL",
@@ -229,8 +180,8 @@ def test_blocked_diagnostics_never_disable_export(monkeypatch):
     )
 
 
-def test_single_export_bypasses_readiness_guard(monkeypatch):
-    context = _context(601)
+def test_single_export_calls_production_export_directly(monkeypatch):
+    context = _context()
     expected = object()
     auto_readiness._UI_MODULE = SimpleNamespace(
         export_active_object_a1=lambda value: expected if value is context else None,
@@ -246,69 +197,57 @@ def test_single_export_bypasses_readiness_guard(monkeypatch):
     operator._report_result.assert_called_once_with(expected)
 
 
-def test_timer_registration_is_persistent_and_symmetric(monkeypatch):
-    registered: set[object] = set()
-    calls: list[tuple[str, object]] = []
-
-    class _Timers:
-        @staticmethod
-        def is_registered(callback):
-            return callback in registered
-
-        @staticmethod
-        def register(callback, **kwargs):
-            registered.add(callback)
-            calls.append(("register", kwargs))
-
-        @staticmethod
-        def unregister(callback):
-            registered.remove(callback)
-            calls.append(("unregister", callback))
-
-    monkeypatch.setattr(
-        auto_readiness,
-        "bpy",
-        SimpleNamespace(app=SimpleNamespace(timers=_Timers())),
+def test_bridge_register_and_unregister_restore_exact_ui_methods(monkeypatch):
+    owners = {
+        "panel": SimpleNamespace(_draw_readiness=object()),
+        "manual": SimpleNamespace(execute=object()),
+        "single": SimpleNamespace(execute=object()),
+        "multi": SimpleNamespace(execute=object()),
+        "guard": SimpleNamespace(_require_readiness=object()),
+    }
+    originals = {
+        "draw": owners["panel"]._draw_readiness,
+        "manual": owners["manual"].execute,
+        "single": owners["single"].execute,
+        "multi": owners["multi"].execute,
+        "guard": owners["guard"]._require_readiness,
+    }
+    fake_ui = SimpleNamespace(
+        OBJECT_PT_Spine2DMeshPanel=owners["panel"],
+        OBJECT_OT_Spine2DRefreshInfo=owners["manual"],
+        OBJECT_OT_Spine2DSingleExport=owners["single"],
+        OBJECT_OT_Spine2DMultiExport=owners["multi"],
+        _Spine2DExportOperatorMixin=owners["guard"],
     )
 
-    auto_readiness._register_timer()
-    auto_readiness._register_timer()
-    auto_readiness._unregister_timer()
+    auto_readiness._patch_ui(fake_ui)
+    assert owners["panel"]._draw_readiness is auto_readiness._draw_nonblocking
+    assert owners["manual"].execute is auto_readiness._manual_execute
+    assert owners["single"].execute is auto_readiness._single_execute
+    assert owners["multi"].execute is auto_readiness._multi_execute
+    assert owners["guard"]._require_readiness is auto_readiness._never_blocks
 
-    assert calls[0] == (
-        "register",
-        {
-            "first_interval": auto_readiness._AUTO_POLL_SECONDS,
-            "persistent": True,
-        },
-    )
-    assert calls[1][0] == "unregister"
-    assert len(calls) == 2
+    auto_readiness._restore_ui(fake_ui)
+    assert owners["panel"]._draw_readiness is originals["draw"]
+    assert owners["manual"].execute is originals["manual"]
+    assert owners["single"].execute is originals["single"]
+    assert owners["multi"].execute is originals["multi"]
+    assert owners["guard"]._require_readiness is originals["guard"]
+    assert auto_readiness._BASE_METHODS == {}
 
 
-def test_handler_registration_deduplicates_and_removes(monkeypatch):
-    handlers = SimpleNamespace(
-        depsgraph_update_post=[],
-        load_pre=[],
-        load_post=[],
-    )
-    monkeypatch.setattr(
-        auto_readiness,
-        "bpy",
-        SimpleNamespace(app=SimpleNamespace(handlers=handlers)),
-    )
+def test_shipped_bridge_contains_no_scheduler_or_automatic_callbacks():
+    source = AUTO_READINESS_PATH.read_text(encoding="utf-8")
 
-    auto_readiness._install_handlers()
-    auto_readiness._install_handlers()
-
-    assert handlers.depsgraph_update_post == [
-        auto_readiness.a1_auto_readiness_depsgraph_update_post
-    ]
-    assert handlers.load_pre == [auto_readiness.a1_auto_readiness_load_pre]
-    assert handlers.load_post == [auto_readiness.a1_auto_readiness_load_post]
-
-    auto_readiness._remove_handlers()
-
-    assert handlers.depsgraph_update_post == []
-    assert handlers.load_pre == []
-    assert handlers.load_post == []
+    for forbidden in (
+        "bpy.app.timers",
+        "monotonic",
+        "_automatic_timer",
+        "request_auto_analysis",
+        "a1_auto_readiness_depsgraph_update_post",
+        "a1_auto_readiness_load_pre",
+        "a1_auto_readiness_load_post",
+        "_install_handlers",
+        "_register_timer",
+    ):
+        assert forbidden not in source
