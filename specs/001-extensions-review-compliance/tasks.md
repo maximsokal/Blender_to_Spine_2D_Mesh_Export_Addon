@@ -22,7 +22,7 @@ Legend:
 
 ## T100 — Convert reviewer feedback into executable contracts
 
-- [ ] **T101** Add a focused compliance test module that parses `blender_manifest.toml`.
+- [x] **T101** Add a focused compliance test module that parses `blender_manifest.toml`.
 - [ ] **T102** Test that historical irrelevant tags `backup` and `text-editing` cannot return.
 - [ ] **T103** Test that every configured tag is from the current accepted project taxonomy or Blender validator accepts it.
 - [ ] **T104** Add documentation contract asserting submission workflow refers to the existing declined submission/new version.
@@ -35,7 +35,7 @@ Legend:
 - [ ] **T111** Scan for direct `bpy.app.timers` ownership and classify every match rather than banning Blender timers globally.
 - [ ] **T112** Add static production scan for reviewer-style UI `*_dup` functions.
 - [ ] **T113** Make static scans ignore tests/fixtures only when the test itself is deliberately demonstrating prohibited source text.
-- [ ] **T114** Ensure scans run against the actual extension runtime root.
+- [x] **T114** Ensure scans run against the actual extension runtime root.
 - [ ] **T115** Add post-build ZIP scan so source exclusions cannot hide a packaging regression.
 
 ## T200 — Current trace/persistence call graph
@@ -50,19 +50,19 @@ Legend:
 - [ ] **T208** Locate every cancellation path that can finalize diagnostics.
 - [ ] **T209** Locate unregister-time trace/diagnostic cleanup if it exists.
 - [ ] **T210** Record exact current owner/function names in implementation notes before editing.
-- [ ] **T211** Confirm historical `PipelineTraceSession` is absent or identify its current equivalent.
+- [x] **T211** Confirm historical `PipelineTraceSession` is absent or identify its current equivalent.
 - [ ] **T212** Confirm historical `spine_core/chat_persistence.py` is absent or identify replacement owner.
 
 ## T300 — Remove unsupported background threading
 
-- [ ] **T301** Inventory all production `threading` imports.
+- [x] **T301** Inventory all production `threading` imports.
 - [ ] **T302** Inventory all production queue/concurrency imports that can create hidden threads.
-- [ ] **T303** Classify each concurrency use as persistent, synchronously joined, Blender-main-thread scheduler, subprocess, or test-only.
+- [x] **T303** Classify each concurrency use as persistent, synchronously joined, Blender-main-thread scheduler, subprocess, or test-only.
 - [ ] **T304** Remove each persistent Python background-thread owner from shipped runtime.
 - [ ] **T305** Remove each persistent `threading.Timer` owner from shipped runtime.
 - [ ] **T306** Ensure worker-independent pure-Python concurrency, if retained, cannot reach `bpy`/RNA/Blender data.
 - [ ] **T307** Ensure no worker survives return to Blender’s normal event loop.
-- [ ] **T308** Add unit/static tests for the chosen no-background-thread contract.
+- [x] **T308** Add unit/static tests for the chosen no-background-thread contract.
 - [ ] **T309** Add real Blender smoke proving no lingering Python worker after Analyze.
 - [ ] **T310** Add real Blender smoke proving no lingering Python worker after Export.
 - [ ] **T311** Add real Blender smoke proving no lingering Python worker after failed Export.
@@ -216,7 +216,7 @@ Legend:
 
 ## T1200 — ZIP hygiene
 
-- [ ] **T1201** Review current `[build].paths_exclude_pattern` against current package tree.
+- [x] **T1201** Review current `[build].paths_exclude_pattern` against current package tree.
 - [ ] **T1202** Confirm `.git` is excluded.
 - [ ] **T1203** Confirm `.github` is excluded.
 - [ ] **T1204** Confirm Python cache/bytecode is excluded.
@@ -288,3 +288,7 @@ Legend:
 - [ ] **T1506** Update `quickstart.md` only if repository gate commands change.
 - [ ] **T1507** Confirm no unresolved RF/FR item is hidden behind a broad “done” status.
 - [ ] **T1508** Confirm all final docs describe the shipped version, not a historical internal branch.
+
+## Implementation checkpoint — first focused compliance failure
+
+Evidence from the local run at `eca6f72` is recorded in `implementation-log.md`. The run proved the compliance test module executes and exposed the shipping-boundary problem: three Rewrite runtime `RLock` users plus development/legacy sources were being treated alike. The branch now removes the three runtime locks, excludes the development pipeline trace family, and makes the source scan manifest-aware. T1303/T1304 remain unchecked because these gates must be rerun against the new branch HEAD before they count as evidence.
