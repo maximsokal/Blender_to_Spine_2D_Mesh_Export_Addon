@@ -29,6 +29,14 @@ paths_exclude_pattern = [
   "/docs/",
   "/*.zip",
 
+  # Development-only pipeline instrumentation. Runtime export diagnostics use the
+  # synchronous export-events/diagnostics infrastructure and do not need sys/thread
+  # tracing. Keep these sources in the repository for probes/tests, not in the ZIP.
+  "/infrastructure/pipeline_trace.py",
+  "/infrastructure/pipeline_trace_model.py",
+  "/infrastructure/pipeline_trace_report.py",
+  "/infrastructure/pipeline_trace_values.py",
+
   # Retained repository sources from the pre-Rewrite add-on. They are not part
   # of the Blender 5.2+ extension runtime and must not be shipped in its ZIP.
   "/Legacy/",
