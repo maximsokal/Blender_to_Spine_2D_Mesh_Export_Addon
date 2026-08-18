@@ -22,6 +22,7 @@ from ..domain.spine.version_target import (
 from .scene_settings_migration import (
     CURRENT_SETTINGS_SCHEMA_VERSION,
     migration_file_loading,
+    migration_registration_pending,
 )
 
 
@@ -73,16 +74,6 @@ def rig_profile_rna_enum_items() -> tuple[tuple[str, str, str], ...]:
         (profile.value, profile.label, profile.description)
         for profile in A1RigProfile
     )
-
-
-def _extension_registration_active() -> bool:
-    try:
-        from .. import get_registration_state
-
-        state = get_registration_state()
-    except Exception:
-        return False
-    return str(getattr(state, "value", state)).upper() == "REGISTERING"
 
 
 def _update_ui_for_paths(_self: Any, context: bpy.types.Context) -> None:
@@ -158,7 +149,18 @@ def _update_rig_profile(_self: Any, context: bpy.types.Context) -> None:
 
 
 def _update_seam_maker_mode(self: Any, context: bpy.types.Context) -> None:
-    lifecycle_update = migration_file_loading() or _extension_registration_active()
+    """Advance schema only for an actual user-side seam setting change.
+
+    During initial RNA binding the migration owner keeps a raw snapshot for each
+    already-open Scene. During .blend loading it exposes a separate file-loading flag.
+    Either condition means this callback belongs to lifecycle restoration rather than a
+    new user edit, so the stored schema version must not be advanced prematurely.
+    """
+
+    lifecycle_update = (
+        migration_file_loading()
+        or migration_registration_pending(self)
+    )
     if not lifecycle_update:
         try:
             current = int(getattr(self, "spine2d_settings_schema_version", 0) or 0)
