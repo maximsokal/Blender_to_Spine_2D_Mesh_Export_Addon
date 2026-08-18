@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from Blender_to_Spine2D_Mesh_Exporter import rig_ui
+from Blender_to_Spine2D_Mesh_Exporter import rig_ui, ui
 from Blender_to_Spine2D_Mesh_Exporter.application import (
     A1GeometryPreparationSettings,
 )
@@ -176,37 +176,41 @@ def test_canonical_panel_owns_projection_selector_only_for_normal_uv() -> None:
     ui_source = (PACKAGE / "ui.py").read_text(encoding="utf-8")
     rig_source = (PACKAGE / "rig_ui.py").read_text(encoding="utf-8")
 
-    assert ui_source.count('"spine2d_projection_direction"') == 1
     assert 'text="Projection direction"' in ui_source
     assert "A1TextureExportMode.CAMERA_PROJECTION" in ui_source
     assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION" in ui_source
     assert 'text="Active camera render → flat screen-space mesh"' in ui_source
     assert 'text="Active camera render → optimized depth-relief mesh"' in ui_source
-    assert '"spine2d_projection_direction"' not in rig_source
     assert "SPINE2D_OT_ResetSettingsWithProjection" not in rig_source
+    assert "scene.spine2d_projection_direction =" not in rig_source
 
 
-def test_rig_reset_restores_current_projection_defaults() -> None:
+def test_canonical_reset_restores_projection_shared_pivot_and_parallax_defaults(
+    monkeypatch,
+) -> None:
     scene = SimpleNamespace(
-        spine2d_rig_profile=A1RigProfile.THREE_AXIS_ROTATION.value,
         spine2d_projection_direction=A1ProjectionDirection.NEGATIVE_X.value,
         spine2d_shared_selection_pivot=False,
         spine2d_depth_parallax_horizon_angle=0.5,
-        spine2d_export_preview_animation=True,
     )
     context = SimpleNamespace(scene=scene)
-    operator = rig_ui.SPINE2D_OT_ResetRigProfile()
+    operator = ui.SPINE2D_OT_ResetSettings()
     operator.report = MagicMock()
+
+    monkeypatch.setattr(ui, "get_default_output_dir", lambda: "//")
+    monkeypatch.setattr(ui, "clear_a1_export_readiness", lambda _scene: None)
+    monkeypatch.setattr(ui, "_tag_redraw", lambda _context: None)
 
     result = operator.execute(context)
 
     assert result == {"FINISHED"}
-    assert scene.spine2d_rig_profile == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
     assert scene.spine2d_projection_direction == A1ProjectionDirection.POSITIVE_Z.value
     assert scene.spine2d_shared_selection_pivot is True
     assert scene.spine2d_depth_parallax_horizon_angle == 0.0
-    assert scene.spine2d_export_preview_animation is False
-    operator.report.assert_called_once_with({"INFO"}, "Rig and projection settings reset")
+    operator.report.assert_called_once_with(
+        {"INFO"},
+        "Spine2D Rewrite settings have been reset.",
+    )
 
 
 def test_rig_reset_reports_invalid_context_without_partial_success() -> None:
