@@ -29,6 +29,7 @@ from .blender_adapter.spine_version_preferences import (
 from .config import get_default_output_dir
 from .domain.baking import A1TextureExportMode, TextureSequenceTiming
 from .domain.geometry import DepthProjectionBaseMode
+from .domain.projection import A1ProjectionDirection
 from .domain.spine.version_target import (
     DEFAULT_SPINE_JSON_TARGET,
     resolve_spine_json_target,
@@ -79,6 +80,8 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene.spine2d_texture_export_mode = (
                 A1TextureExportMode.NORMAL_UV_SEGMENTS.value
             )
+            scene.spine2d_projection_direction = A1ProjectionDirection.POSITIVE_Z.value
+            scene.spine2d_shared_selection_pivot = True
             scene.spine2d_target_spine_version = DEFAULT_SPINE_JSON_TARGET.value
             scene.spine2d_texture_size = 1024
             scene.spine2d_json_path = get_default_output_dir()
@@ -103,6 +106,7 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene.spine2d_depth_base_mode = (
                 DepthProjectionBaseMode.FARTHEST_VISIBLE.value
             )
+            scene.spine2d_depth_parallax_horizon_angle = 0.0
             clear_a1_export_readiness(scene)
             _tag_redraw(context)
             self.report({"INFO"}, "Spine2D Rewrite settings have been reset.")
