@@ -1,6 +1,6 @@
 # Rig Profiles
 
-This document describes the current generated Spine rig behavior in **Spine2D Mesh Exporter
+This document describes the current generated Spine rig behavior in **Spine Mesh Exporter
 0.155.0**.
 
 Historical reference skeleton dumps are not maintained here. Executable fixtures and Git
