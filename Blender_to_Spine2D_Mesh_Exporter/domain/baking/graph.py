@@ -47,6 +47,11 @@ class ShaderNodeSnapshot:
     node_name: str
     group_path: Tuple[str, ...] = ()
     muted: bool = False
+    # Blender exposes Texture Coordinate "From Instancer" as a node property, not
+    # as an output socket. Keeping it in the immutable snapshot lets the pure
+    # capability policy distinguish ordinary UV/Generated coordinates from
+    # instance-context-dependent coordinates without importing bpy into domain code.
+    from_instancer: bool = False
 
     def __post_init__(self) -> None:
         for field_name in ("node_id", "node_type", "node_name"):
@@ -59,6 +64,8 @@ class ShaderNodeSnapshot:
             raise TypeError("group_path must be a tuple of non-empty strings")
         if not isinstance(self.muted, bool):
             raise TypeError("muted must be bool")
+        if not isinstance(self.from_instancer, bool):
+            raise TypeError("from_instancer must be bool")
 
 
 @dataclass(frozen=True, slots=True)
