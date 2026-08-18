@@ -29,6 +29,14 @@ def test_canonical_main_panel_keeps_primary_foldouts_in_order():
     assert ui.OBJECT_PT_Spine2DMeshPanel.bl_idname == "OBJECT_PT_spine2d_mesh"
 
 
+def test_canonical_main_panel_uses_public_title_without_changing_technical_id():
+    panel = ui.OBJECT_PT_Spine2DMeshPanel
+
+    assert panel.bl_label == "Spine Mesh Exporter"
+    assert panel.bl_category == "Spine Mesh Exporter"
+    assert panel.bl_idname == "OBJECT_PT_spine2d_mesh"
+
+
 def test_secondary_sections_are_ordinary_child_panels_of_canonical_main_panel():
     assert ui_layout.OBJECT_PT_Spine2DRigPanel.bl_parent_id == (
         ui.OBJECT_PT_Spine2DMeshPanel.bl_idname
