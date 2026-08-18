@@ -1,6 +1,6 @@
 # Blender Extensions Platform Submission
 
-This document describes the moderation-remediation candidate for **Spine2D Mesh Exporter
+This document describes the moderation-remediation candidate for **Spine Mesh Exporter
 0.155.0**.
 
 This release updates the **existing Blender Extensions submission** that received moderator
@@ -27,7 +27,7 @@ pointing at superseded source or documentation.
 ## Current public metadata
 
 ```text
-Name: Spine2D Mesh Exporter
+Name: Spine Mesh Exporter
 Version: 0.155.0
 Minimum Blender: 5.2.0
 Platform restriction: none declared
@@ -63,7 +63,7 @@ Suggested short description:
 
 Suggested reviewer-oriented description:
 
-> Spine2D Mesh Exporter converts Blender Mesh objects into Spine-ready JSON and textures.
+> Spine Mesh Exporter converts Blender Mesh objects into Spine-ready JSON and textures.
 > It supports Normal / UV Segments with six signed-axis projections and two Active Camera
 > rig roots, flat Camera Projection, Depth Camera Projection, 2-Axis Rotation + Scale
 > controls, generated bake UVs, automatic/custom seam segmentation, texture sequences,
@@ -85,13 +85,13 @@ The 0.155.0 archive must provide evidence for the seven current review items:
 5. the manifest contains only the `Import-Export` tag;
 6. the unjustified Windows-only manifest restriction is removed after runtime portability
    audit;
-7. the public title is `Spine2D Mesh Exporter` while the technical ID stays unchanged, and
+7. the public title is `Spine Mesh Exporter` while the technical ID stays unchanged, and
    the corrected archive is uploaded to the same existing submission.
 
 ## Reviewer test path
 
 1. Install the ZIP through **Edit > Preferences > Extensions > Install from Disk**.
-2. Enable **Spine2D Mesh Exporter**.
+2. Enable **Spine Mesh Exporter**.
 3. In the add-on Preferences, confirm one exact project-version field exists for each Spine
    family 3.8, 4.0, 4.1, 4.2, and 4.3.
 4. Save a `.blend` file containing one Mesh object with a material.
@@ -144,12 +144,12 @@ Do not upload an archive that was built before the final manifest/test/documenta
 
 1. Sign in to the Blender Extensions website with the Blender ID that owns the existing
    submission.
-2. Open the **existing declined/reviewed Spine2D Mesh Exporter submission**.
+2. Open the **existing declined/reviewed Spine Mesh Exporter submission**.
 3. Use that listing's version/update workflow to upload
    `blender_to_spine2d_mesh_exporter-0.155.0.zip`.
 4. Do **not** create a second listing or a new initial submission.
 5. Do **not** delete and recreate the existing listing to bypass the review state.
-6. Verify the generated metadata shows `Spine2D Mesh Exporter`, version `0.155.0`, technical
+6. Verify the generated metadata shows `Spine Mesh Exporter`, version `0.155.0`, technical
    ID `blender_to_spine2d_mesh_exporter`, only `Import-Export`, and no unintended platform
    restriction.
 7. Add a concise changelog mapping 0.155.0 to the moderator feedback rather than unrelated
