@@ -9,6 +9,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.scene_settings_migration i
     CURRENT_SETTINGS_SCHEMA_VERSION,
     clear_pre_registration_scene_state,
     migrate_scene_settings,
+    migration_registration_pending,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import (
     A1RigProfile,
@@ -131,7 +132,9 @@ def test_pre_registration_snapshot_survives_rna_default_rebind():
     clear_pre_registration_scene_state()
     try:
         assert migration._capture_pre_registration_scene_state_for_scenes((scene,)) == 1
+        assert migration_registration_pending(scene) is True
         assert migrate_scene_settings(scene) is True
+        assert migration_registration_pending(scene) is False
         assert scene.spine2d_settings_schema_version == CURRENT_SETTINGS_SCHEMA_VERSION
         assert scene.spine2d_seam_maker_mode == "AUTO"
         assert scene.spine2d_rig_profile == A1RigProfile.THREE_AXIS_ROTATION.value
@@ -222,17 +225,22 @@ def test_current_schema_is_idempotent():
     assert scene.spine2d_target_spine_version == SpineJsonTarget.SPINE_3_8.value
 
 
-def test_root_registers_snapshot_before_scene_rna_and_migration_before_ui():
+def test_root_captures_snapshot_before_scene_rna_and_migrates_before_ui():
     source = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
     register_config_start = source.index("def _register_config_rna()")
     unregister_config_start = source.index("def _unregister_config_rna()")
     register_config = source[register_config_start:unregister_config_start]
+    root_register_start = source.index("    def register() -> None:")
+    root_unregister_start = source.index("    def unregister() -> None:")
+    root_register = source[root_register_start:root_unregister_start]
 
     assert register_config.index("capture_pre_registration_scene_state()") < (
-        register_config.index("register_rna_properties_transactionally(")
+        register_config.index("setattr(bpy.types.Scene, name, value)")
     )
+    assert "registered_names: list[str] = []" in register_config
     assert "clear_pre_registration_scene_state()" in register_config
-    assert source.index('"Scene RNA properties"') < source.index(
-        '"Scene settings migration"'
-    ) < source.index('"UI"')
-    assert source.index('"UI"') < source.index('"Rig UI"')
+
+    assert root_register.index("_register_config_rna()") < root_register.index(
+        "scene_settings_migration.register()"
+    ) < root_register.index("ui.register()")
+    assert root_register.index("ui.register()") < root_register.index("rig_ui.register()")
