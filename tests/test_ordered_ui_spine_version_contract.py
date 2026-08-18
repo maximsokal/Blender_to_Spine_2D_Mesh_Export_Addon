@@ -1,4 +1,4 @@
-"""Static contracts for Spine target and Texture size ownership in the main panel."""
+"""Static contracts for Spine target and Bake-owned Texture size in the main panel."""
 
 from __future__ import annotations
 
@@ -47,17 +47,13 @@ def _property_call_line(method: ast.FunctionDef, property_name: str) -> int | No
     return None
 
 
-def test_main_export_settings_own_spine_target_and_texture_size() -> None:
+def test_spine_target_stays_in_paths_and_texture_size_moves_to_bake() -> None:
     export_method = _main_panel_method("_draw_export_settings")
     bake_method = _main_panel_method("_draw_bake_settings")
 
-    target_line = _property_call_line(export_method, "spine2d_target_spine_version")
-    texture_line = _property_call_line(export_method, "spine2d_texture_size")
-
-    assert target_line is not None
-    assert texture_line is not None
-    assert target_line < texture_line
-    assert _property_call_line(bake_method, "spine2d_texture_size") is None
+    assert _property_call_line(export_method, "spine2d_target_spine_version") is not None
+    assert _property_call_line(export_method, "spine2d_texture_size") is None
+    assert _property_call_line(bake_method, "spine2d_texture_size") is not None
 
 
 def test_main_export_panel_resolves_and_reports_target_capabilities() -> None:
@@ -84,4 +80,5 @@ def test_main_export_panel_resolves_and_reports_target_capabilities() -> None:
     assert "descriptor" in attributes
     assert "serializer_ready" in attributes
     assert "Spine version" in strings
-    assert "Codec implementation in progress; Analyze blocks export" in strings
+    assert "Codec implementation unavailable for this target" in strings
+    assert "Analyze blocks export" not in strings
