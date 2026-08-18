@@ -1,4 +1,4 @@
-"""Register and unregister every Rewrite runtime owner against Blender 5.2 RNA."""
+"""Register and unregister the public Rewrite extension against Blender 5.2 RNA."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
 
 
 RNA_REGISTRATIONS = (
-    *extension.CONFIG_RNA_PROPERTIES,
     *extension.ui.RNA_PROPERTIES,
     *extension.generated_material_ui.RNA_PROPERTIES,
     *extension.ui_layout.RNA_PROPERTIES,
@@ -43,38 +42,12 @@ def _replace_current_scene_with_fresh() -> None:
             bpy.data.scenes.remove(scene)
 
 
-def _register_all_steps() -> list[tuple[str, object, object]]:
-    completed: list[tuple[str, object, object]] = []
-    try:
-        for step in extension.REGISTRATION_STEPS:
-            _label, register_callback, _unregister_callback = step
-            register_callback()
-            completed.append(step)
-        return completed
-    except Exception:
-        for _label, _register_callback, unregister_callback in reversed(completed):
-            unregister_callback()
-        raise
-
-
-def _unregister_completed(completed) -> None:
-    failures: list[tuple[str, Exception]] = []
-    for label, _register_callback, unregister_callback in reversed(completed):
-        try:
-            unregister_callback()
-        except Exception as exc:  # keep cleaning so leaks are still observable
-            failures.append((label, exc))
-    if failures:
-        details = "; ".join(
-            f"{label}: {type(error).__name__}: {error}"
-            for label, error in failures
-        )
-        raise AssertionError(f"registration cleanup failed: {details}")
-
-
 def _assert_registered() -> None:
+    for name, _value in extension.CONFIG_RNA_PROPERTIES:
+        assert hasattr(bpy.types.Scene, name), name
     for registration in RNA_REGISTRATIONS:
         assert hasattr(registration.owner, registration.name), registration.name
+
     assert bpy.context.scene.spine2d_texture_size == 1024
     assert bpy.context.scene.spine2d_seam_maker_mode == "AUTO"
     assert (
@@ -84,12 +57,17 @@ def _assert_registered() -> None:
     assert bpy.context.scene.spine2d_material_source_policy == "REQUIRE_SOURCE"
     assert hasattr(bpy.types.Object, "spine2d_bake_settings")
     assert hasattr(bpy.types.Object, "spine2d_connect_settings")
-    assert _panel_class("OBJECT_PT_spine2d_mesh") is (
-        extension.ui_layout.OBJECT_PT_Spine2DOrderedMeshPanel
+
+    assert _panel_class("OBJECT_PT_spine2d_mesh") is extension.ui.OBJECT_PT_Spine2DMeshPanel
+    assert _panel_class("OBJECT_PT_spine2d_rig") is extension.ui_layout.OBJECT_PT_Spine2DRigPanel
+    assert _panel_class("OBJECT_PT_spine2d_generated_materials") is (
+        extension.ui_layout.OBJECT_PT_Spine2DGeneratedMaterialsPanel
     )
-    assert _panel_class("OBJECT_PT_spine2d_rig") is None
-    assert _panel_class("OBJECT_PT_spine2d_repolish") is not None
-    assert _panel_class("OBJECT_PT_spine2d_generated_materials") is None
+    assert _panel_class("OBJECT_PT_spine2d_depth_parallax") is (
+        extension.ui_layout.OBJECT_PT_Spine2DDepthParallaxPanel
+    )
+    assert _panel_class("OBJECT_PT_spine2d_repolish") is None
+
     assert _operator_class("spine2d.reset_rig_profile") is not None
     assert _operator_class("object.spine2d_single_export") is not None
     assert _operator_class("object.spine2d_multi_export") is not None
@@ -97,16 +75,28 @@ def _assert_registered() -> None:
 
 
 def _assert_unregistered() -> None:
+    for name, _value in extension.CONFIG_RNA_PROPERTIES:
+        assert not hasattr(bpy.types.Scene, name), name
     for registration in RNA_REGISTRATIONS:
         assert not hasattr(registration.owner, registration.name), registration.name
-    assert _panel_class("OBJECT_PT_spine2d_mesh") is None
-    assert _panel_class("OBJECT_PT_spine2d_rig") is None
-    assert _panel_class("OBJECT_PT_spine2d_repolish") is None
-    assert _panel_class("OBJECT_PT_spine2d_generated_materials") is None
+
+    for panel_id in (
+        "OBJECT_PT_spine2d_mesh",
+        "OBJECT_PT_spine2d_rig",
+        "OBJECT_PT_spine2d_generated_materials",
+        "OBJECT_PT_spine2d_depth_parallax",
+        "OBJECT_PT_spine2d_repolish",
+    ):
+        assert _panel_class(panel_id) is None, panel_id
+
     assert _operator_class("spine2d.reset_rig_profile") is None
     assert _operator_class("object.spine2d_single_export") is None
     assert _operator_class("object.spine2d_multi_export") is None
     assert _operator_class("object.save_uv_as_json") is None
+
+    is_registered = getattr(bpy.app.timers, "is_registered", None)
+    if callable(is_registered):
+        assert not is_registered(extension.addon_preferences._deferred_view3d_redraw)
 
 
 def test_every_registration_owner_survives_two_real_rna_cycles(clean_blender_data):
@@ -114,11 +104,12 @@ def test_every_registration_owner_survives_two_real_rna_cycles(clean_blender_dat
     # Defaults must therefore be asserted on a genuinely fresh Scene.
     _replace_current_scene_with_fresh()
 
-    # A second complete cycle catches stale class/RNA ownership left by unregister().
+    # A second complete cycle catches stale class/RNA/timer ownership left by
+    # unregister(). Use the public extension lifecycle rather than private test steps.
     for _cycle in range(2):
-        completed = _register_all_steps()
+        extension.register()
         try:
             _assert_registered()
         finally:
-            _unregister_completed(completed)
+            extension.unregister()
         _assert_unregistered()
