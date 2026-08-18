@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "Blender_to_Spine2D_Mesh_Exporter"
-RIG_UI = PACKAGE / "rig_ui.py"
+UI = PACKAGE / "ui.py"
 DEPTH_SOURCE = PACKAGE / "blender_adapter" / "a1_depth_source_geometry_preparation.py"
 GEOMETRY_PUBLIC = PACKAGE / "domain" / "geometry" / "__init__.py"
 DEPTH_OWNER = (
@@ -29,14 +29,17 @@ def _read(path: Path) -> str:
 
 
 def test_camera_modes_show_fixed_active_camera_instead_of_axis_selector() -> None:
-    source = _read(RIG_UI)
+    source = _read(UI)
 
-    assert "def _draw_forced_active_camera_projection(" in source
-    assert source.count("_draw_forced_active_camera_projection(layout)") == 2
-    assert source.count("_draw_projection_direction(layout, scene)") == 1
-    assert "A1TextureExportMode.CAMERA_PROJECTION.value" in source
-    assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION.value" in source
-    assert 'row.label(text="Active Camera", icon="CAMERA_DATA")' in source
+    # The canonical main panel owns export mode and projection selection. Camera-only
+    # routes show a fixed Active Camera explanation and expose the axis selector only
+    # in the Normal / UV branch.
+    assert "A1TextureExportMode.CAMERA_PROJECTION" in source
+    assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION" in source
+    assert source.count('"spine2d_projection_direction"') == 1
+    assert 'text="Active camera render → flat screen-space mesh"' in source
+    assert 'text="Active camera render → optimized depth-relief mesh"' in source
+    assert 'text="Projection direction"' in source
 
 
 def test_depth_preparation_uses_visible_topology_projection_owner() -> None:
