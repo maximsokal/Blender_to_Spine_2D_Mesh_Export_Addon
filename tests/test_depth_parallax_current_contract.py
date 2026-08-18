@@ -85,7 +85,7 @@ def test_current_manifest_and_scene_schema_match_depth_contract() -> None:
     assert "if current < 8" in migration
 
 
-def test_scene_rna_stores_radians_and_cut_displays_rotation_angle() -> None:
+def test_scene_rna_stores_radians_and_child_panel_displays_rotation_angle() -> None:
     properties = _read(SCENE_PROPERTIES)
     capture = _read(SCENE_CAPTURE)
     rig_ui = _read(RIG_UI)
@@ -102,12 +102,14 @@ def test_scene_rna_stores_radians_and_cut_displays_rotation_angle() -> None:
     assert "DepthParallaxSettings(" in capture
     assert "depth_parallax=_resolve_depth_parallax_settings(scene)" in capture
 
-    assert "def _draw_depth_parallax_cut_settings(" in ui_layout
-    assert 'text="Parallax reserve"' in ui_layout
+    assert "class OBJECT_PT_Spine2DDepthParallaxPanel" in ui_layout
+    assert 'bl_label = "Depth Parallax"' in ui_layout
+    assert '"spine2d_depth_parallax_horizon_angle"' in ui_layout
     assert 'text="Parallax Horizon Angle"' in ui_layout
     assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION" in ui_layout
+    assert 'bl_parent_id = _PARENT_PANEL_ID' in ui_layout
     assert "_draw_depth_parallax_horizon" not in rig_ui
-    assert 'text="Parallax reserve"' not in rig_ui
+    assert 'text="Depth Parallax"' not in rig_ui
     assert "spine2d_depth_parallax_horizon_angle = 0.0" in rig_ui
 
 
