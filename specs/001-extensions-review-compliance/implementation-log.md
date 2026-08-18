@@ -24,8 +24,6 @@ Changes:
 
 Reason: closes the concrete runtime `threading` use discovered by the RF-002 audit.
 
-Pending evidence: full runtime AST scan and local test suite.
-
 ## Slice 03 — Re-Polish advertisement removed
 
 Files:
@@ -40,7 +38,7 @@ Removed behavior:
 
 Reason: RF-003 requires a self-contained extension with no advertisement/third-party dependency.
 
-Pending evidence: runtime static scan and exact built-ZIP inventory.
+Pending evidence: exact built-ZIP inventory.
 
 ## Slice 04 — Root registration simplified
 
@@ -59,12 +57,11 @@ Current behavior:
 
 - when Blender API is available, root calls module owners in a clear forward order and unregisters them in reverse;
 - top-level Scene properties use direct `setattr` / reverse `delattr` ownership;
+- partial Scene RNA registration has owner-local rollback and clears pending migration snapshots;
 - when `bpy` is unavailable, `register()` and `unregister()` are no-ops;
-- logging initialization remains after successful owner registration.
+- optional post-registration logging/preferences initialization is best-effort and cannot corrupt an otherwise successful enable.
 
-Reason: RF-004 explicitly rejected root registration-state/cleanup complexity.
-
-Pending: simplify any remaining module-local registration wrappers that are not justified by actual handlers/RNA/resources.
+Reason: RF-004 explicitly rejected root registration-state/cleanup complexity while still requiring deterministic ownership cleanup.
 
 ## Slice 05 — `ui_layout.py` panel swapping removed
 
@@ -84,24 +81,21 @@ Replacement:
 - Rig, Generated Materials, and Depth Parallax are ordinary Blender child panels;
 - child panel registration is a direct declaration-order loop; unregister is reverse order.
 
-Reason: this directly addresses the `ui_layout.py` behavior called out by RF-004.
+## Slice 06 — Class-only registration owners simplified
 
-## Slice 06 — Rig UI registration simplified
+Files include:
 
-File: `Blender_to_Spine2D_Mesh_Exporter/rig_ui.py`
+- `rig_ui.py`;
+- `addon_preferences.py`;
+- `single_object_operator.py`;
+- `ui_layout.py`.
 
-Removed:
+Changes:
 
-- replacement of `SPINE2D_OT_ResetSettings` at registration time;
-- restore-original-reset logic and global registration flags;
-- transactional registration wrappers.
-
-Replacement:
-
-- one independent `spine2d.reset_rig_profile` operator;
-- direct class registration/unregistration;
-- Rig child panel only draws controls not already owned by the main panel, avoiding duplicate export-mode/projection controls;
-- rig reset restores rig profile, +Z projection, shared pivot, parallax angle and preview-animation default.
+- class-only owners use direct `bpy.utils.register_class` loops;
+- unregister runs in reverse class order;
+- owner-specific resources such as the Preferences one-shot redraw timer are released explicitly by their owner;
+- registration state is retained only in modules that actually replace runtime bindings or own mixed resources.
 
 ## Slice 07 — Manifest moderation metadata
 
@@ -124,57 +118,175 @@ platforms = ["windows-x64"]
 
 The technical `id = "blender_to_spine2d_mesh_exporter"` remains unchanged.
 
-Platform decision: current audit found no reason to make the pure-Python installed runtime Windows-only. Windows-specific developer/test paths are not treated as installed-runtime dependencies. Final portability still requires Blender package/install validation before release.
-
 ## Slice 08 — Compliance regression tests
 
-Added `tests/test_extensions_review_compliance.py` covering:
+`tests/test_extensions_review_compliance.py` covers:
 
 - exact 0.155.0 manifest metadata;
 - only `Import-Export` tag;
 - no platform restriction;
-- no `threading` or `queue` imports anywhere in shipped production Python;
+- no forbidden Python concurrency imports in manifest-eligible runtime;
 - no `PipelineTraceSession` symbol in shipped runtime;
 - no Re-Polish runtime source/reference;
 - no root registration state machine;
 - no `ui_layout.py` main-panel unregister/restore pattern;
+- no shipped `*_dup` UI workaround functions;
 - required development/legacy build exclusions.
 
-Updated `tests/test_manifest_version.py` to 0.155.0.
+## Slice 09 — Shipping-boundary concurrency and development-trace cleanup
 
-Updated `tests/test_texture_size_bake_ui.py` for the canonical main-panel/child-panel architecture.
-
-## Slice 09 — Shipping-boundary threading and development-trace cleanup
-
-Local focused gate at `eca6f72` found five source-tree `threading` imports:
+The initial focused gate found five source-tree `threading` imports. Three were real Rewrite
+runtime modules:
 
 - `infrastructure/atomic_work_state.py`;
 - `infrastructure/export_diagnostics.py`;
-- `infrastructure/export_events.py`;
-- `infrastructure/pipeline_trace.py`;
-- retained `legacy_loader.py`.
+- `infrastructure/export_events.py`.
 
-The first three are real Rewrite runtime modules, but their locks protected only synchronous process-local dictionaries/policy values. They now use direct main-thread state with the same reservation, listener-snapshot, and policy semantics and import no `threading`/`queue`.
+Their locks protected synchronous process-local dictionaries/policy values only. They now
+use direct process-local state with the same reservation/listener/policy semantics and import
+no `threading`/`queue`.
 
-`PipelineTraceSession` was located and classified as development instrumentation. Its only direct consumers found by repository call-graph search are the development probe and trace tests; the production infrastructure package does not re-export it. The manifest now excludes:
+`PipelineTraceSession` was classified as development instrumentation. Its trace implementation
+files are excluded from the extension build:
 
 - `/infrastructure/pipeline_trace.py`;
 - `/infrastructure/pipeline_trace_model.py`;
 - `/infrastructure/pipeline_trace_report.py`;
 - `/infrastructure/pipeline_trace_values.py`.
 
-The retained pre-Rewrite `legacy_loader.py` is intentionally left untouched and remains excluded by `/legacy_loader.py`.
+The retained pre-Rewrite `legacy_loader.py` remains untouched and excluded from the shipped
+extension.
 
-`tests/test_extensions_review_compliance.py` is now manifest-aware: source AST checks operate on Python files that are eligible to ship, instead of treating deliberately excluded repository sources as runtime. A boundary regression test verifies that the trace/legacy files are excluded while the three rewritten infrastructure modules remain inside the scanned shipping set.
+The compliance scanner follows manifest build exclusions rather than treating intentionally
+retained repository source as installed runtime.
 
-This slice addresses the two failures from the first local focused gate. It does **not** claim RF-001/RF-002 closed yet: the updated focused/full/real-bpy suites still need to run locally, and the exact Blender-built ZIP remains the authoritative packaging evidence.
+## Slice 10 — Root lifecycle tests migrated to the real public lifecycle
 
-## Current open work after Slice 09
+Old tests that manually iterated `REGISTRATION_STEPS`, expected the replacement panel, or
+required Re-Polish were migrated to call the real public `extension.register()` and
+`extension.unregister()` pair.
 
-1. Pull the latest branch commits and rerun compile + focused tests; only then continue to the full Python and real-bpy suites.
-2. If the focused gate is green, audit remaining production modules for hidden concurrency constructs (`multiprocessing`, `concurrent.futures`, direct Blender timers) and classify rather than blanket-ban Blender-managed timers.
-3. Audit remaining production modules for unnecessary transactional registration helpers (`ui.py`, generated-material UI, readiness/migration owners, etc.) and simplify only where ownership does not require state.
-4. Remove the old root registration-state dependency in `scene_properties.py` now that the root state machine is gone.
-5. Update public README/docs/submission/testing version/name/platform/same-submission wording to 0.155.0.
-6. Add exact Blender-built ZIP inventory gate and build/validate/install the final candidate.
-7. Execute real bpy repeated enable/disable/restart tests and representative exports before claiming RF-004 or RF-006 fully closed.
+Covered suites include unit/source contracts, repeated real-bpy registration cycles,
+handler/keymap cleanup, operator undo/redo, public blend goldens, grenade headless runners,
+and memory-stress tooling.
+
+Pre-test `extension.unregister()` calls that could hide lifecycle leaks were removed from
+Scene migration real-bpy tests. Those tests now assert an unregistered baseline instead of
+mutating a leaked previous state away.
+
+## Slice 11 — Scene migration decoupled from the removed root state machine
+
+Files:
+
+- `blender_adapter/scene_properties.py`;
+- `blender_adapter/scene_settings_migration.py`.
+
+Changes:
+
+- `scene_properties.py` no longer imports/queries `get_registration_state`;
+- Seam Maker update logic now asks whether the specific Scene has a pending pre-registration migration snapshot;
+- `scene_settings_migration.py` no longer keeps a generic `_REGISTERED` flag;
+- load handler installation uses the handler collections as source of truth and local
+  `added_pre`/`added_post` flags only for rollback of the current call.
+
+This preserves saved-Scene migration semantics without recreating root registration state.
+
+## Slice 12 — Dormant automatic readiness scheduler removed from shipped runtime
+
+File: `Blender_to_Spine2D_Mesh_Exporter/auto_readiness.py`.
+
+The previous intermediate implementation no longer installed its automatic scheduler, but
+still shipped the complete dead mechanism. That was removed rather than merely disabled.
+
+Removed:
+
+- `_automatic_timer`;
+- `bpy.app.timers` polling registration helpers;
+- debounce deadlines/pending request state;
+- automatic request-key scheduling;
+- automatic depsgraph readiness callback;
+- automatic load-pre/load-post readiness callbacks;
+- `request_auto_analysis` and automatic-status UI text.
+
+Current behavior:
+
+- Analyze is explicit and synchronous on Blender's main thread;
+- a small process-local re-entry flag prevents recursive Analyze calls only;
+- readiness diagnostics remain advisory and never disable Export;
+- Export wrappers call the production export directly and schedule no readiness work;
+- register/unregister own only reversible UI method overrides.
+
+Focused and real-bpy contracts now assert that the old scheduler symbols do not exist.
+
+## Slice 13 — Runtime hook ownership hardened
+
+- Preferences keeps one one-shot Blender event-loop redraw timer for exact-version edits and
+  explicitly unregisters it during add-on teardown.
+- The shipped hook inventory expects that Preferences timer to be the only timer surface.
+- Handler append/remove ownership is scanned per shipped module.
+- keymap/draw-handler/preview allocations remain prohibited unless explicitly owned.
+
+This distinguishes a bounded Blender event-loop redraw callback from a persistent Python
+background scheduler.
+
+## Slice 14 — Platform restriction audit
+
+Added `tests/test_runtime_portability_contract.py`.
+
+Static manifest-eligible runtime audit now proves:
+
+- no manifest `platforms` restriction;
+- no shipped `subprocess` dependency;
+- no unconditional `msvcrt`, `winreg`, or `fcntl` dependency;
+- `ctypes` is confined to guarded process-identity compatibility in
+  `infrastructure/atomic_work_state.py`;
+- Windows process probing is guarded by `os.name == "nt"` and POSIX has an `os.kill` path;
+- Linux process-start identity uses `/proc` only when available;
+- unknown hosts fail closed through a process-local session marker rather than deleting
+  another process's work files;
+- Windows external-I/O path budgeting is disabled on non-Windows hosts unless explicitly
+  requested by a test/caller;
+- durable I/O uses portable `Path`, `os.replace`, and `os.fsync` primitives with a guarded
+  Windows directory-fsync limitation;
+- no absolute Windows drive/UNC literal is allowed in shipped Python;
+- no bundled `.dll`, `.pyd`, `.so`, or `.dylib` is present in the manifest-eligible package.
+
+This supports removing the unjustified Windows-only manifest restriction. It does not claim
+that Linux/macOS real-Blender release validation has already been executed.
+
+## Slice 15 — Same-submission documentation remediation
+
+`docs/submission.md` now describes version 0.155.0 as a correction to the **existing**
+reviewed/declined Blender Extensions submission. It explicitly prohibits creating a second
+listing or deleting/recreating the declined listing.
+
+Current metadata documented there:
+
+- Name: `Spine2D Mesh Exporter`;
+- Version: `0.155.0`;
+- technical ID unchanged;
+- Tags: `Import-Export` only;
+- no platform restriction declared;
+- Files permission unchanged.
+
+`docs/README.md`, `docs/installation.md`, `docs/usage.md`, and
+`docs/settings-reference.md` have begun the same 0.155.0/manual-Analyze synchronization.
+The remaining maintained public documents still need the same version/title pass before the
+documentation gate can be claimed green.
+
+## Current open work after Slice 15
+
+1. Finish synchronizing every maintained public document and root README to `0.155.0`, the
+   `Spine2D Mesh Exporter` public title, and the same-submission/platform policy.
+2. Review whether any remaining mixed-resource transactional registration helper is truly
+   generic complexity or justified owner-local rollback; do not remove partial-RNA safety
+   merely for aesthetics.
+3. Pull the final static-remediation HEAD locally and run compile + focused tests.
+4. If focused tests are green, run the full Blender-independent suite.
+5. Run targeted/full real-bpy lifecycle suites and representative headless exports.
+6. Build the exact candidate with Blender `extension build`, run `extension validate`, and
+   enumerate/scan the actual ZIP; source-tree exclusions are not final packaging evidence.
+7. Install that exact ZIP in an isolated profile and run enable/disable/restart/re-enable,
+   preference persistence, manual Analyze, and production export checks.
+8. Only after those gates, update the evidence/checklist and prepare the moderator reply for
+   the same existing submission.
