@@ -1,6 +1,6 @@
 # Output Format
 
-This document describes the current output contract for **Spine2D Mesh Exporter 0.155.0**.
+This document describes the current output contract for **Spine Mesh Exporter 0.155.0**.
 
 ## Spine targets and exact project versions
 
