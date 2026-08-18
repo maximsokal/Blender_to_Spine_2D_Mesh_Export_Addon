@@ -10,11 +10,14 @@ This file contains the **seven comments from the current Blender Extensions mode
 
 Reviewer asks what `PipelineTraceSession` is for and whether users actually need it. If it is a development tool it must be removed from the distributed extension. Development files must be excluded through `blender_manifest.toml`, and the review archive must be built with Blender's extension command-line tooling so reviewers see only runtime files.
 
-Current baseline findings:
+Current findings after implementation audit:
 
-- repository code search does not currently locate a `PipelineTraceSession` symbol in the Rewrite branch;
-- therefore this item is not closed by editing a guessed historical file; it needs an explicit runtime-package static check and exact ZIP inventory;
-- the manifest already has substantial build exclusions, but the built ZIP remains the authoritative evidence.
+- `PipelineTraceSession` does exist at `infrastructure/pipeline_trace.py`;
+- repository call-graph search finds it in the development Blender probe and trace tests, not in the production infrastructure package exports;
+- the session installs `sys.settrace()` plus `threading.settrace()` and is therefore development instrumentation, not required by the user-facing exporter runtime;
+- `pipeline_trace.py`, `pipeline_trace_model.py`, `pipeline_trace_report.py`, and `pipeline_trace_values.py` are now excluded through `blender_manifest.toml`;
+- the compliance source scan follows the manifest shipping boundary instead of treating deliberately excluded repository sources as runtime;
+- the built ZIP remains the authoritative final evidence.
 
 Closure:
 
@@ -33,11 +36,21 @@ Implementation rule:
 - do not introduce `subprocess` merely to satisfy the wording if no background work is required; prefer synchronous/main-thread execution where possible;
 - if `subprocess` is required, isolate it from Blender data/API and own its lifecycle explicitly.
 
+Current implementation findings:
+
+- the first focused compliance run found `threading` imports in `atomic_work_state.py`, `export_diagnostics.py`, `export_events.py`, development-only `pipeline_trace.py`, and retained legacy `legacy_loader.py`;
+- the three Rewrite runtime modules used only `RLock` around synchronous process-local state and now use direct main-thread state without replacement workers;
+- `pipeline_trace.py` is excluded as development-only under RF-001;
+- `legacy_loader.py` remains untouched and is already excluded from the extension ZIP by the manifest;
+- the compliance AST scan now checks only manifest-eligible shipped Python modules.
+
 Closure:
 
 1. AST/static scan of every shipped Python module finds no `threading` or `queue` import;
 2. no hidden current equivalent of the old background worker survives;
 3. Analyze/Export/disable leave no add-on-owned Python worker alive.
+
+Updated focused/full/real-bpy test evidence is still pending, so RF-002 is not yet marked closed.
 
 ## RF-003 — Remove Re-Polish advertisement / third-party dependency
 
@@ -139,12 +152,12 @@ The package directory/technical extension identity stays unchanged unless Blende
 
 ## Current closure status
 
-| Reviewer item | Status at implementation start |
+| Reviewer item | Current status |
 | --- | --- |
-| RF-001 PipelineTraceSession / clean package | Open — absence must be proven in runtime ZIP |
-| RF-002 threading / queue | Open — add explicit shipped-runtime ban and audit |
-| RF-003 Re-Polish | Confirmed blocker — current runtime contains it |
-| RF-004 registration / ui_layout | Confirmed blocker — current architecture matches complaint |
-| RF-005 only Import-Export tag | Confirmed blocker — three extra tags remain |
-| RF-006 Windows restriction | Open — platform audit required |
-| RF-007 title / same submission | Confirmed blocker — old title/version/docs remain |
+| RF-001 PipelineTraceSession / clean package | Implemented at source/manifest level — local updated gate + exact ZIP inventory still pending |
+| RF-002 threading / queue | Runtime locks removed and scan made shipping-aware — updated focused/full/real-bpy evidence pending |
+| RF-003 Re-Polish | Runtime UI/module removed — ZIP evidence pending |
+| RF-004 registration / ui_layout | Root/panel architecture simplified — lifecycle evidence and remaining owner audit pending |
+| RF-005 only Import-Export tag | Manifest changed — Blender validator evidence pending |
+| RF-006 Windows restriction | Manifest restriction removed — portability audit/validation pending |
+| RF-007 title / same submission | Manifest version/title changed — public docs and same-submission release workflow still pending |
