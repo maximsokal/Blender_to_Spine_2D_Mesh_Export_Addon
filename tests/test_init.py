@@ -53,7 +53,7 @@ def test_extension_manifest_targets_blender_52_and_declares_files_permission():
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
     assert manifest["version"] == "0.155.0"
-    assert manifest["name"] == "Spine2D Mesh Exporter"
+    assert manifest["name"] == "Spine Mesh Exporter"
     assert manifest["blender_version_min"] == "5.2.0"
     assert manifest["type"] == "add-on"
     assert str(manifest["permissions"]["files"]).strip()
