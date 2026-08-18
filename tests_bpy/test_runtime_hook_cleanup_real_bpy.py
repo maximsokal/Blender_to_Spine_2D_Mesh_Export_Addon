@@ -40,40 +40,25 @@ def _keymap_signature():
     return tuple(sorted(result))
 
 
-def _register_steps():
-    completed = []
-    try:
-        for step in extension.REGISTRATION_STEPS:
-            step[1]()
-            completed.append(step)
-        return tuple(completed)
-    except Exception:
-        for step in reversed(completed):
-            step[2]()
-        raise
-
-
-def _unregister_steps(completed):
-    failures = []
-    for label, _register, unregister in reversed(completed):
-        try:
-            unregister()
-        except Exception as exc:
-            failures.append(f"{label}: {type(exc).__name__}: {exc}")
-    assert failures == []
-
-
-def test_ten_registration_cycles_restore_all_handlers_and_addon_keymaps(clean_blender_data):
+def test_ten_registration_cycles_restore_all_handlers_keymaps_and_owned_timer(
+    clean_blender_data,
+):
     handlers_before = _handler_signature()
     keymaps_before = _keymap_signature()
 
     for _cycle in range(10):
-        completed = _register_steps()
+        extension.register()
         try:
             handler = extension.ui.a1_readiness_depsgraph_update_post
             assert tuple(bpy.app.handlers.depsgraph_update_post).count(handler) == 1
             assert _keymap_signature() == keymaps_before
         finally:
-            _unregister_steps(completed)
+            extension.unregister()
+
         assert _handler_signature() == handlers_before
         assert _keymap_signature() == keymaps_before
+
+        is_registered = getattr(bpy.app.timers, "is_registered", None)
+        if callable(is_registered):
+            assert not is_registered(extension.addon_preferences._deferred_view3d_redraw)
+            assert not is_registered(extension.auto_readiness._automatic_timer)
