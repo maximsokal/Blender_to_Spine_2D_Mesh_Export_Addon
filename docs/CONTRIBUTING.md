@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for contributing to Blender to Spine2D Mesh Exporter.
+Thank you for contributing to Spine Mesh Exporter.
 
 ## Supported baseline
 
