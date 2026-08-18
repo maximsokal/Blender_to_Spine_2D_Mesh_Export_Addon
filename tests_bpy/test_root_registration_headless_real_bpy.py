@@ -8,6 +8,17 @@ import Blender_to_Spine2D_Mesh_Exporter as extension
 
 
 _PACKAGE_SUFFIX = "Blender_to_Spine2D_Mesh_Exporter"
+_REMOVED_AUTOMATIC_READINESS_SYMBOLS = (
+    "_automatic_timer",
+    "_register_timer",
+    "_unregister_timer",
+    "_install_handlers",
+    "_remove_handlers",
+    "request_auto_analysis",
+    "a1_auto_readiness_depsgraph_update_post",
+    "a1_auto_readiness_load_pre",
+    "a1_auto_readiness_load_post",
+)
 
 
 def _matching_addon_preference_keys() -> tuple[str, ...]:
@@ -24,35 +35,23 @@ def _matching_addon_preference_keys() -> tuple[str, ...]:
 
 
 def _assert_manual_readiness_runtime_registered() -> None:
-    """Require the manual readiness bridge without background analysis hooks."""
+    """Require the manual readiness bridge and prove the old scheduler is absent."""
 
     assert extension.auto_readiness._REGISTERED is True
-    assert not bpy.app.timers.is_registered(extension.auto_readiness._automatic_timer)
-    assert extension.auto_readiness.a1_auto_readiness_depsgraph_update_post not in (
-        bpy.app.handlers.depsgraph_update_post
-    )
-    assert extension.auto_readiness.a1_auto_readiness_load_pre not in (
-        bpy.app.handlers.load_pre
-    )
-    assert extension.auto_readiness.a1_auto_readiness_load_post not in (
-        bpy.app.handlers.load_post
-    )
+    assert extension.auto_readiness._UI_MODULE is extension.ui
+    assert extension.auto_readiness._BASE_METHODS
+    for name in _REMOVED_AUTOMATIC_READINESS_SYMBOLS:
+        assert not hasattr(extension.auto_readiness, name), name
 
 
 def _assert_manual_readiness_runtime_unregistered() -> None:
-    """Require complete teardown of the manual readiness bridge and old hooks."""
+    """Require complete teardown of the manual readiness method overrides."""
 
     assert extension.auto_readiness._REGISTERED is False
-    assert not bpy.app.timers.is_registered(extension.auto_readiness._automatic_timer)
-    assert extension.auto_readiness.a1_auto_readiness_depsgraph_update_post not in (
-        bpy.app.handlers.depsgraph_update_post
-    )
-    assert extension.auto_readiness.a1_auto_readiness_load_pre not in (
-        bpy.app.handlers.load_pre
-    )
-    assert extension.auto_readiness.a1_auto_readiness_load_post not in (
-        bpy.app.handlers.load_post
-    )
+    assert extension.auto_readiness._UI_MODULE is None
+    assert extension.auto_readiness._BASE_METHODS == {}
+    for name in _REMOVED_AUTOMATIC_READINESS_SYMBOLS:
+        assert not hasattr(extension.auto_readiness, name), name
 
 
 def _assert_root_runtime_registered() -> None:
