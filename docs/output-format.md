@@ -1,7 +1,6 @@
 # Output Format
 
-This document describes the current output contract for Blender to Spine2D Mesh Exporter
-**0.154.0**.
+This document describes the current output contract for **Spine2D Mesh Exporter 0.155.0**.
 
 ## Spine targets and exact project versions
 
@@ -41,6 +40,9 @@ D:/project/export/Hero_merged_spine_4.2.35.json
 D:/project/export/images/Hero_Baked.png
 ```
 
+The drive-letter example above illustrates one possible user-selected path; the installed
+extension itself has no hard-coded drive or operating-system output location.
+
 Texture resolution is controlled by the Scene-level `Texture size` setting in the **Bake**
 foldout. Its UI location does not change output path semantics.
 
@@ -67,8 +69,9 @@ Sequence textures:
 ```
 
 Multi-object JSON uses the first ordered source name plus the number of additional selected
-objects and the effective exact version. Output stems are sanitized for ordinary Windows
-filesystem restrictions.
+objects and the effective exact version. Output stems are sanitized conservatively for
+portable filesystem use, including characters and reserved names that are invalid on
+Windows.
 
 ## Normal / UV Segments attachments
 
@@ -152,6 +155,9 @@ Export stages candidate files before installation. Temporary transaction files s
 `.spine2d-stage-*` and `.spine2d-backup-*` are not final Spine assets. The transaction owns
 deterministic reservation, staged JSON/textures, backup, rollback/restoration, stale-work
 recovery and live-process ownership checks.
+
+The atomic layer uses host-appropriate process identity and filesystem durability behavior;
+Windows compatibility branches are guarded and do not make the extension Windows-only.
 
 ## Related documents
 
