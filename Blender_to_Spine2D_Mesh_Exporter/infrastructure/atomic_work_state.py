@@ -8,7 +8,6 @@ import hashlib
 import math
 import os
 from pathlib import Path
-from threading import RLock
 import time
 from uuid import uuid4
 
@@ -493,54 +492,60 @@ def _work_file_age_seconds(
 
 
 class _ProcessLocalAtomicRegistry:
-    """Thread-safe ownership of active tokens and final paths in this process."""
+    """Main-thread ownership of active tokens and final paths in this process.
+
+    Blender extension operations are synchronous on the main Python thread. Keeping
+    this registry process-local and lock-free avoids unsupported Python threading while
+    preserving the same reservation and stale-work semantics.
+    """
 
     def __init__(self) -> None:
-        self._lock = RLock()
         self._tokens: dict[str, AtomicWorkTokenMetadata] = {}
         self._final_path_owners: dict[Path, str] = {}
 
     def register(self, metadata: AtomicWorkTokenMetadata) -> None:
         if not isinstance(metadata, AtomicWorkTokenMetadata):
             raise TypeError("metadata must be AtomicWorkTokenMetadata")
-        with self._lock:
-            if metadata.token in self._tokens:
-                raise RuntimeError("atomic work token is already active")
-            self._tokens[metadata.token] = metadata
+        if metadata.token in self._tokens:
+            raise RuntimeError("atomic work token is already active")
+        self._tokens[metadata.token] = metadata
 
     def is_token_active(self, token: str) -> bool:
-        with self._lock:
-            return token in self._tokens
+        if not isinstance(token, str):
+            raise TypeError("token must be str")
+        return token in self._tokens
 
     def claim_final_path(self, final_path: Path, token: str) -> None:
         if not isinstance(final_path, Path):
             raise TypeError("final_path must be pathlib.Path")
+        if not isinstance(token, str) or not token:
+            raise ValueError("token must be a non-empty string")
         if (
             not final_path.is_absolute()
             or final_path != final_path.resolve(strict=False)
         ):
             raise ValueError("final_path must be absolute and normalized")
-        with self._lock:
-            if token not in self._tokens:
-                raise RuntimeError("atomic work token is not active")
-            owner = self._final_path_owners.get(final_path)
-            if owner is not None and owner != token:
-                raise RuntimeError(
-                    "final output is already reserved by another active "
-                    f"transaction: {final_path}"
-                )
-            self._final_path_owners[final_path] = token
+        if token not in self._tokens:
+            raise RuntimeError("atomic work token is not active")
+        owner = self._final_path_owners.get(final_path)
+        if owner is not None and owner != token:
+            raise RuntimeError(
+                "final output is already reserved by another active "
+                f"transaction: {final_path}"
+            )
+        self._final_path_owners[final_path] = token
 
     def unregister(self, token: str) -> None:
-        with self._lock:
-            self._tokens.pop(token, None)
-            owned = tuple(
-                path
-                for path, owner in self._final_path_owners.items()
-                if owner == token
-            )
-            for path in owned:
-                self._final_path_owners.pop(path, None)
+        if not isinstance(token, str) or not token:
+            raise ValueError("token must be a non-empty string")
+        self._tokens.pop(token, None)
+        owned = tuple(
+            path
+            for path, owner in self._final_path_owners.items()
+            if owner == token
+        )
+        for path in owned:
+            self._final_path_owners.pop(path, None)
 
 
 _REGISTRY = _ProcessLocalAtomicRegistry()
