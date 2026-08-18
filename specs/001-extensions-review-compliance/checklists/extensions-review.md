@@ -30,6 +30,8 @@ Complete this checklist against the **exact release candidate commit and ZIP**. 
 - [ ] Failed Export returns with no extension-owned Python background worker alive.
 - [ ] Disable/unregister leaves no worker/thread owner alive.
 
+Source-level checkpoint after the first focused compliance run: the three Rewrite runtime `RLock` users have been converted to synchronous process-local state, the development trace family is excluded from the extension build, and the AST scan follows the manifest shipping boundary. These boxes remain unchecked until the updated local suites and exact built ZIP prove the final candidate.
+
 ## Pipeline trace / diagnostics persistence
 
 - [ ] Current trace owner/call graph is documented by exact current function/class names.
@@ -42,6 +44,8 @@ Complete this checklist against the **exact release candidate commit and ZIP**. 
 - [ ] Finalization is idempotent or otherwise protected from duplicate writes.
 - [ ] No session-owned Python thread/timer is required for final persistence.
 - [ ] Cleanup is deterministic on exception paths.
+
+Source-level checkpoint: `PipelineTraceSession` was found in `infrastructure/pipeline_trace.py`, classified as development instrumentation from its call sites and tracing behavior, and excluded together with its three helper modules. Runtime export events/diagnostics remain separate synchronous infrastructure. Final proof still requires ZIP inventory and Blender validation.
 
 ## Manifest tags
 
