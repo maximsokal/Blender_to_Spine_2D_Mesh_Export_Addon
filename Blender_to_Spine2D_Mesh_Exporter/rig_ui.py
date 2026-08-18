@@ -115,7 +115,7 @@ def draw_rig_settings(
 
 
 class SPINE2D_OT_ResetRigProfile(bpy.types.Operator):
-    """Restore public rig/projection settings to production defaults."""
+    """Restore only the persisted production rig profile default."""
 
     bl_idname = "spine2d.reset_rig_profile"
     bl_label = "Reset Rig Settings"
@@ -123,16 +123,14 @@ class SPINE2D_OT_ResetRigProfile(bpy.types.Operator):
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
         try:
-            scene = context.scene
+            scene = getattr(context, "scene", None)
+            if scene is None:
+                raise ValueError("context.scene is unavailable")
             scene.spine2d_rig_profile = A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
-            scene.spine2d_projection_direction = A1ProjectionDirection.POSITIVE_Z.value
-            scene.spine2d_shared_selection_pivot = True
-            scene.spine2d_depth_parallax_horizon_angle = 0.0
-            scene.spine2d_export_preview_animation = False
-            self.report({"INFO"}, "Rig and projection settings reset")
+            self.report({"INFO"}, "Rig profile reset to 2-Axis Rotation + Scale")
             return {"FINISHED"}
         except Exception as exc:
-            logger.exception("Unable to reset Spine2D rig settings")
+            logger.exception("Unable to reset Spine2D rig profile")
             self.report({"ERROR"}, f"Rig reset error: {exc}")
             return {"CANCELLED"}
 
