@@ -116,7 +116,7 @@ def test_manifest_matches_extensions_review_metadata() -> None:
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
     assert manifest["version"] == "0.155.0"
-    assert manifest["name"] == "Spine2D Mesh Exporter"
+    assert manifest["name"] == "Spine Mesh Exporter"
     assert manifest["tags"] == ["Import-Export"]
     assert "platforms" not in manifest
     assert "Blender" not in manifest["name"]
