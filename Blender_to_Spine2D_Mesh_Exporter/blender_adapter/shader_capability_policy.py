@@ -146,6 +146,9 @@ SOURCE_ATTRIBUTE_NODE_TYPES: Final = frozenset(
     }
 )
 
+# Blender's Texture Coordinate "From Instancer" switch is a node property, not an
+# output socket. It is therefore intentionally absent here and handled by
+# texture_coordinate_findings() using ShaderNodeSnapshot.from_instancer.
 TEXTURE_COORD_CAPABILITIES: Mapping[str, ShaderBakeCapability] = MappingProxyType(
     {
         "uv": ShaderBakeCapability.LOCAL_UV_SAFE,
@@ -155,7 +158,6 @@ TEXTURE_COORD_CAPABILITIES: Mapping[str, ShaderBakeCapability] = MappingProxyTyp
         "object": ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
         "generated": ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
         "normal": ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
-        "from instancer": ShaderBakeCapability.GROUP_RENDER_REQUIRED,
     }
 )
 GEOMETRY_OUTPUT_CAPABILITIES: Mapping[str, ShaderBakeCapability] = MappingProxyType(
