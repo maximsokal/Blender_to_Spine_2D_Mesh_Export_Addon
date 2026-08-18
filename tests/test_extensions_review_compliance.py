@@ -17,6 +17,9 @@ PIPELINE_TRACE_RUNTIME_FILES = frozenset(
         "/infrastructure/pipeline_trace_values.py",
     }
 )
+FORBIDDEN_PYTHON_CONCURRENCY_ROOTS = frozenset(
+    {"threading", "queue", "multiprocessing", "concurrent"}
+)
 
 
 def _manifest_exclude_patterns() -> tuple[str, ...]:
@@ -37,9 +40,9 @@ def _manifest_exclude_patterns() -> tuple[str, ...]:
 def _manifest_excludes_package_path(path: Path) -> bool:
     """Return whether a package path is excluded by the manifest build rules.
 
-    The compliance scan only needs Python files under the extension source root.  It
+    The compliance scan only needs Python files under the extension source root. It
     supports the rooted file/directory patterns used by this manifest plus ordinary
-    filename globs such as ``*.py[cod]``.  The final Blender-built ZIP inventory is a
+    filename globs such as ``*.py[cod]``. The final Blender-built ZIP inventory is a
     separate release gate and remains authoritative for packaging behavior.
     """
 
@@ -95,6 +98,19 @@ def _imported_roots(path: Path) -> set[str]:
     return roots
 
 
+def _function_source(path: Path, function_name: str) -> str:
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == function_name
+    )
+    segment = ast.get_source_segment(source, function)
+    assert segment is not None
+    return segment
+
+
 def test_manifest_matches_extensions_review_metadata() -> None:
     manifest = tomllib.loads(MANIFEST.read_text(encoding="utf-8"))
 
@@ -107,17 +123,35 @@ def test_manifest_matches_extensions_review_metadata() -> None:
     assert "Blender" not in manifest["tagline"]
 
 
-def test_runtime_does_not_import_threading_or_queue() -> None:
+def test_runtime_does_not_import_forbidden_python_concurrency() -> None:
     offenders: list[str] = []
     for path in _shipped_python_files():
         imported = _imported_roots(path)
-        blocked = sorted(imported.intersection({"threading", "queue"}))
+        blocked = sorted(imported.intersection(FORBIDDEN_PYTHON_CONCURRENCY_ROOTS))
         if blocked:
             offenders.append(
                 f"{path.relative_to(ROOT).as_posix()}: {', '.join(blocked)}"
             )
 
     assert offenders == [], "Forbidden Blender runtime imports:\n" + "\n".join(offenders)
+
+
+def test_auto_readiness_does_not_install_background_polling_callbacks() -> None:
+    path = PACKAGE / "auto_readiness.py"
+    register_source = _function_source(path, "register")
+    unregister_source = _function_source(path, "unregister")
+
+    assert "_register_timer()" not in register_source
+    assert "_install_handlers()" not in register_source
+    assert "_unregister_timer()" not in unregister_source
+    assert "_remove_handlers()" not in unregister_source
+
+
+def test_preferences_release_owned_one_shot_blender_timer() -> None:
+    path = PACKAGE / "addon_preferences.py"
+    unregister_source = _function_source(path, "unregister")
+
+    assert "_cancel_deferred_view3d_redraw()" in unregister_source
 
 
 def test_development_pipeline_trace_session_is_not_shipped() -> None:
@@ -150,6 +184,21 @@ def test_root_registration_has_no_registration_state_machine() -> None:
     assert "register_rna_properties_transactionally" not in source
     assert "repolish_ui" not in source
     assert 'raise RuntimeError("Blender bpy module is required' not in source
+
+
+def test_simple_class_only_registration_owners_use_normal_blender_pattern() -> None:
+    for relative in (
+        "addon_preferences.py",
+        "single_object_operator.py",
+        "rig_ui.py",
+        "ui_layout.py",
+    ):
+        source = (PACKAGE / relative).read_text(encoding="utf-8")
+        assert "register_classes_transactionally" not in source, relative
+        assert "unregister_all_best_effort" not in source, relative
+        assert "class_cleanup_actions" not in source, relative
+        assert "bpy.utils.register_class" in source, relative
+        assert "bpy.utils.unregister_class" in source, relative
 
 
 def test_ui_layout_uses_child_panels_without_panel_replacement() -> None:
