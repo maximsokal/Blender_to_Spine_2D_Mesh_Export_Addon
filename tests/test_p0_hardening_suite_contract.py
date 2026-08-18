@@ -43,7 +43,8 @@ def test_root_registration_keeps_explicit_standard_owner_lifecycle():
         "ui_layout.register()",
         "single_object_operator.register()",
     )
-    offsets = tuple(source.index(call) for call in registration_calls)
+    lines = tuple(line.strip() for line in source.splitlines())
+    offsets = tuple(lines.index(call) for call in registration_calls)
     assert offsets == tuple(sorted(offsets))
 
     assert "def _initialize_registered_logging() -> bool:" in source
