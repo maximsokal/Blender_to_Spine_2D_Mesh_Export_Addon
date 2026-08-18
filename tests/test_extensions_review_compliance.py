@@ -186,6 +186,39 @@ def test_root_registration_has_no_registration_state_machine() -> None:
     assert 'raise RuntimeError("Blender bpy module is required' not in source
 
 
+def test_shipped_runtime_has_no_dependency_on_removed_root_registration_state() -> None:
+    forbidden = (
+        "get_registration_state",
+        "ExtensionRegistrationState",
+        "_REGISTRATION_STATE",
+    )
+    offenders: list[str] = []
+
+    for path in _shipped_python_files():
+        source = path.read_text(encoding="utf-8")
+        matched = tuple(token for token in forbidden if token in source)
+        if matched:
+            offenders.append(
+                f"{path.relative_to(ROOT).as_posix()}: {', '.join(matched)}"
+            )
+
+    assert offenders == [], "Removed root lifecycle dependency:\n" + "\n".join(offenders)
+
+
+def test_scene_property_migration_uses_local_pending_snapshot_signal() -> None:
+    source = (PACKAGE / "blender_adapter" / "scene_properties.py").read_text(
+        encoding="utf-8"
+    )
+    migration = (
+        PACKAGE / "blender_adapter" / "scene_settings_migration.py"
+    ).read_text(encoding="utf-8")
+
+    assert "migration_registration_pending" in source
+    assert "get_registration_state" not in source
+    assert "def migration_registration_pending(scene: Any) -> bool:" in migration
+    assert "_PRE_REGISTRATION_SCENE_STATES" in migration
+
+
 def test_simple_class_only_registration_owners_use_normal_blender_pattern() -> None:
     for relative in (
         "addon_preferences.py",
