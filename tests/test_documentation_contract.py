@@ -10,6 +10,8 @@ DOCS = ROOT / "docs"
 EXAMPLES = ROOT / "examples"
 MANIFEST = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "blender_manifest.toml"
 README = ROOT / "README.md"
+PUBLIC_TITLE = "Spine Mesh Exporter"
+OLD_PUBLIC_TITLE = "Spine2D Mesh Exporter"
 
 CYRILLIC = re.compile(r"[\u0400-\u04FF]")
 MARKDOWN_LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
@@ -122,6 +124,24 @@ def test_public_docs_do_not_publish_superseded_extension_versions() -> None:
     )
 
 
+def test_public_docs_use_reviewer_approved_display_title() -> None:
+    manifest = _read(MANIFEST)
+    readme = _read(README)
+
+    assert f'name = "{PUBLIC_TITLE}"' in manifest
+    assert readme.startswith(f"# {PUBLIC_TITLE}\n")
+
+    stale: list[str] = []
+    for path in _maintained_markdown_paths():
+        if OLD_PUBLIC_TITLE in _read(path):
+            stale.append(str(path.relative_to(ROOT)))
+
+    assert not stale, (
+        f"Superseded public title {OLD_PUBLIC_TITLE!r} remains in maintained docs:\n"
+        + "\n".join(stale)
+    )
+
+
 def test_temporary_rewrite_documents_are_not_public_docs() -> None:
     assert not tuple(DOCS.glob("REWRITE_*.md"))
     assert not (DOCS / "a1_fixture_manifest.example.json").exists()
@@ -132,7 +152,7 @@ def test_readme_presents_current_product_without_stale_ui_media() -> None:
     source = _read(README)
 
     required_fragments = (
-        "# Spine2D Mesh Exporter",
+        "# Spine Mesh Exporter",
         "assets/cover.png",
         "img.shields.io/badge/License-GPLv3",
         "img.shields.io/github/v/release/",
@@ -250,7 +270,7 @@ def test_submission_document_matches_current_public_manifest() -> None:
     manifest = _read(MANIFEST)
     current_version = _manifest_version()
 
-    assert "Name: Spine2D Mesh Exporter" in submission
+    assert "Name: Spine Mesh Exporter" in submission
     assert "Platform restriction: none declared" in submission
     assert "Tags: Import-Export" in submission
     assert "License: GPL-3.0-or-later" in submission
@@ -261,7 +281,7 @@ def test_submission_document_matches_current_public_manifest() -> None:
     assert "initial Blender Extensions Platform submission" not in submission
     assert 'platforms = ["windows-x64"]' not in manifest
     assert 'tags = ["Import-Export"]' in manifest
-    assert 'name = "Spine2D Mesh Exporter"' in manifest
+    assert 'name = "Spine Mesh Exporter"' in manifest
     assert 'website = "https://github.com/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon"' in manifest
 
 
