@@ -1,7 +1,7 @@
-# Spine2D Mesh Exporter
+# Spine Mesh Exporter
 
 <p align="center">
-  <img src="assets/cover.png" alt="Spine2D Mesh Exporter cover" width="600">
+  <img src="assets/cover.png" alt="Spine Mesh Exporter cover" width="600">
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
   </a>
 </p>
 
-**Spine2D Mesh Exporter 0.155.0** converts Blender Mesh objects into Spine-ready JSON,
+**Spine Mesh Exporter 0.155.0** converts Blender Mesh objects into Spine-ready JSON,
 weighted mesh attachments, baked or camera-rendered textures, generated animation controls,
 and optional texture sequences.
 
@@ -307,7 +307,7 @@ failure paths verify/restore relevant:
 ## Quick start
 
 1. Install `blender_to_spine2d_mesh_exporter-0.155.0.zip` through **Edit > Preferences > Extensions > Install from Disk**.
-2. Enable **Spine2D Mesh Exporter**.
+2. Enable **Spine Mesh Exporter**.
 3. Configure the exact Spine project patch for every family you use in Add-on Preferences.
 4. Save the `.blend` file and select one or more Mesh objects in Object Mode.
 5. Open the exporter in the 3D View Sidebar.
