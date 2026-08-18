@@ -13,7 +13,7 @@ LICENSE = ROOT / "LICENSE"
 INIT = PACKAGE / "__init__.py"
 ADDON_PREFERENCES = PACKAGE / "addon_preferences.py"
 
-EXPECTED_TAGS = {"Import-Export", "Mesh", "UV", "Animation"}
+EXPECTED_TAGS = ["Import-Export"]
 EXPECTED_WEBSITE = "https://github.com/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon"
 
 
@@ -27,14 +27,14 @@ def test_submission_manifest_has_public_listing_metadata() -> None:
 
     assert manifest["schema_version"] == "1.0.0"
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
-    assert manifest["version"] == "0.154.0"
-    assert manifest["name"] == "Blender to Spine2D Mesh Exporter"
+    assert manifest["version"] == "0.155.0"
+    assert manifest["name"] == "Spine2D Mesh Exporter"
     assert manifest["maintainer"] == "Maxim Sokolenko"
     assert manifest["website"] == EXPECTED_WEBSITE
     assert manifest["type"] == "add-on"
     assert manifest["blender_version_min"] == "5.2.0"
-    assert manifest["platforms"] == ["windows-x64"]
-    assert set(manifest["tags"]) == EXPECTED_TAGS
+    assert "platforms" not in manifest
+    assert manifest["tags"] == EXPECTED_TAGS
     assert manifest["license"] == ["SPDX:GPL-3.0-or-later"]
     assert manifest["copyright"] == ["2025-2026 Maxim Sokolenko"]
 
@@ -43,6 +43,8 @@ def test_submission_manifest_has_public_listing_metadata() -> None:
     assert tagline == tagline.strip()
     assert 1 <= len(tagline) <= 64
     assert not tagline.endswith((".", "!", "?"))
+    assert "Blender" not in manifest["name"]
+    assert "Blender" not in tagline
 
 
 def test_submission_permission_reason_is_store_safe() -> None:
@@ -56,7 +58,7 @@ def test_submission_permission_reason_is_store_safe() -> None:
     assert not reason.endswith((".", "!", "?"))
 
 
-def test_submission_package_uses_extension_namespace_contract() -> None:
+def test_submission_package_keeps_stable_extension_namespace_contract() -> None:
     init_source = INIT.read_text(encoding="utf-8")
     preferences_source = ADDON_PREFERENCES.read_text(encoding="utf-8")
 
@@ -64,6 +66,10 @@ def test_submission_package_uses_extension_namespace_contract() -> None:
     assert "ADDON_ID = __package__" in preferences_source
     assert "sys.path" not in init_source
     assert "sys.path" not in preferences_source
+
+    # The moderator-requested public title change must not fork the technical identity.
+    assert _manifest()["id"] == "blender_to_spine2d_mesh_exporter"
+    assert PACKAGE.name == "Blender_to_Spine2D_Mesh_Exporter"
 
 
 def test_submission_has_gpl_license_source() -> None:
