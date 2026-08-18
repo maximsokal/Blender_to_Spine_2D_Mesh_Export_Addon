@@ -12,7 +12,7 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.projection import A1ProjectionDirec
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
 
 
-def test_rig_reset_restores_owned_rig_and_projection_defaults():
+def test_rig_reset_restores_two_axis_without_touching_other_settings():
     scene = SimpleNamespace(
         spine2d_rig_profile=A1RigProfile.THREE_AXIS_ROTATION.value,
         spine2d_projection_direction=A1ProjectionDirection.NEGATIVE_Y.value,
@@ -30,15 +30,15 @@ def test_rig_reset_restores_owned_rig_and_projection_defaults():
 
     assert result == {"FINISHED"}
     assert scene.spine2d_rig_profile == A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
-    assert scene.spine2d_projection_direction == A1ProjectionDirection.POSITIVE_Z.value
-    assert scene.spine2d_shared_selection_pivot is True
-    assert scene.spine2d_depth_parallax_horizon_angle == 0.0
-    assert scene.spine2d_export_preview_animation is False
+    assert scene.spine2d_projection_direction == A1ProjectionDirection.NEGATIVE_Y.value
+    assert scene.spine2d_shared_selection_pivot is False
+    assert scene.spine2d_depth_parallax_horizon_angle == 0.25
+    assert scene.spine2d_export_preview_animation is True
     assert scene.spine2d_texture_size == 2048
     assert scene.spine2d_seam_maker_mode == "CUSTOM"
     operator.report.assert_called_once_with(
         {"INFO"},
-        "Rig and projection settings reset",
+        "Rig profile reset to 2-Axis Rotation + Scale",
     )
 
 
