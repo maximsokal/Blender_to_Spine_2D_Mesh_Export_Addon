@@ -61,4 +61,8 @@ def test_ten_registration_cycles_restore_all_handlers_keymaps_and_owned_timer(
         is_registered = getattr(bpy.app.timers, "is_registered", None)
         if callable(is_registered):
             assert not is_registered(extension.addon_preferences._deferred_view3d_redraw)
-            assert not is_registered(extension.auto_readiness._automatic_timer)
+
+        # The former automatic-readiness scheduler was removed from shipped runtime.
+        # Real-bpy lifecycle coverage must assert that it stays removed, not attempt
+        # to query a timer callback that intentionally no longer exists.
+        assert not hasattr(extension.auto_readiness, "_automatic_timer")
