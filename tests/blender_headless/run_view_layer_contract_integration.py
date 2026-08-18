@@ -84,7 +84,7 @@ def test_holdout_only_source_is_rejected_before_render() -> None:
             any("Holdout" in issue.message for issue in errors),
             f"Holdout failure is not actionable: {errors}",
         )
-        _assert(not result.committed_paths, "Holdout failure committed output files")
+        _assert(not result.output_files, "Holdout failure committed output files")
         _assert(not _temporary_datablock_names(), "Holdout failure leaked temporary data")
 
 
