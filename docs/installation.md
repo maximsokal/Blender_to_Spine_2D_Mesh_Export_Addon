@@ -1,11 +1,11 @@
 # Installation Guide
 
-This guide describes Blender to Spine2D Mesh Exporter **0.154.0**.
+This guide describes **Spine2D Mesh Exporter 0.155.0**.
 
 ## Requirements
 
 - Blender 5.2 or newer.
-- Windows is the currently tested desktop platform.
+- No operating-system platform restriction is declared in the extension manifest.
 - A saved `.blend` file.
 - A writable export directory.
 - A supported Spine schema family: 3.8, 4.0, 4.1, 4.2, or 4.3.
@@ -23,8 +23,8 @@ The minimum Blender version is declared in
 2. Open Blender 5.2 or newer.
 3. Open **Edit > Preferences > Extensions**.
 4. Choose **Install from Disk**.
-5. Select `blender_to_spine2d_mesh_exporter-0.154.0.zip`.
-6. Enable **Blender to Spine2D Mesh Exporter**.
+5. Select `blender_to_spine2d_mesh_exporter-0.155.0.zip`.
+6. Enable **Spine2D Mesh Exporter**.
 7. In the add-on Preferences, expand **Spine project JSON versions** and set the exact
    Editor/project version for every Spine family you use.
 8. Open a 3D View, press `N`, and select the extension tab.
@@ -55,7 +55,7 @@ Preferences through Blender before closing.
 4. Install the new ZIP through **Install from Disk**.
 5. Reopen the project.
 6. Verify the exact project versions in Add-on Preferences.
-7. Run **Analyze** before exporting.
+7. Optionally run **Analyze** to refresh diagnostics before exporting.
 
 Closing Blender prevents loaded Python modules from making a new archive appear to behave
 like an older installed build.
@@ -90,6 +90,10 @@ The **Paths and Spine 2D version** foldout contains the Spine schema-family targ
 **Exact JSON version**, and output paths. The scene-wide **Texture size** control is located
 in **Bake**, before the frame/sequence controls. Moving the control does not change the
 persisted RNA property or saved value.
+
+The **Analyze** action is explicit and synchronous. It reports export-readiness diagnostics
+but does not schedule background analysis and does not disable Export when no current report
+exists.
 
 ## Active Camera requirements
 
@@ -137,7 +141,7 @@ From the repository root in PowerShell:
 $Blender = "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 $SourceDir = ".\Blender_to_Spine2D_Mesh_Exporter"
 $DistDir = ".\dist"
-$Archive = Join-Path $DistDir "blender_to_spine2d_mesh_exporter-0.154.0.zip"
+$Archive = Join-Path $DistDir "blender_to_spine2d_mesh_exporter-0.155.0.zip"
 
 if (-not (Test-Path -LiteralPath $Blender -PathType Leaf)) {
     throw "Blender executable not found: $Blender"
@@ -166,7 +170,7 @@ Get-FileHash -LiteralPath $Archive -Algorithm SHA256
 Expected archive:
 
 ```text
-dist/blender_to_spine2d_mesh_exporter-0.154.0.zip
+dist/blender_to_spine2d_mesh_exporter-0.155.0.zip
 ```
 
 ## After installation
@@ -175,15 +179,17 @@ Use a representative project and verify:
 
 1. `Texture size` appears in Bake and not in Paths and Spine 2D version.
 2. Add-on Preferences show one exact project version field for each supported Spine family.
-3. Changing the active family's exact patch immediately changes the viewport **Exact JSON version** label and invalidates Analyze.
-4. Analyze completes without unexpected blockers after the configured exact version is valid.
-5. Signed-axis Normal export imports correctly.
-6. Active Camera Object Root matches the Blender camera setup pose without stretching.
-7. Object Root X/Y controls pivot around the projected Blender Object Origin.
-8. Active Camera Camera Root keeps correct camera-relative placement.
-9. Camera Projection produces a flat camera-facing attachment.
-10. Depth Camera Projection produces the expected FRONT relief and optional reserve views.
-11. The JSON filename and `skeleton.spine` use the configured exact patch for the selected family.
+3. Changing the active family's exact patch immediately changes the viewport **Exact JSON version** label and invalidates any existing Analyze report.
+4. Analyze can be run manually and completes without unexpected diagnostics after the configured exact version is valid.
+5. Export remains available without a current Analyze report.
+6. Signed-axis Normal export imports correctly.
+7. Active Camera Object Root matches the Blender camera setup pose without stretching.
+8. Object Root X/Y controls pivot around the projected Blender Object Origin.
+9. Active Camera Camera Root keeps correct camera-relative placement.
+10. Camera Projection produces a flat camera-facing attachment.
+11. Depth Camera Projection produces the expected FRONT relief and optional reserve views.
+12. The JSON filename and `skeleton.spine` use the configured exact patch for the selected family.
+13. Disable/re-enable leaves no duplicate classes, handlers, timers, RNA properties, or method overrides.
 
 Continue with [Usage](usage.md), [Settings Reference](settings-reference.md), and
 [Testing](testing.md).
