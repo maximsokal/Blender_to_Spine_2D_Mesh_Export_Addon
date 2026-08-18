@@ -144,8 +144,15 @@ def test_cancelled_operator_does_not_consume_undo_step(tmp_path, monkeypatch):
             fail_export,
         )
 
-        result = set(bpy.ops.object.save_uv_as_json())
-        assert "CANCELLED" in result
+        # The production operator catches the backend exception, emits an ERROR report,
+        # and returns CANCELLED. Blender may surface that ERROR report as RuntimeError to
+        # Python callers of bpy.ops; either Python boundary must leave undo untouched.
+        try:
+            result = set(bpy.ops.object.save_uv_as_json())
+        except RuntimeError as exc:
+            assert "forced production operator failure" in str(exc)
+        else:
+            assert "CANCELLED" in result
 
         assert "FINISHED" in bpy.ops.ed.undo()
         assert bpy.data.objects["UndoHero"].location.x == pytest.approx(0.0)
