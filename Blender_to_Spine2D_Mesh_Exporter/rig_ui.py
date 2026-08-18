@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 def _selected_mesh_count(context: bpy.types.Context) -> int:
+    """Count Mesh objects accepted by the selected-object export route."""
+
     return sum(
         1
         for candidate in getattr(context, "selected_objects", ())
@@ -29,6 +31,8 @@ def _selected_mesh_count(context: bpy.types.Context) -> int:
 def _resolved_projection_direction(
     scene: bpy.types.Scene,
 ) -> A1ProjectionDirection | None:
+    """Resolve the persisted projection identifier without hiding invalid state."""
+
     try:
         return resolve_a1_projection_direction(
             getattr(
@@ -41,15 +45,45 @@ def _resolved_projection_direction(
         return None
 
 
-def _shared_pivot_available(context: bpy.types.Context) -> bool:
+def _shared_pivot_available(
+    context: bpy.types.Context,
+    texture_mode: A1TextureExportMode = A1TextureExportMode.NORMAL_UV_SEGMENTS,
+) -> bool:
+    """Mirror the exporter capability contract for conditional pivot UI visibility."""
+
     direction = _resolved_projection_direction(context.scene)
     if direction is None:
         return False
     return supports_a1_shared_pivot(
-        A1TextureExportMode.NORMAL_UV_SEGMENTS,
+        texture_mode,
         direction,
         _selected_mesh_count(context),
     )
+
+
+def _draw_shared_selection_pivot(
+    layout: bpy.types.UILayout,
+    context: bpy.types.Context,
+) -> None:
+    """Draw the default-on shared pivot only when the export route supports it."""
+
+    if not _shared_pivot_available(
+        context,
+        A1TextureExportMode.NORMAL_UV_SEGMENTS,
+    ):
+        return
+
+    scene = context.scene
+    layout.prop(
+        scene,
+        "spine2d_shared_selection_pivot",
+        text="Shared selection pivot",
+    )
+    if bool(getattr(scene, "spine2d_shared_selection_pivot", True)):
+        layout.label(
+            text="Pivot: center of all selected exported Mesh geometry",
+            icon="CON_PIVOT",
+        )
 
 
 def draw_rig_settings(
@@ -72,20 +106,8 @@ def draw_rig_settings(
             A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
         )
     ).strip().upper()
-    if (
-        texture_mode == A1TextureExportMode.NORMAL_UV_SEGMENTS.value
-        and _shared_pivot_available(context)
-    ):
-        layout.prop(
-            scene,
-            "spine2d_shared_selection_pivot",
-            text="Shared selection pivot",
-        )
-        if bool(getattr(scene, "spine2d_shared_selection_pivot", True)):
-            layout.label(
-                text="Pivot: center of selected exported Mesh geometry",
-                icon="CON_PIVOT",
-            )
+    if texture_mode == A1TextureExportMode.NORMAL_UV_SEGMENTS.value:
+        _draw_shared_selection_pivot(layout, context)
 
     row = layout.row(align=True)
     row.label(text="Preview animation")
