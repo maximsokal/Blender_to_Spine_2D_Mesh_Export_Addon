@@ -212,6 +212,9 @@ def test_connected_two_axis_export_builds_global_and_object_controls() -> None:
         )
         _assert_connected_control_space(document)
 
+        # Spine 4.2 uses the global-first two-axis schedule. The complete global
+        # wrapper must run before any object-local constraints so a later depth phase
+        # cannot reset a subtree below the historical zero-scale setup parent.
         _assert_fields(
             _constraint(document, "all_objects_rotation_X_constraint"),
             {
@@ -234,7 +237,7 @@ def test_connected_two_axis_export_builds_global_and_object_controls() -> None:
         _assert_fields(
             _constraint(document, "all_objects_IK"),
             {
-                "order": 3,
+                "order": 1,
                 "bones": ["all_objects_rotate_X_constraint"],
                 "target": "all_objects_rotate_X_constraint_IK",
                 "compress": True,
@@ -245,7 +248,7 @@ def test_connected_two_axis_export_builds_global_and_object_controls() -> None:
         _assert_fields(
             _constraint(document, "all_objects_scale"),
             {
-                "order": 6,
+                "order": 2,
                 "bones": [
                     "all_objects_rotate_X",
                     "all_objects_layer_0",
@@ -263,7 +266,7 @@ def test_connected_two_axis_export_builds_global_and_object_controls() -> None:
         _assert_fields(
             _constraint(document, "all_objects_scale_rotate_X_constraint"),
             {
-                "order": 9,
+                "order": 3,
                 "bones": ["all_objects_0_scale", "all_objects_1_scale"],
                 "target": "all_objects_rotate_X_constraint",
             },
@@ -272,7 +275,7 @@ def test_connected_two_axis_export_builds_global_and_object_controls() -> None:
         _assert_fields(
             _constraint(document, "all_objects_rotation_Y"),
             {
-                "order": 12,
+                "order": 4,
                 "bones": ["all_objects_layer_0", "all_objects_layer_1"],
                 "target": "all_objects_rotation_Y",
                 "local": True,
@@ -288,18 +291,18 @@ def test_connected_two_axis_export_builds_global_and_object_controls() -> None:
 
         expected_orders = {
             "all_objects_rotation_X_constraint": 0,
-            "ObjectB_rotation_X_constraint": 1,
-            "ObjectA_rotation_X_constraint": 2,
-            "all_objects_IK": 3,
-            "ObjectB_IK": 4,
-            "ObjectA_IK": 5,
-            "all_objects_scale": 6,
-            "ObjectB_scale": 7,
-            "ObjectA_scale": 8,
-            "all_objects_scale_rotate_X_constraint": 9,
-            "ObjectB_scale_rotate_X_constraint": 10,
-            "ObjectA_scale_rotate_X_constraint": 11,
-            "all_objects_rotation_Y": 12,
+            "all_objects_IK": 1,
+            "all_objects_scale": 2,
+            "all_objects_scale_rotate_X_constraint": 3,
+            "all_objects_rotation_Y": 4,
+            "ObjectB_rotation_X_constraint": 5,
+            "ObjectA_rotation_X_constraint": 6,
+            "ObjectB_IK": 7,
+            "ObjectA_IK": 8,
+            "ObjectB_scale": 9,
+            "ObjectA_scale": 10,
+            "ObjectB_scale_rotate_X_constraint": 11,
+            "ObjectA_scale_rotate_X_constraint": 12,
             "ObjectB_rotation_Y": 13,
             "ObjectA_rotation_Y": 14,
         }
