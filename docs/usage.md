@@ -1,6 +1,6 @@
 # Usage Guide
 
-This guide describes **Spine2D Mesh Exporter 0.155.0**.
+This guide describes **Spine Mesh Exporter 0.155.0**.
 
 ## Open the exporter
 
@@ -8,7 +8,7 @@ This guide describes **Spine2D Mesh Exporter 0.155.0**.
 2. Save the `.blend` file.
 3. Select at least one Mesh object.
 4. Keep the active object in Object Mode.
-5. Open **3D View > Sidebar > Spine2D Mesh Exporter**.
+5. Open **3D View > Sidebar > Spine Mesh Exporter**.
 
 Run **Analyze** whenever you want refreshed diagnostics after changing selection, geometry,
 modifiers, UVs, seams, materials, renderer, camera, frame settings, texture size, Spine exact
@@ -223,7 +223,7 @@ Spine 4.3 -> default 4.3.23
 ```
 
 The exact Editor/project patch is configured independently in **Edit > Preferences >
-Add-ons > Spine2D Mesh Exporter > Spine project JSON versions**. Each family owns one
+Add-ons > Spine Mesh Exporter > Spine project JSON versions**. Each family owns one
 persistent global exact-version field. Use canonical `major.minor.patch` notation and keep
 the same major/minor family; for example, `4.2.35` is valid for the Spine 4.2 field.
 
