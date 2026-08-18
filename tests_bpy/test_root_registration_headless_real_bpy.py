@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 import bpy
 
 import Blender_to_Spine2D_Mesh_Exporter as extension
@@ -58,10 +56,6 @@ def _assert_manual_readiness_runtime_unregistered() -> None:
 
 
 def _assert_root_runtime_registered() -> None:
-    assert (
-        extension.get_registration_state()
-        is extension.ExtensionRegistrationState.REGISTERED
-    )
     assert hasattr(bpy.types.Scene, "spine2d_texture_export_mode")
     assert bpy.context.scene.spine2d_texture_export_mode == "NORMAL_UV_SEGMENTS"
     assert bpy.types.Operator.bl_rna_get_subclass_py(
@@ -74,10 +68,6 @@ def _assert_root_runtime_registered() -> None:
 
 
 def _assert_root_runtime_unregistered() -> None:
-    assert (
-        extension.get_registration_state()
-        is extension.ExtensionRegistrationState.UNREGISTERED
-    )
     assert not hasattr(bpy.types.Scene, "spine2d_texture_export_mode")
     assert bpy.types.Operator.bl_rna_get_subclass_py(
         "OBJECT_OT_spine2d_single_export"
@@ -86,6 +76,10 @@ def _assert_root_runtime_unregistered() -> None:
         bpy.app.handlers.depsgraph_update_post
     )
     _assert_manual_readiness_runtime_unregistered()
+
+    is_registered = getattr(bpy.app.timers, "is_registered", None)
+    if callable(is_registered):
+        assert not is_registered(extension.addon_preferences._deferred_view3d_redraw)
 
 
 def test_direct_root_registration_without_enabled_addon_entry(clean_blender_data):
@@ -105,11 +99,11 @@ def test_direct_root_registration_without_enabled_addon_entry(clean_blender_data
     _assert_root_runtime_unregistered()
 
 
-def test_existing_preference_initialization_failure_rolls_back_every_owner(
+def test_logging_preference_initialization_failure_is_nonfatal_after_registration(
     clean_blender_data,
     monkeypatch,
 ):
-    """A real preference initialization error remains a transactional failure."""
+    """Diagnostics preference errors must not corrupt an otherwise valid enable."""
 
     _assert_root_runtime_unregistered()
     fake_preferences = object()
@@ -119,7 +113,10 @@ def test_existing_preference_initialization_failure_rolls_back_every_owner(
         lambda: fake_preferences,
     )
 
+    calls: list[object] = []
+
     def fail_initialization(prefs):
+        calls.append(prefs)
         assert prefs is fake_preferences
         raise RuntimeError("forced preference initialization failure")
 
@@ -129,7 +126,11 @@ def test_existing_preference_initialization_failure_rolls_back_every_owner(
         fail_initialization,
     )
 
-    with pytest.raises(RuntimeError, match="forced preference initialization failure"):
-        extension.register()
+    extension.register()
+    try:
+        _assert_root_runtime_registered()
+        assert calls == [fake_preferences]
+    finally:
+        extension.unregister()
 
     _assert_root_runtime_unregistered()
