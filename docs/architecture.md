@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the production architecture of **Spine2D Mesh Exporter 0.155.0**.
+This document describes the production architecture of **Spine Mesh Exporter 0.155.0**.
 
 ## Package boundaries
 
