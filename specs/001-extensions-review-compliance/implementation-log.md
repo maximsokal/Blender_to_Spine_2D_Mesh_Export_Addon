@@ -144,11 +144,37 @@ Updated `tests/test_manifest_version.py` to 0.155.0.
 
 Updated `tests/test_texture_size_bake_ui.py` for the canonical main-panel/child-panel architecture.
 
-## Current open work after Slice 08
+## Slice 09 — Shipping-boundary threading and development-trace cleanup
 
-1. Run focused/full suites locally and update any tests that intentionally encoded the old rejected registration architecture.
-2. Audit remaining production modules for unnecessary transactional registration helpers (`ui.py`, generated-material UI, readiness/migration owners, etc.) and simplify only where ownership does not require state.
-3. Remove the old root registration-state dependency in `scene_properties.py` now that the root state machine is gone.
-4. Update public README/docs/submission/testing version/name/platform/same-submission wording to 0.155.0.
-5. Add exact Blender-built ZIP inventory gate and build/validate/install the final candidate.
-6. Execute real bpy repeated enable/disable/restart tests and representative exports before claiming RF-004 or RF-006 fully closed.
+Local focused gate at `eca6f72` found five source-tree `threading` imports:
+
+- `infrastructure/atomic_work_state.py`;
+- `infrastructure/export_diagnostics.py`;
+- `infrastructure/export_events.py`;
+- `infrastructure/pipeline_trace.py`;
+- retained `legacy_loader.py`.
+
+The first three are real Rewrite runtime modules, but their locks protected only synchronous process-local dictionaries/policy values. They now use direct main-thread state with the same reservation, listener-snapshot, and policy semantics and import no `threading`/`queue`.
+
+`PipelineTraceSession` was located and classified as development instrumentation. Its only direct consumers found by repository call-graph search are the development probe and trace tests; the production infrastructure package does not re-export it. The manifest now excludes:
+
+- `/infrastructure/pipeline_trace.py`;
+- `/infrastructure/pipeline_trace_model.py`;
+- `/infrastructure/pipeline_trace_report.py`;
+- `/infrastructure/pipeline_trace_values.py`.
+
+The retained pre-Rewrite `legacy_loader.py` is intentionally left untouched and remains excluded by `/legacy_loader.py`.
+
+`tests/test_extensions_review_compliance.py` is now manifest-aware: source AST checks operate on Python files that are eligible to ship, instead of treating deliberately excluded repository sources as runtime. A boundary regression test verifies that the trace/legacy files are excluded while the three rewritten infrastructure modules remain inside the scanned shipping set.
+
+This slice addresses the two failures from the first local focused gate. It does **not** claim RF-001/RF-002 closed yet: the updated focused/full/real-bpy suites still need to run locally, and the exact Blender-built ZIP remains the authoritative packaging evidence.
+
+## Current open work after Slice 09
+
+1. Pull the latest branch commits and rerun compile + focused tests; only then continue to the full Python and real-bpy suites.
+2. If the focused gate is green, audit remaining production modules for hidden concurrency constructs (`multiprocessing`, `concurrent.futures`, direct Blender timers) and classify rather than blanket-ban Blender-managed timers.
+3. Audit remaining production modules for unnecessary transactional registration helpers (`ui.py`, generated-material UI, readiness/migration owners, etc.) and simplify only where ownership does not require state.
+4. Remove the old root registration-state dependency in `scene_properties.py` now that the root state machine is gone.
+5. Update public README/docs/submission/testing version/name/platform/same-submission wording to 0.155.0.
+6. Add exact Blender-built ZIP inventory gate and build/validate/install the final candidate.
+7. Execute real bpy repeated enable/disable/restart tests and representative exports before claiming RF-004 or RF-006 fully closed.
