@@ -132,6 +132,7 @@ def test_readme_presents_current_product_without_stale_ui_media() -> None:
     source = _read(README)
 
     required_fragments = (
+        "# Spine2D Mesh Exporter",
         "assets/cover.png",
         "img.shields.io/badge/License-GPLv3",
         "img.shields.io/github/v/release/",
@@ -154,6 +155,7 @@ def test_readme_presents_current_product_without_stale_ui_media() -> None:
     assert not missing, f"README current-product contract is missing: {missing}"
 
     forbidden_fragments = (
+        "# Blender to Spine2D Mesh Exporter",
         "img.youtube.com/",
         "youtube.com/watch?v=",
         "Click to watch the video",
@@ -248,12 +250,18 @@ def test_submission_document_matches_current_public_manifest() -> None:
     manifest = _read(MANIFEST)
     current_version = _manifest_version()
 
-    assert "Windows x64" in submission
-    assert "Import-Export, Mesh, UV, Animation" in submission
+    assert "Name: Spine2D Mesh Exporter" in submission
+    assert "Platform restriction: none declared" in submission
+    assert "Tags: Import-Export" in submission
     assert "License: GPL-3.0-or-later" in submission
     assert "Permission: Files" in submission
     assert f"blender_to_spine2d_mesh_exporter-{current_version}.zip" in submission
-    assert 'platforms = ["windows-x64"]' in manifest
+    assert "same existing submission" in submission
+    assert "Do **not** create a second listing" in submission
+    assert "initial Blender Extensions Platform submission" not in submission
+    assert 'platforms = ["windows-x64"]' not in manifest
+    assert 'tags = ["Import-Export"]' in manifest
+    assert 'name = "Spine2D Mesh Exporter"' in manifest
     assert 'website = "https://github.com/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon"' in manifest
 
 
