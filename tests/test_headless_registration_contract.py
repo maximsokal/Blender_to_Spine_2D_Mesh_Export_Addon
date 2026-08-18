@@ -10,6 +10,7 @@ def test_root_registration_does_not_index_enabled_addon_preferences_directly():
     assert "preferences.addons[__name__]" not in source
     assert "def _initialize_registered_logging()" in source
     assert "prefs = config._addon_preferences()" in source
-    assert "if prefs is None:" in source
+    assert "if prefs is not None:" in source
+    assert "initialize_logging_preferences(prefs)" in source
     assert "config.setup_logging()" in source
     assert "_initialize_registered_logging()" in source
