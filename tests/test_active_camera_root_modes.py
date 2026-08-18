@@ -21,6 +21,9 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_settings import (
     _effective_projection_direction,
     _effective_rig_setup_pose_mode,
 )
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.scene_properties import (
+    projection_direction_rna_enum_items,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (
     A1TextureExportMode,
     BakeExecutionSettings,
@@ -193,17 +196,30 @@ def test_ui_exposes_both_root_modes_without_migrating_existing_id() -> None:
     projection = _read(
         "Blender_to_Spine2D_Mesh_Exporter/domain/projection.py"
     )
-    properties = _read(
-        "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/scene_properties.py"
-    )
     ui = _read("Blender_to_Spine2D_Mesh_Exporter/ui.py")
+    enum_items = {
+        identifier: (label, description)
+        for identifier, label, description in projection_direction_rna_enum_items()
+    }
 
+    # ACTIVE_CAMERA is a persisted public identifier and must remain the Object Root mode.
     assert 'ACTIVE_CAMERA = "ACTIVE_CAMERA"' in projection
     assert "ACTIVE_CAMERA_CAMERA_ROOT" in projection
-    assert "Active Camera — Object Root Bone" in projection
-    assert "Active Camera — Camera Root Bone" in projection
-    assert "A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT" in properties
-    assert "Blender Object Origin as its own Spine main-bone pivot" in properties
-    assert "camera-space zero as the Spine main-bone pivot" in properties
+
+    object_root_label, object_root_description = enum_items[
+        A1ProjectionDirection.ACTIVE_CAMERA.value
+    ]
+    camera_root_label, camera_root_description = enum_items[
+        A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT.value
+    ]
+
+    assert object_root_label == "Active Camera — Object Root Bone"
+    assert camera_root_label == "Active Camera — Camera Root Bone"
+    assert "Blender Object Origin as its own Spine main-bone pivot" in (
+        object_root_description
+    )
+    assert "camera-space zero as the Spine main-bone pivot" in (
+        camera_root_description
+    )
     assert '"spine2d_projection_direction"' in ui
     assert 'text="Projection direction"' in ui
