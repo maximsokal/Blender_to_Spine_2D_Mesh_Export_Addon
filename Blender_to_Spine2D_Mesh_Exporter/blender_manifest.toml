@@ -2,7 +2,7 @@ schema_version = "1.0.0"
 
 id = "blender_to_spine2d_mesh_exporter"
 version = "0.155.0"
-name = "Spine2D Mesh Exporter"
+name = "Spine Mesh Exporter"
 maintainer = "Maxim Sokolenko"
 website = "https://github.com/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon"
 blender_version_min = "5.2.0"
