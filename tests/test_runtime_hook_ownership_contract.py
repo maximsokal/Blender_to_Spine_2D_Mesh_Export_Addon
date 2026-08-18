@@ -99,23 +99,19 @@ def test_blender_timer_surfaces_are_explicitly_classified_and_owned():
         and "register" in path.read_text(encoding="utf-8")
     }
 
-    # addon_preferences owns one one-shot event-loop redraw timer. auto_readiness
-    # retains compatibility timer helpers, but its installed register/unregister
-    # lifecycle deliberately never activates the old automatic polling service.
-    assert timer_sources == {"addon_preferences.py", "auto_readiness.py"}
+    # The only shipped timer is one one-shot event-loop redraw owned by Preferences.
+    # Manual readiness contains no timer/scheduler implementation at all.
+    assert timer_sources == {"addon_preferences.py"}
 
     preferences = PACKAGE / "addon_preferences.py"
     assert "_cancel_deferred_view3d_redraw()" in _function_source(
         preferences, "unregister"
     )
 
-    automatic = PACKAGE / "auto_readiness.py"
-    automatic_register = _function_source(automatic, "register")
-    automatic_unregister = _function_source(automatic, "unregister")
-    assert "_register_timer()" not in automatic_register
-    assert "_install_handlers()" not in automatic_register
-    assert "_unregister_timer()" not in automatic_unregister
-    assert "_remove_handlers()" not in automatic_unregister
+    manual_readiness = (PACKAGE / "auto_readiness.py").read_text(encoding="utf-8")
+    assert "bpy.app.timers" not in manual_readiness
+    assert "_automatic_timer" not in manual_readiness
+    assert "request_auto_analysis" not in manual_readiness
 
 
 def test_each_handler_append_has_a_matching_remove_in_same_shipped_module():
