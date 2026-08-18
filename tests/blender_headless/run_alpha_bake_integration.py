@@ -1,4 +1,4 @@
-"""Real Blender 4.4 tests for automatic alpha and transparency baking."""
+"""Real Blender 5.2 tests for automatic alpha and transparency baking."""
 
 from __future__ import annotations
 
@@ -39,6 +39,7 @@ from run_bake_integration import (  # noqa: E402
     _capture_context,
     _capture_scene_bake_state,
     _clear_scene,
+    _configure_cycles_scene,
     _create_quad,
     _create_sentinel,
     _material_fingerprint,
@@ -127,6 +128,7 @@ def _prepare_plan(obj, output_directory: Path, stem: str):
     ).snapshot
     analysis = analyse_object_materials(
         obj,
+        render_target="CYCLES",
         source_object_id=source_snapshot.source_object_id,
     )
     plan = build_bake_plan(
@@ -176,6 +178,7 @@ def _assert_alpha_band(pixels, expected: float, *, tolerance: float = 0.08) -> N
 
 def test_principled_constant_alpha_is_composed_into_png() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-alpha-principled-") as directory:
         obj = _create_quad("PrincipledAlpha")
         material = _new_principled_material(
@@ -229,6 +232,7 @@ def test_principled_constant_alpha_is_composed_into_png() -> None:
 
 def test_image_alpha_link_is_evaluated_by_alpha_pass() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-alpha-image-") as directory:
         obj = _create_quad("ImageAlpha")
         material, source_image = _new_image_alpha_material("ImageAlphaMaterial", alpha=0.62)
@@ -265,6 +269,7 @@ def test_image_alpha_link_is_evaluated_by_alpha_pass() -> None:
 
 def test_mix_shader_order_produces_correct_opacity_for_two_material_slots() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-alpha-mix-") as directory:
         obj = _create_two_quad_object("MixAlphaSlots")
         low = _new_transparent_mix_material(
@@ -307,6 +312,7 @@ def test_mix_shader_order_produces_correct_opacity_for_two_material_slots() -> N
 
 def test_pure_transparent_material_produces_zero_alpha_texture() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-alpha-transparent-") as directory:
         obj = _create_quad("PureTransparent")
         material = _new_transparent_material("PureTransparentMaterial")
