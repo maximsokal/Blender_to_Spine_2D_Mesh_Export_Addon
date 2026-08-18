@@ -38,19 +38,20 @@ def test_canonical_main_panel_uses_public_title_without_changing_technical_id():
 
 
 def test_secondary_sections_are_ordinary_child_panels_of_canonical_main_panel():
-    assert ui_layout.OBJECT_PT_Spine2DRigPanel.bl_parent_id == (
-        ui.OBJECT_PT_Spine2DMeshPanel.bl_idname
-    )
-    assert ui_layout.OBJECT_PT_Spine2DGeneratedMaterialsPanel.bl_parent_id == (
-        ui.OBJECT_PT_Spine2DMeshPanel.bl_idname
-    )
-    assert ui_layout.OBJECT_PT_Spine2DDepthParallaxPanel.bl_parent_id == (
-        ui.OBJECT_PT_Spine2DMeshPanel.bl_idname
+    child_panels = (
+        ui_layout.OBJECT_PT_Spine2DRigPanel,
+        ui_layout.OBJECT_PT_Spine2DGeneratedMaterialsPanel,
+        ui_layout.OBJECT_PT_Spine2DDepthParallaxPanel,
+        ui_layout.OBJECT_PT_Spine2DAnalysisPanel,
     )
 
-    assert ui_layout.OBJECT_PT_Spine2DRigPanel.bl_order < (
-        ui_layout.OBJECT_PT_Spine2DGeneratedMaterialsPanel.bl_order
-    ) < ui_layout.OBJECT_PT_Spine2DDepthParallaxPanel.bl_order
+    assert all(
+        panel.bl_parent_id == ui.OBJECT_PT_Spine2DMeshPanel.bl_idname
+        for panel in child_panels
+    )
+    assert tuple(panel.bl_order for panel in child_panels) == tuple(
+        sorted(panel.bl_order for panel in child_panels)
+    )
 
 
 def test_child_panels_delegate_to_canonical_section_drawers():
@@ -63,6 +64,7 @@ def test_child_panels_delegate_to_canonical_section_drawers():
         "generated_material_ui.draw_generated_material_settings(self.layout, context)"
         in layout_source
     )
+    assert "_draw_modifier_analysis_warning(layout, context)" in layout_source
     assert "def draw_rig_settings(" in rig_source
     assert "def draw_generated_material_settings(" in material_source
 
