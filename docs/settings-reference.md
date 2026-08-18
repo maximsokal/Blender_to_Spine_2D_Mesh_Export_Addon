@@ -1,8 +1,7 @@
 # Settings Reference
 
-This document describes the maintained public settings in Blender to Spine2D Mesh Exporter
-**0.154.0**. Fresh-Scene defaults are listed below. The current Scene settings schema is
-**8**.
+This document describes the maintained public settings in **Spine2D Mesh Exporter 0.155.0**.
+Fresh-Scene defaults are listed below. The current Scene settings schema is **8**.
 
 ## Export
 
@@ -93,8 +92,8 @@ It comes from the matching global Add-on Preference, not from the Scene.
 
 ### Exact Spine project versions (Add-on Preferences)
 
-Open **Edit > Preferences > Add-ons > Blender to Spine2D Mesh Exporter > Spine project JSON
-versions**. Five persistent string properties are available:
+Open **Edit > Preferences > Add-ons > Spine2D Mesh Exporter > Spine project JSON versions**.
+Five persistent string properties are available:
 
 | Family | Preference | Default |
 | --- | --- | --- |
@@ -320,12 +319,16 @@ blockers/warnings and geometry, material, rig, attachment, camera, depth, sequen
 modifier statistics. Changing any relevant source state or exporter setting invalidates or
 stales the report.
 
+Analyze is explicit and synchronous in 0.155.0. The extension ships no automatic readiness
+polling timer or automatic load/depsgraph analysis scheduler, and diagnostics do not disable
+Export when no current report exists.
+
 ## Saved Scene migration
 
 Scene schema **8** preserves valid saved values and initializes missing Depth parallax data
 with a safe `0°` default. Persisted `ACTIVE_CAMERA` continues to mean **Active Camera —
 Object Root Bone**; Camera Root uses `ACTIVE_CAMERA_CAMERA_ROOT`.
 
-`spine2d_texture_size` remains the same persisted Scene property in 0.154.0; only its visual
+`spine2d_texture_size` remains the same persisted Scene property in 0.155.0; only its visual
 owner moved from the paths/version foldout to Bake. Exact Spine project versions are global
 AddonPreferences and therefore require no Scene schema migration.
