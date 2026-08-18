@@ -1,7 +1,7 @@
 # Rig Profiles
 
-This document describes the current generated Spine rig behavior in Blender to Spine2D
-Mesh Exporter **0.154.0**.
+This document describes the current generated Spine rig behavior in **Spine2D Mesh Exporter
+0.155.0**.
 
 Historical reference skeleton dumps are not maintained here. Executable fixtures and Git
 history provide regression provenance; this document describes the current production
