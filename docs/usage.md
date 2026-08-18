@@ -1,6 +1,6 @@
 # Usage Guide
 
-This guide describes Blender to Spine2D Mesh Exporter **0.154.0**.
+This guide describes **Spine2D Mesh Exporter 0.155.0**.
 
 ## Open the exporter
 
@@ -8,11 +8,12 @@ This guide describes Blender to Spine2D Mesh Exporter **0.154.0**.
 2. Save the `.blend` file.
 3. Select at least one Mesh object.
 4. Keep the active object in Object Mode.
-5. Open **3D View > Sidebar > Blender to Spine2D Mesh Exporter**.
+5. Open **3D View > Sidebar > Spine2D Mesh Exporter**.
 
-Run **Analyze** after changing selection, geometry, modifiers, UVs, seams, materials,
-renderer, camera, frame settings, texture size, Spine exact project versions, or other
-exporter settings.
+Run **Analyze** whenever you want refreshed diagnostics after changing selection, geometry,
+modifiers, UVs, seams, materials, renderer, camera, frame settings, texture size, Spine exact
+project versions, or other exporter settings. Analyze is explicit and synchronous; it is not
+scheduled in the background and a current report is not required to run Export.
 
 ## Choose an export mode
 
@@ -158,8 +159,8 @@ texture namespace, and weighted attachment while sharing the generated rig with 
 
 Reserve slots are emitted before the FRONT slot so FRONT remains above them in Spine draw order.
 
-If the union surface exceeds **Max depth points**, Analyze and Export fail instead of
-silently dropping requested reserve geometry.
+If the union surface exceeds **Max depth points**, Analyze and Export report/fail on the
+unsupported request instead of silently dropping requested reserve geometry.
 
 ## Configure materials
 
@@ -222,9 +223,9 @@ Spine 4.3 -> default 4.3.23
 ```
 
 The exact Editor/project patch is configured independently in **Edit > Preferences >
-Add-ons > Blender to Spine2D Mesh Exporter > Spine project JSON versions**. Each family owns
-one persistent global exact-version field. Use canonical `major.minor.patch` notation and
-keep the same major/minor family; for example, `4.2.35` is valid for the Spine 4.2 field.
+Add-ons > Spine2D Mesh Exporter > Spine project JSON versions**. Each family owns one
+persistent global exact-version field. Use canonical `major.minor.patch` notation and keep
+the same major/minor family; for example, `4.2.35` is valid for the Spine 4.2 field.
 
 Changing an exact project version invalidates cached Analyze results. The viewport **Exact
 JSON version** label, `ExportSettings.spine_version`, versioned JSON filename and serialized
@@ -237,8 +238,12 @@ Unsupported target/profile/composition combinations fail before expensive geomet
 
 Analyze runs the production preparation path without final file commit. Review blockers,
 warnings, geometry statistics, material/bake strategy, camera/depth statistics, sequence
-ownership, and ignored modifier diagnostics. A stale report should be regenerated after any
+ownership, and ignored modifier diagnostics. A stale report can be regenerated after any
 relevant source or settings change.
+
+Analyze runs only when the user invokes it. The extension does not install an automatic
+readiness polling timer or automatic depsgraph/load analysis callbacks. Diagnostics remain
+advisory and do not disable the production Export action.
 
 ## Export one object
 
@@ -246,9 +251,8 @@ relevant source or settings change.
 2. Configure Export Mode and mode-specific settings.
 3. Choose the Spine schema family and confirm **Exact JSON version**.
 4. Configure Texture size and frame settings in Bake.
-5. Run Analyze.
-6. Review diagnostics.
-7. Run **Export Current Object**.
+5. Optionally run Analyze and review diagnostics.
+6. Run **Export Current Object**.
 
 Typical output:
 
@@ -263,7 +267,7 @@ images/<ObjectName>_Baked.png
 2. Configure shared Scene settings, including Texture size in Bake.
 3. For signed-axis Normal / UV exports, keep **Shared Selection Pivot** enabled when the parts must rotate around one assembly pivot; disable it for independent object pivots.
 4. Configure per-object Frames and Start values.
-5. Run Analyze.
+5. Optionally run Analyze and review diagnostics.
 6. Run **Export Selected Objects**.
 
 Public selected-object export is standalone composition. Connected and mixed composition
