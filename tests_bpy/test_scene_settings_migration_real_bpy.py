@@ -40,6 +40,14 @@ def _remove_persisted_test_values(scene) -> None:
             pass
 
 
+def _assert_extension_unregistered() -> None:
+    """Fail on a leaked previous lifecycle instead of mutating it away."""
+
+    assert not hasattr(bpy.types.Scene, "spine2d_texture_export_mode")
+    assert spine2d_scene_settings_load_pre not in bpy.app.handlers.load_pre
+    assert spine2d_scene_settings_load_post not in bpy.app.handlers.load_post
+
+
 def test_schema_two_custom_scene_is_repaired_during_extension_registration():
     """Real registration migrates legacy schema 2 through current schema 8 once."""
 
@@ -47,7 +55,7 @@ def test_schema_two_custom_scene_is_repaired_during_extension_registration():
     # while the extension RNA surface is not registered yet. Registering EnumProperty over
     # these ID properties may invoke its update callback, which must not advance the current
     # schema before migration resets CUSTOM and assigns compatibility defaults.
-    extension.unregister()
+    _assert_extension_unregistered()
     scene = bpy.context.scene
     _remove_persisted_test_values(scene)
     scene[_SEAM_MODE_PROPERTY] = "CUSTOM"
@@ -108,14 +116,13 @@ def test_schema_two_custom_scene_is_repaired_during_extension_registration():
         extension.unregister()
         _remove_persisted_test_values(scene)
 
-    assert spine2d_scene_settings_load_pre not in bpy.app.handlers.load_pre
-    assert spine2d_scene_settings_load_post not in bpy.app.handlers.load_post
+    _assert_extension_unregistered()
 
 
 def test_genuinely_fresh_scene_gets_current_defaults_in_real_bpy():
     """A genuinely new Scene receives every current schema-8 compatibility default."""
 
-    extension.unregister()
+    _assert_extension_unregistered()
     scene = bpy.data.scenes.new("Spine2D Fresh Rig Default")
     _remove_persisted_test_values(scene)
     try:
@@ -142,3 +149,5 @@ def test_genuinely_fresh_scene_gets_current_defaults_in_real_bpy():
         extension.unregister()
         if scene.name in bpy.data.scenes:
             bpy.data.scenes.remove(scene)
+
+    _assert_extension_unregistered()
