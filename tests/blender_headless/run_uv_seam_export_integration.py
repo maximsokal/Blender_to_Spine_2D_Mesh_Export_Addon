@@ -1,4 +1,4 @@
-"""Real Blender 4.4 export fixture for loop-level UV seam duplication.
+"""Real Blender 5.2 export fixture for loop-level UV seam duplication.
 
 Two triangles form one manifold disk with a 90-degree fold. A1 segmentation keeps
 them in one export region, while Smart Project unwrap deliberately splits the fold.
@@ -46,6 +46,7 @@ from run_bake_integration import (  # noqa: E402
     _capture_context,
     _capture_scene_bake_state,
     _clear_scene,
+    _configure_cycles_scene,
     _create_emission_material,
     _create_mesh_object,
     _create_sentinel,
@@ -73,6 +74,8 @@ def _create_folded_disk():
 
 
 def _build_settings(output_directory: Path) -> A1SingleObjectExportSettings:
+    if not isinstance(output_directory, Path):
+        raise TypeError("output_directory must be pathlib.Path")
     return A1SingleObjectExportSettings(
         export=ExportSettings(
             texture_width=32,
@@ -97,6 +100,7 @@ def _build_settings(output_directory: Path) -> A1SingleObjectExportSettings:
 
 def test_complete_service_exports_uv_split_region() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-uv-seam-") as directory:
         output_directory = Path(directory)
         source = _create_folded_disk()
