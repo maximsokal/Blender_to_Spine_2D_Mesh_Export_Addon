@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from fnmatch import fnmatchcase
 import tomllib
 from pathlib import Path
 
@@ -8,14 +9,76 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "Blender_to_Spine2D_Mesh_Exporter"
 MANIFEST = PACKAGE / "blender_manifest.toml"
+PIPELINE_TRACE_RUNTIME_FILES = frozenset(
+    {
+        "/infrastructure/pipeline_trace.py",
+        "/infrastructure/pipeline_trace_model.py",
+        "/infrastructure/pipeline_trace_report.py",
+        "/infrastructure/pipeline_trace_values.py",
+    }
+)
 
 
-def _production_python_files() -> tuple[Path, ...]:
+def _manifest_exclude_patterns() -> tuple[str, ...]:
+    manifest = tomllib.loads(MANIFEST.read_text(encoding="utf-8"))
+    raw_patterns = manifest.get("build", {}).get("paths_exclude_pattern", ())
+    if not isinstance(raw_patterns, list):
+        raise AssertionError("manifest build.paths_exclude_pattern must be a list")
+    patterns: list[str] = []
+    for value in raw_patterns:
+        if not isinstance(value, str) or not value.strip():
+            raise AssertionError(
+                "manifest build.paths_exclude_pattern entries must be non-empty strings"
+            )
+        patterns.append(value.replace("\\", "/"))
+    return tuple(patterns)
+
+
+def _manifest_excludes_package_path(path: Path) -> bool:
+    """Return whether a package path is excluded by the manifest build rules.
+
+    The compliance scan only needs Python files under the extension source root.  It
+    supports the rooted file/directory patterns used by this manifest plus ordinary
+    filename globs such as ``*.py[cod]``.  The final Blender-built ZIP inventory is a
+    separate release gate and remains authoritative for packaging behavior.
+    """
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    try:
+        relative = path.relative_to(PACKAGE).as_posix()
+    except ValueError as exc:
+        raise ValueError(f"path is outside extension package: {path}") from exc
+
+    rooted = f"/{relative}"
+    for pattern in _manifest_exclude_patterns():
+        if pattern.startswith("/"):
+            if pattern.endswith("/"):
+                directory = pattern.rstrip("/")
+                if rooted == directory or rooted.startswith(f"{directory}/"):
+                    return True
+            elif fnmatchcase(rooted, pattern):
+                return True
+            continue
+
+        if pattern.endswith("/"):
+            directory_name = pattern.rstrip("/")
+            if directory_name in path.relative_to(PACKAGE).parts:
+                return True
+            continue
+
+        if fnmatchcase(path.name, pattern) or fnmatchcase(relative, pattern):
+            return True
+
+    return False
+
+
+def _shipped_python_files() -> tuple[Path, ...]:
     return tuple(
         sorted(
             path
             for path in PACKAGE.rglob("*.py")
-            if "Legacy" not in path.parts and "__pycache__" not in path.parts
+            if not _manifest_excludes_package_path(path)
         )
     )
 
@@ -46,7 +109,7 @@ def test_manifest_matches_extensions_review_metadata() -> None:
 
 def test_runtime_does_not_import_threading_or_queue() -> None:
     offenders: list[str] = []
-    for path in _production_python_files():
+    for path in _shipped_python_files():
         imported = _imported_roots(path)
         blocked = sorted(imported.intersection({"threading", "queue"}))
         if blocked:
@@ -60,7 +123,7 @@ def test_runtime_does_not_import_threading_or_queue() -> None:
 def test_development_pipeline_trace_session_is_not_shipped() -> None:
     offenders = [
         path.relative_to(ROOT).as_posix()
-        for path in _production_python_files()
+        for path in _shipped_python_files()
         if "PipelineTraceSession" in path.read_text(encoding="utf-8")
     ]
     assert offenders == []
@@ -70,7 +133,7 @@ def test_repolish_advertisement_is_not_shipped() -> None:
     assert not (PACKAGE / "repolish_ui.py").exists()
 
     offenders: list[str] = []
-    for path in _production_python_files():
+    for path in _shipped_python_files():
         text = path.read_text(encoding="utf-8").lower()
         if "re-polish" in text or "repolish" in text:
             offenders.append(path.relative_to(ROOT).as_posix())
@@ -111,5 +174,16 @@ def test_manifest_build_excludes_repository_development_surfaces() -> None:
         "/docs/",
         "/*.zip",
         "/Legacy/",
+        *PIPELINE_TRACE_RUNTIME_FILES,
     }
     assert required.issubset(patterns)
+
+
+def test_source_scan_matches_manifest_shipping_boundary() -> None:
+    shipped = {f"/{path.relative_to(PACKAGE).as_posix()}" for path in _shipped_python_files()}
+
+    assert PIPELINE_TRACE_RUNTIME_FILES.isdisjoint(shipped)
+    assert "/legacy_loader.py" not in shipped
+    assert "/infrastructure/atomic_work_state.py" in shipped
+    assert "/infrastructure/export_diagnostics.py" in shipped
+    assert "/infrastructure/export_events.py" in shipped
