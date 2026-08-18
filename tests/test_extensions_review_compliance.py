@@ -20,6 +20,10 @@ PIPELINE_TRACE_RUNTIME_FILES = frozenset(
 FORBIDDEN_PYTHON_CONCURRENCY_ROOTS = frozenset(
     {"threading", "queue", "multiprocessing", "concurrent"}
 )
+SUPERSEDED_PUBLIC_RUNTIME_TITLES = (
+    "Spine2D Mesh Exporter",
+    "Blender to Spine2D Mesh Exporter",
+)
 
 
 def _manifest_exclude_patterns() -> tuple[str, ...]:
@@ -121,6 +125,23 @@ def test_manifest_matches_extensions_review_metadata() -> None:
     assert "platforms" not in manifest
     assert "Blender" not in manifest["name"]
     assert "Blender" not in manifest["tagline"]
+
+
+def test_shipped_runtime_does_not_expose_superseded_public_titles() -> None:
+    offenders: list[str] = []
+    for path in _shipped_python_files():
+        source = path.read_text(encoding="utf-8")
+        matched = tuple(
+            title for title in SUPERSEDED_PUBLIC_RUNTIME_TITLES if title in source
+        )
+        if matched:
+            offenders.append(
+                f"{path.relative_to(ROOT).as_posix()}: {', '.join(matched)}"
+            )
+
+    assert offenders == [], "Superseded public title in shipped runtime:\n" + "\n".join(
+        offenders
+    )
 
 
 def test_runtime_does_not_import_forbidden_python_concurrency() -> None:
