@@ -42,7 +42,8 @@ Current implementation findings:
 - the three Rewrite runtime modules used only `RLock` around synchronous process-local state and now use direct main-thread state without replacement workers;
 - `pipeline_trace.py` is excluded as development-only under RF-001;
 - `legacy_loader.py` remains untouched and is already excluded from the extension ZIP by the manifest;
-- the compliance AST scan now checks only manifest-eligible shipped Python modules.
+- the compliance AST scan now checks only manifest-eligible shipped Python modules;
+- at `3a028d8a`, the focused compliance set passed `27/27` and the targeted real-bpy lifecycle set passed `4/4`, including repeated registration and runtime-hook cleanup after removal of `_automatic_timer`.
 
 Closure:
 
@@ -50,7 +51,7 @@ Closure:
 2. no hidden current equivalent of the old background worker survives;
 3. Analyze/Export/disable leave no add-on-owned Python worker alive.
 
-Updated focused/full/real-bpy test evidence is still pending, so RF-002 is not yet marked closed.
+Focused and targeted lifecycle evidence is green. The full Blender-independent/real-bpy suites and exact built-ZIP scan remain release gates.
 
 ## RF-003 — Remove Re-Polish advertisement / third-party dependency
 
@@ -89,7 +90,7 @@ Target design:
 5. Blender-owned resources are still unregistered normally; ordinary Python globals are not ceremonially cleared;
 6. retain actionable logging without generic recovery machinery.
 
-Closure requires real bpy repeated enable/disable tests and installed-extension restart smoke.
+Targeted real-bpy lifecycle evidence at `3a028d8a` passed `4/4`: twenty public register/unregister cycles, isolated import/reload, two complete RNA cycles, and ten runtime-hook cleanup cycles. Full real-bpy and installed-extension restart/re-enable evidence remain pending.
 
 ## RF-005 — Only `Import-Export` tag
 
@@ -140,24 +141,24 @@ name = "Blender to Spine2D Mesh Exporter"
 version = "0.154.0"
 ```
 
-Target for this remediation:
+Chosen remediation title and version:
 
 ```toml
 id = "blender_to_spine2d_mesh_exporter"   # unchanged
-name = "Spine2D Mesh Exporter"
+name = "Spine Mesh Exporter"
 version = "0.155.0"
 ```
 
-The package directory/technical extension identity stays unchanged unless Blender validation proves otherwise. Public docs/listing text must use the new display title. The corrected ZIP is uploaded as a new version of the **same existing submission**.
+The package directory/technical extension identity stays unchanged unless Blender validation proves otherwise. Public docs, listing text, and Sidebar display label use `Spine Mesh Exporter`; technical `spine2d_*` RNA/operator identifiers remain stable. The corrected ZIP is uploaded as a new version of the **same existing submission**.
 
 ## Current closure status
 
 | Reviewer item | Current status |
 | --- | --- |
-| RF-001 PipelineTraceSession / clean package | Implemented at source/manifest level — local updated gate + exact ZIP inventory still pending |
-| RF-002 threading / queue | Runtime locks removed and scan made shipping-aware — updated focused/full/real-bpy evidence pending |
+| RF-001 PipelineTraceSession / clean package | Implemented at source/manifest level — exact ZIP inventory and Blender validation still pending |
+| RF-002 threading / queue | Runtime locks removed, shipping-aware scan added, focused + targeted real-bpy green — full suites/ZIP evidence pending |
 | RF-003 Re-Polish | Runtime UI/module removed — ZIP evidence pending |
-| RF-004 registration / ui_layout | Root/panel architecture simplified — lifecycle evidence and remaining owner audit pending |
+| RF-004 registration / ui_layout | Root/panel architecture simplified; targeted lifecycle gate green — full real-bpy and installed restart smoke pending |
 | RF-005 only Import-Export tag | Manifest changed — Blender validator evidence pending |
-| RF-006 Windows restriction | Manifest restriction removed — portability audit/validation pending |
-| RF-007 title / same submission | Manifest version/title changed — public docs and same-submission release workflow still pending |
+| RF-006 Windows restriction | Manifest restriction removed and static portability audit added — package/cross-platform validation pending |
+| RF-007 title / same submission | Manifest/UI/public docs synchronized to `Spine Mesh Exporter`; technical ID unchanged — focused rename gate and final same-submission upload evidence pending |
