@@ -188,11 +188,11 @@ class Spine2DBakeSettings(bpy.types.PropertyGroup):
 class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
     """Main Blender 5.2+ Rewrite exporter panel."""
 
-    bl_label = "Spine2D Mesh Exporter"
+    bl_label = "Spine Mesh Exporter"
     bl_idname = "OBJECT_PT_spine2d_mesh"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Spine2D Mesh Exporter"
+    bl_category = "Spine Mesh Exporter"
 
     @staticmethod
     def _scale_applied(obj: bpy.types.Object, tolerance: float = 1e-4) -> bool:
