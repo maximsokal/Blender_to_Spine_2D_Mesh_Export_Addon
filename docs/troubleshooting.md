@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This document describes current **Spine2D Mesh Exporter 0.155.0** behavior.
+This document describes current **Spine Mesh Exporter 0.155.0** behavior.
 
 ## Use Analyze for diagnostics
 
@@ -232,7 +232,7 @@ Blender can reopen the saved image from disk.
 
 ## Useful logs
 
-Open **Edit > Preferences > Extensions > Spine2D Mesh Exporter** and enable the appropriate
+Open **Edit > Preferences > Extensions > Spine Mesh Exporter** and enable the appropriate
 file/module logging.
 
 For output problems, inspect infrastructure atomic/output modules. For material/bake
