@@ -8,7 +8,7 @@ passes the checklist and Blender package gates.
 
 - Replaced the earlier mixed/historical feedback ledger with the seven comments from the current moderation review.
 - Target release is `0.155.0` on the same existing Blender Extensions submission.
-- Target public name is `Spine2D Mesh Exporter`; manifest `id` remains unchanged.
+- Target public name is `Spine Mesh Exporter`; manifest `id` remains unchanged.
 
 ## Slice 02 — Runtime threading removal
 
@@ -105,7 +105,7 @@ Changed:
 
 ```toml
 version = "0.155.0"
-name = "Spine2D Mesh Exporter"
+name = "Spine Mesh Exporter"
 tags = ["Import-Export"]
 tagline = "Convert 3D objects into Spine 2D meshes"
 ```
@@ -256,37 +256,75 @@ that Linux/macOS real-Blender release validation has already been executed.
 
 ## Slice 15 — Same-submission documentation remediation
 
-`docs/submission.md` now describes version 0.155.0 as a correction to the **existing**
+`docs/submission.md` describes version 0.155.0 as a correction to the **existing**
 reviewed/declined Blender Extensions submission. It explicitly prohibits creating a second
 listing or deleting/recreating the declined listing.
 
 Current metadata documented there:
 
-- Name: `Spine2D Mesh Exporter`;
+- Name: `Spine Mesh Exporter`;
 - Version: `0.155.0`;
 - technical ID unchanged;
 - Tags: `Import-Export` only;
 - no platform restriction declared;
 - Files permission unchanged.
 
-`docs/README.md`, `docs/installation.md`, `docs/usage.md`, and
-`docs/settings-reference.md` have begun the same 0.155.0/manual-Analyze synchronization.
-The remaining maintained public documents still need the same version/title pass before the
-documentation gate can be claimed green.
+## Slice 16 — Targeted lifecycle gate after scheduler removal
 
-## Current open work after Slice 15
+Local evidence on exact commit `3a028d8a`:
 
-1. Finish synchronizing every maintained public document and root README to `0.155.0`, the
-   `Spine2D Mesh Exporter` public title, and the same-submission/platform policy.
-2. Review whether any remaining mixed-resource transactional registration helper is truly
-   generic complexity or justified owner-local rollback; do not remove partial-RNA safety
-   merely for aesthetics.
-3. Pull the final static-remediation HEAD locally and run compile + focused tests.
-4. If focused tests are green, run the full Blender-independent suite.
-5. Run targeted/full real-bpy lifecycle suites and representative headless exports.
-6. Build the exact candidate with Blender `extension build`, run `extension validate`, and
+- targeted real-bpy lifecycle: `4 passed, 49 deselected`;
+- focused compliance/runtime-hook set: `27 passed`;
+- both commands returned exit code `0`;
+- local worktree was clean after the gate.
+
+The real-bpy selection covered:
+
+- twenty public registration/unregistration cycles;
+- isolated module import/reload without registration side effects;
+- two complete RNA ownership cycles;
+- ten handler/keymap/timer cleanup cycles.
+
+The runtime-hook test now asserts that the removed `auto_readiness._automatic_timer` symbol
+stays absent rather than trying to query a callback that no longer exists.
+
+## Slice 17 — Public title synchronized without technical-identity migration
+
+The public display title is now **`Spine Mesh Exporter`** across:
+
+- `blender_manifest.toml` `name`;
+- root README and maintained docs/examples;
+- submission metadata/workflow text;
+- canonical 3D View Sidebar panel `bl_label` and `bl_category`;
+- compliance/documentation/UI regression contracts;
+- moderation ledger.
+
+Stable technical identity remains unchanged:
+
+```text
+manifest id: blender_to_spine2d_mesh_exporter
+package:     Blender_to_Spine2D_Mesh_Exporter
+panel id:    OBJECT_PT_spine2d_mesh
+RNA/operator prefixes: spine2d_*
+ZIP stem:    blender_to_spine2d_mesh_exporter-0.155.0.zip
+```
+
+The documentation gate rejects both superseded public titles:
+
+- `Spine2D Mesh Exporter`;
+- `Blender to Spine2D Mesh Exporter`.
+
+This is a branding/display correction only; it does not migrate saved Scene properties,
+operators, package identity, or serialized Spine data.
+
+## Current open work after Slice 17
+
+1. Pull the final rename-remediation HEAD locally and run the focused public-title/documentation/UI gate.
+2. If focused tests are green, run the full Blender-independent suite.
+3. Run the complete real-bpy suite and representative Blender-headless exports.
+4. Build the exact candidate with Blender `extension build`, run `extension validate`, and
    enumerate/scan the actual ZIP; source-tree exclusions are not final packaging evidence.
-7. Install that exact ZIP in an isolated profile and run enable/disable/restart/re-enable,
+5. Install that exact ZIP in an isolated profile and run enable/disable/restart/re-enable,
    preference persistence, manual Analyze, and production export checks.
-8. Only after those gates, update the evidence/checklist and prepare the moderator reply for
-   the same existing submission.
+6. Only after those gates, update task/checklist completion and prepare the moderator reply
+   for the same existing submission.
