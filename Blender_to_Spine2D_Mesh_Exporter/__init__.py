@@ -81,13 +81,29 @@ if bpy is not None:
             if hasattr(bpy.types.Scene, name):
                 delattr(bpy.types.Scene, name)
 
-    def _initialize_registered_logging() -> None:
-        """Apply enabled add-on preferences when Blender exposes them."""
+    def _initialize_registered_logging() -> bool:
+        """Best-effort logging setup after all Blender resources are registered.
 
-        prefs = config._addon_preferences()
-        if prefs is not None:
-            initialize_logging_preferences(prefs)
-        config.setup_logging()
+        Logging preferences are diagnostics, not a Blender registration resource. A
+        malformed historical preference value or filesystem/logging failure must not
+        turn an otherwise successful extension enable into a partially registered root
+        lifecycle. Default console logging is already configured before owner
+        registration, so failures here can be reported safely and the exporter remains
+        usable.
+        """
+
+        try:
+            prefs = config._addon_preferences()
+            if prefs is not None:
+                initialize_logging_preferences(prefs)
+            config.setup_logging()
+        except Exception:
+            logger.exception(
+                "Unable to apply Spine2D logging preferences; "
+                "continuing with default logging"
+            )
+            return False
+        return True
 
     def register() -> None:
         """Register the extension using the standard ordered Blender add-on pattern."""
