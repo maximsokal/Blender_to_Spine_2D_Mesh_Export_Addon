@@ -24,7 +24,7 @@ def _fail(message: str) -> int:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    """Validate the runtime, then execute only the real-bpy test root."""
+    """Validate the runtime, then execute the complete real-bpy test root."""
 
     if sys.version_info[:2] != EXPECTED_PYTHON:
         return _fail(
@@ -59,11 +59,13 @@ def main(arguments: list[str] | None = None) -> int:
     if not TEST_ROOT.is_dir():
         return _fail(f"test directory does not exist: {TEST_ROOT}")
 
+    # Release validation must execute the whole real-bpy suite even when one test fails,
+    # so the caller receives the complete failure set in a single run.
     pytest_arguments = [
         str(TEST_ROOT),
         "-q",
         "--strict-markers",
-        "--maxfail=1",
+        "--tb=short",
     ]
     if arguments:
         pytest_arguments.extend(arguments)
