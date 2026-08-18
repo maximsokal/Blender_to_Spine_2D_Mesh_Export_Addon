@@ -1,7 +1,6 @@
 # Testing and Release Validation
 
-This document defines the current validation policy for Blender to Spine2D Mesh Exporter
-**0.154.0**.
+This document defines the current validation policy for **Spine2D Mesh Exporter 0.155.0**.
 
 A focused test is not a release claim. Release evidence must be generated from one exact
 clean commit and the archive built from that same commit.
@@ -9,6 +8,7 @@ clean commit and the archive built from that same commit.
 ## Product scope under test
 
 - Blender 5.2.0 or newer.
+- No operating-system platform restriction declared in the manifest.
 - Spine schema families 3.8, 4.0, 4.1, 4.2, and 4.3 according to the capability/codec registry.
 - Default exact project versions 3.8.99, 4.0.64, 4.1.24, 4.2.43, and 4.3.23.
 - User-configurable canonical exact patch versions inside each supported family.
@@ -23,6 +23,7 @@ clean commit and the archive built from that same commit.
 - Static and per-object texture sequences.
 - Scene-level Texture size owned by the Bake foldout.
 - Depth parallax reserve views.
+- Manual synchronous Analyze diagnostics with no automatic readiness scheduler.
 - Atomic output and Blender-state restoration.
 - Scene settings schema 8.
 
@@ -65,6 +66,29 @@ Repeat the clean-tree check after tests and packaging.
 if ($LASTEXITCODE -ne 0) { throw "Compilation failed" }
 ```
 
+## Moderation-focused Blender-independent gate
+
+Run the remediation contracts before the complete suite so architecture/metadata regressions
+fail quickly:
+
+```powershell
+& $Python -m pytest -q --tb=short `
+    tests/test_extensions_review_compliance.py `
+    tests/test_runtime_portability_contract.py `
+    tests/test_runtime_hook_ownership_contract.py `
+    tests/test_auto_readiness.py `
+    tests/test_init.py `
+    tests/test_registration_lifecycle.py `
+    tests/test_root_registration_state_machine.py `
+    tests/test_scene_settings_migration_contract.py `
+    tests/test_documentation_contract.py
+
+if ($LASTEXITCODE -ne 0) { throw "Moderation-focused tests failed" }
+```
+
+This gate must prove the source-level requirements; it is not a replacement for real Blender
+lifecycle or exact-ZIP validation.
+
 ## Blender-independent suite
 
 ```powershell
@@ -94,7 +118,12 @@ Important current contracts include:
 - sequence ownership;
 - parallax reserve topology/camera planning;
 - Blender-state/resource lifecycle contracts;
-- manifest/documentation version synchronization.
+- no shipped Python background-concurrency imports;
+- no shipped automatic readiness scheduler;
+- explicit handler/timer ownership;
+- manifest-aware development/legacy exclusions;
+- public metadata/same-submission documentation synchronization;
+- runtime portability contracts.
 
 Focused Spine exact-version coverage includes:
 
@@ -122,7 +151,8 @@ Focused UI/release coverage includes:
 tests/test_texture_size_bake_ui.py
 tests/test_documentation_contract.py
 tests/test_manifest_version.py
-tests/test_extension_version_0151.py
+tests/test_extensions_review_compliance.py
+tests/test_runtime_portability_contract.py
 ```
 
 ## Installed extension exact-version persistence gate
@@ -226,8 +256,8 @@ if ($LASTEXITCODE -ne 0) { throw "Grenade all-target Spine matrix failed" }
 
 This source-registration runner deliberately uses registry default exact versions because it
 does not install the extension into Blender Preferences. Its job is the heavyweight real
-asset regression: every codec family must export the same 14-object artist asset with Shared
-Pivot and leave source object/scene/context/datablock state unchanged.
+asset regression: every codec family must export the same artist asset with Shared Pivot and
+leave source object/scene/context/datablock state unchanged.
 
 The separate installed-extension persistence gate is the authority for custom exact patch
 propagation. Keeping these responsibilities separate avoids fake AddonPreferences objects in
@@ -290,11 +320,25 @@ if ($LASTEXITCODE -ne 0) { throw "Real bpy suite failed" }
 
 A missing real-bpy environment must not be reported as successful release validation.
 
-## Build 0.154.0
+Targeted moderation lifecycle files include:
+
+```text
+tests_bpy/test_extension_lifecycle_real_bpy.py
+tests_bpy/test_registration_real_bpy.py
+tests_bpy/test_runtime_hook_cleanup_real_bpy.py
+tests_bpy/test_root_registration_headless_real_bpy.py
+tests_bpy/test_scene_settings_migration_real_bpy.py
+```
+
+These tests call the same public `extension.register()` / `extension.unregister()` lifecycle
+that Blender uses. They must not silently clean a leaked previous lifecycle before asserting
+the baseline.
+
+## Build 0.155.0
 
 ```powershell
 $SourceDir = ".\Blender_to_Spine2D_Mesh_Exporter"
-$Archive = ".\dist\blender_to_spine2d_mesh_exporter-0.154.0.zip"
+$Archive = ".\dist\blender_to_spine2d_mesh_exporter-0.155.0.zip"
 
 New-Item -ItemType Directory -Force ".\dist" | Out-Null
 Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue
@@ -313,8 +357,34 @@ Get-FileHash -LiteralPath $Archive -Algorithm SHA256
 ```
 
 The archive root must contain `blender_manifest.toml` and `__init__.py` and must not include
-repository-only tests, docs, legacy runtime sources, bytecode, or nested archives excluded
-by the manifest build rules.
+repository-only tests, docs, retained legacy runtime sources, development pipeline-trace
+sources, bytecode, or nested archives excluded by the manifest build rules.
+
+## Exact ZIP inventory and moderation scan
+
+The Blender-built ZIP, not the source tree, is authoritative. Before upload enumerate every
+member and fail the release if it contains any forbidden development/legacy member or
+shipped source that imports the forbidden concurrency roots.
+
+The exact ZIP must contain none of:
+
+```text
+Legacy/
+legacy_loader.py
+repolish_ui.py
+infrastructure/pipeline_trace.py
+infrastructure/pipeline_trace_model.py
+infrastructure/pipeline_trace_report.py
+infrastructure/pipeline_trace_values.py
+tests/
+docs/
+__pycache__/
+*.pyc
+```
+
+Also scan extracted shipped Python for `threading`, `queue`, `multiprocessing`, `concurrent`,
+`PipelineTraceSession`, `re-polish`, and the removed automatic-readiness scheduler symbols.
+A source-tree pass cannot substitute for this package gate.
 
 ## Manual Blender UI validation
 
@@ -322,13 +392,15 @@ Before packaging, verify in a saved `.blend`:
 
 1. Add-on Preferences contain exactly one exact project-version field for each family 3.8 through 4.3.
 2. Configure a non-default exact patch for the selected family and confirm the viewport **Exact JSON version** changes immediately.
-3. Run Analyze, change the exact patch again, and confirm readiness becomes stale/invalidated.
-4. Close and reopen Blender after saving Preferences and confirm all five values persist.
-5. Expand **Paths and Spine 2D version** and confirm `Texture size` is absent.
-6. Expand **Bake** and confirm `Texture size` is the first setting.
-7. Select at least two Mesh objects in signed-axis Normal / UV and confirm **Shared Selection Pivot** is visible and enabled by default.
-8. Reduce the selection to one Mesh or select an unsupported camera route and confirm Shared Selection Pivot is hidden.
-9. Reset Scene settings and confirm Texture size returns to `1024`; global exact-version Preferences must not be reset.
+3. Run Analyze, change the exact patch again, and confirm the cached report becomes stale/invalidated.
+4. Confirm Export is available without running Analyze again.
+5. Close and reopen Blender after saving Preferences and confirm all five values persist.
+6. Expand **Paths and Spine 2D version** and confirm `Texture size` is absent.
+7. Expand **Bake** and confirm `Texture size` is the first setting.
+8. Select at least two Mesh objects in signed-axis Normal / UV and confirm **Shared Selection Pivot** is visible and enabled by default.
+9. Reduce the selection to one Mesh or select an unsupported camera route and confirm Shared Selection Pivot is hidden.
+10. Reset Scene settings and confirm Texture size returns to `1024`; global exact-version Preferences must not be reset.
+11. Disable/re-enable and confirm no duplicate classes, handlers, RNA, panels, timers, or readiness method overrides remain.
 
 ## Manual Spine validation
 
@@ -343,13 +415,17 @@ Record:
 - exact commit SHA;
 - clean worktree before and after the gate;
 - Python/bpy/Blender versions;
+- focused moderation test result;
 - complete pytest result;
 - installed-extension preference save/restart/custom-export gate report;
 - required Blender-headless gate markers;
 - real-bpy result;
-- archive path, size, and SHA256;
+- archive path, size, member inventory, and SHA256;
+- exact-ZIP moderation scan result;
 - Blender extension validation result;
-- manual Blender UI and Spine validation notes.
+- clean-profile install/disable/restart/re-enable result;
+- manual Blender UI and Spine validation notes;
+- confirmation that the corrected version is uploaded to the same existing submission.
 
 Never claim a test passed on a commit that was not the exact commit used to generate the
 reported output.
