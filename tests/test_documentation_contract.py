@@ -11,7 +11,10 @@ EXAMPLES = ROOT / "examples"
 MANIFEST = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "blender_manifest.toml"
 README = ROOT / "README.md"
 PUBLIC_TITLE = "Spine Mesh Exporter"
-OLD_PUBLIC_TITLE = "Spine2D Mesh Exporter"
+SUPERSEDED_PUBLIC_TITLES = (
+    "Spine2D Mesh Exporter",
+    "Blender to Spine2D Mesh Exporter",
+)
 
 CYRILLIC = re.compile(r"[\u0400-\u04FF]")
 MARKDOWN_LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
@@ -133,11 +136,13 @@ def test_public_docs_use_reviewer_approved_display_title() -> None:
 
     stale: list[str] = []
     for path in _maintained_markdown_paths():
-        if OLD_PUBLIC_TITLE in _read(path):
-            stale.append(str(path.relative_to(ROOT)))
+        source = _read(path)
+        for title in SUPERSEDED_PUBLIC_TITLES:
+            if title in source:
+                stale.append(f"{path.relative_to(ROOT)}: {title}")
 
     assert not stale, (
-        f"Superseded public title {OLD_PUBLIC_TITLE!r} remains in maintained docs:\n"
+        "Superseded public extension titles remain in maintained docs:\n"
         + "\n".join(stale)
     )
 
