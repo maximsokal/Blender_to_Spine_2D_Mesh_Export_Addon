@@ -28,7 +28,7 @@ def test_submission_manifest_has_public_listing_metadata() -> None:
     assert manifest["schema_version"] == "1.0.0"
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
     assert manifest["version"] == "0.155.0"
-    assert manifest["name"] == "Spine2D Mesh Exporter"
+    assert manifest["name"] == "Spine Mesh Exporter"
     assert manifest["maintainer"] == "Maxim Sokolenko"
     assert manifest["website"] == EXPECTED_WEBSITE
     assert manifest["type"] == "add-on"
