@@ -27,6 +27,7 @@ _ALLOWED_CTYPES_FILES = frozenset(
     }
 )
 _WINDOWS_DRIVE_LITERAL = re.compile(r"^[A-Za-z]:[\\/]")
+_WINDOWS_UNC_LITERAL = re.compile(r"^\\\\[^\\/\s]+[\\/][^\\/\s]+(?:[\\/]|$)")
 
 
 def _exclude_patterns() -> tuple[str, ...]:
@@ -159,7 +160,7 @@ def test_shipped_python_contains_no_absolute_windows_drive_or_unc_path_literals(
     for path in _shipped_python_files():
         relative = path.relative_to(PACKAGE).as_posix()
         for line, value in _string_literals(path):
-            if _WINDOWS_DRIVE_LITERAL.match(value) or value.startswith("\\\\"):
+            if _WINDOWS_DRIVE_LITERAL.match(value) or _WINDOWS_UNC_LITERAL.match(value):
                 offenders.append(f"{relative}:{line}: {value!r}")
 
     assert offenders == [], "Hard-coded Windows paths in shipped runtime:\n" + "\n".join(
