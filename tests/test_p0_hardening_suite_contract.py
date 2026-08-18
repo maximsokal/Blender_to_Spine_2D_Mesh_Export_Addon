@@ -19,17 +19,35 @@ def _source(path: Path) -> str:
     return source
 
 
-def test_root_registration_keeps_explicit_transactional_state_machine():
+def test_root_registration_keeps_explicit_standard_owner_lifecycle():
     source = _source(PACKAGE / "__init__.py")
-    for required in (
+
+    for forbidden in (
         "class ExtensionRegistrationState",
         'DEGRADED = "DEGRADED"',
         "def get_registration_state",
+        "REGISTRATION_STEPS",
         "Rewrite extension registration rollback",
-        "ExtensionRegistrationState.UNREGISTERED",
-        "ExtensionRegistrationState.REGISTERED",
     ):
-        assert required in source
+        assert forbidden not in source
+
+    registration_calls = (
+        "addon_preferences.register()",
+        "_register_config_rna()",
+        "scene_settings_migration.register()",
+        "ui.register()",
+        "rig_ui.register()",
+        "a1_readiness_invalidation.register()",
+        "auto_readiness.register()",
+        "generated_material_ui.register()",
+        "ui_layout.register()",
+        "single_object_operator.register()",
+    )
+    offsets = tuple(source.index(call) for call in registration_calls)
+    assert offsets == tuple(sorted(offsets))
+
+    assert "def _initialize_registered_logging() -> bool:" in source
+    assert "continuing with default logging" in source
 
 
 def test_ui_entrypoints_keep_one_shared_export_reentrancy_guard():
