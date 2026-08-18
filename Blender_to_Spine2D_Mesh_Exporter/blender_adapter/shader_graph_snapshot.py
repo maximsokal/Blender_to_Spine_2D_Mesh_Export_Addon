@@ -33,20 +33,53 @@ def ordered_reachable_nodes(
     )
 
 
+def _texture_coordinate_from_instancer(node: Any, resolved_type: str) -> bool:
+    """Read Blender's Texture Coordinate instance-context switch defensively."""
+
+    if not isinstance(resolved_type, str) or not resolved_type.strip():
+        raise TypeError("resolved_type must be a non-empty string")
+    if resolved_type != "TEX_COORD":
+        return False
+
+    value = getattr(node, "from_instancer", False)
+    if not isinstance(value, bool):
+        raise MaterialGraphAnalysisError(
+            "Texture Coordinate from_instancer must resolve to bool"
+        )
+    return value
+
+
 def build_shader_node_snapshots(
     ordered_nodes: tuple[ReachableShaderNode, ...],
 ) -> tuple[ShaderNodeSnapshot, ...]:
     if not isinstance(ordered_nodes, tuple):
         raise TypeError("ordered_nodes must be tuple")
-    return tuple(
-        ShaderNodeSnapshot(
-            node_id=item.node_id,
-            node_type=node_type(item.node),
-            node_name=node_name(item.node),
-            group_path=item.frame.group_path,
-        )
-        for item in ordered_nodes
-    )
+
+    snapshots: list[ShaderNodeSnapshot] = []
+    try:
+        for item in ordered_nodes:
+            if not isinstance(item, ReachableShaderNode):
+                raise TypeError("ordered_nodes must contain ReachableShaderNode")
+            resolved_type = node_type(item.node)
+            snapshots.append(
+                ShaderNodeSnapshot(
+                    node_id=item.node_id,
+                    node_type=resolved_type,
+                    node_name=node_name(item.node),
+                    group_path=item.frame.group_path,
+                    from_instancer=_texture_coordinate_from_instancer(
+                        item.node,
+                        resolved_type,
+                    ),
+                )
+            )
+    except MaterialGraphAnalysisError:
+        raise
+    except Exception as exc:
+        raise MaterialGraphAnalysisError(
+            "Unable to snapshot reachable shader node properties"
+        ) from exc
+    return tuple(snapshots)
 
 
 def build_shader_link_snapshots(
