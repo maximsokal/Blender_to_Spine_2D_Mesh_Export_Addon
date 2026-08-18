@@ -44,6 +44,18 @@ def _function_source(name: str, function_name: str) -> str:
     return segment
 
 
+def _exact_call_positions(function_source: str, calls: tuple[str, ...]) -> tuple[int, ...]:
+    """Return exact source-line positions without substring aliasing.
+
+    In particular, ``ui.register()`` must not match the suffix of
+    ``rig_ui.register()``. Exact stripped lines make the source contract represent the
+    real owner sequence instead of Python string-substring accidents.
+    """
+
+    lines = tuple(line.strip() for line in function_source.splitlines())
+    return tuple(lines.index(call) for call in calls)
+
+
 def test_registration_infrastructure_is_blender_independent():
     """Shared rollback helpers may remain for owners with mixed Blender resources."""
 
@@ -154,7 +166,7 @@ def test_root_uses_explicit_standard_registration_order():
     assert "setattr(bpy.types.Scene, name, value)" in source
     assert "delattr(bpy.types.Scene, name)" in source
 
-    registration_calls = [
+    registration_calls = (
         "addon_preferences.register()",
         "_register_config_rna()",
         "scene_settings_migration.register()",
@@ -165,11 +177,11 @@ def test_root_uses_explicit_standard_registration_order():
         "generated_material_ui.register()",
         "ui_layout.register()",
         "single_object_operator.register()",
-    ]
-    positions = [register_source.index(call) for call in registration_calls]
-    assert positions == sorted(positions)
+    )
+    positions = _exact_call_positions(register_source, registration_calls)
+    assert positions == tuple(sorted(positions))
 
-    unregistration_calls = [
+    unregistration_calls = (
         "single_object_operator.unregister()",
         "ui_layout.unregister()",
         "generated_material_ui.unregister()",
@@ -180,9 +192,9 @@ def test_root_uses_explicit_standard_registration_order():
         "scene_settings_migration.unregister()",
         "_unregister_config_rna()",
         "addon_preferences.unregister()",
-    ]
-    positions = [unregister_source.index(call) for call in unregistration_calls]
-    assert positions == sorted(positions)
+    )
+    positions = _exact_call_positions(unregister_source, unregistration_calls)
+    assert positions == tuple(sorted(positions))
 
 
 def test_non_blender_root_lifecycle_is_harmless_noop():
