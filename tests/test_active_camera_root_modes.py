@@ -196,13 +196,14 @@ def test_ui_exposes_both_root_modes_without_migrating_existing_id() -> None:
     properties = _read(
         "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/scene_properties.py"
     )
-    ui = _read("Blender_to_Spine2D_Mesh_Exporter/rig_ui.py")
+    ui = _read("Blender_to_Spine2D_Mesh_Exporter/ui.py")
 
     assert 'ACTIVE_CAMERA = "ACTIVE_CAMERA"' in projection
     assert "ACTIVE_CAMERA_CAMERA_ROOT" in projection
     assert "Active Camera — Object Root Bone" in projection
     assert "Active Camera — Camera Root Bone" in projection
     assert "A1ProjectionDirection.ACTIVE_CAMERA_CAMERA_ROOT" in properties
-    assert "direction.camera_root" in ui
-    assert "Main bone pivot: active camera / camera-space zero" in ui
-    assert "Main bone pivot: each object's Blender Object Origin" in ui
+    assert "Blender Object Origin as its own Spine main-bone pivot" in properties
+    assert "camera-space zero as the Spine main-bone pivot" in properties
+    assert '"spine2d_projection_direction"' in ui
+    assert 'text="Projection direction"' in ui
