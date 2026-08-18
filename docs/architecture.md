@@ -1,7 +1,6 @@
 # Architecture
 
-This document describes the production architecture of Blender to Spine2D Mesh Exporter
-**0.154.0**.
+This document describes the production architecture of **Spine2D Mesh Exporter 0.155.0**.
 
 ## Package boundaries
 
@@ -55,9 +54,13 @@ Domain modules do not import `bpy` or `bmesh`.
 
 ### `infrastructure`
 
-Owns cross-cutting services such as transactional registration, durable atomic output,
-interprocess locking, stale-stage/backup recovery, diagnostics, logging, tracing, and audit
-services.
+Owns cross-cutting services such as durable atomic output, process-local export ownership,
+stale-stage/backup recovery, diagnostics, logging, audit services, and the mixed-resource
+registration helpers still required by owners that can partially acquire RNA/handler
+resources.
+
+Development-only pipeline-trace implementation files are retained in the repository for
+tests/probes but excluded from the extension build and are not part of installed runtime.
 
 ## Public request flow
 
@@ -66,7 +69,7 @@ Blender UI
 -> capture immutable Scene/object settings
 -> resolve schema family + persistent exact project version
 -> capability validation
--> readiness or export request
+-> optional manual readiness diagnostics OR direct export request
 -> object preparation
 -> Spine document assembly
 -> target-family adaptation
@@ -98,24 +101,47 @@ family continues to choose the serializer codec.
 Preference update callbacks invalidate readiness and redraw the UI but never call
 `wm.save_userpref`; global Blender preference persistence remains owned by Blender.
 
-## Ordered UI ownership
+## Blender registration ownership
 
-`ui.py` owns reusable base panel controls/operators. `ui_layout.py` owns the ordered
-production panel and composes the user-facing foldouts in this order:
+The package root intentionally uses a direct Blender add-on lifecycle instead of a generic
+root registration state machine.
+
+Registration order is explicit and unregistration is the reverse order. Individual modules
+own their own Blender resources:
+
+- class-only modules use direct `bpy.utils.register_class` / reverse unregister loops;
+- Scene RNA registration owns narrow rollback for properties acquired by the current call;
+- migration owns its `load_pre` / `load_post` handlers;
+- readiness invalidation owns its depsgraph handler and reversible function/method bindings;
+- the manual readiness bridge owns only reversible UI method overrides;
+- Add-on Preferences owns its one-shot redraw timer and explicitly releases it on teardown;
+- mixed class/RNA owners retain local transactional cleanup where partial acquisition can
+  otherwise leak Blender resources.
+
+No `ExtensionRegistrationState`, degraded root mode, or `REGISTRATION_STEPS` table is part of
+the 0.155.0 runtime.
+
+## UI ownership
+
+`ui.py` owns the canonical main panel and core export/readiness operators. `ui_layout.py`
+registers ordinary child panels instead of unregistering/replacing the main panel.
+
+Current visible ownership is:
 
 ```text
-Paths and Spine 2D version
-Rig
-Rewrite Generated Materials
-Cut
-Bake
-Analysis
+main panel
+├── Paths and Spine 2D version
+├── Cut
+├── Bake
+├── Analysis / Export action
+├── Rig child panel
+├── Generated Materials child panel
+└── Depth Parallax child panel when applicable
 ```
 
 Control placement is semantic. The existing Scene property `spine2d_texture_size` is drawn
-by **Bake** before frame/sequence controls and is not duplicated in **Paths and Spine 2D
-version**. Exact Spine project versions are global Add-on Preferences and therefore are not
-Scene migration data.
+by **Bake** and is not duplicated in **Paths and Spine 2D version**. Exact Spine project
+versions are global Add-on Preferences and therefore are not Scene migration data.
 
 ## Object preparation
 
@@ -266,17 +292,26 @@ and every texture.
 
 ## Readiness
 
-Readiness executes production preparation without final commit and records immutable
-blockers/warnings/statistics. Relevant source/settings changes stale or invalidate the
-cached report. Exact-version preference edits explicitly invalidate all open Scene readiness
-caches.
+Readiness is an explicit synchronous diagnostic route. **Analyze** executes production
+preparation without final commit and records immutable blockers/warnings/statistics. Relevant
+source/settings changes stale or invalidate the cached report. Exact-version preference edits
+explicitly invalidate all open Scene readiness caches.
 
-## Atomic output
+The installed runtime does not schedule automatic readiness analysis from a Python worker,
+Blender polling timer, depsgraph callback, or load callback. A current report is not required
+to invoke production Export.
+
+## Atomic output and portability
 
 Output files are reserved and staged before installation. Existing finals may be protected
 with backups. Required properties are deterministic path reservation, complete staged files,
 rollback/restoration, stale work recovery, and no deletion of work owned by another live
 process.
+
+The runtime has no declared OS restriction. Windows-specific process/path compatibility is
+guarded by host checks; POSIX process liveness uses the corresponding POSIX path. Durable
+filesystem behavior uses portable Python primitives with documented host limitations handled
+inside the atomic layer rather than by excluding other platforms in the manifest.
 
 ## Source-state integrity
 
