@@ -68,11 +68,32 @@ if bpy is not None:
         return module in MODULES
 
     def _register_config_rna() -> None:
-        """Register Scene properties through the normal Blender RNA pattern."""
+        """Register owned Scene properties with narrow local rollback.
+
+        Pre-registration snapshots must exist before Blender binds RNA defaults so old
+        persisted Scene values can be migrated correctly. If one property registration
+        fails, remove only properties acquired by this function call and discard the
+        pending snapshots before propagating the original Blender exception.
+        """
 
         scene_settings_migration.capture_pre_registration_scene_state()
-        for name, value in CONFIG_RNA_PROPERTIES:
-            setattr(bpy.types.Scene, name, value)
+        registered_names: list[str] = []
+        try:
+            for name, value in CONFIG_RNA_PROPERTIES:
+                setattr(bpy.types.Scene, name, value)
+                registered_names.append(name)
+        except Exception:
+            for name in reversed(registered_names):
+                try:
+                    if hasattr(bpy.types.Scene, name):
+                        delattr(bpy.types.Scene, name)
+                except Exception:
+                    logger.exception(
+                        "Unable to roll back partially registered Scene RNA property %s",
+                        name,
+                    )
+            scene_settings_migration.clear_pre_registration_scene_state()
+            raise
 
     def _unregister_config_rna() -> None:
         """Remove Scene properties owned by this extension in reverse order."""
