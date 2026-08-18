@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide describes **Spine2D Mesh Exporter 0.155.0**.
+This guide describes **Spine Mesh Exporter 0.155.0**.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ The minimum Blender version is declared in
 3. Open **Edit > Preferences > Extensions**.
 4. Choose **Install from Disk**.
 5. Select `blender_to_spine2d_mesh_exporter-0.155.0.zip`.
-6. Enable **Spine2D Mesh Exporter**.
+6. Enable **Spine Mesh Exporter**.
 7. In the add-on Preferences, expand **Spine project JSON versions** and set the exact
    Editor/project version for every Spine family you use.
 8. Open a 3D View, press `N`, and select the extension tab.
