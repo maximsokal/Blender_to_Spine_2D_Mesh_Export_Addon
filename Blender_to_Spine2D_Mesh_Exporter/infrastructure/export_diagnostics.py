@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from threading import RLock
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,7 +17,6 @@ class ExportDiagnosticsPolicy:
             raise TypeError("recover_stale_work_files must be bool")
 
 
-_lock = RLock()
 _policy = ExportDiagnosticsPolicy()
 
 
@@ -27,21 +25,23 @@ def configure_export_diagnostics(
     preserve_failed_work_files: bool,
     recover_stale_work_files: bool = True,
 ) -> ExportDiagnosticsPolicy:
-    """Replace and return the process-local diagnostics policy."""
+    """Replace and return the process-local diagnostics policy.
+
+    Blender invokes the add-on lifecycle synchronously on its main Python thread, so
+    this process-local policy deliberately avoids Python thread synchronization.
+    """
 
     global _policy
     resolved = ExportDiagnosticsPolicy(
         preserve_failed_work_files=preserve_failed_work_files,
         recover_stale_work_files=recover_stale_work_files,
     )
-    with _lock:
-        _policy = resolved
+    _policy = resolved
     return resolved
 
 
 def get_export_diagnostics_policy() -> ExportDiagnosticsPolicy:
-    with _lock:
-        return _policy
+    return _policy
 
 
 __all__ = [
