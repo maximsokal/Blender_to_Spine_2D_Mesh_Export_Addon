@@ -18,7 +18,8 @@ def _tree(name: str) -> ast.Module:
 
 def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
     return next(
-        node for node in ast.walk(tree)
+        node
+        for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef) and node.name == name
     )
 
@@ -35,7 +36,17 @@ def _called_names(function: ast.FunctionDef) -> set[str]:
     return result
 
 
+def _function_source(name: str, function_name: str) -> str:
+    source = _source(name)
+    function = _function(_tree(name), function_name)
+    segment = ast.get_source_segment(source, function)
+    assert segment is not None
+    return segment
+
+
 def test_registration_infrastructure_is_blender_independent():
+    """Shared rollback helpers may remain for owners with mixed Blender resources."""
+
     path = INFRASTRUCTURE / "blender_registration.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     imported = {
@@ -73,30 +84,32 @@ def test_runtime_operators_route_directly_to_rewrite_services():
     assert "resolve_multi_backend" not in ui
 
 
-def test_registration_owners_use_only_needed_transaction_helpers():
+def test_simple_class_owners_use_normal_blender_registration_pattern():
+    """Simple class-only owners must not use the rejected generic cleanup framework."""
+
+    for name in (
+        "addon_preferences.py",
+        "single_object_operator.py",
+        "rig_ui.py",
+        "ui_layout.py",
+    ):
+        source = _source(name)
+        register_calls = _called_names(_function(_tree(name), "register"))
+        unregister_calls = _called_names(_function(_tree(name), "unregister"))
+
+        assert "register_class" in register_calls, name
+        assert "unregister_class" in unregister_calls, name
+        assert "register_classes_transactionally" not in source, name
+        assert "unregister_all_best_effort" not in source, name
+        assert "class_cleanup_actions" not in source, name
+
+
+def test_mixed_resource_owners_keep_targeted_rollback_helpers():
+    """Only owners with classes plus RNA/handlers retain transactional cleanup."""
+
     expectations = {
-        "addon_preferences.py": {
-            "register_classes_transactionally",
-            "unregister_all_best_effort",
-        },
-        "single_object_operator.py": {
-            "register_classes_transactionally",
-            "unregister_all_best_effort",
-        },
-        "repolish_ui.py": {
-            "register_classes_transactionally",
-            "unregister_all_best_effort",
-        },
-        "rig_ui.py": {
-            "register_classes_transactionally",
-            "unregister_all_best_effort",
-        },
         "ui.py": {
             "register_classes_transactionally",
-            "register_rna_properties_transactionally",
-            "unregister_all_best_effort",
-        },
-        "ui_layout.py": {
             "register_rna_properties_transactionally",
             "unregister_all_best_effort",
         },
@@ -122,59 +135,84 @@ def test_ui_rna_ownership_registers_classes_before_pointer_properties():
     assert 'name="spine2d_bake_settings"' in source
     assert 'name="spine2d_connect_settings"' in source
 
-    unregister = _function(_tree("ui.py"), "unregister")
-    unregister_source = ast.get_source_segment(source, unregister)
+    unregister_source = _function_source("ui.py", "unregister")
     assert unregister_source.index("rna_property_cleanup_actions") < unregister_source.index(
         "class_cleanup_actions"
     )
 
 
-def test_root_owns_scene_properties_and_orders_all_runtime_dependencies():
-    tree = _tree("__init__.py")
+def test_root_uses_explicit_standard_registration_order():
     source = _source("__init__.py")
-    assert "for name, prop in scene_properties.PROPERTIES" in source
-    assert "register_rna_properties_transactionally(CONFIG_RNA_PROPERTIES)" in source
-    assert "bpy.utils.register_class" not in source
-    assert "bpy.utils.unregister_class" not in source
-    assert "scene_settings_migration" in source
-    assert "a1_readiness_invalidation" in source
-    assert "auto_readiness" in source
-    assert "rig_ui" in source
-    assert "ui_layout" in source
+    register_source = _function_source("__init__.py", "register")
+    unregister_source = _function_source("__init__.py", "unregister")
 
-    steps_assignment = next(
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.AnnAssign)
-        and isinstance(node.target, ast.Name)
-        and node.target.id == "REGISTRATION_STEPS"
-    )
-    labels = [ast.literal_eval(item.elts[0]) for item in steps_assignment.value.elts]
-    assert labels == [
-        "addon preferences",
-        "Scene RNA properties",
-        "Scene settings migration",
-        "UI",
-        "Rig UI",
-        "readiness invalidation",
-        "automatic readiness",
-        "generated material UI",
-        "ordered UI layout",
-        "Re-Polish UI",
-        "single-object operator",
+    assert "REGISTRATION_STEPS" not in source
+    assert "ExtensionRegistrationState" not in source
+    assert "unregister_all_best_effort" not in source
+    assert "repolish_ui" not in source
+    assert "for name, value in CONFIG_RNA_PROPERTIES" in source
+    assert "setattr(bpy.types.Scene, name, value)" in source
+    assert "delattr(bpy.types.Scene, name)" in source
+
+    registration_calls = [
+        "addon_preferences.register()",
+        "_register_config_rna()",
+        "scene_settings_migration.register()",
+        "ui.register()",
+        "rig_ui.register()",
+        "a1_readiness_invalidation.register()",
+        "auto_readiness.register()",
+        "generated_material_ui.register()",
+        "ui_layout.register()",
+        "single_object_operator.register()",
     ]
-    assert labels.index("Scene RNA properties") < labels.index(
-        "Scene settings migration"
-    ) < labels.index("UI")
-    assert labels.index("UI") < labels.index("Rig UI")
-    assert labels.index("Rig UI") < labels.index("readiness invalidation")
-    assert labels.index("readiness invalidation") < labels.index(
-        "automatic readiness"
-    )
-    assert labels.index("generated material UI") < labels.index(
-        "ordered UI layout"
-    ) < labels.index("Re-Polish UI") < labels.index("single-object operator")
-    assert "unregister_all_best_effort" in _called_names(_function(tree, "register"))
-    assert "unregister_all_best_effort" in _called_names(_function(tree, "unregister"))
+    positions = [register_source.index(call) for call in registration_calls]
+    assert positions == sorted(positions)
+
+    unregistration_calls = [
+        "single_object_operator.unregister()",
+        "ui_layout.unregister()",
+        "generated_material_ui.unregister()",
+        "auto_readiness.unregister()",
+        "a1_readiness_invalidation.unregister()",
+        "rig_ui.unregister()",
+        "ui.unregister()",
+        "scene_settings_migration.unregister()",
+        "_unregister_config_rna()",
+        "addon_preferences.unregister()",
+    ]
+    positions = [unregister_source.index(call) for call in unregistration_calls]
+    assert positions == sorted(positions)
+
+
+def test_non_blender_root_lifecycle_is_harmless_noop():
+    source = _source("__init__.py")
+    assert "Outside Blender there is nothing to register." in source
+    assert "Outside Blender there is nothing to unregister." in source
+    assert 'raise RuntimeError("Blender bpy module is required' not in source
+
+
+def test_auto_readiness_does_not_install_background_polling_lifecycle():
+    source = _source("auto_readiness.py")
+    register_source = _function_source("auto_readiness.py", "register")
+    unregister_source = _function_source("auto_readiness.py", "unregister")
+
+    # Compatibility helpers may remain while old tests/probes are migrated, but the
+    # installed lifecycle must not schedule automatic analysis or depsgraph callbacks.
+    assert "_register_timer()" not in register_source
+    assert "_install_handlers()" not in register_source
+    assert "_unregister_timer()" not in unregister_source
+    assert "_remove_handlers()" not in unregister_source
+    assert "do not install timers" in register_source
+    assert "do not install timers" in source
+
+
+def test_preferences_own_and_release_one_shot_redraw_timer():
+    source = _source("addon_preferences.py")
+    unregister_source = _function_source("addon_preferences.py", "unregister")
+
+    assert "bpy.app.timers one-shot callback" in source
+    assert "_cancel_deferred_view3d_redraw()" in unregister_source
 
 
 def test_root_startup_imports_no_legacy_implementation_module():
