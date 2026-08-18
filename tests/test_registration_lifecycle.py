@@ -72,14 +72,14 @@ def test_registration_infrastructure_is_blender_independent():
 def test_runtime_operators_route_directly_to_rewrite_services():
     single = _source("single_object_operator.py")
     ui = _source("ui.py")
-    automatic = _source("auto_readiness.py")
+    manual_readiness = _source("auto_readiness.py")
     assert "export_active_object_a1" in single
     assert "load_legacy_single_backend" not in single
     assert "DEFAULT_SINGLE_BACKEND" not in single
     assert "export_active_object_a1" in ui
     assert "export_selected_objects_a1" in ui
-    assert "export_active_object_a1" in automatic
-    assert "export_selected_objects_a1" in automatic
+    assert "export_active_object_a1" in manual_readiness
+    assert "export_selected_objects_a1" in manual_readiness
     assert "DEFAULT_MULTI_BACKEND" not in ui
     assert "resolve_multi_backend" not in ui
 
@@ -192,19 +192,30 @@ def test_non_blender_root_lifecycle_is_harmless_noop():
     assert 'raise RuntimeError("Blender bpy module is required' not in source
 
 
-def test_auto_readiness_does_not_install_background_polling_lifecycle():
+def test_manual_readiness_lifecycle_contains_no_scheduler_or_auto_callbacks():
     source = _source("auto_readiness.py")
     register_source = _function_source("auto_readiness.py", "register")
     unregister_source = _function_source("auto_readiness.py", "unregister")
 
-    # Compatibility helpers may remain while old tests/probes are migrated, but the
-    # installed lifecycle must not schedule automatic analysis or depsgraph callbacks.
-    assert "_register_timer()" not in register_source
-    assert "_install_handlers()" not in register_source
-    assert "_unregister_timer()" not in unregister_source
-    assert "_remove_handlers()" not in unregister_source
-    assert "do not install timers" in register_source
-    assert "do not install timers" in source
+    for forbidden in (
+        "bpy.app.timers",
+        "_automatic_timer",
+        "request_auto_analysis",
+        "a1_auto_readiness_depsgraph_update_post",
+        "a1_auto_readiness_load_pre",
+        "a1_auto_readiness_load_post",
+        "_register_timer",
+        "_unregister_timer",
+        "_install_handlers",
+        "_remove_handlers",
+        "_PENDING",
+        "_PENDING_DEADLINE",
+    ):
+        assert forbidden not in source
+
+    assert "_patch_ui(ui)" in register_source
+    assert "_restore_ui(ui_module)" in unregister_source
+    assert "_ANALYSIS_RUNNING" in source
 
 
 def test_preferences_own_and_release_one_shot_redraw_timer():
