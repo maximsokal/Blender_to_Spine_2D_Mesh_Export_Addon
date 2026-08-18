@@ -1,4 +1,4 @@
-"""Static contracts for Spine target and Bake ownership in the ordered panel."""
+"""Static contracts for Spine target and Texture size ownership in the main panel."""
 
 from __future__ import annotations
 
@@ -6,27 +6,27 @@ import ast
 from pathlib import Path
 
 
-UI_LAYOUT_PATH = (
+UI_PATH = (
     Path(__file__).resolve().parents[1]
     / "Blender_to_Spine2D_Mesh_Exporter"
-    / "ui_layout.py"
+    / "ui.py"
 )
 
 
-def _ordered_method(name: str) -> ast.FunctionDef:
+def _main_panel_method(name: str) -> ast.FunctionDef:
     tree = ast.parse(
-        UI_LAYOUT_PATH.read_text(encoding="utf-8"),
-        filename="ui_layout.py",
+        UI_PATH.read_text(encoding="utf-8"),
+        filename="ui.py",
     )
     for node in tree.body:
         if not isinstance(node, ast.ClassDef):
             continue
-        if node.name != "OBJECT_PT_Spine2DOrderedMeshPanel":
+        if node.name != "OBJECT_PT_Spine2DMeshPanel":
             continue
         for member in node.body:
             if isinstance(member, ast.FunctionDef) and member.name == name:
                 return member
-    raise AssertionError(f"Ordered panel method {name!r} is missing")
+    raise AssertionError(f"Main panel method {name!r} is missing")
 
 
 def _property_call_line(method: ast.FunctionDef, property_name: str) -> int | None:
@@ -47,20 +47,21 @@ def _property_call_line(method: ast.FunctionDef, property_name: str) -> int | No
     return None
 
 
-def test_final_ordered_panel_separates_spine_target_from_texture_size() -> None:
-    export_method = _ordered_method("_draw_export_settings")
-    bake_method = _ordered_method("_draw_bake_settings")
+def test_main_export_settings_own_spine_target_and_texture_size() -> None:
+    export_method = _main_panel_method("_draw_export_settings")
+    bake_method = _main_panel_method("_draw_bake_settings")
 
-    assert _property_call_line(
-        export_method,
-        "spine2d_target_spine_version",
-    ) is not None
-    assert _property_call_line(export_method, "spine2d_texture_size") is None
-    assert _property_call_line(bake_method, "spine2d_texture_size") is not None
+    target_line = _property_call_line(export_method, "spine2d_target_spine_version")
+    texture_line = _property_call_line(export_method, "spine2d_texture_size")
+
+    assert target_line is not None
+    assert texture_line is not None
+    assert target_line < texture_line
+    assert _property_call_line(bake_method, "spine2d_texture_size") is None
 
 
-def test_final_ordered_export_panel_resolves_and_reports_target_capabilities() -> None:
-    method = _ordered_method("_draw_export_settings")
+def test_main_export_panel_resolves_and_reports_target_capabilities() -> None:
+    method = _main_panel_method("_draw_export_settings")
     called_names = {
         node.func.id
         for node in ast.walk(method)
