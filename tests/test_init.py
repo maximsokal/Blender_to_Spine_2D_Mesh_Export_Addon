@@ -1,4 +1,4 @@
-"""Blender 5.2+ extension metadata and transactional lifecycle regressions."""
+"""Blender 5.2+ extension metadata and standard lifecycle regressions."""
 
 from __future__ import annotations
 
@@ -32,26 +32,18 @@ def _install_preferences() -> object:
     return preferences
 
 
-def _run_cleanup_actions(actions, **_kwargs) -> None:
-    for action in actions:
-        action.callback()
-
-
-def _set_root_registration_state(state_name: str) -> None:
-    state_type = getattr(extension, "ExtensionRegistrationState", None)
-    if state_type is not None:
-        extension._REGISTRATION_STATE = getattr(state_type, state_name)
-
-
-@pytest.fixture(autouse=True)
-def _isolate_root_registration_state():
-    """Keep lifecycle tests independent from idempotent registration state."""
-
-    _set_root_registration_state("UNREGISTERED")
-    try:
-        yield
-    finally:
-        _set_root_registration_state("UNREGISTERED")
+def _runtime_owners() -> tuple[tuple[str, object], ...]:
+    return (
+        ("addon_preferences", extension.addon_preferences),
+        ("scene_settings_migration", extension.scene_settings_migration),
+        ("ui", extension.ui),
+        ("rig_ui", extension.rig_ui),
+        ("a1_readiness_invalidation", extension.a1_readiness_invalidation),
+        ("auto_readiness", extension.auto_readiness),
+        ("generated_material_ui", extension.generated_material_ui),
+        ("ui_layout", extension.ui_layout),
+        ("single_object_operator", extension.single_object_operator),
+    )
 
 
 def test_extension_manifest_targets_blender_52_and_declares_files_permission():
@@ -60,6 +52,8 @@ def test_extension_manifest_targets_blender_52_and_declares_files_permission():
         manifest = tomllib.load(stream)
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
+    assert manifest["version"] == "0.155.0"
+    assert manifest["name"] == "Spine2D Mesh Exporter"
     assert manifest["blender_version_min"] == "5.2.0"
     assert manifest["type"] == "add-on"
     assert str(manifest["permissions"]["files"]).strip()
@@ -76,6 +70,9 @@ def test_entry_point_uses_manifest_metadata_and_runtime_gate():
     )
     assert "scene_properties.PROPERTIES" in source
     assert "config.PROPERTIES" not in source
+    assert "REGISTRATION_STEPS" not in source
+    assert "ExtensionRegistrationState" not in source
+    assert "repolish_ui" not in source
 
 
 def test_addon_preferences_do_not_self_disable_or_remove_extension():
@@ -126,18 +123,10 @@ def test_blender_version_gate_rejects_missing_or_malformed_version():
         module.normalize_blender_version((5, 2))
 
 
-def test_register_runs_runtime_gate_then_every_stage_then_preferences(monkeypatch):
+def test_register_runs_runtime_gate_then_explicit_owners_then_logging(monkeypatch):
     events: list[str] = []
     preferences = _install_preferences()
 
-    def stage(label: str):
-        return (
-            label,
-            lambda: events.append(f"register:{label}"),
-            lambda: events.append(f"unregister:{label}"),
-        )
-
-    monkeypatch.setattr(extension, "REGISTRATION_STEPS", (stage("one"), stage("two")))
     monkeypatch.setattr(
         extension,
         "require_supported_blender_runtime",
@@ -148,6 +137,19 @@ def test_register_runs_runtime_gate_then_every_stage_then_preferences(monkeypatc
         "_setup_default_logging",
         lambda: events.append("default-logging"),
     )
+    monkeypatch.setattr(
+        extension,
+        "_register_config_rna",
+        lambda: events.append("register:config-rna"),
+    )
+    for label, owner in _runtime_owners():
+        monkeypatch.setattr(
+            owner,
+            "register",
+            lambda label=label: events.append(f"register:{label}"),
+        )
+
+    monkeypatch.setattr(extension.config, "_addon_preferences", lambda: preferences)
     monkeypatch.setattr(
         extension,
         "initialize_logging_preferences",
@@ -164,93 +166,23 @@ def test_register_runs_runtime_gate_then_every_stage_then_preferences(monkeypatc
     assert events == [
         "runtime-gate",
         "default-logging",
-        "register:one",
-        "register:two",
+        "register:addon_preferences",
+        "register:config-rna",
+        "register:scene_settings_migration",
+        "register:ui",
+        "register:rig_ui",
+        "register:a1_readiness_invalidation",
+        "register:auto_readiness",
+        "register:generated_material_ui",
+        "register:ui_layout",
+        "register:single_object_operator",
         "preferences",
         "configured-logging",
     ]
 
 
-def test_register_rolls_back_only_completed_stages_in_reverse_order(monkeypatch):
-    events: list[str] = []
-    _install_preferences()
-    primary_errors: list[BaseException | None] = []
-
-    failure = RuntimeError("second stage failed")
-
-    steps = (
-        (
-            "one",
-            lambda: events.append("register:one"),
-            lambda: events.append("unregister:one"),
-        ),
-        (
-            "two",
-            lambda: (_ for _ in ()).throw(failure),
-            lambda: events.append("unregister:two"),
-        ),
-        (
-            "three",
-            lambda: events.append("register:three"),
-            lambda: events.append("unregister:three"),
-        ),
-    )
-
-    def cleanup(actions, *, primary_error=None, **_kwargs):
-        primary_errors.append(primary_error)
-        _run_cleanup_actions(actions)
-
-    monkeypatch.setattr(extension, "REGISTRATION_STEPS", steps)
-    monkeypatch.setattr(extension, "require_supported_blender_runtime", lambda _bpy: None)
-    monkeypatch.setattr(extension.config, "_setup_default_logging", lambda: None)
-    monkeypatch.setattr(extension, "unregister_all_best_effort", cleanup)
-
-    with pytest.raises(RuntimeError, match="second stage failed"):
-        extension.register()
-
-    assert events == ["register:one", "unregister:one"]
-    assert primary_errors == [failure]
-
-
-def test_register_rolls_back_all_stages_when_preferences_fail(monkeypatch):
-    events: list[str] = []
-    _install_preferences()
-
-    def stage(label: str):
-        return (
-            label,
-            lambda: events.append(f"register:{label}"),
-            lambda: events.append(f"unregister:{label}"),
-        )
-
-    monkeypatch.setattr(extension, "REGISTRATION_STEPS", (stage("one"), stage("two")))
-    monkeypatch.setattr(extension, "require_supported_blender_runtime", lambda _bpy: None)
-    monkeypatch.setattr(extension.config, "_setup_default_logging", lambda: None)
-    monkeypatch.setattr(
-        extension,
-        "initialize_logging_preferences",
-        lambda _prefs: (_ for _ in ()).throw(RuntimeError("preferences failed")),
-    )
-    monkeypatch.setattr(extension, "unregister_all_best_effort", _run_cleanup_actions)
-
-    with pytest.raises(RuntimeError, match="preferences failed"):
-        extension.register()
-
-    assert events == [
-        "register:one",
-        "register:two",
-        "unregister:two",
-        "unregister:one",
-    ]
-
-
 def test_runtime_gate_failure_prevents_any_registration_mutation(monkeypatch):
     events: list[str] = []
-    monkeypatch.setattr(
-        extension,
-        "REGISTRATION_STEPS",
-        (("one", lambda: events.append("register:one"), lambda: None),),
-    )
     monkeypatch.setattr(
         extension,
         "require_supported_blender_runtime",
@@ -261,6 +193,17 @@ def test_runtime_gate_failure_prevents_any_registration_mutation(monkeypatch):
         "_setup_default_logging",
         lambda: events.append("default-logging"),
     )
+    monkeypatch.setattr(
+        extension,
+        "_register_config_rna",
+        lambda: events.append("register:config-rna"),
+    )
+    for label, owner in _runtime_owners():
+        monkeypatch.setattr(
+            owner,
+            "register",
+            lambda label=label: events.append(f"register:{label}"),
+        )
 
     with pytest.raises(RuntimeError, match="unsupported runtime"):
         extension.register()
@@ -268,33 +211,77 @@ def test_runtime_gate_failure_prevents_any_registration_mutation(monkeypatch):
     assert events == []
 
 
-def test_unregister_runs_every_stage_in_reverse_order(monkeypatch):
+def test_owner_registration_failure_is_not_hidden_by_generic_root_recovery(monkeypatch):
     events: list[str] = []
+    failure = RuntimeError("ui registration failed")
 
-    def stage(label: str):
-        return (
-            label,
-            lambda: events.append(f"register:{label}"),
-            lambda: events.append(f"unregister:{label}"),
-        )
+    monkeypatch.setattr(extension, "require_supported_blender_runtime", lambda _bpy: None)
+    monkeypatch.setattr(extension.config, "_setup_default_logging", lambda: None)
+    monkeypatch.setattr(
+        extension,
+        "_register_config_rna",
+        lambda: events.append("register:config-rna"),
+    )
+
+    for label, owner in _runtime_owners():
+        if label == "ui":
+            monkeypatch.setattr(
+                owner,
+                "register",
+                lambda: (_ for _ in ()).throw(failure),
+            )
+        else:
+            monkeypatch.setattr(
+                owner,
+                "register",
+                lambda label=label: events.append(f"register:{label}"),
+            )
+
+    with pytest.raises(RuntimeError, match="ui registration failed") as raised:
+        extension.register()
+
+    assert raised.value is failure
+    assert events == [
+        "register:addon_preferences",
+        "register:config-rna",
+        "register:scene_settings_migration",
+    ]
+
+
+def test_unregister_runs_explicit_owners_in_reverse_order(monkeypatch):
+    events: list[str] = []
 
     monkeypatch.setattr(
         extension,
-        "REGISTRATION_STEPS",
-        (stage("one"), stage("two"), stage("three")),
+        "_unregister_config_rna",
+        lambda: events.append("unregister:config-rna"),
     )
-    monkeypatch.setattr(extension, "unregister_all_best_effort", _run_cleanup_actions)
-    _set_root_registration_state("REGISTERED")
+    for label, owner in _runtime_owners():
+        monkeypatch.setattr(
+            owner,
+            "unregister",
+            lambda label=label: events.append(f"unregister:{label}"),
+        )
 
     extension.unregister()
 
-    assert events == ["unregister:three", "unregister:two", "unregister:one"]
+    assert events == [
+        "unregister:single_object_operator",
+        "unregister:ui_layout",
+        "unregister:generated_material_ui",
+        "unregister:auto_readiness",
+        "unregister:a1_readiness_invalidation",
+        "unregister:rig_ui",
+        "unregister:ui",
+        "unregister:scene_settings_migration",
+        "unregister:config-rna",
+        "unregister:addon_preferences",
+    ]
 
 
 def test_registration_structure_has_current_runtime_owners_only():
     module_names = tuple(module.__name__.rsplit(".", 1)[-1] for module in extension.MODULES)
     class_names = tuple(cls.__name__ for cls in extension.CLASSES_TO_REGISTER)
-    step_labels = tuple(step[0] for step in extension.REGISTRATION_STEPS)
 
     assert module_names == (
         "addon_preferences",
@@ -305,21 +292,17 @@ def test_registration_structure_has_current_runtime_owners_only():
         "auto_readiness",
         "generated_material_ui",
         "ui_layout",
-        "repolish_ui",
         "single_object_operator",
     )
+    assert "repolish_ui" not in module_names
     assert "WM_OT_UninstallAddon" not in class_names
     assert "SPINE2D_OT_RefreshLoggingModules" in class_names
-    assert step_labels == (
-        "addon preferences",
-        "Scene RNA properties",
-        "Scene settings migration",
-        "UI",
-        "Rig UI",
-        "readiness invalidation",
-        "automatic readiness",
-        "generated material UI",
-        "ordered UI layout",
-        "Re-Polish UI",
-        "single-object operator",
-    )
+
+
+def test_config_rna_owner_uses_direct_scene_properties():
+    source = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
+
+    assert "for name, value in CONFIG_RNA_PROPERTIES" in source
+    assert "setattr(bpy.types.Scene, name, value)" in source
+    assert "for name, _value in reversed(CONFIG_RNA_PROPERTIES)" in source
+    assert "delattr(bpy.types.Scene, name)" in source
