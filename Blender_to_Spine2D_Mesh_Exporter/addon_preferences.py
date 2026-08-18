@@ -14,20 +14,15 @@ from .domain.spine.version_target import (
     SpineJsonTarget,
     validate_spine_json_exact_version_for_target,
 )
-from .infrastructure.blender_registration import (
-    class_cleanup_actions,
-    register_classes_transactionally,
-    unregister_all_best_effort,
-)
 
 
 logger = logging.getLogger(__name__)
 ADDON_ID = __package__ or __name__.rpartition(".")[0]
 
 # Blender may edit AddonPreferences in a separate native Preferences window while
-# the exporter panel lives in the main window.  The immediate tag below marks the
-# area dirty, while the one-shot application timer guarantees another redraw after
-# the RNA update event has returned to Blender's event loop.
+# the exporter panel lives in the main window. The immediate redraw covers visible
+# areas; this one-shot Blender application timer schedules one redraw after the RNA
+# update event returns to Blender's event loop.
 _view3d_redraw_scheduled = False
 
 
@@ -43,10 +38,10 @@ def _tag_all_view3d_areas_for_redraw(context: Any | None) -> int:
     """Request redraw for every visible 3D View area in every Blender window.
 
     Add-on Preferences can be edited in a window other than the main Blender
-    window.  Iterating ``WindowManager.windows`` instead of only ``context.area``
+    window. Iterating ``WindowManager.windows`` instead of only ``context.area``
     keeps every exporter sidebar synchronized with the global preference value.
 
-    Returns the number of VIEW_3D areas tagged.  Returning the count makes the
+    Returns the number of VIEW_3D areas tagged. Returning the count makes the
     helper observable in tests without changing Blender state beyond redraw tags.
     """
 
@@ -91,7 +86,7 @@ def _deferred_view3d_redraw() -> None:
 
 
 def _schedule_view3d_redraw() -> None:
-    """Coalesce exact-version UI refreshes into one event-loop redraw."""
+    """Coalesce exact-version UI refreshes into one Blender event-loop redraw."""
 
     global _view3d_redraw_scheduled
 
@@ -115,6 +110,42 @@ def _schedule_view3d_redraw() -> None:
     except Exception:
         _view3d_redraw_scheduled = False
         logger.exception("Unable to schedule Spine project-version VIEW_3D redraw")
+
+
+def _cancel_deferred_view3d_redraw() -> None:
+    """Release the owned one-shot Blender timer during add-on unregistration.
+
+    Blender 5.2 exposes ``bpy.app.timers.is_registered``. The fallback branch uses
+    the process-local scheduled flag only for test/fallback environments where that
+    query is unavailable. Cleanup is best-effort because a one-shot callback may have
+    completed between the registration query and the unregister call.
+    """
+
+    global _view3d_redraw_scheduled
+
+    try:
+        timers = getattr(getattr(bpy, "app", None), "timers", None)
+        unregister_timer = getattr(timers, "unregister", None)
+        if not callable(unregister_timer):
+            return
+
+        is_registered = getattr(timers, "is_registered", None)
+        if callable(is_registered):
+            registered = bool(is_registered(_deferred_view3d_redraw))
+        else:
+            registered = bool(_view3d_redraw_scheduled)
+
+        if registered:
+            unregister_timer(_deferred_view3d_redraw)
+    except Exception:
+        # Do not prevent class cleanup when the one-shot callback completed between
+        # the check and unregister operation or Blender is already tearing down.
+        logger.debug(
+            "Unable to unregister deferred Spine project-version redraw timer",
+            exc_info=True,
+        )
+    finally:
+        _view3d_redraw_scheduled = False
 
 
 def _update_spine_project_version(_self: Any, context: Any) -> None:
@@ -324,34 +355,19 @@ CLASSES_TO_REGISTER = (
 
 
 def register() -> None:
-    """Register all preference classes atomically in dependency order."""
+    """Register preference classes in their dependency order."""
 
-    try:
-        register_classes_transactionally(
-            CLASSES_TO_REGISTER,
-            register_class=bpy.utils.register_class,
-            unregister_class=bpy.utils.unregister_class,
-        )
-    except Exception:
-        logger.exception("Addon preference registration failed")
-        raise
+    for cls in CLASSES_TO_REGISTER:
+        bpy.utils.register_class(cls)
     logger.debug("Addon preference classes registered")
 
 
 def unregister() -> None:
-    """Attempt every preference-class cleanup before reporting aggregate failure."""
+    """Release the owned redraw timer, then unregister classes in reverse order."""
 
-    try:
-        unregister_all_best_effort(
-            class_cleanup_actions(
-                CLASSES_TO_REGISTER,
-                unregister_class=bpy.utils.unregister_class,
-            ),
-            operation="addon preference unregistration",
-        )
-    except Exception:
-        logger.exception("Addon preference unregistration failed")
-        raise
+    _cancel_deferred_view3d_redraw()
+    for cls in reversed(CLASSES_TO_REGISTER):
+        bpy.utils.unregister_class(cls)
     logger.debug("Addon preference classes unregistered")
 
 
