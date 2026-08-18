@@ -1,6 +1,6 @@
 # Settings Reference
 
-This document describes the maintained public settings in **Spine2D Mesh Exporter 0.155.0**.
+This document describes the maintained public settings in **Spine Mesh Exporter 0.155.0**.
 Fresh-Scene defaults are listed below. The current Scene settings schema is **8**.
 
 ## Export
@@ -92,7 +92,7 @@ It comes from the matching global Add-on Preference, not from the Scene.
 
 ### Exact Spine project versions (Add-on Preferences)
 
-Open **Edit > Preferences > Add-ons > Spine2D Mesh Exporter > Spine project JSON versions**.
+Open **Edit > Preferences > Add-ons > Spine Mesh Exporter > Spine project JSON versions**.
 Five persistent string properties are available:
 
 | Family | Preference | Default |
