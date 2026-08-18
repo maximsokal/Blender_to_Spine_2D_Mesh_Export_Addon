@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 import logging
 from pathlib import Path
-from threading import RLock
 from types import MappingProxyType
 from typing import Callable, Mapping
 from uuid import uuid4
@@ -56,29 +55,33 @@ ExportEventListener = Callable[[ExportEvent], None]
 
 
 class ExportEventDispatcher:
-    """Thread-safe dispatcher whose listeners can never break the export itself."""
+    """Synchronous dispatcher whose listeners can never break the export itself.
+
+    Blender add-on operations run on the main Python thread.  The dispatcher keeps a
+    snapshot of listeners before invoking callbacks so a callback may safely subscribe
+    or unsubscribe another listener without mutating the active iteration.
+    """
 
     def __init__(self) -> None:
-        self._lock = RLock()
         self._listeners: dict[str, ExportEventListener] = {}
 
     def subscribe(self, listener: ExportEventListener) -> str:
         if not callable(listener):
             raise TypeError("listener must be callable")
         token = uuid4().hex
-        with self._lock:
-            self._listeners[token] = listener
+        self._listeners[token] = listener
         return token
 
     def unsubscribe(self, token: str) -> bool:
-        with self._lock:
-            return self._listeners.pop(token, None) is not None
+        if not isinstance(token, str):
+            raise TypeError("token must be str")
+        return self._listeners.pop(token, None) is not None
 
     def emit(self, event: ExportEvent) -> None:
         if not isinstance(event, ExportEvent):
             raise TypeError("event must be ExportEvent")
-        with self._lock:
-            listeners = tuple(self._listeners.values())
+
+        listeners = tuple(self._listeners.values())
         for listener in listeners:
             try:
                 listener(event)
