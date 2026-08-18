@@ -18,11 +18,13 @@ def _graph(
     channels=(MaterialSemanticChannel.SURFACE_COLOR,),
     dependencies=(),
     issues=(),
+    from_instancer=False,
 ):
     source = ShaderNodeSnapshot(
         node_id="Source",
         node_type=node_type,
         node_name="Source",
+        from_instancer=from_instancer,
     )
     output = ShaderNodeSnapshot(
         node_id="Material Output",
@@ -104,13 +106,30 @@ def test_texture_coordinate_uv_is_local_but_window_requires_camera():
     assert "TEXTURE_COORD_SOURCE_CONTEXT" in _codes(camera)
 
 
-def test_texture_coordinate_from_instancer_requires_group_render():
-    audit = audit_material_graph_capabilities(
-        _graph("TEX_COORD", output_socket="From Instancer"),
+def test_texture_coordinate_from_instancer_requires_group_render_for_affected_outputs():
+    for output_socket in ("UV", "Generated"):
+        audit = audit_material_graph_capabilities(
+            _graph(
+                "TEX_COORD",
+                output_socket=output_socket,
+                from_instancer=True,
+            ),
+            render_target="CYCLES",
+        )
+
+        assert audit.required_capability is ShaderBakeCapability.GROUP_RENDER_REQUIRED
+        assert "TEXTURE_COORD_INSTANCER_CONTEXT" in _codes(audit)
+
+    window = audit_material_graph_capabilities(
+        _graph(
+            "TEX_COORD",
+            output_socket="Window",
+            from_instancer=True,
+        ),
         render_target="CYCLES",
     )
-
-    assert audit.required_capability is ShaderBakeCapability.GROUP_RENDER_REQUIRED
+    assert window.required_capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED
+    assert "TEXTURE_COORD_SOURCE_CONTEXT" in _codes(window)
 
 
 def test_camera_data_and_object_info_require_source_camera_render():
