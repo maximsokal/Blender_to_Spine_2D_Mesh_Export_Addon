@@ -63,6 +63,7 @@ def _build_plan(
     snapshot = read_source_mesh_snapshot(obj)
     analysis = analyse_object_materials(
         obj,
+        render_target="CYCLES",
         source_object_id=snapshot.source_object_id,
     )
     object_context, scene_context = analyse_bake_contexts(
