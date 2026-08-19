@@ -121,23 +121,59 @@ def test_registered_operator_uses_rewrite_backend() -> None:
             == "images/SingleOperator_Baked",
             "attachment path does not preserve the texture stem",
         )
+
+        # The public Scene default is the TWO_AXIS_ROTATION_SCALE profile. Its visual
+        # controls intentionally replace Rotation Z with a dedicated uniform-scale
+        # control, so the operator integration must validate that public profile rather
+        # than the retired three-axis v0.23 visual order.
+        _assert(
+            bpy.context.scene.spine2d_rig_profile == "TWO_AXIS_ROTATION_SCALE",
+            "public Scene rig profile is no longer the approved two-axis profile",
+        )
         _assert(
             tuple(slot["name"] for slot in document["slots"][:4])
             == (
                 "SingleOperator_rotation_X",
-                "SingleOperator_rotation_Z",
                 "SingleOperator_rotation_Y",
+                "SingleOperator_scale",
                 "SingleOperator_main",
             ),
-            "Rewrite did not preserve public control slot order",
+            f"Rewrite public two-axis control slot order changed: {document['slots'][:4]}",
         )
+
         _assert("preview" in document["animations"], "preview animation is missing")
+        preview_bones = document["animations"]["preview"]["bones"]
         _assert(
-            document["animations"]["preview"]["bones"]
-            ["SingleOperator_rotation_X"]["rotate"][-1]
-            == {"time": 8, "value": -360},
-            "preview X timeline changed",
+            set(preview_bones)
+            == {
+                "SingleOperator_rotation_X",
+                "SingleOperator_rotation_Y",
+                "SingleOperator_scale",
+            },
+            f"two-axis preview controls changed: {tuple(preview_bones)}",
         )
+        _assert(
+            preview_bones["SingleOperator_rotation_X"]["rotate"][-1]
+            == {"time": 2, "value": 360},
+            "two-axis preview X timeline changed",
+        )
+        _assert(
+            preview_bones["SingleOperator_rotation_Y"]["rotate"][-1]
+            == {"time": 2, "value": 360},
+            "two-axis preview Y timeline changed",
+        )
+        scale_timeline = preview_bones["SingleOperator_scale"]["scale"]
+        _assert(len(scale_timeline) == 5, "two-axis preview scale timeline changed")
+        _assert(
+            float(scale_timeline[-1]["x"]) == 1.0
+            and float(scale_timeline[-1]["y"]) == 1.0,
+            f"two-axis preview does not return to unit scale: {scale_timeline[-1]}",
+        )
+        _assert(
+            "SingleOperator_rotation_Z" not in preview_bones,
+            "retired Rotation Z preview remains in the public two-axis profile",
+        )
+
         _assert(_capture_context() == context_before, "single operator changed context")
         _assert(
             _capture_scene_bake_state() == scene_before,
