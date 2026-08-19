@@ -1,4 +1,4 @@
-"""Real Blender 4.4 matrix for B4 SDR/straight and HDR/premultiplied output."""
+"""Real Blender 5.2 matrix for B4 SDR/straight and HDR/premultiplied output."""
 
 from __future__ import annotations
 
@@ -92,6 +92,21 @@ def _pixel_statistics(pixels):
     return maximum_rgb, visible, transparent, partial
 
 
+def _coverage_diagnostic(
+    *,
+    size: tuple[int, int],
+    maximum_rgb: float,
+    visible: int,
+    transparent: int,
+    partial: int,
+    alpha_mode: str,
+) -> str:
+    return (
+        f"size={size}, visible={visible}, transparent={transparent}, "
+        f"partial={partial}, max_rgb={maximum_rgb:.6f}, alpha_mode={alpha_mode!r}"
+    )
+
+
 def _attachment(document, stem):
     matches = [
         attachment
@@ -126,10 +141,27 @@ def test_sdr_png_auto_policy_is_display_referred_and_straight() -> None:
         image_path = output_directory / "images" / "SdrOutput_Baked.png"
         size, pixels, is_float, alpha_mode = _read_blender_image(image_path)
         maximum_rgb, visible, transparent, partial = _pixel_statistics(pixels)
-        _assert(not is_float, "PNG unexpectedly loaded as float image")
-        _assert(maximum_rgb <= 1.0001, f"SDR PNG retained HDR values: {maximum_rgb}")
-        _assert(visible > 30 and transparent > 20, "SDR PNG coverage is invalid")
-        _assert(alpha_mode in {"STRAIGHT", "CHANNEL_PACKED"}, f"wrong PNG alpha: {alpha_mode}")
+        diagnostic = _coverage_diagnostic(
+            size=size,
+            maximum_rgb=maximum_rgb,
+            visible=visible,
+            transparent=transparent,
+            partial=partial,
+            alpha_mode=alpha_mode,
+        )
+        _assert(not is_float, f"PNG unexpectedly loaded as float image: {diagnostic}")
+        _assert(
+            maximum_rgb <= 1.0001,
+            f"SDR PNG retained HDR values: {diagnostic}",
+        )
+        _assert(
+            visible > 30 and transparent > 20,
+            f"SDR PNG coverage is invalid: {diagnostic}",
+        )
+        _assert(
+            alpha_mode in {"STRAIGHT", "CHANNEL_PACKED"},
+            f"wrong PNG alpha: {diagnostic}",
+        )
 
         document = json.loads((output_directory / "SdrOutput.json").read_text("utf-8"))
         attachment = _attachment(document, "SdrOutput")
@@ -170,10 +202,27 @@ def test_openexr_auto_policy_preserves_scene_linear_hdr_and_premultiplied_alpha(
         image_path = output_directory / "images" / "HdrOutput_Baked.exr"
         size, pixels, is_float, alpha_mode = _read_blender_image(image_path)
         maximum_rgb, visible, transparent, partial = _pixel_statistics(pixels)
-        _assert(is_float, "OPEN_EXR did not load as a float image")
-        _assert(maximum_rgb > 1.2, f"HDR values were tone-mapped or clipped: {maximum_rgb}")
-        _assert(visible > 30 and transparent > 20, "HDR EXR coverage is invalid")
-        _assert(alpha_mode in {"PREMUL", "PREMULTIPLIED"}, f"wrong EXR alpha: {alpha_mode}")
+        diagnostic = _coverage_diagnostic(
+            size=size,
+            maximum_rgb=maximum_rgb,
+            visible=visible,
+            transparent=transparent,
+            partial=partial,
+            alpha_mode=alpha_mode,
+        )
+        _assert(is_float, f"OPEN_EXR did not load as a float image: {diagnostic}")
+        _assert(
+            maximum_rgb > 1.2,
+            f"HDR values were tone-mapped or clipped: {diagnostic}",
+        )
+        _assert(
+            visible > 30 and transparent > 20,
+            f"HDR EXR coverage is invalid: {diagnostic}",
+        )
+        _assert(
+            alpha_mode in {"PREMUL", "PREMULTIPLIED"},
+            f"wrong EXR alpha: {diagnostic}",
+        )
 
         document = json.loads((output_directory / "HdrOutput.json").read_text("utf-8"))
         attachment = _attachment(document, "HdrOutput")
