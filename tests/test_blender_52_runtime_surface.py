@@ -21,6 +21,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.shader_graph_error import 
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.shader_graph_rna import (
     find_material_output,
+    node_type,
     normalise_render_target,
 )
 
@@ -91,6 +92,13 @@ def test_shader_target_contract_accepts_only_blender_52_values():
     ):
         with pytest.raises(MaterialGraphAnalysisError, match="Unsupported Blender 5.2"):
             normalise_render_target(old_or_invalid)
+
+
+def test_shader_node_type_normalizes_confirmed_blender_52_rna_aliases():
+    assert node_type(SimpleNamespace(type="SHADERTORGB")) == "SHADER_TO_RGB"
+    assert node_type(SimpleNamespace(type="OUTPUT_MATERIAL")) == "OUTPUT_MATERIAL"
+    assert node_type(SimpleNamespace(type=" tex_image ")) == "TEX_IMAGE"
+    assert node_type(SimpleNamespace(type="")) == "UNKNOWN"
 
 
 def test_material_output_uses_exact_positional_blender_52_target():
