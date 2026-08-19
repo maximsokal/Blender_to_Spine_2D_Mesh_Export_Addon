@@ -122,9 +122,7 @@ def _create_pyramid() -> bpy.types.Object:
 def _configure_scene(output_directory: Path, *, seam_mode: str) -> None:
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_EEVEE"
-    scene.spine2d_texture_export_mode = (
-        A1TextureExportMode.NORMAL_UV_SEGMENTS.value
-    )
+    scene.spine2d_texture_export_mode = A1TextureExportMode.NORMAL_UV_SEGMENTS.value
     scene.spine2d_texture_size = 128
     scene.spine2d_json_path = str(output_directory)
     scene.spine2d_images_path = "images"
@@ -176,11 +174,29 @@ def _assert_source_state(source: bpy.types.Object, expected) -> None:
     )
 
 
-def _load_exported_outputs(output_directory: Path) -> tuple[dict, Path]:
-    json_path = output_directory / "Pyramid_merged.json"
-    texture_path = output_directory / "images" / "Pyramid_Baked.png"
-    _assert(json_path.is_file(), f"JSON was not created: {json_path}")
-    _assert(texture_path.is_file(), f"Texture was not created: {texture_path}")
+def _published_file(result, suffix: str) -> Path:
+    if result is None:
+        raise ValueError("result cannot be None")
+    if not isinstance(suffix, str) or not suffix.startswith("."):
+        raise ValueError("suffix must be an extension such as '.json' or '.png'")
+
+    matches = tuple(
+        Path(path)
+        for path in result.output_files
+        if Path(path).suffix.lower() == suffix.lower()
+    )
+    _assert(
+        len(matches) == 1,
+        f"expected exactly one published {suffix} output, got {matches}",
+    )
+    path = matches[0]
+    _assert(path.is_file(), f"published output does not exist: {path}")
+    return path
+
+
+def _load_exported_outputs(result) -> tuple[dict, Path]:
+    json_path = _published_file(result, ".json")
+    texture_path = _published_file(result, ".png")
     return json.loads(json_path.read_text(encoding="utf-8")), texture_path
 
 
@@ -253,6 +269,7 @@ def test_eevee_normal_auto_mode_exports_four_uv_segments() -> None:
 
         source_state = _capture_source_state(source)
         engine_before = bpy.context.scene.render.engine
+        result = None
 
         for attempt in range(3):
             result = export_active_object_a1(bpy.context)
@@ -262,12 +279,13 @@ def test_eevee_normal_auto_mode_exports_four_uv_segments() -> None:
             )
             _assert_source_state(source, source_state)
 
+        _assert(result is not None, "Normal AUTO export loop produced no result")
         _assert(
             bpy.context.scene.render.engine == engine_before == "BLENDER_EEVEE",
             "Normal AUTO object bake did not restore the EEVEE Scene engine",
         )
 
-        document, texture_path = _load_exported_outputs(output_directory)
+        document, texture_path = _load_exported_outputs(result)
         slots = _assert_no_camera_projection(document)
         expected_slots = tuple(f"Pyramid_Segment_{index}" for index in range(4))
         _assert(slots == expected_slots, f"Unexpected Normal AUTO slots: {slots}")
@@ -310,7 +328,7 @@ def test_eevee_normal_custom_mode_accepts_promoted_physical_hull_points() -> Non
         )
         _assert_source_state(source, source_state)
 
-        document, _texture_path = _load_exported_outputs(output_directory)
+        document, _texture_path = _load_exported_outputs(result)
         slots = _assert_no_camera_projection(document)
         _assert(
             all(name.startswith("Pyramid_Segment_") for name in slots),
@@ -356,7 +374,7 @@ def test_missing_material_image_fails_before_cycles_bake() -> None:
         )
         _assert_source_state(source, source_state)
         _assert(
-            not (output_directory / "Pyramid_merged.json").exists(),
+            not tuple(output_directory.rglob("*.json")),
             "Failed missing-image export committed JSON",
         )
         _assert(
@@ -387,7 +405,7 @@ def test_edit_mode_is_rejected_without_mutating_source_or_mode() -> None:
 
         _assert_source_state(source, source_state)
         _assert(
-            not (output_directory / "Pyramid_merged.json").exists(),
+            not tuple(output_directory.rglob("*.json")),
             "Edit Mode failure committed JSON",
         )
 
