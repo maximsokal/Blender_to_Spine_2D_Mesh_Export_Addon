@@ -37,19 +37,35 @@ from run_camera_projection_integration import (  # noqa: E402
 
 
 def _create_destructive_compositor(scene):
-    scene.use_nodes = True
-    tree = scene.node_tree
-    tree.nodes.clear()
+    if scene is None:
+        raise ValueError("scene cannot be None")
+
+    tree = bpy.data.node_groups.new(
+        name="Spine2DDestructiveCompositor",
+        type="CompositorNodeTree",
+    )
+    tree.interface.new_socket(
+        name="Image",
+        in_out="OUTPUT",
+        socket_type="NodeSocketColor",
+    )
     constant = tree.nodes.new(type="CompositorNodeRGB")
     constant.name = "Destructive Full Frame Magenta"
     constant.outputs["RGBA"].default_value = (1.0, 0.0, 1.0, 1.0)
-    composite = tree.nodes.new(type="CompositorNodeComposite")
-    composite.name = "Destructive Composite Output"
-    tree.links.new(constant.outputs["RGBA"], composite.inputs["Image"])
+    group_output = tree.nodes.new(type="NodeGroupOutput")
+    group_output.name = "Destructive Group Output"
+    group_output.is_active_output = True
+    image_input = group_output.inputs.get("Image")
+    if image_input is None:
+        raise AssertionError("Blender 5.2 compositor group output has no Image input")
+    tree.links.new(constant.outputs["RGBA"], image_input)
+    scene.compositing_node_group = tree
     return tree
 
 
 def _node_tree_fingerprint(tree):
+    if tree is None:
+        raise ValueError("tree cannot be None")
     nodes = tuple(
         sorted(
             (
@@ -78,6 +94,20 @@ def _node_tree_fingerprint(tree):
         )
     )
     return nodes, links
+
+
+def _single_png_output(result) -> Path:
+    outputs = tuple(
+        path
+        for path in result.output_files
+        if isinstance(path, Path) and path.suffix.lower() == ".png"
+    )
+    _assert(
+        len(outputs) == 1,
+        f"expected one committed B4 PNG, got {result.output_files}",
+    )
+    _assert(outputs[0].is_file(), f"committed B4 PNG is missing: {outputs[0]}")
+    return outputs[0]
 
 
 def _magenta_visible_count(pixels):
@@ -110,12 +140,13 @@ def test_custom_compositor_is_bypassed_during_b4_and_restored_unchanged() -> Non
         original_render = render_module._call_render_operator
 
         def guarded_render(bpy_module):
+            active_tree = scene.compositing_node_group
             observations.append(
                 {
                     "use_compositing": bool(scene.render.use_compositing),
                     "use_sequencer": bool(scene.render.use_sequencer),
-                    "use_nodes": bool(scene.use_nodes),
-                    "tree": _node_tree_fingerprint(scene.node_tree),
+                    "tree_identity": active_tree is tree,
+                    "tree": _node_tree_fingerprint(active_tree),
                 }
             )
             _assert(
@@ -127,8 +158,8 @@ def test_custom_compositor_is_bypassed_during_b4_and_restored_unchanged() -> Non
                 "B4 did not disable Sequencer postprocessing",
             )
             _assert(
-                observations[-1]["use_nodes"] is True,
-                "B4 mutated scene.use_nodes instead of isolating execution",
+                observations[-1]["tree_identity"],
+                "B4 replaced the Scene compositing_node_group",
             )
             _assert(
                 observations[-1]["tree"] == tree_before,
@@ -150,13 +181,16 @@ def test_custom_compositor_is_bypassed_during_b4_and_restored_unchanged() -> Non
         _assert(observations, "B4 render operator was not called")
         _assert(scene.render.use_compositing, "Compositor flag was not restored")
         _assert(scene.render.use_sequencer, "Sequencer flag was not restored")
-        _assert(scene.use_nodes, "scene.use_nodes was not preserved")
         _assert(
-            _node_tree_fingerprint(scene.node_tree) == tree_before,
+            scene.compositing_node_group is tree,
+            "Scene compositing_node_group was not preserved",
+        )
+        _assert(
+            _node_tree_fingerprint(scene.compositing_node_group) == tree_before,
             "custom Compositor node tree was not restored byte-for-structure",
         )
 
-        pixels = _read_pixels(result.image_paths[0])
+        pixels = _read_pixels(_single_png_output(result))
         visible, transparent = _visible_and_transparent_counts(pixels)
         magenta = _magenta_visible_count(pixels)
         pixel_count = len(pixels) // 4
