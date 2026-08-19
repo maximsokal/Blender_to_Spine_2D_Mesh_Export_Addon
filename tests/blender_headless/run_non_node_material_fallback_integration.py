@@ -57,6 +57,7 @@ def test_material_graph_without_output_fails_without_source_mutation() -> None:
     with tempfile.TemporaryDirectory(prefix="spine2d-invalid-node-material-") as directory:
         source = _create_quad("InvalidNodeMaterialSource")
         material = bpy.data.materials.new(name="InvalidNodeMaterial")
+        material.use_nodes = True
         _assert(material.node_tree is not None, "Blender 5.2 material has no node tree")
         material.node_tree.nodes.clear()
         source.data.materials.append(material)
