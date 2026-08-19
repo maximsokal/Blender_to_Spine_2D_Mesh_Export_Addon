@@ -10,6 +10,7 @@ import traceback
 from unittest import mock
 
 import bpy
+from bpy_extras.anim_utils import animdata_get_channelbag_for_assigned_slot
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 REPOSITORY_ROOT = SCRIPT_DIRECTORY.parents[1]
@@ -89,6 +90,27 @@ def _prepare_sequence_plan(
     return target_snapshot, analysis, plan
 
 
+def _set_assigned_action_interpolation_linear(id_data) -> None:
+    if id_data is None:
+        raise ValueError("id_data cannot be None")
+    animation_data = getattr(id_data, "animation_data", None)
+    if animation_data is None or animation_data.action is None:
+        raise AssertionError("animated ID has no assigned Blender 5.2 Action")
+    channelbag = animdata_get_channelbag_for_assigned_slot(animation_data)
+    if channelbag is None:
+        raise AssertionError("assigned Blender 5.2 Action has no channelbag")
+
+    keyframe_count = 0
+    for fcurve in channelbag.fcurves:
+        for keyframe in fcurve.keyframe_points:
+            keyframe.interpolation = "LINEAR"
+            keyframe_count += 1
+    _assert(
+        keyframe_count >= 2,
+        f"expected at least two animated alpha keyframes, got {keyframe_count}",
+    )
+
+
 def _median_covered_alpha(path: Path) -> float:
     values = _alpha_values(_read_pixels(path), minimum=0.02)
     _assert(len(values) > 20, f"texture '{path.name}' has no covered alpha pixels")
@@ -141,9 +163,7 @@ def test_animated_principled_alpha_sequence_changes_output_and_restores_frame() 
         alpha_socket.keyframe_insert(data_path="default_value", frame=1)
         alpha_socket.default_value = 0.8
         alpha_socket.keyframe_insert(data_path="default_value", frame=3)
-        for fcurve in material.node_tree.animation_data.action.fcurves:
-            for keyframe in fcurve.keyframe_points:
-                keyframe.interpolation = "LINEAR"
+        _set_assigned_action_interpolation_linear(material.node_tree)
 
         sentinel = _create_sentinel()
         _activate_only(sentinel)
