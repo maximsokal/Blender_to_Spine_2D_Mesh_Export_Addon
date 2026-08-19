@@ -1,4 +1,4 @@
-"""Blender 4.4 integration checks for the A1 renderer contract."""
+"""Blender 5.2 integration checks for the A1 renderer contract."""
 
 from __future__ import annotations
 
@@ -100,14 +100,14 @@ def test_cycles_analysis_uses_cycles_output() -> None:
 
 def test_eevee_analysis_and_execution_contract_force_b4() -> None:
     _prepare_scene_with_sentinel()
-    bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
+    bpy.context.scene.render.engine = "BLENDER_EEVEE"
     with tempfile.TemporaryDirectory(prefix="spine2d-renderer-eevee-") as directory:
         source = _create_quad("EeveeRendererSource")
         source.data.materials.append(_renderer_specific_material("RendererMaterial"))
         settings = replace(
             _settings(Path(directory), "EeveeRenderer"),
             bake_execution=BakeExecutionSettings(
-                render_engine="BLENDER_EEVEE_NEXT",
+                render_engine="BLENDER_EEVEE",
                 samples=2,
             ),
         )
@@ -124,7 +124,7 @@ def test_eevee_analysis_and_execution_contract_force_b4() -> None:
             "Eevee local material was incorrectly assigned to object bake",
         )
         _assert(
-            prepared.statistics["render_engine"] == "BLENDER_EEVEE_NEXT",
+            prepared.statistics["render_engine"] == "BLENDER_EEVEE",
             "wrong Eevee engine statistic",
         )
         _assert(
@@ -135,7 +135,7 @@ def test_eevee_analysis_and_execution_contract_force_b4() -> None:
 
 def test_renderer_mismatch_fails_before_execution() -> None:
     _prepare_scene_with_sentinel()
-    bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
+    bpy.context.scene.render.engine = "BLENDER_EEVEE"
     with tempfile.TemporaryDirectory(prefix="spine2d-renderer-mismatch-") as directory:
         source = _create_quad("RendererMismatchSource")
         source.data.materials.append(_renderer_specific_material("RendererMaterial"))
