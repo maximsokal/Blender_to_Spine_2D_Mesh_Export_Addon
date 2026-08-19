@@ -1,4 +1,4 @@
-"""Real Blender 4.4 Eevee production B4 render and export fixture."""
+"""Real Blender 5.2 Eevee production B4 render and export fixture."""
 
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ def _visible_transparent_and_colored(pixels):
 def test_eevee_b4_executes_real_render_and_finalizes_cropped_attachment() -> None:
     _prepare_scene_with_sentinel()
     scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE_NEXT"
+    scene.render.engine = "BLENDER_EEVEE"
     with tempfile.TemporaryDirectory(prefix="spine2d-eevee-b4-") as directory:
         output_directory = Path(directory)
         source = _create_quad("EeveeProductionSource")
@@ -96,7 +96,7 @@ def test_eevee_b4_executes_real_render_and_finalizes_cropped_attachment() -> Non
         settings = replace(
             _settings(output_directory, "EeveeProduction"),
             bake_execution=BakeExecutionSettings(
-                render_engine="BLENDER_EEVEE_NEXT",
+                render_engine="BLENDER_EEVEE",
                 samples=4,
             ),
         )
@@ -106,7 +106,7 @@ def test_eevee_b4_executes_real_render_and_finalizes_cropped_attachment() -> Non
         result = export_a1_single_object(source, settings)
 
         _assert(result.success, f"Eevee B4 export failed: {result.issues}")
-        _assert(result.statistics["render_engine"] == "BLENDER_EEVEE_NEXT", "wrong engine")
+        _assert(result.statistics["render_engine"] == "BLENDER_EEVEE", "wrong engine")
         _assert(result.statistics["shader_render_target"] == "EEVEE", "wrong target")
         _assert(
             result.statistics["projection_crop_width"] < 64
