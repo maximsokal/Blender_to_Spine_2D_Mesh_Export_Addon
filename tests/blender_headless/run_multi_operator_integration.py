@@ -65,6 +65,24 @@ def _analyze_ready_export() -> None:
     _assert("FINISHED" in result, f"Analyze did not finish: {result}")
 
 
+def _invoke_expected_operator_failure(operator, *, expected_message: str) -> None:
+    if not callable(operator):
+        raise TypeError("operator must be callable")
+    if not isinstance(expected_message, str) or not expected_message:
+        raise ValueError("expected_message must be a non-empty string")
+
+    try:
+        result = operator()
+    except RuntimeError as exc:
+        _assert(
+            expected_message in str(exc),
+            f"operator raised an unrelated RuntimeError: {exc}",
+        )
+        return
+
+    _assert("CANCELLED" in result, f"Rewrite failure was hidden: {result}")
+
+
 def test_registered_operator_uses_public_rewrite_standalone_route() -> None:
     _clear_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-operator-rewrite-") as directory:
@@ -156,9 +174,11 @@ def test_rewrite_failure_cancels_without_legacy_fallback() -> None:
             "export_selected_objects_a1",
             side_effect=RuntimeError("forced rewrite operator failure"),
         ):
-            result = bpy.ops.object.spine2d_multi_export()
+            _invoke_expected_operator_failure(
+                bpy.ops.object.spine2d_multi_export,
+                expected_message="forced rewrite operator failure",
+            )
 
-        _assert("CANCELLED" in result, f"Rewrite failure was hidden: {result}")
         _assert(
             "export_selected_objects" not in ui.__dict__,
             "Rewrite UI exposes a Legacy selected-object exporter",
