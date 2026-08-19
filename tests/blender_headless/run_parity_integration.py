@@ -1,4 +1,4 @@
-"""Validate the A1 parity gate against JSON produced by Blender 4.4.
+"""Validate the A1 parity gate against JSON produced by Blender 5.2.
 
 The fixture exports a real object through the complete service, confirms a copied
 result is compatible despite volatile metadata changes, then corrupts one weighted
@@ -79,6 +79,7 @@ def _first_mesh_attachment(document: dict):
 
 def test_parity_gate_reads_real_service_output() -> None:
     _clear_scene()
+    bpy.context.scene.render.engine = "CYCLES"
     with tempfile.TemporaryDirectory(prefix="spine2d-parity-") as directory:
         output_directory = Path(directory)
         source = _create_quad("ParitySource")
