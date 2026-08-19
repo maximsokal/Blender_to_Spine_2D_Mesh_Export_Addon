@@ -156,12 +156,21 @@ def test_complete_service_exports_uv_split_region() -> None:
             "UV-split attachment edge topology is incomplete",
         )
 
+        # Vertex-bone naming belongs to the exported attachment request. Derive its
+        # prefix from the actual serialized slot instead of assuming that the region is
+        # always named Segment_0; region ordering may legitimately change while the
+        # one-bone-per-attachment-vertex contract must remain exact.
+        vertex_bone_prefix = f"{slot_name}_vertex_"
         vertex_bones = tuple(
             bone
             for bone in document["bones"]
-            if bone["name"].startswith("UVSeam_Segment_0_vertex_")
+            if str(bone.get("name", "")).startswith(vertex_bone_prefix)
         )
-        _assert(len(vertex_bones) == 6, "one bone per UV-specific vertex is required")
+        _assert(
+            len(vertex_bones) == vertex_count == 6,
+            "one vertex bone is required for every UV-specific attachment vertex; "
+            f"slot={slot_name!r}, bones={tuple(bone.get('name') for bone in vertex_bones)}",
+        )
         positions = tuple(
             (float(bone.get("x", 0.0)), float(bone.get("y", 0.0)))
             for bone in vertex_bones
