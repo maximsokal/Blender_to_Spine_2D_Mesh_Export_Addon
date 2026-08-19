@@ -67,6 +67,7 @@ def _prepare_sequence_plan(
     ).snapshot
     analysis = analyse_object_materials(
         obj,
+        render_target="CYCLES",
         source_object_id=source_snapshot.source_object_id,
     )
     plan = build_bake_plan(
