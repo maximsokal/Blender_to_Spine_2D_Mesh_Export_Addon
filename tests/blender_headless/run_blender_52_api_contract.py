@@ -426,6 +426,7 @@ def test_material_node_tree_and_output_target_contract() -> None:
     material = None
     try:
         material = bpy.data.materials.new("__Spine2D_ApiContractMaterial")
+        material.use_nodes = True
         node_tree = material.node_tree
         _assert(node_tree is not None, "Blender 5.2 Material has no node_tree")
         _assert(node_tree.nodes is not None, "Material node tree has no nodes")
