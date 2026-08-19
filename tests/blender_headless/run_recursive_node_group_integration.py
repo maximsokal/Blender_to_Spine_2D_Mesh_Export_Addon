@@ -1,4 +1,4 @@
-"""Blender 4.4 integration tests for recursive Shader Node Group analysis."""
+"""Blender 5.2 integration tests for recursive Shader Node Group analysis."""
 
 from __future__ import annotations
 
@@ -216,7 +216,6 @@ def _create_renderer_specific_material(name: str):
     eevee_output = nodes.new(type="ShaderNodeOutputMaterial")
     eevee_output.name = "Eevee Material Output"
     eevee_output.target = "EEVEE"
-
     layer_weight = nodes.new(type="ShaderNodeLayerWeight")
     layer_weight.name = "Cycles Layer Weight"
     emission = nodes.new(type="ShaderNodeEmission")
@@ -239,7 +238,11 @@ def test_nested_camera_group_routes_to_b4_and_renders() -> None:
         material = _create_nested_layer_weight_material("NestedCameraMaterial")
         source.data.materials.append(material)
 
-        analysis = analyse_object_materials(source, source_object_id=source.name)
+        analysis = analyse_object_materials(
+            source,
+            render_target="CYCLES",
+            source_object_id=source.name,
+        )
         graph = analysis.slots[0].graph
         _assert(graph is not None, "nested camera material has no graph snapshot")
         dependencies = set(graph.dependencies)
@@ -283,7 +286,11 @@ def test_nested_volume_group_routes_to_b4_and_renders() -> None:
         material = _create_nested_volume_material("NestedVolumeMaterial")
         source.data.materials.append(material)
 
-        analysis = analyse_object_materials(source, source_object_id=source.name)
+        analysis = analyse_object_materials(
+            source,
+            render_target="CYCLES",
+            source_object_id=source.name,
+        )
         graph = analysis.slots[0].graph
         _assert(graph is not None, "nested volume material has no graph snapshot")
         _assert(
@@ -316,7 +323,11 @@ def test_unused_group_input_does_not_select_camera_projection() -> None:
         material = _create_group_with_unused_camera_input("PreciseGroupMaterial")
         source.data.materials.append(material)
 
-        analysis = analyse_object_materials(source, source_object_id=source.name)
+        analysis = analyse_object_materials(
+            source,
+            render_target="CYCLES",
+            source_object_id=source.name,
+        )
         graph = analysis.slots[0].graph
         _assert(graph is not None, "precise group material has no graph snapshot")
         _assert(
@@ -343,7 +354,11 @@ def test_nested_image_controls_material_kind_and_ignores_orphan_image() -> None:
     material, generated = _create_nested_image_material("NestedImageMaterial")
     source.data.materials.append(material)
 
-    analysis = analyse_object_materials(source, source_object_id=source.name)
+    analysis = analyse_object_materials(
+        source,
+        render_target="CYCLES",
+        source_object_id=source.name,
+    )
     slot = analysis.slots[0]
     _assert(slot.kind is MaterialKind.IMAGE, f"unexpected nested image kind: {slot.kind}")
     _assert(
@@ -365,7 +380,11 @@ def test_muted_group_uses_internal_bypass_and_stays_local() -> None:
         source.data.materials.append(material)
         _assert(tuple(instance.internal_links), "Blender did not create muted group bypass links")
 
-        analysis = analyse_object_materials(source, source_object_id=source.name)
+        analysis = analyse_object_materials(
+            source,
+            render_target="CYCLES",
+            source_object_id=source.name,
+        )
         graph = analysis.slots[0].graph
         _assert(graph is not None, "muted group material has no graph snapshot")
         _assert(
@@ -394,7 +413,11 @@ def test_renderer_specific_material_outputs_follow_active_engine() -> None:
     original_engine = scene.render.engine
     try:
         scene.render.engine = "CYCLES"
-        cycles = analyse_object_materials(source, source_object_id=source.name)
+        cycles = analyse_object_materials(
+            source,
+            render_target="CYCLES",
+            source_object_id=source.name,
+        )
         cycles_graph = cycles.slots[0].graph
         _assert(cycles_graph is not None, "Cycles graph snapshot is missing")
         _assert(
@@ -406,8 +429,12 @@ def test_renderer_specific_material_outputs_follow_active_engine() -> None:
             f"Cycles camera dependency missing: {cycles_graph.dependencies}",
         )
 
-        scene.render.engine = "BLENDER_EEVEE_NEXT"
-        eevee = analyse_object_materials(source, source_object_id=source.name)
+        scene.render.engine = "BLENDER_EEVEE"
+        eevee = analyse_object_materials(
+            source,
+            render_target="EEVEE",
+            source_object_id=source.name,
+        )
         eevee_graph = eevee.slots[0].graph
         _assert(eevee_graph is not None, "Eevee graph snapshot is missing")
         _assert(
