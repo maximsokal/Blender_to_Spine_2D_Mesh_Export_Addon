@@ -19,6 +19,12 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
 
 import Blender_to_Spine2D_Mesh_Exporter as addon  # noqa: E402
 from Blender_to_Spine2D_Mesh_Exporter import single_object_operator  # noqa: E402
+from Blender_to_Spine2D_Mesh_Exporter.application import (  # noqa: E402
+    resolve_a1_output_paths,
+)
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_export_plan import (  # noqa: E402
+    build_active_ui_export_plan,
+)
 from run_bake_integration import (  # noqa: E402
     PNG_SIGNATURE,
     _activate_only,
@@ -52,6 +58,37 @@ def _configure_scene(output_directory: Path) -> int:
     return int(scene.spine2d_texture_size)
 
 
+def _public_output_paths(source) -> tuple[Path, Path]:
+    if source is None:
+        raise ValueError("source cannot be None")
+
+    plan = build_active_ui_export_plan(bpy.context)
+    _assert(plan.source_object is source, "public single UI plan changed active source")
+    paths = resolve_a1_output_paths(source.name, plan.settings)
+    return (
+        paths.json_path,
+        paths.image_directory / f"{paths.output_stem}_Baked.png",
+    )
+
+
+def _invoke_expected_operator_failure(operator, *, expected_message: str) -> None:
+    if not callable(operator):
+        raise TypeError("operator must be callable")
+    if not isinstance(expected_message, str) or not expected_message:
+        raise ValueError("expected_message must be a non-empty string")
+
+    try:
+        result = operator()
+    except RuntimeError as exc:
+        _assert(
+            expected_message in str(exc),
+            f"operator raised an unrelated RuntimeError: {exc}",
+        )
+        return
+
+    _assert("CANCELLED" in result, f"Rewrite failure was hidden: {result}")
+
+
 def test_registered_operator_uses_rewrite_backend() -> None:
     _clear_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-single-operator-") as directory:
@@ -60,6 +97,7 @@ def test_registered_operator_uses_rewrite_backend() -> None:
         material = _create_emission_material(source)
         _activate_only(source)
         _configure_scene(output_directory)
+        json_path, texture_path = _public_output_paths(source)
 
         context_before = _capture_context()
         scene_before = _capture_scene_bake_state()
@@ -68,11 +106,10 @@ def test_registered_operator_uses_rewrite_backend() -> None:
         result = bpy.ops.object.save_uv_as_json()
 
         _assert("FINISHED" in result, f"Rewrite single operator failed: {result}")
-        # The public UI route intentionally preserves the historic single-object
-        # JSON filename while routing the implementation exclusively to Rewrite.
-        json_path = output_directory / "SingleOperator_merged.json"
-        texture_path = output_directory / "images" / "SingleOperator_Baked.png"
-        _assert(json_path.is_file(), "single operator did not create public JSON output")
+        _assert(
+            json_path.is_file(),
+            f"single operator did not create versioned public JSON output: {json_path}",
+        )
         _assert(
             texture_path.read_bytes()[:8] == PNG_SIGNATURE,
             "single operator texture is not a valid PNG",
@@ -123,15 +160,12 @@ def test_visual_options_can_be_disabled_through_scene_properties() -> None:
         _configure_scene(output_directory)
         bpy.context.scene.spine2d_control_icons = False
         bpy.context.scene.spine2d_export_preview_animation = False
+        json_path, _texture_path = _public_output_paths(source)
 
         result = bpy.ops.object.save_uv_as_json()
 
         _assert("FINISHED" in result, f"option-disabled export failed: {result}")
-        document = json.loads(
-            (output_directory / "SingleOptionsOff_merged.json").read_text(
-                encoding="utf-8"
-            )
-        )
+        document = json.loads(json_path.read_text(encoding="utf-8"))
         _assert(
             tuple(slot["name"] for slot in document["slots"])
             == ("SingleOptionsOff_Segment_0",),
@@ -157,18 +191,18 @@ def test_rewrite_failure_cancels_without_fallback_or_output() -> None:
         _create_emission_material(source)
         _activate_only(source)
         _configure_scene(output_directory)
-
-        expected_json = output_directory / "SingleNoFallback_merged.json"
-        expected_png = output_directory / "images" / "SingleNoFallback_Baked.png"
+        expected_json, expected_png = _public_output_paths(source)
 
         with mock.patch.object(
             single_object_operator,
             "export_active_object_a1",
             side_effect=RuntimeError("forced single rewrite failure"),
         ):
-            result = bpy.ops.object.save_uv_as_json()
+            _invoke_expected_operator_failure(
+                bpy.ops.object.save_uv_as_json,
+                expected_message="forced single rewrite failure",
+            )
 
-        _assert("CANCELLED" in result, f"Rewrite failure was hidden: {result}")
         _assert(not expected_json.exists(), "failed Rewrite export committed JSON")
         _assert(not expected_png.exists(), "failed Rewrite export committed texture")
         _assert(
