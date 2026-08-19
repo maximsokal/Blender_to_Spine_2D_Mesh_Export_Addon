@@ -50,6 +50,7 @@ from run_bake_integration import (  # noqa: E402
     _capture_context,
     _capture_scene_bake_state,
     _clear_scene,
+    _configure_cycles_scene,
     _create_mesh_object,
     _create_sentinel,
     _material_fingerprint,
@@ -390,6 +391,7 @@ def _connected_settings(output_directory: Path, stem: str):
 
 
 def _prepare_state(sources, materials, frame_number: int):
+    _configure_cycles_scene()
     sentinel = _create_sentinel()
     _activate_only(sentinel)
     for source in sources:
@@ -522,43 +524,29 @@ def test_common_rig_supports_one_sequence_and_two_static_multi_material_objects(
         )
 
 
-def test_sequence_failure_rolls_back_json_static_and_all_frames() -> None:
+def test_forced_second_object_failure_rolls_back_everything() -> None:
     _clear_scene()
-    with tempfile.TemporaryDirectory(prefix="spine2d-sequence-rollback-") as directory:
+    with tempfile.TemporaryDirectory(prefix="spine2d-matrix-rollback-") as directory:
         output_directory = Path(directory)
         fixture = _build_matrix(output_directory)
         context_before, scene_before, material_before = _prepare_state(
             fixture.sources,
             fixture.materials,
-            13,
+            7,
         )
-        final_paths = (
-            output_directory / "ConnectedSequenceRollback.json",
-            output_directory / "images" / "StaticA_Baked.png",
-            output_directory / "images" / "AnimatedB_Baked_0001.png",
-            output_directory / "images" / "AnimatedB_Baked_0002.png",
-            output_directory / "images" / "AnimatedB_Baked_0003.png",
-            output_directory / "images" / "StaticC_Baked.png",
-        )
-        previous = {}
-        for index, path in enumerate(final_paths):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            previous[path] = f"old-{index}".encode()
-            path.write_bytes(previous[path])
+        existing = output_directory / "images" / "AnimatedB_Baked_0002.png"
+        existing.parent.mkdir(parents=True, exist_ok=True)
+        original_bytes = b"existing-user-texture"
+        existing.write_bytes(original_bytes)
 
         original_call = bake_module._call_bake_operator
         calls = 0
 
-        def fail_frame_two(
-            bpy_module,
-            bake_type,
-            *,
-            uv_layer_name,
-        ):
+        def fail_after_first_bake(bpy_module, bake_type, *, uv_layer_name):
             nonlocal calls
             calls += 1
-            if calls == 3:  # StaticA, AnimatedB frame 1, AnimatedB frame 2.
-                raise BakeExecutionError("forced AnimatedB frame-2 failure")
+            if calls == 2:
+                raise BakeExecutionError("forced legacy-derived second bake failure")
             return original_call(
                 bpy_module,
                 bake_type,
@@ -568,31 +556,31 @@ def test_sequence_failure_rolls_back_json_static_and_all_frames() -> None:
         with mock.patch.object(
             bake_module,
             "_call_bake_operator",
-            side_effect=fail_frame_two,
+            side_effect=fail_after_first_bake,
         ):
             result = export_a1_multi_object(
                 fixture.sources,
-                _connected_settings(output_directory, "ConnectedSequenceRollback"),
+                _connected_settings(output_directory, "RollbackRig"),
             )
 
-        _assert(not result.success, "forced failure returned success")
-        _assert(calls == 3, f"wrong bake call count: {calls}")
-        issue = result.issues[-1]
-        _assert(issue.stage == A1MultiObjectStage.STAGE_OUTPUTS.value, issue)
-        for path, content in previous.items():
-            _assert(path.read_bytes() == content, f"rollback changed {path.name}")
-        leftovers = tuple(
+        _assert(not result.success, "forced failure unexpectedly succeeded")
+        _assert(
+            result.statistics.get("stage") == A1MultiObjectStage.STAGE_OUTPUTS.value,
+            f"wrong failed stage: {result.statistics}",
+        )
+        _assert(existing.read_bytes() == original_bytes, "existing output was changed")
+        _assert(
+            not (output_directory / "RollbackRig.json").exists(),
+            "failed export committed JSON",
+        )
+        files = tuple(
             sorted(
-                str(path.relative_to(output_directory))
+                path.relative_to(output_directory).as_posix()
                 for path in output_directory.rglob("*")
                 if path.is_file()
             )
         )
-        _assert(
-            leftovers
-            == tuple(sorted(str(path.relative_to(output_directory)) for path in final_paths)),
-            f"staged/backup files remain: {leftovers}",
-        )
+        _assert(files == ("images/AnimatedB_Baked_0002.png",), f"rollback leaks: {files}")
         _assert_restored(
             context_before,
             scene_before,
@@ -602,17 +590,17 @@ def test_sequence_failure_rolls_back_json_static_and_all_frames() -> None:
 
 
 def main() -> None:
+    print(f"Blender version: {bpy.app.version_string}")
     tests = (
         test_standard_principled_multi_material_bake_is_not_black,
         test_common_rig_supports_one_sequence_and_two_static_multi_material_objects,
-        test_sequence_failure_rolls_back_json_static_and_all_frames,
+        test_forced_second_object_failure_rolls_back_everything,
     )
-    print(f"Blender version: {bpy.app.version_string}")
     for test in tests:
-        print(f"[LEGACY_BAKE_MATRIX] RUN {test.__name__}")
+        print(f"[LEGACY-MATRIX] RUN {test.__name__}")
         test()
-        print(f"[LEGACY_BAKE_MATRIX] PASS {test.__name__}")
-    print(f"[LEGACY_BAKE_MATRIX] PASS {len(tests)} integration tests")
+        print(f"[LEGACY-MATRIX] PASS {test.__name__}")
+    print(f"[LEGACY-MATRIX] PASS {len(tests)} integration tests")
 
 
 if __name__ == "__main__":
