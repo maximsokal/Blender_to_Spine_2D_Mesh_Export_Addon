@@ -3,8 +3,9 @@
 Two triangles form one manifold disk with a 90-degree fold. A1 segmentation keeps
 them in one export region, while Smart Project unwrap deliberately splits the fold.
 The final Spine attachment must therefore contain six UV-specific vertices for four
-geometric vertices and remain fully exportable through Cycles and atomic JSON/PNG
-commit.
+geometric vertices, while its physical XY convex hull remains the three projected
+outer points. The fixture must remain fully exportable through Cycles and atomic
+JSON/PNG commit.
 """
 
 from __future__ import annotations
@@ -134,7 +135,14 @@ def test_complete_service_exports_uv_split_region() -> None:
         attachment = document["skins"][0]["attachments"][slot_name][slot_name]
         vertex_count = len(attachment["uvs"]) // 2
         _assert(vertex_count == 6, f"expected six UV vertices, got {vertex_count}")
-        _assert(attachment["hull"] == 6, f"unexpected hull: {attachment['hull']}")
+        _assert(
+            int(attachment["hull"]) == 3,
+            f"physical XY hull should contain three outer points: {attachment['hull']}",
+        )
+        _assert(
+            int(attachment["hull"]) < vertex_count,
+            "UV seam duplication was incorrectly promoted into the physical hull",
+        )
         _assert(
             len(attachment["triangles"]) == 6,
             "two source triangles were not preserved",
