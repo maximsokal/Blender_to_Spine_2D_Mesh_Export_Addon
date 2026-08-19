@@ -54,6 +54,8 @@ def _configure_scene(output_directory: Path) -> int:
     scene.spine2d_frames_for_render = 0
     scene.spine2d_bake_frame_start = 0
     scene.spine2d_control_icons = True
+    # This RNA value is retained only for historical .blend compatibility. Rewrite
+    # public export deliberately ignores it and never publishes preview animation.
     scene.spine2d_export_preview_animation = True
     return int(scene.spine2d_texture_size)
 
@@ -124,8 +126,8 @@ def test_registered_operator_uses_rewrite_backend() -> None:
 
         # The public Scene default is the TWO_AXIS_ROTATION_SCALE profile. Its visual
         # controls intentionally replace Rotation Z with a dedicated uniform-scale
-        # control, so the operator integration must validate that public profile rather
-        # than the retired three-axis v0.23 visual order.
+        # control, so the operator integration validates that public profile rather than
+        # the retired three-axis v0.23 visual order.
         _assert(
             bpy.context.scene.spine2d_rig_profile == "TWO_AXIS_ROTATION_SCALE",
             "public Scene rig profile is no longer the approved two-axis profile",
@@ -141,37 +143,12 @@ def test_registered_operator_uses_rewrite_backend() -> None:
             f"Rewrite public two-axis control slot order changed: {document['slots'][:4]}",
         )
 
-        _assert("preview" in document["animations"], "preview animation is missing")
-        preview_bones = document["animations"]["preview"]["bones"]
+        # Preview animation is intentionally not part of the Rewrite public export
+        # surface. The historical RNA property remains loadable but must be inert even
+        # when a legacy .blend stores True.
         _assert(
-            set(preview_bones)
-            == {
-                "SingleOperator_rotation_X",
-                "SingleOperator_rotation_Y",
-                "SingleOperator_scale",
-            },
-            f"two-axis preview controls changed: {tuple(preview_bones)}",
-        )
-        _assert(
-            preview_bones["SingleOperator_rotation_X"]["rotate"][-1]
-            == {"time": 2, "value": 360},
-            "two-axis preview X timeline changed",
-        )
-        _assert(
-            preview_bones["SingleOperator_rotation_Y"]["rotate"][-1]
-            == {"time": 2, "value": 360},
-            "two-axis preview Y timeline changed",
-        )
-        scale_timeline = preview_bones["SingleOperator_scale"]["scale"]
-        _assert(len(scale_timeline) == 5, "two-axis preview scale timeline changed")
-        _assert(
-            float(scale_timeline[-1]["x"]) == 1.0
-            and float(scale_timeline[-1]["y"]) == 1.0,
-            f"two-axis preview does not return to unit scale: {scale_timeline[-1]}",
-        )
-        _assert(
-            "SingleOperator_rotation_Z" not in preview_bones,
-            "retired Rotation Z preview remains in the public two-axis profile",
+            "preview" not in document.get("animations", {}),
+            "retired preview animation was re-enabled by compatibility RNA",
         )
 
         _assert(_capture_context() == context_before, "single operator changed context")
@@ -213,7 +190,7 @@ def test_visual_options_can_be_disabled_through_scene_properties() -> None:
             f"disabled control attachments remain: {attachment_slots}",
         )
         _assert(
-            "preview" not in document["animations"],
+            "preview" not in document.get("animations", {}),
             "disabled preview animation remains in JSON",
         )
         _assert(not _temporary_datablock_names(), "option test leaked temporary data")
