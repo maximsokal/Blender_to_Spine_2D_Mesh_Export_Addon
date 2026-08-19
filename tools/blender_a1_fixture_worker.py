@@ -20,6 +20,13 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 import Blender_to_Spine2D_Mesh_Exporter as addon  # noqa: E402
+from Blender_to_Spine2D_Mesh_Exporter.application import (  # noqa: E402
+    resolve_a1_output_paths,
+)
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.a1_ui_export_plan import (  # noqa: E402
+    build_active_ui_export_plan,
+    build_selected_ui_export_plan,
+)
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
     sanitize_filename_stem,
 )
@@ -250,7 +257,17 @@ def _mapping(value: Any, label: str) -> Mapping[str, Any]:
     return value
 
 
+def _require_rewrite_backend(backend: str) -> None:
+    if backend != "REWRITE":
+        raise FixtureWorkerError(
+            "The public extension operator surface is Rewrite-only. Legacy fixture "
+            "exports must use the repository-only legacy harness rather than retired "
+            "Scene backend selector RNA."
+        )
+
+
 def _configure_scene(payload: Mapping[str, Any], backend: str) -> None:
+    _require_rewrite_backend(backend)
     scene = bpy.context.scene
     settings = _mapping(payload.get("settings"), "settings")
     output_directory = Path(_require_string(payload, "output_directory")).resolve(
@@ -302,7 +319,6 @@ def _configure_scene(payload: Mapping[str, Any], backend: str) -> None:
     )
 
     if mode == "single":
-        scene.spine2d_single_export_backend = backend
         start_frame = _integral_int(
             sequence.get("start_frame", 0),
             "settings.sequence.start_frame",
@@ -326,7 +342,6 @@ def _configure_scene(payload: Mapping[str, Any], backend: str) -> None:
             "sequence.frame_count",
         )
     elif mode == "multi":
-        scene.spine2d_multi_export_backend = backend
         for name in selected_names:
             obj = bpy.data.objects.get(name)
             if obj is None:
@@ -362,22 +377,38 @@ def _configure_scene(payload: Mapping[str, Any], backend: str) -> None:
         raise FixtureWorkerError(f"Unsupported fixture mode: {mode}")
 
 
-def _expected_json_name(payload: Mapping[str, Any]) -> str:
+def _safe_json_override(payload: Mapping[str, Any]) -> str | None:
     override = payload.get("expected_json_name")
+    if override is None:
+        return None
+    if not isinstance(override, str):
+        raise FixtureWorkerError("expected_json_name must be a .json filename")
+    normalized = override.replace("\\", "/")
+    path = PurePosixPath(normalized)
+    if len(path.parts) != 1 or path.suffix.lower() != ".json":
+        raise FixtureWorkerError("expected_json_name must be a safe .json filename")
+    return normalized
+
+
+def _expected_json_path(
+    payload: Mapping[str, Any],
+    output_directory: Path,
+) -> Path:
+    override = _safe_json_override(payload)
     if override is not None:
-        if not isinstance(override, str):
-            raise FixtureWorkerError("expected_json_name must be a .json filename")
-        normalized = override.replace("\\", "/")
-        path = PurePosixPath(normalized)
-        if len(path.parts) != 1 or path.suffix.lower() != ".json":
-            raise FixtureWorkerError("expected_json_name must be a safe .json filename")
-        return normalized
-    active = sanitize_filename_stem(_require_string(payload, "active_object"))
+        return output_directory / override
+
     mode = _require_string(payload, "mode").lower()
-    selected_count = len(_require_string_array(payload, "selected_objects"))
     if mode == "single":
-        return f"{active}_merged.json"
-    return f"{active}_plus_{selected_count - 1}_objects.json"
+        plan = build_active_ui_export_plan(bpy.context)
+        paths = resolve_a1_output_paths(plan.source_object.name, plan.settings)
+        return paths.json_path.resolve(strict=False)
+    if mode == "multi":
+        plan = build_selected_ui_export_plan(bpy.context)
+        return (output_directory / f"{plan.settings.output_stem}.json").resolve(
+            strict=False
+        )
+    raise FixtureWorkerError(f"Unsupported fixture mode: {mode}")
 
 
 def _invoke_operator(payload: Mapping[str, Any]) -> set[str]:
@@ -385,6 +416,11 @@ def _invoke_operator(payload: Mapping[str, Any]) -> set[str]:
     if mode == "single":
         return set(bpy.ops.object.save_uv_as_json())
     if mode == "multi":
+        analyse_result = set(bpy.ops.object.spine2d_refresh_info())
+        if "FINISHED" not in analyse_result:
+            raise FixtureWorkerError(
+                f"Analyze operator returned {sorted(analyse_result)}"
+            )
         return set(bpy.ops.object.spine2d_multi_export())
     raise FixtureWorkerError(f"Unsupported fixture mode: {mode}")
 
@@ -406,6 +442,7 @@ def _run(payload: Mapping[str, Any], backend: str) -> dict[str, Any]:
     try:
         _configure_selection(active_name, selected_names)
         _configure_scene(payload, backend)
+        expected_json = _expected_json_path(payload, output_directory)
         context_before = _context_snapshot()
         mesh_before = _mesh_snapshot(selected_names)
         datablocks_before = _datablock_snapshot()
@@ -419,7 +456,6 @@ def _run(payload: Mapping[str, Any], backend: str) -> dict[str, Any]:
         context_after = _context_snapshot()
         mesh_after = _mesh_snapshot(selected_names)
         datablocks_after = _datablock_snapshot()
-        expected_json = output_directory / _expected_json_name(payload)
         if not expected_json.is_file():
             raise FixtureWorkerError(
                 f"Expected final JSON was not created: {expected_json}"
