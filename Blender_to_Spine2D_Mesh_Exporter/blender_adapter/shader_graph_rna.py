@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Final, Mapping
 
 from .shader_graph_error import MaterialGraphAnalysisError
 
@@ -18,6 +19,15 @@ TEMPORARY_PREFIXES = (
 )
 VALID_RENDER_TARGETS = frozenset({"ALL", "CYCLES", "EEVEE"})
 
+# Blender RNA identifiers are not always spelled like the stable vocabulary used by
+# the immutable shader-capability domain. Normalize only confirmed Blender 5.2 RNA
+# variants here so every downstream policy can stay renderer-agnostic and deterministic.
+NODE_TYPE_ALIASES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "SHADERTORGB": "SHADER_TO_RGB",
+    }
+)
+
 
 def material_name(material: Any) -> str:
     value = str(
@@ -31,8 +41,18 @@ def material_name(material: Any) -> str:
 
 
 def node_type(node: Any) -> str:
-    value = str(getattr(node, "type", "") or "").strip()
-    return value or "UNKNOWN"
+    """Return one normalized shader-node identifier for immutable graph snapshots.
+
+    Blender's ``ShaderNodeShaderToRGB`` reports ``node.type == 'SHADERTORGB'`` in
+    Blender 5.2, while the capability domain intentionally uses the stable explicit
+    identifier ``SHADER_TO_RGB``. RNA spelling differences are owned by this adapter
+    boundary rather than duplicated throughout capability policy tables.
+    """
+
+    raw_value = str(getattr(node, "type", "") or "").strip().upper()
+    if not raw_value:
+        return "UNKNOWN"
+    return NODE_TYPE_ALIASES.get(raw_value, raw_value)
 
 
 def rna_identity(value: Any) -> int:
@@ -312,6 +332,7 @@ def color_nonzero(socket: Any | None) -> bool:
 
 
 __all__ = [
+    "NODE_TYPE_ALIASES",
     "TEMPORARY_PREFIXES",
     "VALID_RENDER_TARGETS",
     "color_nonzero",
