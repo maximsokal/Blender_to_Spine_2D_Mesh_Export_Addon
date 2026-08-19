@@ -74,6 +74,20 @@ def _settings(
     )
 
 
+def _single_png_output(result) -> Path:
+    outputs = tuple(
+        path
+        for path in result.output_files
+        if isinstance(path, Path) and path.suffix.lower() == ".png"
+    )
+    _assert(
+        len(outputs) == 1,
+        f"expected one committed PNG, got {result.output_files}",
+    )
+    _assert(outputs[0].is_file(), f"committed PNG is missing: {outputs[0]}")
+    return outputs[0]
+
+
 def _covered_rgb(path: Path) -> tuple[tuple[float, float, float], ...]:
     pixels = _read_pixels(path)
     return tuple(
@@ -126,7 +140,7 @@ def test_generate_if_missing_bakes_materialless_mesh_and_cleans_resources() -> N
             result.statistics.get("generated_material_active") == 1,
             f"generated path was not recorded: {result.statistics}",
         )
-        _assert_green_generated_texture(result.image_paths[0])
+        _assert_green_generated_texture(_single_png_output(result))
         _assert(len(source.data.materials) == 0, "fallback added source material slots")
         _assert(
             _source_attribute_names(source) == attributes_before,
@@ -161,7 +175,7 @@ def test_force_generated_ignores_source_material_without_mutating_it() -> None:
         )
 
         _assert(result.success, f"forced generated export failed: {result.issues}")
-        _assert_green_generated_texture(result.image_paths[0])
+        _assert_green_generated_texture(_single_png_output(result))
         _assert(
             tuple(item.name for item in source.data.materials) == source_material_names,
             "force-generated path changed source material slots",
@@ -194,7 +208,7 @@ def test_generated_material_requested_from_eevee_uses_internal_cycles_bake() -> 
         )
 
         _assert(result.success, f"EEVEE-requested generated export failed: {result.issues}")
-        _assert_green_generated_texture(result.image_paths[0])
+        _assert_green_generated_texture(_single_png_output(result))
         _assert(
             bpy.context.scene.render.engine == "BLENDER_EEVEE",
             "generated bake did not restore the requested EEVEE scene engine",
