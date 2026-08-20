@@ -27,7 +27,6 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.render_engine_contract imp
     RenderEngineContractError,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
-    BakeExecutionSettings,
     CameraProjectionPlan,
 )
 from run_bake_integration import _assert  # noqa: E402
@@ -104,9 +103,11 @@ def test_eevee_analysis_and_execution_contract_force_b4() -> None:
     with tempfile.TemporaryDirectory(prefix="spine2d-renderer-eevee-") as directory:
         source = _create_quad("EeveeRendererSource")
         source.data.materials.append(_renderer_specific_material("RendererMaterial"))
+        base_settings = _settings(Path(directory), "EeveeRenderer")
         settings = replace(
-            _settings(Path(directory), "EeveeRenderer"),
-            bake_execution=BakeExecutionSettings(
+            base_settings,
+            bake_execution=replace(
+                base_settings.bake_execution,
                 render_engine="BLENDER_EEVEE",
                 samples=2,
             ),
