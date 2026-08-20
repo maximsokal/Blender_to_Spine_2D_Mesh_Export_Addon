@@ -112,7 +112,13 @@ class ProjectionRuntimeState:
     def restore(self, scene: Any) -> None:
         failures: list[str] = []
 
-        for entry in reversed(self.scene_values):
+        # Blender validates image color mode/depth against the *current* file format.
+        # Camera Projection may temporarily switch PNG/8-bit state to OPEN_EXR/16-32bit,
+        # so restoring the captured values in simple reverse-capture order is invalid:
+        # color_depth="8" cannot be assigned while file_format is still OPEN_EXR.
+        # Restore the owning file format first, then its dependent image settings; all
+        # unrelated state retains the historical reverse order.
+        for entry in _ordered_scene_restore_entries(self.scene_values):
             try:
                 _set_path(scene, entry.path, entry.value)
             except Exception as exc:
@@ -168,9 +174,44 @@ _SCENE_PATHS = (
     "cycles.samples",
     "cycles.film_transparent_glass",
 )
+_IMAGE_SETTING_RESTORE_ORDER = (
+    "render.image_settings.file_format",
+    "render.image_settings.color_mode",
+    "render.image_settings.color_depth",
+)
 _RENDERABLE_TYPES = frozenset(
     {"MESH", "CURVE", "SURFACE", "META", "FONT", "VOLUME"}
 )
+
+
+def _ordered_scene_restore_entries(
+    scene_values: Tuple[_SceneValue, ...],
+) -> Tuple[_SceneValue, ...]:
+    """Order captured values so Blender enum dependencies are restored safely."""
+
+    if not isinstance(scene_values, tuple) or not all(
+        isinstance(entry, _SceneValue) for entry in scene_values
+    ):
+        raise TypeError("scene_values must be a tuple of _SceneValue values")
+
+    by_path = {entry.path: entry for entry in scene_values}
+    if len(by_path) != len(scene_values):
+        raise CameraProjectionExecutionError(
+            "Captured camera projection state contains duplicate Scene paths"
+        )
+
+    dependent_paths = set(_IMAGE_SETTING_RESTORE_ORDER)
+    image_entries = tuple(
+        by_path[path]
+        for path in _IMAGE_SETTING_RESTORE_ORDER
+        if path in by_path
+    )
+    unrelated_entries = tuple(
+        entry
+        for entry in reversed(scene_values)
+        if entry.path not in dependent_paths
+    )
+    return (*image_entries, *unrelated_entries)
 
 
 def _get_path(root: Any, path: str) -> Any:
