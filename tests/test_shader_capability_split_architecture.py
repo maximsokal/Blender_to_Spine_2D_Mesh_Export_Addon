@@ -49,11 +49,16 @@ def _graph(
     output_socket: str = "Value",
     dependencies=(),
     channels=(MaterialSemanticChannel.SURFACE_COLOR,),
+    from_instancer: bool = False,
 ) -> MaterialGraphSnapshot:
+    if not isinstance(from_instancer, bool):
+        raise TypeError("from_instancer must be bool")
+
     source = ShaderNodeSnapshot(
         node_id="Source",
         node_type=node_type,
         node_name="Source",
+        from_instancer=from_instancer,
     )
     output = ShaderNodeSnapshot(
         node_id="Material Output",
@@ -236,7 +241,11 @@ def test_graph_level_precedence_and_socket_policy_remain_unchanged():
         render_target="CYCLES",
     )
     texture_coord = shader_capability_analysis.audit_material_graph_capabilities(
-        _graph("TEX_COORD", output_socket="From Instancer"),
+        _graph(
+            "TEX_COORD",
+            output_socket="UV",
+            from_instancer=True,
+        ),
         render_target="CYCLES",
     )
 
