@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import sys
 import tempfile
@@ -21,6 +22,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     prepare_a1_object,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
+    A1TextureExportMode,
     CameraProjectionPlan,
     MaterialDependencyKind,
     MaterialKind,
@@ -35,6 +37,24 @@ from run_camera_projection_integration import (  # noqa: E402
     _settings,
     _visible_and_transparent_counts,
 )
+
+
+def _normal_settings(output_directory: Path, stem: str):
+    """Reuse the camera fixture geometry/output defaults while selecting Normal/UV."""
+
+    if not isinstance(output_directory, Path):
+        raise TypeError("output_directory must be pathlib.Path")
+    if not isinstance(stem, str) or not stem.strip():
+        raise ValueError("stem must be a non-empty string")
+
+    base = _settings(output_directory, stem.strip())
+    return replace(
+        base,
+        bake_execution=replace(
+            base.bake_execution,
+            texture_export_mode=A1TextureExportMode.NORMAL_UV_SEGMENTS,
+        ),
+    )
 
 
 def _new_group_socket(tree, name: str, *, in_out: str, socket_type: str):
@@ -340,7 +360,7 @@ def test_unused_group_input_does_not_select_camera_projection() -> None:
         )
         prepared = prepare_a1_object(
             source,
-            _settings(output_directory, "PreciseGroupLocal"),
+            _normal_settings(output_directory, "PreciseGroupLocal"),
         )
         _assert(
             not isinstance(prepared.bake_plan, CameraProjectionPlan),
@@ -397,7 +417,7 @@ def test_muted_group_uses_internal_bypass_and_stays_local() -> None:
         )
         prepared = prepare_a1_object(
             source,
-            _settings(output_directory, "MutedGroupLocal"),
+            _normal_settings(output_directory, "MutedGroupLocal"),
         )
         _assert(
             not isinstance(prepared.bake_plan, CameraProjectionPlan),
