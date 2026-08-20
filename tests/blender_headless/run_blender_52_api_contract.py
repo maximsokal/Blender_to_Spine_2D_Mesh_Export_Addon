@@ -153,7 +153,12 @@ def test_mesh_edge_and_uv_attribute_contract() -> None:
 
         mesh.uv_layers.active = uv_layer
         uv_layer.active_render = True
-        _assert(mesh.uv_layers.active is uv_layer, "Active UV layer was not retained")
+        active_uv = mesh.uv_layers.active
+        _assert(active_uv is not None, "Active UV layer became None")
+        _assert(
+            active_uv.name == uv_layer.name == "BakeUV",
+            f"Active UV layer was not retained: {getattr(active_uv, 'name', None)!r}",
+        )
         _assert(bool(uv_layer.active_render), "Render UV layer was not retained")
     finally:
         _remove_object(obj)
