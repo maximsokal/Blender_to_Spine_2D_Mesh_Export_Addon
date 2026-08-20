@@ -76,8 +76,8 @@ def _object_settings(
 
 def _create_visible_face_with_edge_on_side(name: str):
     # The second triangle has valid three-dimensional area, but vertices 1 and 3
-    # project to the same XY position. It represents a side wall that is invisible
-    # in Spine's two-dimensional projection.
+    # project to the same XY position. It represents a side wall that is edge-on in
+    # the setup pose but must remain in Spine because X/Y controls can reveal it later.
     return _create_mesh_object(
         name,
         (
@@ -93,7 +93,21 @@ def _create_visible_face_with_edge_on_side(name: str):
     )
 
 
-def test_two_axis_standalone_multi_export_skips_edge_on_side_face() -> None:
+def _mesh_attachment(document: dict, slot_name: str) -> dict:
+    attachments = document["skins"][0]["attachments"].get(slot_name)
+    _assert(
+        isinstance(attachments, dict),
+        f"slot {slot_name!r} has no skin attachments",
+    )
+    attachment = attachments.get(slot_name)
+    _assert(
+        isinstance(attachment, dict),
+        f"slot {slot_name!r} has no canonical mesh attachment",
+    )
+    return attachment
+
+
+def test_two_axis_standalone_multi_export_preserves_edge_on_side_face() -> None:
     _clear_scene()
     _configure_cycles_scene()
 
@@ -151,25 +165,22 @@ def test_two_axis_standalone_multi_export_skips_edge_on_side_face() -> None:
 
         document = json.loads(json_path.read_text(encoding="utf-8"))
         slot_names = tuple(slot["name"] for slot in document["slots"])
-        _assert(
-            "EdgeOnComponent_Segment_0" in slot_names,
-            f"visible EdgeOnComponent attachment missing: {slot_names}",
+        expected_edge_slots = (
+            "EdgeOnComponent_Segment_0",
+            "EdgeOnComponent_Segment_1",
         )
-        _assert(
-            "EdgeOnComponent_Segment_1" not in slot_names,
-            f"edge-on side face produced an attachment: {slot_names}",
-        )
-        edge_on_slot = next(
-            slot for slot in document["slots"]
-            if slot["name"] == "EdgeOnComponent_Segment_0"
-        )
-        edge_on_attachment = document["skins"][0]["attachments"][
-            edge_on_slot["name"]
-        ][edge_on_slot["name"]]
-        _assert(
-            len(edge_on_attachment["triangles"]) == 3,
-            f"expected one visible triangle: {edge_on_attachment['triangles']}",
-        )
+        for slot_name in expected_edge_slots:
+            _assert(
+                slot_name in slot_names,
+                f"edge-on topology was lost from the rig: {slot_names}",
+            )
+            attachment = _mesh_attachment(document, slot_name)
+            _assert(
+                len(attachment["triangles"]) == 3,
+                f"{slot_name} no longer owns one source triangle: "
+                f"{attachment['triangles']}",
+            )
+
         _assert(
             not _temporary_datablock_names(),
             "edge-on multi export leaked temporary Blender datablocks",
@@ -178,9 +189,9 @@ def test_two_axis_standalone_multi_export_skips_edge_on_side_face() -> None:
 
 def main() -> None:
     print(f"Blender version: {bpy.app.version_string}")
-    print("[EDGE_ON_MULTI] RUN two-axis standalone edge-on regression")
-    test_two_axis_standalone_multi_export_skips_edge_on_side_face()
-    print("[EDGE_ON_MULTI] PASS two-axis standalone edge-on regression")
+    print("[EDGE_ON_MULTI] RUN two-axis standalone edge-on topology regression")
+    test_two_axis_standalone_multi_export_preserves_edge_on_side_face()
+    print("[EDGE_ON_MULTI] PASS two-axis standalone edge-on topology regression")
 
 
 if __name__ == "__main__":
