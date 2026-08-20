@@ -156,45 +156,101 @@ def node_output_target(node: Any) -> str:
     return normalise_render_target(getattr(node, "target", "ALL"))
 
 
+def _preferred_material_output(
+    candidates: tuple[Any, ...],
+) -> Any | None:
+    """Return the active compatible output, or the first deterministic candidate."""
+
+    if not candidates:
+        return None
+    active = tuple(
+        node
+        for node in candidates
+        if bool(getattr(node, "is_active_output", False))
+    )
+    return active[0] if active else candidates[0]
+
+
 def find_material_output(
     node_tree: Any,
     nodes: tuple[Any, ...],
     render_target: str,
 ) -> Any | None:
-    """Resolve the effective Material Output for one Blender 5.2 target."""
+    """Resolve the effective Material Output for one Blender 5.2 renderer target.
+
+    Blender may expose an active output through ``ShaderNodeTree.get_output_node`` that
+    belongs to another renderer-specific target. The explicit ``ShaderNodeOutputMaterial``
+    ``target`` RNA is therefore authoritative whenever output nodes are available. For a
+    concrete renderer we prefer an exact target, then a generic ``ALL`` output. The
+    Blender getter remains a guarded fallback for reduced RNA/test-double trees only.
+    """
 
     target = normalise_render_target(render_target)
-    getter = getattr(node_tree, "get_output_node", None)
-    if callable(getter):
-        try:
-            candidate = getter(target)
-        except Exception as exc:
-            raise MaterialGraphAnalysisError(
-                f"ShaderNodeTree.get_output_node({target!r}) failed"
-            ) from exc
-        if candidate is not None:
-            if node_type(candidate) != "OUTPUT_MATERIAL":
-                raise MaterialGraphAnalysisError(
-                    "ShaderNodeTree.get_output_node returned a non-Material Output node"
-                )
-            if is_temporary_node(candidate):
-                raise MaterialGraphAnalysisError(
-                    "ShaderNodeTree.get_output_node returned a temporary bake node"
-                )
-            return candidate
-
-    outputs = tuple(node for node in nodes if node_type(node) == "OUTPUT_MATERIAL")
-    if not outputs:
-        return None
-    exact = tuple(node for node in outputs if node_output_target(node) == target)
-    generic = tuple(node for node in outputs if node_output_target(node) == "ALL")
-    candidates = exact or generic
-    if not candidates:
-        return None
-    active = tuple(
-        node for node in candidates if bool(getattr(node, "is_active_output", False))
+    outputs = tuple(
+        node for node in nodes if node_type(node) == "OUTPUT_MATERIAL"
     )
-    return active[0] if active else candidates[0]
+
+    if outputs:
+        if target == "ALL":
+            generic = tuple(
+                node for node in outputs if node_output_target(node) == "ALL"
+            )
+            preferred = _preferred_material_output(generic)
+            if preferred is not None:
+                return preferred
+
+            # ``ALL`` means the caller did not choose a renderer. Preserve Blender's
+            # active-output semantics, but only among the known Material Output nodes.
+            active = tuple(
+                node
+                for node in outputs
+                if bool(getattr(node, "is_active_output", False))
+            )
+            return active[0] if active else outputs[0]
+
+        exact = tuple(
+            node for node in outputs if node_output_target(node) == target
+        )
+        preferred = _preferred_material_output(exact)
+        if preferred is not None:
+            return preferred
+
+        generic = tuple(
+            node for node in outputs if node_output_target(node) == "ALL"
+        )
+        preferred = _preferred_material_output(generic)
+        if preferred is not None:
+            return preferred
+
+        # Renderer-specific outputs exist, but none is compatible with the requested
+        # target. Do not let a global active output silently cross renderer boundaries.
+        return None
+
+    getter = getattr(node_tree, "get_output_node", None)
+    if not callable(getter):
+        return None
+    try:
+        candidate = getter(target)
+    except Exception as exc:
+        raise MaterialGraphAnalysisError(
+            f"ShaderNodeTree.get_output_node({target!r}) failed"
+        ) from exc
+    if candidate is None:
+        return None
+    if node_type(candidate) != "OUTPUT_MATERIAL":
+        raise MaterialGraphAnalysisError(
+            "ShaderNodeTree.get_output_node returned a non-Material Output node"
+        )
+    if is_temporary_node(candidate):
+        raise MaterialGraphAnalysisError(
+            "ShaderNodeTree.get_output_node returned a temporary bake node"
+        )
+
+    candidate_target = node_output_target(candidate)
+    compatible_targets = {"ALL"} if target == "ALL" else {target, "ALL"}
+    if candidate_target not in compatible_targets:
+        return None
+    return candidate
 
 
 def socket_by_name(collection: Any, name: str) -> Any | None:
