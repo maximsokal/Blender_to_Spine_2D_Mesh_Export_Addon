@@ -15,9 +15,18 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from Blender_to_Spine2D_Mesh_Exporter.application import (  # noqa: E402
+    A1SingleObjectExportSettings,
+    A1SourceGeometryMode,
+    ExportSettings,
+)
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     export_a1_single_object,
 )
+from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
+    BakeExecutionSettings,
+)
+from Blender_to_Spine2D_Mesh_Exporter.domain.uv import UvUnwrapSettings  # noqa: E402
 from run_bake_integration import (  # noqa: E402
     _assert,
     _clear_scene,
@@ -26,7 +35,33 @@ from run_bake_integration import (  # noqa: E402
     _material_fingerprint,
     _temporary_datablock_names,
 )
-from run_camera_projection_integration import _settings  # noqa: E402
+
+
+def _normal_settings(
+    output_directory: Path,
+    stem: str,
+) -> A1SingleObjectExportSettings:
+    if not isinstance(output_directory, Path):
+        raise TypeError("output_directory must be pathlib.Path")
+    if not isinstance(stem, str) or not stem.strip():
+        raise ValueError("stem must be a non-empty string")
+
+    resolved_stem = stem.strip()
+    return A1SingleObjectExportSettings(
+        export=ExportSettings(
+            texture_width=32,
+            texture_height=32,
+            output_directory=output_directory,
+            images_relative_path="images",
+            bake_margin=1,
+        ),
+        prefix=resolved_stem,
+        output_stem=resolved_stem,
+        json_output_stem=resolved_stem,
+        source_geometry_mode=A1SourceGeometryMode.ORIGINAL,
+        uv=UvUnwrapSettings(layer_name="SpineBakeUV"),
+        bake_execution=BakeExecutionSettings(samples=1),
+    )
 
 
 def test_blender_52_node_material_is_baked_from_an_owned_copy() -> None:
@@ -40,7 +75,7 @@ def test_blender_52_node_material_is_baked_from_an_owned_copy() -> None:
         _assert(material.node_tree is not None, "Blender 5.2 material has no node tree")
         result = export_a1_single_object(
             source,
-            _settings(Path(directory), "NodeMaterial"),
+            _normal_settings(Path(directory), "NodeMaterial"),
         )
 
         _assert(result.success, f"Blender 5.2 node material export failed: {result.issues}")
@@ -65,7 +100,7 @@ def test_material_graph_without_output_fails_without_source_mutation() -> None:
 
         result = export_a1_single_object(
             source,
-            _settings(Path(directory), "InvalidNodeMaterial"),
+            _normal_settings(Path(directory), "InvalidNodeMaterial"),
         )
 
         _assert(not result.success, "material without an output node exported silently")
