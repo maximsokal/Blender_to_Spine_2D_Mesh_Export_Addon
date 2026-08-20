@@ -41,19 +41,21 @@ from run_camera_projection_integration import (  # noqa: E402
 
 
 def _create_hdr_camera_material(name: str):
+    """Create camera-dependent shading with guaranteed scene-linear values above one."""
+
     material = bpy.data.materials.new(name=name)
     material.use_nodes = True
     nodes = material.node_tree.nodes
     nodes.clear()
     output = nodes.new(type="ShaderNodeOutputMaterial")
     layer_weight = nodes.new(type="ShaderNodeLayerWeight")
-    multiply = nodes.new(type="ShaderNodeMath")
-    multiply.operation = "MULTIPLY"
-    multiply.inputs[1].default_value = 8.0
+    ramp = nodes.new(type="ShaderNodeValToRGB")
+    ramp.color_ramp.elements[0].color = (1.0, 0.32, 0.08, 1.0)
+    ramp.color_ramp.elements[1].color = (0.08, 0.32, 1.0, 1.0)
     emission = nodes.new(type="ShaderNodeEmission")
-    emission.inputs["Color"].default_value = (1.0, 0.32, 0.08, 1.0)
-    material.node_tree.links.new(layer_weight.outputs["Facing"], multiply.inputs[0])
-    material.node_tree.links.new(multiply.outputs[0], emission.inputs["Strength"])
+    emission.inputs["Strength"].default_value = 4.0
+    material.node_tree.links.new(layer_weight.outputs["Facing"], ramp.inputs["Fac"])
+    material.node_tree.links.new(ramp.outputs["Color"], emission.inputs["Color"])
     material.node_tree.links.new(emission.outputs["Emission"], output.inputs["Surface"])
     return material
 
