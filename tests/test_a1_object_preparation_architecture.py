@@ -80,6 +80,22 @@ def test_depth_dispatch_helpers_preserve_explicit_stage_owners():
     assert "prepare_a1_depth_document" in document_dispatch
 
 
+def test_depth_statistics_keep_common_projection_logging_schema():
+    function = _function(
+        _tree("a1_depth_source_geometry_preparation.py"),
+        "_depth_statistics",
+    )
+    string_literals = {
+        node.value
+        for node in ast.walk(function)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+
+    assert "active_camera_projection_applied" in string_literals
+    assert "shared_pivot_applied" in string_literals
+    assert "projection_kind" in string_literals
+
+
 def test_public_orchestrator_owns_source_uv_integrity_guard():
     function = _function(_tree("a1_object_preparation.py"), "prepare_a1_object")
     with_calls = [
