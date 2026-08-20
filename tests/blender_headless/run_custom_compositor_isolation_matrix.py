@@ -36,6 +36,26 @@ from run_camera_projection_integration import (  # noqa: E402
 )
 
 
+def _single_color_output_socket(node):
+    if node is None:
+        raise ValueError("node cannot be None")
+    outputs = tuple(node.outputs)
+    _assert(
+        len(outputs) == 1,
+        f"expected one compositor color output, got {[socket.name for socket in outputs]}",
+    )
+    socket = outputs[0]
+    _assert(
+        str(getattr(socket, "bl_idname", "")) == "NodeSocketColor",
+        f"unexpected compositor output socket type: {getattr(socket, 'bl_idname', None)!r}",
+    )
+    _assert(
+        hasattr(socket, "default_value"),
+        "compositor color output has no default_value",
+    )
+    return socket
+
+
 def _create_destructive_compositor(scene):
     if scene is None:
         raise ValueError("scene cannot be None")
@@ -51,14 +71,15 @@ def _create_destructive_compositor(scene):
     )
     constant = tree.nodes.new(type="CompositorNodeRGB")
     constant.name = "Destructive Full Frame Magenta"
-    constant.outputs["RGBA"].default_value = (1.0, 0.0, 1.0, 1.0)
+    constant_output = _single_color_output_socket(constant)
+    constant_output.default_value = (1.0, 0.0, 1.0, 1.0)
     group_output = tree.nodes.new(type="NodeGroupOutput")
     group_output.name = "Destructive Group Output"
     group_output.is_active_output = True
     image_input = group_output.inputs.get("Image")
     if image_input is None:
         raise AssertionError("Blender 5.2 compositor group output has no Image input")
-    tree.links.new(constant.outputs["RGBA"], image_input)
+    tree.links.new(constant_output, image_input)
     scene.compositing_node_group = tree
     return tree
 
