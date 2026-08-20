@@ -122,6 +122,42 @@ def test_blender_version_and_eevee_identifier() -> None:
         scene.render.engine = original_engine
 
 
+def _activate_uv_layer_for_display_and_render(mesh, uv_layer, expected_name: str) -> None:
+    """Use Blender 5.2 UVLoopLayers collection ownership for active UV roles."""
+
+    if mesh is None:
+        raise ValueError("mesh cannot be None")
+    if uv_layer is None:
+        raise ValueError("uv_layer cannot be None")
+    if not isinstance(expected_name, str) or not expected_name:
+        raise ValueError("expected_name must be a non-empty string")
+
+    layers = mesh.uv_layers
+    layers.active = uv_layer
+    layers.active_render = uv_layer
+
+    active_uv = layers.active
+    render_uv = layers.active_render
+    _assert(active_uv is not None, "Active UV layer became None")
+    _assert(render_uv is not None, "Render UV layer became None")
+    _assert(
+        active_uv.name == expected_name,
+        f"Active UV layer was not retained: {getattr(active_uv, 'name', None)!r}",
+    )
+    _assert(
+        render_uv.name == expected_name,
+        f"Render UV layer was not retained: {getattr(render_uv, 'name', None)!r}",
+    )
+    _assert(
+        int(layers.active_index) == int(layers.find(expected_name)),
+        f"Active UV index does not identify {expected_name!r}",
+    )
+    _assert(
+        int(layers.active_render_index) == int(layers.find(expected_name)),
+        f"Render UV index does not identify {expected_name!r}",
+    )
+
+
 def test_mesh_edge_and_uv_attribute_contract() -> None:
     mesh = None
     obj = None
@@ -151,15 +187,7 @@ def test_mesh_edge_and_uv_attribute_contract() -> None:
         coordinate = tuple(float(value) for value in uv_layer.uv[0].vector)
         _assert(coordinate == (0.125, 0.875), f"UV vector round trip failed: {coordinate}")
 
-        mesh.uv_layers.active = uv_layer
-        uv_layer.active_render = True
-        active_uv = mesh.uv_layers.active
-        _assert(active_uv is not None, "Active UV layer became None")
-        _assert(
-            active_uv.name == uv_layer.name == "BakeUV",
-            f"Active UV layer was not retained: {getattr(active_uv, 'name', None)!r}",
-        )
-        _assert(bool(uv_layer.active_render), "Render UV layer was not retained")
+        _activate_uv_layer_for_display_and_render(mesh, uv_layer, "BakeUV")
     finally:
         _remove_object(obj)
         _remove_mesh(mesh)
@@ -255,8 +283,7 @@ def test_uv_operator_rna_and_headless_execution_contract() -> None:
         obj = bpy.data.objects.new("__Spine2D_UvOperatorContractObject", mesh)
         bpy.context.scene.collection.objects.link(obj)
         uv_layer = mesh.uv_layers.new(name="SpineBakeUV")
-        mesh.uv_layers.active = uv_layer
-        uv_layer.active_render = True
+        _activate_uv_layer_for_display_and_render(mesh, uv_layer, "SpineBakeUV")
 
         _activate_only(obj)
         _require_finished(
@@ -503,9 +530,27 @@ def main() -> None:
         test_material_node_tree_and_output_target_contract,
         test_image_alpha_and_color_attribute_contract,
     )
+    failures: list[tuple[str, BaseException]] = []
     for test in tests:
-        test()
-        print(f"[PASS] {test.__name__}")
+        print(f"[API-CONTRACT] RUN {test.__name__}")
+        try:
+            test()
+        except BaseException as exc:
+            failures.append((test.__name__, exc))
+            print(f"[API-CONTRACT] FAIL {test.__name__}: {exc}")
+            traceback.print_exc()
+        else:
+            print(f"[API-CONTRACT] PASS {test.__name__}")
+
+    if failures:
+        summary = "; ".join(
+            f"{name}: {type(exc).__name__}: {exc}"
+            for name, exc in failures
+        )
+        raise AssertionError(
+            f"Blender 5.2 API contract failed: {len(failures)}/{len(tests)}; {summary}"
+        ) from failures[0][1]
+
     print(f"Blender 5.2 API contract passed: {len(tests)} tests")
 
 
