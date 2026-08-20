@@ -21,7 +21,6 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     export_a1_single_object,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
-    BakeExecutionSettings,
     ProjectionAlphaRepresentation,
     ProjectionDynamicRange,
     ProjectionOutputPolicy,
@@ -127,10 +126,14 @@ def test_sdr_png_auto_policy_is_display_referred_and_straight() -> None:
         source = _create_quad("SdrOutputSource")
         source.scale = (0.68, 0.5, 1.0)
         source.data.materials.append(_create_hdr_camera_material("SdrOutputMaterial"))
+        base_settings = _settings(output_directory, "SdrOutput")
         settings = replace(
-            _settings(output_directory, "SdrOutput"),
+            base_settings,
             texture_format=TextureFormat.PNG,
-            bake_execution=BakeExecutionSettings(samples=4),
+            bake_execution=replace(
+                base_settings.bake_execution,
+                samples=4,
+            ),
         )
         context_before = _capture_context()
         render_before = _scene_render_fingerprint()
@@ -179,10 +182,12 @@ def test_openexr_auto_policy_preserves_scene_linear_hdr_and_premultiplied_alpha(
         source = _create_quad("HdrOutputSource")
         source.scale = (0.68, 0.5, 1.0)
         source.data.materials.append(_create_hdr_camera_material("HdrOutputMaterial"))
+        base_settings = _settings(output_directory, "HdrOutput")
         settings = replace(
-            _settings(output_directory, "HdrOutput"),
+            base_settings,
             texture_format=TextureFormat.OPEN_EXR,
-            bake_execution=BakeExecutionSettings(
+            bake_execution=replace(
+                base_settings.bake_execution,
                 samples=4,
                 projection_output_policy=ProjectionOutputPolicy(
                     dynamic_range=ProjectionDynamicRange.SCENE_LINEAR_HDR,
