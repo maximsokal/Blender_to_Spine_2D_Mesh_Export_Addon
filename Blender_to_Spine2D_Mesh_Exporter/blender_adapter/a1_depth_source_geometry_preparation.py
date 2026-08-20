@@ -312,7 +312,6 @@ def _canonicalize_depth_evaluated_identity(
         result.duplicate_loop_source_id_count,
         result.duplicate_face_source_id_count,
         result.missing_edge_source_id_count,
-        result.missing_edge_source_id_count,
     )
     return result.snapshot, resolved_warnings, resolved_statistics, result
 
