@@ -27,7 +27,7 @@ from Blender_to_Spine2D_Mesh_Exporter.infrastructure import (  # noqa: E402
 )
 
 
-_TEST_LOGGING_SETTINGS_PROPERTY = "_spine2d_test_logging_settings"
+_TEST_LOGGING_SETTINGS_PROPERTY = "spine2d_test_logging_settings"
 
 
 def _assert(condition: bool, message: str) -> None:
