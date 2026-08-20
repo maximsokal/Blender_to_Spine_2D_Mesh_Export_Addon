@@ -312,6 +312,7 @@ def _canonicalize_depth_evaluated_identity(
         result.duplicate_loop_source_id_count,
         result.duplicate_face_source_id_count,
         result.missing_edge_source_id_count,
+        result.missing_edge_source_id_count,
     )
     return result.snapshot, resolved_warnings, resolved_statistics, result
 
@@ -348,6 +349,7 @@ def _depth_statistics(
             "depth_projection_source_triangle_count": result.source_triangle_count,
             "depth_projection_point_count": result.sampled_point_count,
             "active_camera_projection_applied": 1,
+            "shared_pivot_applied": 0,
             "active_camera_preprojection_triangulation": 1,
             "active_camera_name": result.frame.camera_id,
             "active_camera_type": result.frame.kind.value,
