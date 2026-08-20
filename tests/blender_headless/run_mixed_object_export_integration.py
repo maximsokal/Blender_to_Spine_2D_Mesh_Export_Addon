@@ -150,11 +150,14 @@ def test_mixed_selection_preserves_connected_and_standalone_semantics() -> None:
         _assert(
             slot_names
             == (
+                "ObjectC_Segment_0",
                 "ObjectA_Segment_0",
                 "ObjectB_Segment_0",
-                "ObjectC_Segment_0",
             ),
-            f"mixed slot order changed: {slot_names}",
+            (
+                "mixed projected object-block order changed; expected back-to-front "
+                f"C(z=-1), A(z=0), B(z=0.5), got {slot_names}"
+            ),
         )
         constraints = tuple(document.get("ik", ())) + tuple(document.get("transform", ()))
         orders = tuple(int(item["order"]) for item in constraints)
