@@ -1,7 +1,10 @@
 """Real Blender 5.2 integration tests for the rewritten multi-object service.
 
 The connected case protects exact historical ``main`` behavior: a dedicated neutral
-wrapper, layer-based constraint orders, and unchanged per-object compensators.
+wrapper, authored dependency orders, and unchanged per-object compensators. Spine 4.2
+serializes those authored orders through a detached globally unique runtime schedule;
+this fixture validates both contracts instead of comparing post-codec JSON to pre-codec
+order numbers.
 """
 
 from __future__ import annotations
@@ -57,6 +60,9 @@ from run_bake_integration import (  # noqa: E402
     _material_fingerprint,
     _temporary_datablock_names,
 )
+
+
+_RUNTIME_CONSTRAINT_COLLECTIONS = ("ik", "transform", "path", "physics")
 
 
 def _build_object_settings(
@@ -173,7 +179,8 @@ def _assert_state_restored(
 def _constraint(document: dict, name: str) -> dict:
     matches = tuple(
         item
-        for item in (*document.get("ik", ()), *document.get("transform", ()))
+        for collection_name in _RUNTIME_CONSTRAINT_COLLECTIONS
+        for item in document.get(collection_name, ())
         if item.get("name") == name
     )
     _assert(len(matches) == 1, f"expected one constraint {name!r}, found {len(matches)}")
@@ -186,6 +193,88 @@ def _assert_fields(actual: dict, expected: dict, label: str) -> None:
             actual.get(key) == value,
             f"{label}.{key}: {actual.get(key)!r} != {value!r}; actual={actual}",
         )
+
+
+def _legacy_connected_authored_orders() -> dict[str, int]:
+    """Return the canonical authored 3-axis connected dependency schedule."""
+
+    return {
+        "all_objects_rotation_X": 0,
+        "all_objects_rotation_Y": 1,
+        "all_objects_rotation_Z": 2,
+        "ObjectB_rotation_X": 3,
+        "ObjectA_rotation_X": 4,
+        "ObjectB_rotation_Y": 5,
+        "ObjectA_rotation_Y": 6,
+        "all_objects_scale_constraint_IK": 7,
+        "ObjectB_scale_constraint_IK": 8,
+        "ObjectA_scale_constraint_IK": 9,
+        "all_objects_scale_constraint": 10,
+        "ObjectB_scale_constraint": 11,
+        "ObjectA_scale_constraint": 12,
+        "ObjectB_rotation_Z": 13,
+        "ObjectA_rotation_Z": 14,
+        # Compensators intentionally share the authored phase with object rotation Y.
+        "ObjectA_scale_compensator": 6,
+        "ObjectB_scale_compensator": 6,
+    }
+
+
+def _serialized_runtime_order_by_name(
+    document: dict,
+    authored_orders: dict[str, int],
+) -> dict[str, int]:
+    """Mirror the Spine 4.2 detached runtime-order codec for one fixture document."""
+
+    if not isinstance(document, dict):
+        raise TypeError("document must be dict")
+    if not isinstance(authored_orders, dict) or not authored_orders:
+        raise ValueError("authored_orders must be a non-empty dict")
+    if not all(
+        isinstance(name, str)
+        and name
+        and isinstance(order, int)
+        and not isinstance(order, bool)
+        and order >= 0
+        for name, order in authored_orders.items()
+    ):
+        raise TypeError("authored_orders must map names to non-negative integer orders")
+
+    records: list[tuple[int, int, int, str]] = []
+    seen_names: set[str] = set()
+    for collection_rank, collection_name in enumerate(_RUNTIME_CONSTRAINT_COLLECTIONS):
+        for collection_index, item in enumerate(document.get(collection_name, ())):
+            name = item.get("name")
+            _assert(
+                isinstance(name, str) and name,
+                f"{collection_name}[{collection_index}] has no constraint name",
+            )
+            _assert(name not in seen_names, f"duplicate serialized constraint: {name}")
+            _assert(
+                name in authored_orders,
+                f"serialized constraint is absent from authored schedule: {name}",
+            )
+            seen_names.add(name)
+            records.append(
+                (
+                    authored_orders[name],
+                    collection_rank,
+                    collection_index,
+                    name,
+                )
+            )
+
+    _assert(
+        seen_names == set(authored_orders),
+        "serialized/authored connected constraint ownership differs: "
+        f"missing={tuple(sorted(set(authored_orders) - seen_names))}, "
+        f"unexpected={tuple(sorted(seen_names - set(authored_orders)))}",
+    )
+    records.sort(key=lambda item: (item[0], item[1], item[2]))
+    return {
+        name: runtime_order
+        for runtime_order, (_authored, _rank, _index, name) in enumerate(records)
+    }
 
 
 def test_standalone_multi_export_commits_one_json_and_two_textures() -> None:
@@ -270,6 +359,8 @@ def test_connected_multi_export_matches_legacy_main_wrapper() -> None:
 
         document = json.loads(expected_json.read_text(encoding="utf-8"))
         bones = {bone["name"]: bone for bone in document["bones"]}
+        authored_orders = _legacy_connected_authored_orders()
+        runtime_orders = _serialized_runtime_order_by_name(document, authored_orders)
 
         _assert(
             bones["ObjectA_main"]["parent"] == "all_objects_layer_1",
@@ -313,7 +404,7 @@ def test_connected_multi_export_matches_legacy_main_wrapper() -> None:
         _assert_fields(
             _constraint(document, "all_objects_rotation_X"),
             {
-                "order": 0,
+                "order": runtime_orders["all_objects_rotation_X"],
                 "bones": ["all_objects_0_scale", "all_objects_1_scale", "all_objects"],
                 "target": "all_objects_rotation_X",
                 "rotation": 90,
@@ -332,7 +423,7 @@ def test_connected_multi_export_matches_legacy_main_wrapper() -> None:
         _assert_fields(
             _constraint(document, "all_objects_rotation_Z"),
             {
-                "order": 2,
+                "order": runtime_orders["all_objects_rotation_Z"],
                 "bones": ["ObjectA", "ObjectB"],
                 "target": "all_objects_rotation_Z",
                 "local": True,
@@ -345,7 +436,7 @@ def test_connected_multi_export_matches_legacy_main_wrapper() -> None:
         _assert_fields(
             _constraint(document, "all_objects_scale_constraint"),
             {
-                "order": 10,
+                "order": runtime_orders["all_objects_scale_constraint"],
                 "bones": ["all_objects_0_scale", "all_objects_1_scale"],
                 "target": "all_objects_rotate_X_constraint",
                 "scaleX": -1,
@@ -356,38 +447,27 @@ def test_connected_multi_export_matches_legacy_main_wrapper() -> None:
             "all_objects_scale_constraint",
         )
 
-        expected_orders = {
-            "all_objects_rotation_X": 0,
-            "all_objects_rotation_Y": 1,
-            "all_objects_rotation_Z": 2,
-            "ObjectB_rotation_X": 3,
-            "ObjectA_rotation_X": 4,
-            "ObjectB_rotation_Y": 5,
-            "ObjectA_rotation_Y": 6,
-            "all_objects_scale_constraint_IK": 7,
-            "ObjectB_scale_constraint_IK": 8,
-            "ObjectA_scale_constraint_IK": 9,
-            "all_objects_scale_constraint": 10,
-            "ObjectB_scale_constraint": 11,
-            "ObjectA_scale_constraint": 12,
-            "ObjectB_rotation_Z": 13,
-            "ObjectA_rotation_Z": 14,
-            "ObjectA_scale_compensator": 6,
-            "ObjectB_scale_compensator": 6,
-        }
-        for name, expected_order in expected_orders.items():
+        for name, expected_runtime_order in runtime_orders.items():
             actual = _constraint(document, name)
             _assert(
-                int(actual["order"]) == expected_order,
-                f"{name} order {actual['order']} != {expected_order}",
+                int(actual["order"]) == expected_runtime_order,
+                f"{name} runtime order {actual['order']} != {expected_runtime_order}; "
+                f"authored={authored_orders[name]}",
             )
 
         orders = tuple(
             int(item["order"])
-            for item in (*document.get("ik", ()), *document.get("transform", ()))
+            for collection_name in _RUNTIME_CONSTRAINT_COLLECTIONS
+            for item in document.get(collection_name, ())
         )
-        _assert(set(orders) == set(range(15)), f"Legacy order phases changed: {orders}")
-        _assert(len(orders) == 17 and len(set(orders)) == 15, f"Legacy ties changed: {orders}")
+        _assert(
+            tuple(sorted(orders)) == tuple(range(len(orders))),
+            f"Spine 4.2 runtime order normalization is not contiguous: {orders}",
+        )
+        _assert(
+            len(orders) == len(set(orders)) == len(authored_orders),
+            f"Spine 4.2 runtime orders collide or constraints were lost: {orders}",
+        )
         _assert(
             result.statistics["connected_layer_count"] == 2,
             "connected Z layer count is wrong",
