@@ -20,9 +20,6 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     export_a1_single_object,
 )
-from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
-    BakeExecutionSettings,
-)
 from run_bake_integration import (  # noqa: E402
     _assert,
     _capture_context,
@@ -93,9 +90,11 @@ def test_eevee_b4_executes_real_render_and_finalizes_cropped_attachment() -> Non
         source.data.materials.append(
             _create_eevee_camera_material("EeveeProductionMaterial")
         )
+        base_settings = _settings(output_directory, "EeveeProduction")
         settings = replace(
-            _settings(output_directory, "EeveeProduction"),
-            bake_execution=BakeExecutionSettings(
+            base_settings,
+            bake_execution=replace(
+                base_settings.bake_execution,
                 render_engine="BLENDER_EEVEE",
                 samples=4,
             ),
