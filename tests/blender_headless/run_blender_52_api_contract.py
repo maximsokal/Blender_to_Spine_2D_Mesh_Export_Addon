@@ -507,14 +507,48 @@ def test_image_alpha_and_color_attribute_contract() -> None:
             type="FLOAT_COLOR",
             domain="CORNER",
         )
-        attribute.data[0].color_srgb = (0.25, 0.5, 0.75, 1.0)
-        stored = tuple(float(value) for value in attribute.data[0].color_srgb)
+
+        expected_srgb = (0.25, 0.5, 0.75, 1.0)
+        attribute.data[0].color_srgb = expected_srgb
+        stored_srgb = tuple(
+            float(value)
+            for value in attribute.data[0].color_srgb
+        )
+        stored_linear = tuple(
+            float(value)
+            for value in attribute.data[0].color
+        )
+
+        _assert(
+            all(isfinite(value) for value in (*stored_srgb, *stored_linear)),
+            "FloatColorAttributeValue returned non-finite color values",
+        )
+
+        rgb_errors = tuple(
+            abs(actual - expected)
+            for actual, expected in zip(stored_srgb[:3], expected_srgb[:3])
+        )
+        _assert(
+            max(rgb_errors) <= 5e-5,
+            "FloatColorAttributeValue.color_srgb round trip exceeded the "
+            f"32-bit sRGB/linear conversion tolerance: stored={stored_srgb}, "
+            f"errors={rgb_errors}",
+        )
+        _assert(
+            abs(stored_srgb[3] - expected_srgb[3]) <= 1e-7,
+            f"FloatColorAttributeValue alpha round trip failed: {stored_srgb[3]}",
+        )
         _assert(
             all(
-                abs(actual - expected) < 1e-6
-                for actual, expected in zip(stored, (0.25, 0.5, 0.75, 1.0))
+                0.0 <= linear < srgb
+                for linear, srgb in zip(stored_linear[:3], stored_srgb[:3])
             ),
-            f"FloatColorAttributeValue.color_srgb round trip failed: {stored}",
+            "FloatColorAttributeValue.color_srgb did not convert to scene-linear "
+            f"FLOAT_COLOR storage: srgb={stored_srgb}, linear={stored_linear}",
+        )
+        _assert(
+            abs(stored_linear[3] - expected_srgb[3]) <= 1e-7,
+            f"Scene-linear alpha storage changed unexpectedly: {stored_linear[3]}",
         )
     finally:
         _remove_image(image)
