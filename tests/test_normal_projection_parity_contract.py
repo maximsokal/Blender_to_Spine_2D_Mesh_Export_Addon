@@ -133,9 +133,12 @@ def test_normal_material_bake_uses_unprojected_source_geometry():
 
 
 def test_real_coin_projection_parity_gate_validates_inverse_setup():
-    source = _read(
+    runner = _read(
         "tests/blender_headless/"
         "run_coin_star_normal_projection_parity_integration.py"
+    )
+    core = _read(
+        "tests/blender_headless/coin_star_normal_projection_parity_core.py"
     )
 
     for marker in (
@@ -152,29 +155,41 @@ def test_real_coin_projection_parity_gate_validates_inverse_setup():
         "Normal projection direction changed source-material bake geometry",
         "real coin parity gate did not retain expected side regions",
         "Active Camera Normal did not use neutral object-pivot setup",
-        "Normal projection changed material brightness beyond tolerance",
+        "safe_coin_normal_material",
+        "BakeMode.EMIT.value",
+        "CAMERA_SURFACE_COLOR",
+        "ALPHA",
+        "CAMERA_COMBINED",
     ):
-        assert marker in source
+        assert marker in runner
 
-    assert "def _assert_serialized_active_camera_normal_setup(" in source
-    assert "abs(rotation) <= _NEUTRAL_TOLERANCE" in source
-    assert "abs(depth_x) <= _NEUTRAL_TOLERANCE" in source
-    assert "abs(depth_scale_x) <= _NEUTRAL_TOLERANCE" in source
-    assert "profile.z_camera_setup_bone(prefix, group.index)" in source
-    assert "inverse setup does not cancel depth translation" in source
+    assert "_OBSOLETE_CAMERA_STRATEGY not in values" in runner
+    assert "Normal projection changed material brightness beyond tolerance" in core
+    assert "def _assert_serialized_active_camera_normal_setup(" in core
+    assert "abs(rotation) <= _NEUTRAL_TOLERANCE" in core
+    assert "abs(depth_x) <= _NEUTRAL_TOLERANCE" in core
+    assert "abs(depth_scale_x) <= _NEUTRAL_TOLERANCE" in core
+    assert "profile.z_camera_setup_bone(prefix, group.index)" in core
+    assert "inverse setup does not cancel depth translation" in core
 
-    assert "def _assert_prepared_depth_groups(" in source
-    assert "rig_group_count == plan_group_count" in source
-    assert "tuple(rig.request.z_groups) == tuple(plan.groups)" in source
-    assert "binding_count == vertex_count" in source
-    assert "bound_group_indices == expected_group_indices" in source
+    assert "def _assert_prepared_depth_groups(" in core
+    assert "rig_group_count == plan_group_count" in core
+    assert "tuple(rig.request.z_groups) == tuple(plan.groups)" in core
+    assert "binding_count == vertex_count" in core
+    assert "bound_group_indices == expected_group_indices" in core
 
 
 def test_real_coin_object_root_gate_checks_every_inverse_chain_and_vertex_parent():
-    source = _read(
+    runner = _read(
         "tests/blender_headless/"
         "run_coin_star_normal_object_root_setup_compensation_integration.py"
     )
+    core = _read(
+        "tests/blender_headless/coin_star_normal_object_root_setup_core.py"
+    )
+
+    assert "safe_coin_normal_material" in runner
+    assert "_run(arguments.expected_blend)" in runner
 
     for marker in (
         "[COIN-NORMAL-OBJECT-ROOT-SETUP] PASS",
@@ -189,4 +204,4 @@ def test_real_coin_object_root_gate_checks_every_inverse_chain_and_vertex_parent
         "serialized vertex bypasses inverse setup bone",
         "translations do not sum to zero",
     ):
-        assert marker in source
+        assert marker in core
