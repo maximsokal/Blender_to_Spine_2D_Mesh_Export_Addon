@@ -7,11 +7,25 @@ supplies the supported temporary Normal/UV material for standalone real-asset ex
 
 from __future__ import annotations
 
+from pathlib import Path
+import sys
 import traceback
 
-from coin_star_normal_object_root_setup_core import _parse_arguments, _run
-from coin_star_normal_test_support import safe_coin_normal_material
-from run_coin_star_real_blend_shader_capability_integration import _require_source_object
+
+SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+REPOSITORY_ROOT = SCRIPT_DIRECTORY.parents[1]
+for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
+from coin_star_normal_object_root_setup_core import (  # noqa: E402
+    _parse_arguments,
+    _run,
+)
+from coin_star_normal_test_support import safe_coin_normal_material  # noqa: E402
+from run_coin_star_real_blend_shader_capability_integration import (  # noqa: E402
+    _require_source_object,
+)
 
 
 def main() -> None:
