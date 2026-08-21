@@ -12,21 +12,36 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 import tempfile
 from time import perf_counter
 import traceback
 
 import bpy
 
-from Blender_to_Spine2D_Mesh_Exporter.application import A1SourceGeometryMode
-from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (
+
+SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+REPOSITORY_ROOT = SCRIPT_DIRECTORY.parents[1]
+for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
+from Blender_to_Spine2D_Mesh_Exporter.application import A1SourceGeometryMode  # noqa: E402
+from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     export_a1_single_object,
     prepare_a1_object,
 )
-from Blender_to_Spine2D_Mesh_Exporter.domain.baking import A1TextureExportMode, BakeMode
-from Blender_to_Spine2D_Mesh_Exporter.domain.projection import A1ProjectionDirection
-from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import A1RigSetupPoseMode
-from coin_star_normal_projection_parity_core import (
+from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
+    A1TextureExportMode,
+    BakeMode,
+)
+from Blender_to_Spine2D_Mesh_Exporter.domain.projection import (  # noqa: E402
+    A1ProjectionDirection,
+)
+from Blender_to_Spine2D_Mesh_Exporter.domain.spine.rig_profiles import (  # noqa: E402
+    A1RigSetupPoseMode,
+)
+from coin_star_normal_projection_parity_core import (  # noqa: E402
     _MAX_EXPORT_SECONDS,
     _assert_luminance_parity,
     _assert_prepared_depth_groups,
@@ -38,13 +53,13 @@ from coin_star_normal_projection_parity_core import (
     _source_material_geometry_fingerprint,
     _visible_luminance_metrics,
 )
-from coin_star_normal_test_support import safe_coin_normal_material
-from run_bake_integration import (
+from coin_star_normal_test_support import safe_coin_normal_material  # noqa: E402
+from run_bake_integration import (  # noqa: E402
     _assert,
     _capture_scene_bake_state,
     _temporary_datablock_names,
 )
-from run_coin_star_real_blend_shader_capability_integration import (
+from run_coin_star_real_blend_shader_capability_integration import (  # noqa: E402
     _datablock_fingerprint,
     _object_fingerprint,
     _require_loaded_blend,
