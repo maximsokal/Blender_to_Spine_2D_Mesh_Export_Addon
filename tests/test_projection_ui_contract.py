@@ -172,15 +172,14 @@ def test_scene_rna_exposes_exact_public_projection_identifiers() -> None:
         assert direction.name in source or direction.value in source
 
 
-def test_canonical_panel_owns_projection_selector_only_for_normal_uv() -> None:
-    ui_source = (PACKAGE / "ui.py").read_text(encoding="utf-8")
+def test_rig_foldout_owns_projection_selector_only_for_normal_uv() -> None:
     rig_source = (PACKAGE / "rig_ui.py").read_text(encoding="utf-8")
 
-    assert 'text="Projection direction"' in ui_source
-    assert "A1TextureExportMode.CAMERA_PROJECTION" in ui_source
-    assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION" in ui_source
-    assert 'text="Active camera render → flat screen-space mesh"' in ui_source
-    assert 'text="Active camera render → optimized depth-relief mesh"' in ui_source
+    assert 'text="Projection direction"' in rig_source
+    assert "A1TextureExportMode.CAMERA_PROJECTION" in rig_source
+    assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION" in rig_source
+    assert 'text="Active camera render → flat screen-space mesh"' in rig_source
+    assert 'text="Active camera render → optimized depth-relief mesh"' in rig_source
     assert "SPINE2D_OT_ResetSettingsWithProjection" not in rig_source
     assert "scene.spine2d_projection_direction =" not in rig_source
 

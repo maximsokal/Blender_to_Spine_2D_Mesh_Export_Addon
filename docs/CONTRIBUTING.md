@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for contributing to Spine Mesh Exporter.
+Thank you for contributing to Mesh Exporter.
 
 ## Supported baseline
 

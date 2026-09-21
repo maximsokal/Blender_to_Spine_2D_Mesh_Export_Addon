@@ -10,10 +10,11 @@ DOCS = ROOT / "docs"
 EXAMPLES = ROOT / "examples"
 MANIFEST = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "blender_manifest.toml"
 README = ROOT / "README.md"
-PUBLIC_TITLE = "Spine Mesh Exporter"
+PUBLIC_TITLE = "Mesh Exporter"
 SUPERSEDED_PUBLIC_TITLES = (
     "Spine2D Mesh Exporter",
     "Blender to Spine2D Mesh Exporter",
+    "Spine Mesh Exporter",
 )
 
 CYRILLIC = re.compile(r"[\u0400-\u04FF]")
@@ -157,7 +158,7 @@ def test_readme_presents_current_product_without_stale_ui_media() -> None:
     source = _read(README)
 
     required_fragments = (
-        "# Spine Mesh Exporter",
+        "# Mesh Exporter",
         "assets/cover.png",
         "img.shields.io/badge/License-GPLv3",
         "img.shields.io/github/v/release/",
@@ -181,6 +182,7 @@ def test_readme_presents_current_product_without_stale_ui_media() -> None:
 
     forbidden_fragments = (
         "# Blender to Spine2D Mesh Exporter",
+        "# Spine Mesh Exporter",
         "img.youtube.com/",
         "youtube.com/watch?v=",
         "Click to watch the video",
@@ -275,7 +277,7 @@ def test_submission_document_matches_current_public_manifest() -> None:
     manifest = _read(MANIFEST)
     current_version = _manifest_version()
 
-    assert "Name: Spine Mesh Exporter" in submission
+    assert "Name: Mesh Exporter" in submission
     assert "Platform restriction: none declared" in submission
     assert "Tags: Import-Export" in submission
     assert "License: GPL-3.0-or-later" in submission
@@ -286,7 +288,7 @@ def test_submission_document_matches_current_public_manifest() -> None:
     assert "initial Blender Extensions Platform submission" not in submission
     assert 'platforms = ["windows-x64"]' not in manifest
     assert 'tags = ["Import-Export"]' in manifest
-    assert 'name = "Spine Mesh Exporter"' in manifest
+    assert 'name = "Mesh Exporter"' in manifest
     assert 'website = "https://github.com/maximsokal/Blender_to_Spine_2D_Mesh_Export_Addon"' in manifest
 
 

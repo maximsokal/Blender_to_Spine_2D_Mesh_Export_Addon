@@ -144,7 +144,7 @@ if bpy is not None:
         single_object_operator.register()
 
         _initialize_registered_logging()
-        logger.info("Spine Mesh Exporter registered")
+        logger.info("Mesh Exporter registered")
 
     def unregister() -> None:
         """Unregister extension owners in the reverse of registration order."""
@@ -159,7 +159,7 @@ if bpy is not None:
         scene_settings_migration.unregister()
         _unregister_config_rna()
         addon_preferences.unregister()
-        logger.info("Spine Mesh Exporter unregistered")
+        logger.info("Mesh Exporter unregistered")
 
 else:
     MODULES: tuple[Any, ...] = ()

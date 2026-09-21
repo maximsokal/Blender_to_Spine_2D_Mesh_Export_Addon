@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 UI_LAYOUT = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "ui_layout.py"
+UI = ROOT / "Blender_to_Spine2D_Mesh_Exporter" / "ui.py"
 
 
 def _function_source(source: str, name: str) -> str:
@@ -22,20 +23,19 @@ def _function_source(source: str, name: str) -> str:
     return segment
 
 
-def test_analysis_child_panel_draws_normal_uv_modifier_warning() -> None:
+def test_analysis_foldout_draws_normal_uv_modifier_warning() -> None:
     source = UI_LAYOUT.read_text(encoding="utf-8")
+    ui_source = UI.read_text(encoding="utf-8")
 
     assert "collect_normal_uv_ignored_modifiers" in source
     assert "group_ignored_modifiers_by_object" in source
     assert "def _draw_modifier_analysis_warning(" in source
-    assert "_draw_modifier_analysis_warning(layout, context)" in source
     assert 'text="Normal / UV Segments ignores active modifiers"' in source
     assert 'text="Viewport and Spine geometry can look different."' in source
     assert 'text="Apply or convert modifiers before export."' in source
     assert 'icon="MODIFIER"' in source
-    assert "class OBJECT_PT_Spine2DAnalysisPanel" in source
-    assert 'bl_parent_id = _PARENT_PANEL_ID' in source
-    assert 'bl_label = "Analysis"' in source
+    assert 'title="Analysis"' in ui_source
+    assert "ui_layout._draw_modifier_analysis_warning(" in ui_source
 
 
 def test_modifier_warning_is_advisory_and_does_not_disable_export() -> None:

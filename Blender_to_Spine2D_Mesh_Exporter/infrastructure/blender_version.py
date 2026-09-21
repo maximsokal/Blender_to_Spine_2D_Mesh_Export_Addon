@@ -47,7 +47,7 @@ def require_supported_blender_runtime(bpy_module: Any) -> tuple[int, int, int]:
     if version < MINIMUM_BLENDER_VERSION:
         actual = ".".join(str(part) for part in version)
         raise UnsupportedBlenderVersionError(
-            "Spine Mesh Exporter requires Blender "
+            "Mesh Exporter requires Blender "
             f"{MINIMUM_BLENDER_VERSION_TEXT} or newer; detected {actual}"
         )
     return version

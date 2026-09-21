@@ -17,6 +17,20 @@ from .domain.spine.rig_profiles import A1RigProfile
 logger = logging.getLogger(__name__)
 
 
+def _texture_mode(scene: bpy.types.Scene) -> A1TextureExportMode:
+    raw = str(
+        getattr(
+            scene,
+            "spine2d_texture_export_mode",
+            A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
+        )
+    ).strip().upper()
+    try:
+        return A1TextureExportMode(raw)
+    except ValueError:
+        return A1TextureExportMode.NORMAL_UV_SEGMENTS
+
+
 def _selected_mesh_count(context: bpy.types.Context) -> int:
     """Count Mesh objects accepted by the selected-object export route."""
 
@@ -90,28 +104,88 @@ def draw_rig_settings(
     layout: bpy.types.UILayout,
     context: bpy.types.Context,
 ) -> None:
-    """Draw only controls that are not already owned by the main exporter panel."""
+    """Draw rig, export-mode/projection, and connected-object controls.
+
+    Export mode and projection choose how the rig is built (camera-space vs. world-axis
+    bake, shared vs. per-object pivot, depth-generated bones), and Connect objects joins
+    multiple Mesh objects onto one shared rig — both are rig decisions, not output-path
+    settings, so they live here rather than in the Paths and Spine 2D version foldout.
+    """
 
     scene = context.scene
+    layout.prop(scene, "spine2d_texture_export_mode", text="Export mode")
+    texture_mode = _texture_mode(scene)
+    if texture_mode is A1TextureExportMode.CAMERA_PROJECTION:
+        layout.label(
+            text="Active camera render → flat screen-space mesh",
+            icon="CAMERA_DATA",
+        )
+        layout.prop(
+            scene,
+            "spine2d_projection_alpha_threshold",
+            text="Projection alpha threshold",
+        )
+    elif texture_mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
+        layout.label(
+            text="Active camera render → optimized depth-relief mesh",
+            icon="CAMERA_DATA",
+        )
+        layout.label(text="Depth base: Farthest visible point", icon="INFO")
+        layout.prop(
+            scene,
+            "spine2d_projection_alpha_threshold",
+            text="Projection alpha threshold",
+        )
+        layout.separator()
+        layout.prop(scene, "spine2d_depth_smoothing", text="Depth smoothing")
+        layout.prop(scene, "spine2d_depth_edge_threshold", text="Depth edge threshold")
+        layout.prop(
+            scene,
+            "spine2d_depth_mesh_error_pixels",
+            text="Depth mesh error (px)",
+        )
+        layout.prop(scene, "spine2d_depth_max_points", text="Max depth points")
+        layout.label(
+            text="One generated vertex bone per retained depth point",
+            icon="BONE_DATA",
+        )
+    else:
+        layout.label(
+            text="Preserves cut regions and generated UV meshes",
+            icon="UV",
+        )
+        layout.prop(scene, "spine2d_projection_direction", text="Projection direction")
+    layout.separator()
+
     header = layout.row(align=True)
     header.label(text="2-Axis Rotation + Scale", icon="CON_ROTLIKE")
     header.operator("spine2d.reset_rig_profile", text="Reset")
 
     layout.label(text="Controls: Rotation X / Y + Scale")
 
-    texture_mode = str(
-        getattr(
-            scene,
-            "spine2d_texture_export_mode",
-            A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
-        )
-    ).strip().upper()
-    if texture_mode == A1TextureExportMode.NORMAL_UV_SEGMENTS.value:
+    if texture_mode is A1TextureExportMode.NORMAL_UV_SEGMENTS:
         _draw_shared_selection_pivot(layout, context)
+
+    row = layout.row(align=True)
+    row.label(text="Control icons")
+    row.prop(scene, "spine2d_control_icons", text="")
 
     row = layout.row(align=True)
     row.label(text="Preview animation")
     row.prop(scene, "spine2d_export_preview_animation", text="")
+
+    selected_meshes = tuple(
+        candidate
+        for candidate in getattr(context, "selected_objects", ())
+        if getattr(candidate, "type", None) == "MESH"
+    )
+    if len(selected_meshes) > 1:
+        layout.separator()
+        layout.label(text="Connect objects:")
+        for selected_object in selected_meshes:
+            row = layout.row(align=True)
+            row.label(text=selected_object.name, icon="MESH_DATA")
+            row.prop(selected_object.spine2d_connect_settings, "enabled", text="")
 
 
 class SPINE2D_OT_ResetRigProfile(bpy.types.Operator):

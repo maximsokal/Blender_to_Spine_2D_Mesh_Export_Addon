@@ -317,7 +317,91 @@ The documentation gate rejects both superseded public titles:
 This is a branding/display correction only; it does not migrate saved Scene properties,
 operators, package identity, or serialized Spine data.
 
-## Current open work after Slice 17
+## Slice 18 — Child-panel foldouts folded back into the canonical panel's own draw()
+
+Slice 05 fixed the Extensions-review-rejected panel-swap lifecycle by turning Rig,
+Generated Materials, Depth Parallax, and Analysis into ordinary `bl_parent_id` child
+panels. In practice that traded one review defect for a visible UI regression: Blender
+always renders a child panel's content after everything the parent panel's own `draw()`
+produces, and never gives a child panel the same boxed, triangle-foldout look as content
+drawn directly inside `draw()`. Those four sections rendered as a flat, out-of-order tail
+below the Export button instead of alongside Paths/Cut/Bake.
+
+File: `Blender_to_Spine2D_Mesh_Exporter/ui.py`, `Blender_to_Spine2D_Mesh_Exporter/ui_layout.py`
+
+Changes:
+
+- `ui.OBJECT_PT_Spine2DMeshPanel.draw()` now draws Rig, Generated Materials, and Analysis
+  itself through the existing `_draw_foldout` helper, in the same box+triangle style and
+  order as Paths/Cut/Bake (`Paths and Spine 2D version` → `Rig` → `Generated Materials` →
+  `Cut` → `Bake` → `Analysis` → Export action);
+- the Depth Parallax reserve controls moved into `_draw_cut_settings`'s depth-camera
+  branch, replacing the standalone poll-gated child panel;
+- three new Scene `BoolProperty` fold states (`spine2d_show_rig_settings`,
+  `spine2d_show_generated_material_settings`, `spine2d_show_analysis`) were added to
+  `ui.py`'s `SCENE_PROPERTIES`, matching the pattern already used for the other foldouts;
+- `ui_layout.py` no longer defines any `bpy.types.Panel` subclasses; it keeps only the
+  advisory `_draw_modifier_analysis_warning` helper (unchanged) that `ui.py` now calls
+  from the Analysis foldout, plus no-op `register()`/`unregister()` loops over an empty
+  `CLASSES` tuple, kept for root-registration symmetry.
+
+The first pass of this slice moved Rig/Generated Materials into the Analysis foldout's
+sibling foldouts but still drew the Export readiness box (the "Analyze" button and all
+per-object diagnostics) unconditionally after Bake — leaving the new Analysis foldout
+empty and the real diagnostics stuck permanently expanded below Export, unreachable by
+collapsing anything. A follow-up in the same slice moved that content too:
+
+- `_draw_readiness` (the Analyze button, state summary, and per-object breakdown) is now
+  called only from a new `_draw_analysis_content` method, alongside the modifier warning,
+  both inside the Analysis foldout — nothing analysis-related draws outside it anymore;
+- the Export action row's `enabled` gate on `_draw_readiness`'s return value was removed.
+  In the shipped runtime `_draw_readiness` is unconditionally monkey-patched by
+  `auto_readiness._draw_nonblocking` (installed by `auto_readiness.register()`, which the
+  root always calls), and that replacement always returns `True` — "Export remains
+  available" regardless of analysis state is the explicit, documented, non-blocking
+  readiness policy. Gating a UI row on a value that is always `True` in production, while
+  also being unreachable when the section housing it is collapsed, added risk without
+  changing real behavior; the Export row is now simply always enabled, matching what
+  actually shipped.
+
+The canonical panel class (`OBJECT_PT_spine2d_mesh`) is still registered exactly once and
+is never unregistered/replaced — the Slice 05 compliance fix is unaffected. Only where
+each section's *content* is drawn changed, not the panel registration lifecycle.
+
+## Slice 19 — Public title corrected to `Mesh Exporter`
+
+The public display title changed again, from `Spine Mesh Exporter` to **`Mesh Exporter`**,
+across the same surfaces enumerated in Slice 17 (manifest `name`, README/docs/examples,
+submission metadata, canonical panel `bl_label`/`bl_category`, and the compliance/
+documentation/UI regression contracts). `Spine Mesh Exporter` was added to the
+documentation gate's superseded-title list alongside the two titles listed in Slice 17.
+Stable technical identity (manifest `id`, package name, panel id, `spine2d_*` prefixes,
+ZIP stem) remains unchanged, per Slice 17.
+
+## Slice 20 — Export mode, projection, and Connect objects moved into the Rig foldout
+
+Export mode/projection and Control icons/Connect objects were left in the Paths and
+Spine 2D version foldout by the Slice 05/18 refactors, splitting rig decisions (which
+mode, which projection axis, shared pivot, which objects join the rig) away from the Rig
+foldout that otherwise owns every other rig control. `main` had already drawn these
+through `rig_ui.draw_rig_settings`; this slice restores that ownership on top of the
+now-review-compliant panel structure.
+
+Files: `Blender_to_Spine2D_Mesh_Exporter/ui.py`, `Blender_to_Spine2D_Mesh_Exporter/rig_ui.py`
+
+- `ui._draw_export_settings` (the "Paths and Spine 2D version" foldout) now draws only
+  the target Spine schema/exact-version display, the JSON output path, and the images
+  subfolder — no rig or export-mode controls;
+- `rig_ui.draw_rig_settings` gained the Export mode selector, the full texture-mode
+  branch (Camera Projection alpha threshold, Depth Camera Projection quality controls,
+  Normal/UV projection direction), Control icons, and the multi-object Connect objects
+  list, in addition to the rig profile header, shared selection pivot, and Preview
+  animation controls it already owned;
+- `rig_ui.py` gained its own `_texture_mode(scene) -> A1TextureExportMode` helper
+  (mirroring the one already duplicated in `ui.py` and `ui_layout.py`) so the new
+  texture-mode branch compares enum members instead of raw strings.
+
+## Current open work after Slice 20
 
 1. Pull the final rename-remediation HEAD locally and run the focused public-title/documentation/UI gate.
 2. If focused tests are green, run the full Blender-independent suite.

@@ -120,7 +120,7 @@ def test_manifest_matches_extensions_review_metadata() -> None:
 
     assert manifest["id"] == "blender_to_spine2d_mesh_exporter"
     assert manifest["version"] == "0.155.0"
-    assert manifest["name"] == "Spine Mesh Exporter"
+    assert manifest["name"] == "Mesh Exporter"
     assert manifest["tags"] == ["Import-Export"]
     assert "platforms" not in manifest
     assert "Blender" not in manifest["name"]
@@ -285,13 +285,15 @@ def test_shipped_ui_has_no_duplicate_workaround_functions() -> None:
     assert offenders == [], "Duplicate workaround functions:\n" + "\n".join(offenders)
 
 
-def test_ui_layout_uses_child_panels_without_panel_replacement() -> None:
+def test_ui_layout_never_replaces_the_main_panel() -> None:
     source = (PACKAGE / "ui_layout.py").read_text(encoding="utf-8")
+    ui_source = (PACKAGE / "ui.py").read_text(encoding="utf-8")
 
     assert "_ORIGINAL_PANEL_REMOVED" not in source
     assert "_restore_original_panel" not in source
     assert "bpy.utils.unregister_class(ui.OBJECT_PT_Spine2DMeshPanel)" not in source
-    assert "bl_parent_id = _PARENT_PANEL_ID" in source
+    assert "OBJECT_PT_spine2d_mesh" in ui_source
+    assert ui_source.count('bl_idname = "OBJECT_PT_spine2d_mesh"') == 1
 
 
 def test_manifest_build_excludes_repository_development_surfaces() -> None:

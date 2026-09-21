@@ -196,7 +196,7 @@ def test_ui_exposes_both_root_modes_without_migrating_existing_id() -> None:
     projection = _read(
         "Blender_to_Spine2D_Mesh_Exporter/domain/projection.py"
     )
-    ui = _read("Blender_to_Spine2D_Mesh_Exporter/ui.py")
+    rig_ui = _read("Blender_to_Spine2D_Mesh_Exporter/rig_ui.py")
     enum_items = {
         identifier: (label, description)
         for identifier, label, description in projection_direction_rna_enum_items()
@@ -221,5 +221,5 @@ def test_ui_exposes_both_root_modes_without_migrating_existing_id() -> None:
     assert "camera-space zero as the Spine main-bone pivot" in (
         camera_root_description
     )
-    assert '"spine2d_projection_direction"' in ui
-    assert 'text="Projection direction"' in ui
+    assert '"spine2d_projection_direction"' in rig_ui
+    assert 'text="Projection direction"' in rig_ui

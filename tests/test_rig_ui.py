@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from Blender_to_Spine2D_Mesh_Exporter import rig_ui, ui_layout
+from Blender_to_Spine2D_Mesh_Exporter import rig_ui, ui
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import scene_properties
 from Blender_to_Spine2D_Mesh_Exporter.domain.projection import A1ProjectionDirection
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1RigProfile
@@ -42,9 +42,9 @@ def test_rig_reset_restores_two_axis_without_touching_other_settings():
     )
 
 
-def test_rig_content_is_drawn_by_standard_child_panel_without_main_panel_replacement():
+def test_rig_content_is_drawn_by_the_canonical_main_panel_without_replacement():
     source = Path(rig_ui.__file__).read_text(encoding="utf-8")
-    layout_source = Path(ui_layout.__file__).read_text(encoding="utf-8")
+    ui_source = Path(ui.__file__).read_text(encoding="utf-8")
 
     assert "def draw_rig_settings(" in source
     assert 'header.label(text="2-Axis Rotation + Scale"' in source
@@ -54,10 +54,9 @@ def test_rig_content_is_drawn_by_standard_child_panel_without_main_panel_replace
     assert "SPINE2D_OT_ResetSettingsWithProjection" not in source
     assert rig_ui.CLASSES == (rig_ui.SPINE2D_OT_ResetRigProfile,)
 
-    assert "class OBJECT_PT_Spine2DRigPanel" in layout_source
-    assert 'bl_parent_id = _PARENT_PANEL_ID' in layout_source
-    assert "rig_ui.draw_rig_settings(self.layout, context)" in layout_source
-    assert "bpy.utils.unregister_class(ui.OBJECT_PT_Spine2DMeshPanel)" not in layout_source
+    assert 'title="Rig"' in ui_source
+    assert "rig_ui.draw_rig_settings(column, context)" in ui_source
+    assert "bpy.utils.unregister_class(ui.OBJECT_PT_Spine2DMeshPanel)" not in ui_source
 
 
 def test_rig_scene_property_default_is_two_axis():

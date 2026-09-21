@@ -82,6 +82,7 @@ def test_scene_profile_captures_one_typed_mode_for_all_downstream_settings(
 
 def test_ui_exposes_exact_three_mode_labels_and_reset_default():
     ui_source = (PACKAGE / "ui.py").read_text(encoding="utf-8")
+    rig_source = (PACKAGE / "rig_ui.py").read_text(encoding="utf-8")
     property_source = (ADAPTER / "scene_properties.py").read_text(encoding="utf-8")
 
     assert '"spine2d_texture_export_mode"' in property_source
@@ -89,7 +90,7 @@ def test_ui_exposes_exact_three_mode_labels_and_reset_default():
     assert '"Camera Projection"' in property_source
     assert '"Depth Camera Projection"' in property_source
     assert "A1TextureExportMode.NORMAL_UV_SEGMENTS.value" in ui_source
-    assert 'text="Export mode"' in ui_source
+    assert 'text="Export mode"' in rig_source
 
 
 def test_normal_mode_runtime_temporarily_resolves_eevee_to_cycles():

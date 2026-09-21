@@ -1,10 +1,18 @@
 # pylint: disable=import-error
-"""Additional exporter UI sections using ordinary Blender child panels.
+"""Advisory Normal/UV modifier-mismatch warning shared by the canonical exporter panel.
 
-The previous implementation temporarily unregistered the main panel and replaced it
-with another class during add-on registration. Blender Extensions review explicitly
-rejected that lifecycle. The main panel now remains owned by :mod:`ui`; this module
-only registers independent child panels in the normal Blender pattern.
+An earlier implementation temporarily unregistered the main panel and replaced it with
+another class during add-on registration. Blender Extensions review explicitly rejected
+that lifecycle. A later revision kept the main panel stable by moving Rig, Generated
+Materials, and Analysis into separate ordinary Blender child panels instead. That traded
+one problem for another: Blender always renders a child panel's content after everything
+the parent panel's own ``draw()`` produces, and it never gives child panels the same
+boxed, triangle-foldout look as content drawn directly in ``draw()`` — so those sections
+rendered as a flat, out-of-order tail below the Export button.
+
+The main panel in :mod:`ui` now draws every section itself, including the modifier
+warning below, through the one shared ``_draw_foldout`` box style. This module only
+keeps the warning-drawing helper so ``ui`` does not have to duplicate it.
 """
 
 from __future__ import annotations
@@ -13,8 +21,6 @@ from typing import Any
 
 import bpy
 
-from . import rig_ui
-from .blender_adapter import generated_material_ui
 from .blender_adapter.normal_uv_modifier_warnings import (
     collect_normal_uv_ignored_modifiers,
     group_ignored_modifiers_by_object,
@@ -22,7 +28,6 @@ from .blender_adapter.normal_uv_modifier_warnings import (
 from .domain.baking import A1TextureExportMode
 
 
-_PARENT_PANEL_ID = "OBJECT_PT_spine2d_mesh"
 _MAX_VISIBLE_MODIFIERS_PER_OBJECT = 8
 
 
@@ -114,108 +119,14 @@ def _draw_modifier_analysis_warning(
             box.label(text=f"... and {hidden_count} more modifier(s)")
 
 
-class OBJECT_PT_Spine2DRigPanel(bpy.types.Panel):
-    """Expose rig/projection controls below the canonical exporter panel."""
-
-    bl_idname = "OBJECT_PT_spine2d_rig"
-    bl_label = "Rig"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_parent_id = _PARENT_PANEL_ID
-    bl_order = 10
-
-    def draw(self, context: bpy.types.Context) -> None:
-        rig_ui.draw_rig_settings(self.layout, context)
-
-
-class OBJECT_PT_Spine2DGeneratedMaterialsPanel(bpy.types.Panel):
-    """Expose generated-material controls without replacing the main panel."""
-
-    bl_idname = "OBJECT_PT_spine2d_generated_materials"
-    bl_label = "Generated Materials"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_parent_id = _PARENT_PANEL_ID
-    bl_order = 20
-
-    def draw(self, context: bpy.types.Context) -> None:
-        generated_material_ui.draw_generated_material_settings(self.layout, context)
-
-
-class OBJECT_PT_Spine2DDepthParallaxPanel(bpy.types.Panel):
-    """Expose depth-only parallax reserve settings when that mode is active."""
-
-    bl_idname = "OBJECT_PT_spine2d_depth_parallax"
-    bl_label = "Depth Parallax"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_parent_id = _PARENT_PANEL_ID
-    bl_order = 30
-
-    @classmethod
-    def poll(cls, context: bpy.types.Context) -> bool:
-        scene = getattr(context, "scene", None)
-        return bool(
-            scene is not None
-            and _texture_mode(scene) is A1TextureExportMode.DEPTH_CAMERA_PROJECTION
-        )
-
-    def draw(self, context: bpy.types.Context) -> None:
-        scene = context.scene
-        layout = self.layout
-        layout.prop(
-            scene,
-            "spine2d_depth_parallax_horizon_angle",
-            text="Parallax Horizon Angle",
-        )
-        angle = float(
-            getattr(scene, "spine2d_depth_parallax_horizon_angle", 0.0) or 0.0
-        )
-        if angle <= 1.0e-12:
-            layout.label(text="0°: front surface only", icon="INFO")
-        else:
-            layout.label(
-                text="Retains connected surfaces beyond the camera horizon",
-                icon="MESH_DATA",
-            )
-            layout.label(
-                text="Max Depth Points limits front + reserve geometry",
-                icon="BONE_DATA",
-            )
-
-
-class OBJECT_PT_Spine2DAnalysisPanel(bpy.types.Panel):
-    """Expose advisory source-vs-export diagnostics without replacing the main panel."""
-
-    bl_idname = "OBJECT_PT_spine2d_analysis"
-    bl_label = "Analysis"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_parent_id = _PARENT_PANEL_ID
-    bl_order = 40
-
-    def draw(self, context: bpy.types.Context) -> None:
-        layout = self.layout
-        _draw_modifier_analysis_warning(layout, context)
-        layout.label(
-            text="Use Analyze in the main exporter panel for readiness diagnostics.",
-            icon="VIEWZOOM",
-        )
-
-
-CLASSES = (
-    OBJECT_PT_Spine2DRigPanel,
-    OBJECT_PT_Spine2DGeneratedMaterialsPanel,
-    OBJECT_PT_Spine2DDepthParallaxPanel,
-    OBJECT_PT_Spine2DAnalysisPanel,
-)
-
-# Compatibility symbol only. Child panels no longer require custom foldout RNA state.
+# Compatibility symbols only. Every section now draws inside the canonical main panel,
+# so this module owns no panel classes and no RNA state of its own.
+CLASSES: tuple[Any, ...] = ()
 RNA_PROPERTIES: tuple[Any, ...] = ()
 
 
 def register() -> None:
-    """Register child panels in declaration order."""
+    """Register child panels in declaration order (none remain; kept for symmetry)."""
 
     for cls in CLASSES:
         bpy.utils.register_class(cls)
@@ -230,10 +141,6 @@ def unregister() -> None:
 
 __all__ = [
     "CLASSES",
-    "OBJECT_PT_Spine2DAnalysisPanel",
-    "OBJECT_PT_Spine2DDepthParallaxPanel",
-    "OBJECT_PT_Spine2DGeneratedMaterialsPanel",
-    "OBJECT_PT_Spine2DRigPanel",
     "RNA_PROPERTIES",
     "register",
     "unregister",
