@@ -31,12 +31,15 @@ def _read(path: Path) -> str:
 def test_camera_modes_show_fixed_active_camera_instead_of_axis_selector() -> None:
     source = _read(RIG_UI)
 
-    assert "def _draw_forced_active_camera_projection(" in source
-    assert source.count("_draw_forced_active_camera_projection(layout)") == 2
-    assert source.count("_draw_projection_direction(layout, scene)") == 1
-    assert "A1TextureExportMode.CAMERA_PROJECTION.value" in source
-    assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION.value" in source
-    assert 'row.label(text="Active Camera", icon="CAMERA_DATA")' in source
+    # The Rig foldout owns export mode and projection selection. Camera-only routes
+    # show a fixed Active Camera explanation and expose the axis selector only in the
+    # Normal / UV branch.
+    assert "A1TextureExportMode.CAMERA_PROJECTION" in source
+    assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION" in source
+    assert source.count('text="Projection direction"') == 1
+    assert 'text="Active camera render → flat screen-space mesh"' in source
+    assert 'text="Active camera render → optimized depth-relief mesh"' in source
+    assert 'text="Projection direction"' in source
 
 
 def test_depth_preparation_uses_visible_topology_projection_owner() -> None:

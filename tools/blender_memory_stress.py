@@ -121,33 +121,6 @@ def _write_report(path: Path, payload: Mapping[str, Any]) -> None:
     os.replace(temporary, resolved)
 
 
-def _register_steps() -> tuple[tuple[str, Any, Any], ...]:
-    completed = []
-    try:
-        for step in addon.REGISTRATION_STEPS:
-            step[1]()
-            completed.append(step)
-        return tuple(completed)
-    except Exception:
-        for step in reversed(completed):
-            try:
-                step[2]()
-            except Exception:
-                traceback.print_exc()
-        raise
-
-
-def _unregister_steps(completed: Sequence[tuple[str, Any, Any]]) -> None:
-    failures = []
-    for label, _register, unregister in reversed(tuple(completed)):
-        try:
-            unregister()
-        except Exception as exc:
-            failures.append(f"{label}: {type(exc).__name__}: {exc}")
-    if failures:
-        raise MemoryStressError("registration cleanup failed: " + "; ".join(failures))
-
-
 def _configure(output_root: Path) -> Any:
     source = bpy.data.objects.get("Hero")
     if source is None or source.type != "MESH" or source.data is None:
@@ -206,9 +179,10 @@ def main() -> None:
     args = _parser().parse_args(_arguments(sys.argv))
     if args.warmup < 0 or args.iterations <= 0 or args.sample_every <= 0:
         raise MemoryStressError("warmup/iterations/sample-every values are invalid")
+
     output_root = args.output_root.expanduser().resolve(strict=False)
     output_root.mkdir(parents=True, exist_ok=True)
-    completed = _register_steps()
+    addon.register()
     samples = []
     durations = []
     try:
@@ -247,7 +221,13 @@ def main() -> None:
         )
         raise
     finally:
-        _unregister_steps(completed)
+        try:
+            addon.unregister()
+        except Exception as exc:
+            raise MemoryStressError(
+                "extension unregister failed after memory stress: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
 
 
 if __name__ == "__main__":

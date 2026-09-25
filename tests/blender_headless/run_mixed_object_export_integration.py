@@ -31,6 +31,7 @@ from run_bake_integration import (  # noqa: E402
     _capture_context,
     _capture_scene_bake_state,
     _clear_scene,
+    _configure_cycles_scene,
     _create_emission_material,
     _create_quad,
     _create_sentinel,
@@ -44,6 +45,7 @@ from run_multi_object_export_integration import (  # noqa: E402
 
 def test_mixed_selection_preserves_connected_and_standalone_semantics() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-mixed-") as directory:
         output_directory = Path(directory)
         object_a = _create_quad("MixedSourceA")
@@ -148,11 +150,14 @@ def test_mixed_selection_preserves_connected_and_standalone_semantics() -> None:
         _assert(
             slot_names
             == (
+                "ObjectC_Segment_0",
                 "ObjectA_Segment_0",
                 "ObjectB_Segment_0",
-                "ObjectC_Segment_0",
             ),
-            f"mixed slot order changed: {slot_names}",
+            (
+                "mixed projected object-block order changed; expected back-to-front "
+                f"C(z=-1), A(z=0), B(z=0.5), got {slot_names}"
+            ),
         )
         constraints = tuple(document.get("ik", ())) + tuple(document.get("transform", ()))
         orders = tuple(int(item["order"]) for item in constraints)

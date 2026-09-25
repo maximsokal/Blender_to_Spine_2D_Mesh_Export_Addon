@@ -21,11 +21,17 @@ from .shader_capability_policy import (
 )
 
 
+_INSTANCER_AFFECTED_TEXTURE_COORD_OUTPUTS = frozenset({"generated", "uv"})
+
+
 def texture_coordinate_findings(
     node: ShaderNodeSnapshot,
     outputs: Iterable[str],
 ) -> tuple[ShaderCapabilityFinding, ...]:
     """Classify only the Texture Coordinate outputs used by the reachable graph."""
+
+    if not isinstance(node, ShaderNodeSnapshot):
+        raise TypeError("node must be ShaderNodeSnapshot")
 
     resolved_outputs = tuple(outputs)
     if not resolved_outputs:
@@ -37,25 +43,36 @@ def texture_coordinate_findings(
                 node=node,
             ),
         )
+
     findings = []
     for output in resolved_outputs:
-        capability = TEXTURE_COORD_CAPABILITIES.get(output.strip().casefold())
-        if capability is None:
-            capability = ShaderBakeCapability.UNSUPPORTED
-            code = "TEXTURE_COORD_OUTPUT_UNCLASSIFIED"
-            reason = f"Texture Coordinate output '{output}' has no audited bake policy"
-        elif capability is ShaderBakeCapability.LOCAL_UV_SAFE:
-            code = "TEXTURE_COORD_UV_LOCAL"
-            reason = "Texture Coordinate UV uses the preserved source render UV layer"
-        elif capability is ShaderBakeCapability.GROUP_RENDER_REQUIRED:
+        if not isinstance(output, str) or not output.strip():
+            raise TypeError("Texture Coordinate outputs must contain non-empty strings")
+
+        output_key = output.strip().casefold()
+        if node.from_instancer and output_key in _INSTANCER_AFFECTED_TEXTURE_COORD_OUTPUTS:
+            capability = ShaderBakeCapability.GROUP_RENDER_REQUIRED
             code = "TEXTURE_COORD_INSTANCER_CONTEXT"
-            reason = "Texture Coordinate From Instancer requires the original instance context"
-        else:
-            code = "TEXTURE_COORD_SOURCE_CONTEXT"
             reason = (
-                f"Texture Coordinate output '{output}' requires the original object or camera "
-                "evaluation context"
+                f"Texture Coordinate {output} uses From Instancer and therefore requires "
+                "the original instance context"
             )
+        else:
+            capability = TEXTURE_COORD_CAPABILITIES.get(output_key)
+            if capability is None:
+                capability = ShaderBakeCapability.UNSUPPORTED
+                code = "TEXTURE_COORD_OUTPUT_UNCLASSIFIED"
+                reason = f"Texture Coordinate output '{output}' has no audited bake policy"
+            elif capability is ShaderBakeCapability.LOCAL_UV_SAFE:
+                code = "TEXTURE_COORD_UV_LOCAL"
+                reason = "Texture Coordinate UV uses the preserved source render UV layer"
+            else:
+                code = "TEXTURE_COORD_SOURCE_CONTEXT"
+                reason = (
+                    f"Texture Coordinate output '{output}' requires the original object or "
+                    "camera evaluation context"
+                )
+
         findings.append(
             build_finding(
                 capability,

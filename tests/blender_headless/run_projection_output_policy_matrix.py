@@ -1,4 +1,4 @@
-"""Real Blender 4.4 matrix for B4 SDR/straight and HDR/premultiplied output."""
+"""Real Blender 5.2 matrix for B4 SDR/straight and HDR/premultiplied output."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     export_a1_single_object,
 )
 from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
-    BakeExecutionSettings,
     ProjectionAlphaRepresentation,
     ProjectionDynamicRange,
     ProjectionOutputPolicy,
@@ -42,19 +41,21 @@ from run_camera_projection_integration import (  # noqa: E402
 
 
 def _create_hdr_camera_material(name: str):
+    """Create camera-dependent shading with guaranteed scene-linear values above one."""
+
     material = bpy.data.materials.new(name=name)
     material.use_nodes = True
     nodes = material.node_tree.nodes
     nodes.clear()
     output = nodes.new(type="ShaderNodeOutputMaterial")
     layer_weight = nodes.new(type="ShaderNodeLayerWeight")
-    multiply = nodes.new(type="ShaderNodeMath")
-    multiply.operation = "MULTIPLY"
-    multiply.inputs[1].default_value = 8.0
+    ramp = nodes.new(type="ShaderNodeValToRGB")
+    ramp.color_ramp.elements[0].color = (1.0, 0.32, 0.08, 1.0)
+    ramp.color_ramp.elements[1].color = (0.08, 0.32, 1.0, 1.0)
     emission = nodes.new(type="ShaderNodeEmission")
-    emission.inputs["Color"].default_value = (1.0, 0.32, 0.08, 1.0)
-    material.node_tree.links.new(layer_weight.outputs["Facing"], multiply.inputs[0])
-    material.node_tree.links.new(multiply.outputs[0], emission.inputs["Strength"])
+    emission.inputs["Strength"].default_value = 4.0
+    material.node_tree.links.new(layer_weight.outputs["Facing"], ramp.inputs["Fac"])
+    material.node_tree.links.new(ramp.outputs["Color"], emission.inputs["Color"])
     material.node_tree.links.new(emission.outputs["Emission"], output.inputs["Surface"])
     return material
 
@@ -92,6 +93,21 @@ def _pixel_statistics(pixels):
     return maximum_rgb, visible, transparent, partial
 
 
+def _coverage_diagnostic(
+    *,
+    size: tuple[int, int],
+    maximum_rgb: float,
+    visible: int,
+    transparent: int,
+    partial: int,
+    alpha_mode: str,
+) -> str:
+    return (
+        f"size={size}, visible={visible}, transparent={transparent}, "
+        f"partial={partial}, max_rgb={maximum_rgb:.6f}, alpha_mode={alpha_mode!r}"
+    )
+
+
 def _attachment(document, stem):
     matches = [
         attachment
@@ -112,10 +128,14 @@ def test_sdr_png_auto_policy_is_display_referred_and_straight() -> None:
         source = _create_quad("SdrOutputSource")
         source.scale = (0.68, 0.5, 1.0)
         source.data.materials.append(_create_hdr_camera_material("SdrOutputMaterial"))
+        base_settings = _settings(output_directory, "SdrOutput")
         settings = replace(
-            _settings(output_directory, "SdrOutput"),
+            base_settings,
             texture_format=TextureFormat.PNG,
-            bake_execution=BakeExecutionSettings(samples=4),
+            bake_execution=replace(
+                base_settings.bake_execution,
+                samples=4,
+            ),
         )
         context_before = _capture_context()
         render_before = _scene_render_fingerprint()
@@ -126,10 +146,27 @@ def test_sdr_png_auto_policy_is_display_referred_and_straight() -> None:
         image_path = output_directory / "images" / "SdrOutput_Baked.png"
         size, pixels, is_float, alpha_mode = _read_blender_image(image_path)
         maximum_rgb, visible, transparent, partial = _pixel_statistics(pixels)
-        _assert(not is_float, "PNG unexpectedly loaded as float image")
-        _assert(maximum_rgb <= 1.0001, f"SDR PNG retained HDR values: {maximum_rgb}")
-        _assert(visible > 30 and transparent > 20, "SDR PNG coverage is invalid")
-        _assert(alpha_mode in {"STRAIGHT", "CHANNEL_PACKED"}, f"wrong PNG alpha: {alpha_mode}")
+        diagnostic = _coverage_diagnostic(
+            size=size,
+            maximum_rgb=maximum_rgb,
+            visible=visible,
+            transparent=transparent,
+            partial=partial,
+            alpha_mode=alpha_mode,
+        )
+        _assert(not is_float, f"PNG unexpectedly loaded as float image: {diagnostic}")
+        _assert(
+            maximum_rgb <= 1.0001,
+            f"SDR PNG retained HDR values: {diagnostic}",
+        )
+        _assert(
+            visible > 30 and transparent > 20,
+            f"SDR PNG coverage is invalid: {diagnostic}",
+        )
+        _assert(
+            alpha_mode in {"STRAIGHT", "CHANNEL_PACKED"},
+            f"wrong PNG alpha: {diagnostic}",
+        )
 
         document = json.loads((output_directory / "SdrOutput.json").read_text("utf-8"))
         attachment = _attachment(document, "SdrOutput")
@@ -147,10 +184,12 @@ def test_openexr_auto_policy_preserves_scene_linear_hdr_and_premultiplied_alpha(
         source = _create_quad("HdrOutputSource")
         source.scale = (0.68, 0.5, 1.0)
         source.data.materials.append(_create_hdr_camera_material("HdrOutputMaterial"))
+        base_settings = _settings(output_directory, "HdrOutput")
         settings = replace(
-            _settings(output_directory, "HdrOutput"),
+            base_settings,
             texture_format=TextureFormat.OPEN_EXR,
-            bake_execution=BakeExecutionSettings(
+            bake_execution=replace(
+                base_settings.bake_execution,
                 samples=4,
                 projection_output_policy=ProjectionOutputPolicy(
                     dynamic_range=ProjectionDynamicRange.SCENE_LINEAR_HDR,
@@ -170,10 +209,27 @@ def test_openexr_auto_policy_preserves_scene_linear_hdr_and_premultiplied_alpha(
         image_path = output_directory / "images" / "HdrOutput_Baked.exr"
         size, pixels, is_float, alpha_mode = _read_blender_image(image_path)
         maximum_rgb, visible, transparent, partial = _pixel_statistics(pixels)
-        _assert(is_float, "OPEN_EXR did not load as a float image")
-        _assert(maximum_rgb > 1.2, f"HDR values were tone-mapped or clipped: {maximum_rgb}")
-        _assert(visible > 30 and transparent > 20, "HDR EXR coverage is invalid")
-        _assert(alpha_mode in {"PREMUL", "PREMULTIPLIED"}, f"wrong EXR alpha: {alpha_mode}")
+        diagnostic = _coverage_diagnostic(
+            size=size,
+            maximum_rgb=maximum_rgb,
+            visible=visible,
+            transparent=transparent,
+            partial=partial,
+            alpha_mode=alpha_mode,
+        )
+        _assert(is_float, f"OPEN_EXR did not load as a float image: {diagnostic}")
+        _assert(
+            maximum_rgb > 1.2,
+            f"HDR values were tone-mapped or clipped: {diagnostic}",
+        )
+        _assert(
+            visible > 30 and transparent > 20,
+            f"HDR EXR coverage is invalid: {diagnostic}",
+        )
+        _assert(
+            alpha_mode in {"PREMUL", "PREMULTIPLIED"},
+            f"wrong EXR alpha: {diagnostic}",
+        )
 
         document = json.loads((output_directory / "HdrOutput.json").read_text("utf-8"))
         attachment = _attachment(document, "HdrOutput")

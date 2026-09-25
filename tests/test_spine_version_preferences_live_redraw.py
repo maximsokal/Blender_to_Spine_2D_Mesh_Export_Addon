@@ -68,6 +68,37 @@ def test_deferred_redraw_is_coalesced_until_timer_runs(monkeypatch) -> None:
     assert len(registrations) == 2
 
 
+def test_cancel_deferred_redraw_unregisters_owned_timer(monkeypatch) -> None:
+    unregistered: list[object] = []
+
+    timers = SimpleNamespace(
+        is_registered=lambda callback: callback is addon_preferences._deferred_view3d_redraw,
+        unregister=lambda callback: unregistered.append(callback),
+    )
+    monkeypatch.setattr(addon_preferences.bpy.app, "timers", timers, raising=False)
+    monkeypatch.setattr(addon_preferences, "_view3d_redraw_scheduled", True)
+
+    addon_preferences._cancel_deferred_view3d_redraw()
+
+    assert unregistered == [addon_preferences._deferred_view3d_redraw]
+    assert addon_preferences._view3d_redraw_scheduled is False
+
+
+def test_cancel_deferred_redraw_is_safe_after_timer_already_completed(monkeypatch) -> None:
+    unregister = Mock()
+    timers = SimpleNamespace(
+        is_registered=lambda _callback: False,
+        unregister=unregister,
+    )
+    monkeypatch.setattr(addon_preferences.bpy.app, "timers", timers, raising=False)
+    monkeypatch.setattr(addon_preferences, "_view3d_redraw_scheduled", False)
+
+    addon_preferences._cancel_deferred_view3d_redraw()
+
+    unregister.assert_not_called()
+    assert addon_preferences._view3d_redraw_scheduled is False
+
+
 def test_preference_update_redraws_even_if_readiness_invalidation_fails(
     monkeypatch,
 ) -> None:

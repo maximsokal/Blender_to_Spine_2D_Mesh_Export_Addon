@@ -10,10 +10,21 @@ RUNNER = (
     / "blender_headless"
     / "run_coin_star_normal_side_segment_retention_integration.py"
 )
+CORE = (
+    ROOT
+    / "tests"
+    / "blender_headless"
+    / "coin_star_normal_side_segment_core.py"
+)
 
 
 def test_real_coin_side_segment_runner_is_fail_closed_and_fixture_derived() -> None:
-    source = RUNNER.read_text(encoding="utf-8")
+    runner = RUNNER.read_text(encoding="utf-8")
+    core = CORE.read_text(encoding="utf-8")
+
+    assert "safe_coin_normal_material" in runner
+    assert "_run(arguments.expected_blend)" in runner
+    assert "if __name__ == \"__main__\":" in runner
 
     for marker in (
         "[COIN-NORMAL-SIDE-SEGMENTS] PASS",
@@ -31,10 +42,9 @@ def test_real_coin_side_segment_runner_is_fail_closed_and_fixture_derived() -> N
         "_scene_fingerprint() == scene_before",
         "_object_fingerprint(source) == object_before",
         "_temporary_datablock_names() == temporary_before",
+        "--expected-blend",
     ):
-        assert marker in source
+        assert marker in core
 
-    assert "== 48" not in source
-    assert "segments=48" not in source
-    assert "--expected-blend" in source
-    assert "if __name__ == \"__main__\":" in source
+    assert "== 48" not in core
+    assert "segments=48" not in core

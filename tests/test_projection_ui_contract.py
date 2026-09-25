@@ -172,63 +172,58 @@ def test_scene_rna_exposes_exact_public_projection_identifiers() -> None:
         assert direction.name in source or direction.value in source
 
 
-def test_public_panel_draws_projection_only_for_normal_uv_and_reset_restores_z() -> None:
-    source = (PACKAGE / "rig_ui.py").read_text(encoding="utf-8")
+def test_rig_foldout_owns_projection_selector_only_for_normal_uv() -> None:
+    rig_source = (PACKAGE / "rig_ui.py").read_text(encoding="utf-8")
 
-    assert '"spine2d_projection_direction"' in source
-    assert "_draw_projection_direction(layout, scene)" in source
-    assert "A1TextureExportMode.CAMERA_PROJECTION.value" in source
-    assert "direction.active_camera" in source
-    assert "direction.camera_root" in source
-    assert (
-        "context.scene.spine2d_projection_direction = (" in source
-        and "A1ProjectionDirection.POSITIVE_Z.value" in source
-    )
+    assert 'text="Projection direction"' in rig_source
+    assert "A1TextureExportMode.CAMERA_PROJECTION" in rig_source
+    assert "A1TextureExportMode.DEPTH_CAMERA_PROJECTION" in rig_source
+    assert 'text="Active camera render → flat screen-space mesh"' in rig_source
+    assert 'text="Active camera render → optimized depth-relief mesh"' in rig_source
+    assert "SPINE2D_OT_ResetSettingsWithProjection" not in rig_source
+    assert "scene.spine2d_projection_direction =" not in rig_source
 
 
-def test_projection_reset_delegates_base_reset_then_restores_positive_z(
+def test_canonical_reset_restores_projection_shared_pivot_and_parallax_defaults(
     monkeypatch,
 ) -> None:
     scene = SimpleNamespace(
         spine2d_projection_direction=A1ProjectionDirection.NEGATIVE_X.value,
+        spine2d_shared_selection_pivot=False,
+        spine2d_depth_parallax_horizon_angle=0.5,
     )
     context = SimpleNamespace(scene=scene)
-    calls: list[object] = []
-
-    def execute_base(_self, resolved_context):
-        calls.append(resolved_context)
-        return {"FINISHED"}
-
-    monkeypatch.setattr(ui.SPINE2D_OT_ResetSettings, "execute", execute_base)
-    operator = rig_ui.SPINE2D_OT_ResetSettingsWithProjection()
+    operator = ui.SPINE2D_OT_ResetSettings()
     operator.report = MagicMock()
+
+    monkeypatch.setattr(ui, "get_default_output_dir", lambda: "//")
+    monkeypatch.setattr(ui, "clear_a1_export_readiness", lambda _scene: None)
+    monkeypatch.setattr(ui, "_tag_redraw", lambda _context: None)
 
     result = operator.execute(context)
 
     assert result == {"FINISHED"}
-    assert calls == [context]
     assert scene.spine2d_projection_direction == A1ProjectionDirection.POSITIVE_Z.value
-    operator.report.assert_not_called()
+    assert scene.spine2d_shared_selection_pivot is True
+    assert scene.spine2d_depth_parallax_horizon_angle == 0.0
+    operator.report.assert_called_once_with(
+        {"INFO"},
+        "Spine2D Rewrite settings have been reset.",
+    )
 
 
-def test_projection_reset_preserves_base_cancellation(monkeypatch) -> None:
-    scene = SimpleNamespace(
-        spine2d_projection_direction=A1ProjectionDirection.NEGATIVE_X.value,
-    )
-    context = SimpleNamespace(scene=scene)
-    monkeypatch.setattr(
-        ui.SPINE2D_OT_ResetSettings,
-        "execute",
-        lambda _self, _context: {"CANCELLED"},
-    )
-    operator = rig_ui.SPINE2D_OT_ResetSettingsWithProjection()
+def test_rig_reset_reports_invalid_context_without_partial_success() -> None:
+    context = SimpleNamespace(scene=object())
+    operator = rig_ui.SPINE2D_OT_ResetRigProfile()
     operator.report = MagicMock()
 
     result = operator.execute(context)
 
     assert result == {"CANCELLED"}
-    assert scene.spine2d_projection_direction == A1ProjectionDirection.NEGATIVE_X.value
-    operator.report.assert_not_called()
+    operator.report.assert_called_once()
+    levels, message = operator.report.call_args.args
+    assert levels == {"ERROR"}
+    assert message.startswith("Rig reset error:")
 
 
 def test_depth_feature_uses_schema_eight_and_keeps_public_multi_standalone() -> None:

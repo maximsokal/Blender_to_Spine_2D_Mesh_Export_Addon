@@ -188,6 +188,26 @@ def _temporary_datablock_names() -> tuple[str, ...]:
     )
 
 
+def _published_file(result, suffix: str) -> Path:
+    if result is None:
+        raise ValueError("result cannot be None")
+    if not isinstance(suffix, str) or not suffix.startswith("."):
+        raise ValueError("suffix must be an extension such as '.json' or '.png'")
+
+    matches = tuple(
+        Path(path)
+        for path in result.output_files
+        if Path(path).suffix.lower() == suffix.lower()
+    )
+    _assert(
+        len(matches) == 1,
+        f"expected exactly one published {suffix} output, got {matches}",
+    )
+    path = matches[0]
+    _assert(path.is_file(), f"published output does not exist: {path}")
+    return path
+
+
 def test_sword_style_source_material_uv_matches_final_spine_vertices() -> None:
     _clear_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-material-correspondence-") as path:
@@ -212,10 +232,8 @@ def test_sword_style_source_material_uv_matches_final_spine_vertices() -> None:
             "Source UV state changed",
         )
 
-        json_path = output_directory / f"{SOURCE_NAME}_merged.json"
-        texture_path = output_directory / "images" / f"{SOURCE_NAME}_Baked.png"
-        _assert(json_path.is_file(), f"JSON was not created: {json_path}")
-        _assert(texture_path.is_file(), f"Texture was not created: {texture_path}")
+        json_path = _published_file(result, ".json")
+        texture_path = _published_file(result, ".png")
         document = json.loads(json_path.read_text(encoding="utf-8"))
         image_data = _load_rgba(texture_path)
 

@@ -8,11 +8,6 @@ from typing import Set
 import bpy
 
 from .blender_adapter.a1_ui_bridge import export_active_object_a1
-from .infrastructure.blender_registration import (
-    class_cleanup_actions,
-    register_classes_transactionally,
-    unregister_all_best_effort,
-)
 
 
 logger = logging.getLogger(__name__)
@@ -76,34 +71,18 @@ RNA_PROPERTIES: tuple[object, ...] = ()
 
 
 def register() -> None:
-    """Register the Rewrite single-object operator transactionally."""
+    """Register the Rewrite single-object operator using Blender's normal pattern."""
 
-    try:
-        register_classes_transactionally(
-            CLASSES,
-            register_class=bpy.utils.register_class,
-            unregister_class=bpy.utils.unregister_class,
-        )
-    except Exception:
-        logger.exception("Failed to register single-object Rewrite operator")
-        raise
+    for cls in CLASSES:
+        bpy.utils.register_class(cls)
     logger.debug("Single-object Rewrite operator registered")
 
 
 def unregister() -> None:
-    """Remove every owned operator class even when one cleanup fails."""
+    """Unregister the Rewrite single-object operator in reverse order."""
 
-    try:
-        unregister_all_best_effort(
-            class_cleanup_actions(
-                CLASSES,
-                unregister_class=bpy.utils.unregister_class,
-            ),
-            operation="single-object operator unregistration",
-        )
-    except Exception:
-        logger.exception("Single-object Rewrite operator unregistration failed")
-        raise
+    for cls in reversed(CLASSES):
+        bpy.utils.unregister_class(cls)
     logger.debug("Single-object Rewrite operator unregistered")
 
 

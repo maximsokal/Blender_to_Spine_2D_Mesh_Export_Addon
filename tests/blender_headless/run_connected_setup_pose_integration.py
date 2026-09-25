@@ -23,15 +23,18 @@ from run_multi_object_export_integration import (  # noqa: E402
     _assert,
     _assert_state_restored,
     _clear_scene,
+    _legacy_connected_authored_orders,
     _multi_settings,
     _prepare_state,
+    _serialized_runtime_order_by_name,
 )
 
 
 def _constraint(document: dict, name: str) -> dict:
     matches = tuple(
         item
-        for item in (*document.get("ik", ()), *document.get("transform", ()))
+        for collection_name in ("ik", "transform", "path", "physics")
+        for item in document.get(collection_name, ())
         if item.get("name") == name
     )
     _assert(len(matches) == 1, f"expected one constraint {name!r}, found {len(matches)}")
@@ -68,6 +71,8 @@ def test_connected_three_axis_matches_legacy_main_wrapper() -> None:
         output_json = (output_directory / "ConnectedThreeAxisMainParity.json").resolve()
         document = json.loads(output_json.read_text(encoding="utf-8"))
         bones = {bone["name"]: bone for bone in document["bones"]}
+        authored_orders = _legacy_connected_authored_orders()
+        runtime_orders = _serialized_runtime_order_by_name(document, authored_orders)
 
         for control in (
             "all_objects_rotation_X",
@@ -96,7 +101,7 @@ def test_connected_three_axis_matches_legacy_main_wrapper() -> None:
         _assert_exact_fields(
             rotation_x,
             {
-                "order": 0,
+                "order": runtime_orders["all_objects_rotation_X"],
                 "bones": [
                     "all_objects_0_scale",
                     "all_objects_1_scale",
@@ -121,7 +126,7 @@ def test_connected_three_axis_matches_legacy_main_wrapper() -> None:
         _assert_exact_fields(
             rotation_y,
             {
-                "order": 1,
+                "order": runtime_orders["all_objects_rotation_Y"],
                 "bones": [
                     "all_objects_rotate_X",
                     "all_objects_rotate_X_constraint_rotate_IK",
@@ -142,7 +147,7 @@ def test_connected_three_axis_matches_legacy_main_wrapper() -> None:
         _assert_exact_fields(
             rotation_z,
             {
-                "order": 2,
+                "order": runtime_orders["all_objects_rotation_Z"],
                 "bones": ["ObjectA", "ObjectB"],
                 "target": "all_objects_rotation_Z",
                 "local": True,
@@ -157,7 +162,7 @@ def test_connected_three_axis_matches_legacy_main_wrapper() -> None:
         _assert_exact_fields(
             scale,
             {
-                "order": 10,
+                "order": runtime_orders["all_objects_scale_constraint"],
                 "bones": ["all_objects_0_scale", "all_objects_1_scale"],
                 "target": "all_objects_rotate_X_constraint",
                 "scaleX": -1,
@@ -175,8 +180,16 @@ def test_connected_three_axis_matches_legacy_main_wrapper() -> None:
             "Legacy wrapper added Z to visible Y",
         )
 
-        _assert(_constraint(document, "ObjectA_scale_compensator")["order"] == 6, "A compensator order")
-        _assert(_constraint(document, "ObjectB_scale_compensator")["order"] == 6, "B compensator order")
+        _assert(
+            _constraint(document, "ObjectA_scale_compensator")["order"]
+            == runtime_orders["ObjectA_scale_compensator"],
+            "A compensator runtime order",
+        )
+        _assert(
+            _constraint(document, "ObjectB_scale_compensator")["order"]
+            == runtime_orders["ObjectB_scale_compensator"],
+            "B compensator runtime order",
+        )
 
         _assert_state_restored(
             context_before=context_before,

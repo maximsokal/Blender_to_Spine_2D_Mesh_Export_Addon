@@ -20,6 +20,30 @@ def test_b4_captures_disables_and_restores_postprocess_switches():
     assert "scene.render.use_sequencer = False" in source
 
 
+def test_b4_image_settings_restore_format_before_dependent_mode_and_depth():
+    source = _source(
+        "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/"
+        "camera_projection_state.py"
+    )
+
+    assert "for entry in _ordered_scene_restore_entries(self.scene_values)" in source
+    marker = "_IMAGE_SETTING_RESTORE_ORDER = ("
+    start = source.index(marker)
+    end = source.index(")", start)
+    restore_contract = source[start:end]
+
+    file_format_index = restore_contract.index(
+        '"render.image_settings.file_format"'
+    )
+    color_mode_index = restore_contract.index(
+        '"render.image_settings.color_mode"'
+    )
+    color_depth_index = restore_contract.index(
+        '"render.image_settings.color_depth"'
+    )
+    assert file_format_index < color_mode_index < color_depth_index
+
+
 def test_b4_validation_revalidates_renderer_contract():
     source = _source(
         "Blender_to_Spine2D_Mesh_Exporter/blender_adapter/"

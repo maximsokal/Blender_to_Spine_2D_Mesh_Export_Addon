@@ -21,6 +21,7 @@ from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.shader_graph_error import 
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter.shader_graph_rna import (
     find_material_output,
+    node_type,
     normalise_render_target,
 )
 
@@ -93,20 +94,54 @@ def test_shader_target_contract_accepts_only_blender_52_values():
             normalise_render_target(old_or_invalid)
 
 
-def test_material_output_uses_exact_positional_blender_52_target():
-    output = SimpleNamespace(
-        name="Output",
+def test_shader_node_type_normalizes_confirmed_blender_52_rna_aliases():
+    assert node_type(SimpleNamespace(type="SHADERTORGB")) == "SHADER_TO_RGB"
+    assert node_type(SimpleNamespace(type="OUTPUT_MATERIAL")) == "OUTPUT_MATERIAL"
+    assert node_type(SimpleNamespace(type=" tex_image ")) == "TEX_IMAGE"
+    assert node_type(SimpleNamespace(type="")) == "UNKNOWN"
+
+
+def test_material_output_prefers_exact_renderer_target_over_global_active_output():
+    cycles = SimpleNamespace(
+        name="Cycles Output",
         type="OUTPUT_MATERIAL",
         target="CYCLES",
         is_active_output=True,
     )
+    eevee = SimpleNamespace(
+        name="Eevee Output",
+        type="OUTPUT_MATERIAL",
+        target="EEVEE",
+        is_active_output=False,
+    )
     calls: list[str] = []
     tree = SimpleNamespace(
-        get_output_node=lambda target: calls.append(target) or output,
+        get_output_node=lambda target: calls.append(target) or cycles,
     )
 
-    assert find_material_output(tree, (output,), "CYCLES") is output
-    assert calls == ["CYCLES"]
+    assert find_material_output(tree, (cycles, eevee), "EEVEE") is eevee
+    assert calls == []
+
+
+def test_material_output_falls_back_to_generic_all_for_renderer_target():
+    generic = SimpleNamespace(
+        name="Generic Output",
+        type="OUTPUT_MATERIAL",
+        target="ALL",
+        is_active_output=True,
+    )
+    cycles = SimpleNamespace(
+        name="Cycles Output",
+        type="OUTPUT_MATERIAL",
+        target="CYCLES",
+        is_active_output=False,
+    )
+
+    assert find_material_output(
+        SimpleNamespace(),
+        (cycles, generic),
+        "EEVEE",
+    ) is generic
 
 
 def test_shader_graph_without_material_output_is_rejected():

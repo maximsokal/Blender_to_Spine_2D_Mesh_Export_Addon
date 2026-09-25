@@ -1,4 +1,4 @@
-"""Real Blender 4.4 smoke tests for the fixture worker and image comparator."""
+"""Real Blender 5.2 smoke tests for the fixture worker and image comparator."""
 
 from __future__ import annotations
 
@@ -91,9 +91,13 @@ def test_rewrite_fixture_worker_exports_saved_blend() -> None:
             report["temporary_datablocks_clean"],
             f"fixture worker leaked datablocks: {report['datablock_additions']}",
         )
-        json_path = output_directory / "FixtureHero_merged.json"
+        json_path = Path(report["expected_json"])
         png_path = output_directory / "images" / "FixtureHero_Baked.png"
-        _assert(json_path.is_file(), "fixture worker JSON missing")
+        _assert(
+            json_path.parent == output_directory.resolve(),
+            f"fixture worker resolved JSON outside output directory: {json_path}",
+        )
+        _assert(json_path.is_file(), f"fixture worker JSON missing: {json_path}")
         _assert(png_path.read_bytes()[:8] == PNG_SIGNATURE, "fixture worker PNG invalid")
         _assert(not _temporary_datablock_names(), "fixture worker leaked temp data")
 

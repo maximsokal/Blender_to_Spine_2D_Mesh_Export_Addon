@@ -152,13 +152,19 @@ def test_multi_object_filename_uses_resolved_export_exact_version() -> None:
     assert "sources[0].settings.export.spine_target" not in source
 
 
-def test_every_production_viewport_panel_uses_same_preference_resolver() -> None:
-    for relative_path in ("ui.py", "ui_layout.py"):
-        source = _source(relative_path)
-        assert "resolve_spine_project_exact_version(" in source
-        assert 'text=f"Exact JSON version: {exact_version}"' in source
-        assert 'text=f"Exact JSON version: {target.exact_version}"' not in source
-        assert "Invalid Spine version settings" in source
+def test_canonical_main_panel_is_the_single_exact_version_display_owner() -> None:
+    source = _source("ui.py")
+    child_panels = _source("ui_layout.py")
+
+    assert "resolve_spine_project_exact_version(" in source
+    assert 'text=f"Exact JSON version: {exact_version}"' in source
+    assert 'text=f"Exact JSON version: {target.exact_version}"' not in source
+    assert "Invalid Spine version settings" in source
+
+    # Standard child panels must not duplicate the Paths / Spine version controls.
+    assert "resolve_spine_project_exact_version(" not in child_panels
+    assert "Exact JSON version:" not in child_panels
+    assert "spine2d_target_spine_version" not in child_panels
 
 
 def test_preference_resolver_covers_every_current_family_without_fallback_aliases() -> None:

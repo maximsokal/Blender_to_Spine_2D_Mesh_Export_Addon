@@ -31,6 +31,20 @@ from run_camera_projection_integration import (  # noqa: E402
 )
 
 
+def _single_png_output(result) -> Path:
+    outputs = tuple(
+        path
+        for path in result.output_files
+        if isinstance(path, Path) and path.suffix.lower() == ".png"
+    )
+    _assert(
+        len(outputs) == 1,
+        f"expected one committed B4 PNG, got {result.output_files}",
+    )
+    _assert(outputs[0].is_file(), f"committed B4 PNG is missing: {outputs[0]}")
+    return outputs[0]
+
+
 def test_b4_disables_postprocess_only_during_render() -> None:
     _prepare_scene_with_sentinel()
     scene = bpy.context.scene
@@ -68,10 +82,11 @@ def test_b4_disables_postprocess_only_during_render() -> None:
                 _settings(Path(directory), "PostprocessIsolation"),
             )
 
+        _assert(result.success, f"B4 postprocess export failed: {result.issues}")
         _assert(observed, "B4 render operator was not called")
         _assert(scene.render.use_compositing, "Compositor setting was not restored")
         _assert(scene.render.use_sequencer, "Sequencer setting was not restored")
-        pixels = _read_pixels(result.image_paths[0])
+        pixels = _read_pixels(_single_png_output(result))
         visible, transparent = _visible_and_transparent_counts(pixels)
         _assert(visible > 20, "isolated B4 image has no visible source pixels")
         _assert(transparent > 20, "isolated B4 image lost transparent background")

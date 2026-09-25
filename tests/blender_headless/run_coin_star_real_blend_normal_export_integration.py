@@ -1,21 +1,20 @@
-"""Export the real BlendKit coin through the public Normal UV Segments route.
+"""Validate fail-closed Normal/UV routing for the real BlendKit coin material.
 
 Blender must open the caller-provided ``coin_star.blend`` before this script starts. The
-regression proves that a material containing Fresnel, Generated coordinates, two Glossy
-BSDF nodes, and a conservatively analysed muted Add Shader is baked into the generated
-Spine UV layout instead of failing at PLAN_BAKE or switching exported geometry to Camera
+current artist-authored ``Gold metal`` graph contains true displacement. Production
+Normal / UV Segments cannot reproduce that render-time geometry and must reject the
+request at PLAN_BAKE while directing the caller to Camera Projection or Depth Camera
 Projection.
 
-The public Blender UI currently owns ``ORIGINAL`` source geometry for Normal UV Segments.
-This runner intentionally uses that exact contract. Topology-changing evaluated modifiers
-are covered by a separate lineage/canonicalization contract and must not be smuggled into
-this material-bake regression by forcing ``EVALUATED`` here.
+This regression deliberately keeps the artist material untouched. Geometry/rig Normal
+acceptance is covered by separate real-coin gates that temporarily install a deterministic
+surface-only test material. Here the contract is strict rejection with no output files and
+no mutation of Blender source state.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 import sys
 import tempfile
@@ -44,11 +43,8 @@ from Blender_to_Spine2D_Mesh_Exporter.domain.baking import (  # noqa: E402
     BakeExecutionSettings,
     BakeMode,
 )
-from Blender_to_Spine2D_Mesh_Exporter.domain.uv import (  # noqa: E402
-    UvUnwrapSettings,
-)
+from Blender_to_Spine2D_Mesh_Exporter.domain.uv import UvUnwrapSettings  # noqa: E402
 from run_bake_integration import (  # noqa: E402
-    PNG_SIGNATURE,
     _assert,
     _capture_scene_bake_state,
     _temporary_datablock_names,
@@ -65,12 +61,15 @@ from run_coin_star_real_blend_shader_capability_integration import (  # noqa: E4
 _TEXTURE_SIZE = 256
 _MAX_EXPORT_SECONDS = 240.0
 _OUTPUT_STEM = "Game_Gold_Coin_Normal"
+_EXPECTED_STAGE = "PLAN_BAKE"
+_EXPECTED_CODE = "A1_PLAN_BAKE_FAILED"
+_EXPECTED_BLOCKER = "DISPLACEMENT_RENDER_REQUIRED"
 
 
 def _parse_arguments() -> argparse.Namespace:
     arguments = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     parser = argparse.ArgumentParser(
-        description="Export the real coin through Normal UV Segments."
+        description="Validate fail-closed real-coin Normal UV displacement routing."
     )
     parser.add_argument(
         "--expected-blend",
@@ -107,47 +106,40 @@ def _settings(output_directory: Path) -> A1SingleObjectExportSettings:
     )
 
 
-def _mesh_uv_stream_count(value: object) -> int:
-    if isinstance(value, dict):
-        count = 1 if isinstance(value.get("uvs"), list) and value["uvs"] else 0
-        return count + sum(_mesh_uv_stream_count(child) for child in value.values())
-    if isinstance(value, list):
-        return sum(_mesh_uv_stream_count(child) for child in value)
-    return 0
+def _assert_fail_closed_issue(result) -> tuple[object, ...]:
+    issues = tuple(result.issues)
+    _assert(issues, "failed real-coin Normal export returned no diagnostics")
 
+    matching = tuple(
+        issue
+        for issue in issues
+        if getattr(issue, "stage", None) == _EXPECTED_STAGE
+        and getattr(issue, "code", None) == _EXPECTED_CODE
+    )
+    _assert(
+        matching,
+        "real-coin Normal rejection lost PLAN_BAKE/A1_PLAN_BAKE_FAILED diagnostic: "
+        f"{issues}",
+    )
 
-def _read_visible_image_signal(path: Path) -> tuple[int, int, int, float]:
-    """Load one committed PNG, measure visible non-flat RGB, and remove the datablock."""
-
-    if not isinstance(path, Path):
-        raise TypeError("path must be pathlib.Path")
-    image = None
-    try:
-        image = bpy.data.images.load(str(path), check_existing=False)
-        width, height = (int(image.size[0]), int(image.size[1]))
-        pixels = tuple(float(value) for value in image.pixels[:])
-        _assert(len(pixels) == width * height * 4, "loaded coin PNG has invalid RGBA size")
-
-        visible_rgb: list[float] = []
-        visible_pixels = 0
-        for index in range(0, len(pixels), 4):
-            alpha = pixels[index + 3]
-            if alpha <= 1.0 / 255.0:
-                continue
-            visible_pixels += 1
-            visible_rgb.extend(pixels[index : index + 3])
-
-        _assert(visible_pixels > 0, "Normal UV coin bake contains no visible pixels")
-        _assert(visible_rgb, "Normal UV coin bake contains no visible RGB samples")
-        signal_range = max(visible_rgb) - min(visible_rgb)
+    for issue in matching:
+        message = str(getattr(issue, "message", "") or "")
+        technical = str(getattr(issue, "technical_details", "") or "")
+        combined = f"{message}\n{technical}"
         _assert(
-            signal_range > 1.0e-3,
-            f"Normal UV coin bake is visually flat or black: range={signal_range}",
+            _EXPECTED_BLOCKER in combined,
+            f"real-coin Normal rejection lost displacement blocker: {issue}",
         )
-        return width, height, visible_pixels, signal_range
-    finally:
-        if image is not None:
-            bpy.data.images.remove(image)
+        _assert(
+            "Camera Projection" in combined,
+            f"real-coin Normal rejection does not direct to Camera Projection: {issue}",
+        )
+        _assert(
+            "Depth Camera Projection" in combined,
+            f"real-coin Normal rejection does not direct to Depth Camera Projection: {issue}",
+        )
+
+    return matching
 
 
 def _run(expected_blend: str) -> None:
@@ -155,7 +147,7 @@ def _run(expected_blend: str) -> None:
     source = _require_source_object()
     _assert(
         bpy.context.scene.camera is not None,
-        "real coin Normal UV camera-context bake requires an active camera",
+        "real coin fail-closed gate requires the authored active camera",
     )
 
     scene_before = _scene_fingerprint()
@@ -165,7 +157,7 @@ def _run(expected_blend: str) -> None:
     temporary_before = _temporary_datablock_names()
 
     with tempfile.TemporaryDirectory(
-        prefix="spine2d-coin-real-normal-export-"
+        prefix="spine2d-coin-real-normal-rejection-"
     ) as directory:
         output_directory = Path(directory)
         started = perf_counter()
@@ -177,96 +169,44 @@ def _run(expected_blend: str) -> None:
         )
         elapsed = perf_counter() - started
 
-        _assert(result.success, f"real coin Normal UV export failed: {result.issues}")
+        _assert(
+            not result.success,
+            "real coin artist displacement unexpectedly became exportable through Normal/UV",
+        )
         _assert(
             elapsed <= _MAX_EXPORT_SECONDS,
-            f"real coin Normal UV export exceeded {_MAX_EXPORT_SECONDS}s: {elapsed:.3f}s",
+            f"real coin fail-closed routing exceeded {_MAX_EXPORT_SECONDS}s: {elapsed:.3f}s",
         )
-
-        outputs = tuple(Path(path).resolve(strict=False) for path in result.output_files)
-        json_files = tuple(path for path in outputs if path.suffix.lower() == ".json")
-        png_files = tuple(path for path in outputs if path.suffix.lower() == ".png")
-        _assert(len(outputs) == 2, f"expected one JSON and one PNG, got {outputs}")
-        _assert(len(json_files) == 1, f"expected one JSON output, got {json_files}")
-        _assert(len(png_files) == 1, f"expected one PNG output, got {png_files}")
+        matching = _assert_fail_closed_issue(result)
         _assert(
-            all(path.is_file() and path.stat().st_size > 8 for path in outputs),
-            f"real coin export contains missing or empty files: {outputs}",
+            not tuple(result.output_files),
+            f"failed real-coin Normal export reported output files: {result.output_files}",
         )
+        residual_paths = tuple(sorted(path for path in output_directory.rglob("*") if path.exists()))
         _assert(
-            png_files[0].read_bytes().startswith(PNG_SIGNATURE),
-            f"real coin texture is not a PNG: {png_files[0]}",
-        )
-
-        document = json.loads(json_files[0].read_text(encoding="utf-8"))
-        uv_streams = _mesh_uv_stream_count(document)
-        _assert(uv_streams > 0, "real coin Spine JSON contains no mesh UV streams")
-
-        width, height, visible_pixels, signal_range = _read_visible_image_signal(
-            png_files[0]
-        )
-        _assert(
-            (width, height) == (_TEXTURE_SIZE, _TEXTURE_SIZE),
-            f"unexpected Normal UV coin texture size: {(width, height)}",
-        )
-
-        statistics = result.statistics
-        _assert(
-            statistics.get("texture_export_mode")
-            == A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
-            f"coin export changed requested texture mode: {statistics}",
-        )
-        _assert(
-            statistics.get("source_geometry_mode")
-            == A1SourceGeometryMode.ORIGINAL.value,
-            f"coin gate diverged from the public Normal source route: {statistics}",
-        )
-        _assert(
-            statistics.get("modifier_count") == 0,
-            f"public Normal route unexpectedly evaluated modifiers: {statistics}",
-        )
-        _assert(
-            statistics.get("texture_pipeline") == "OBJECT_BAKE",
-            f"coin export did not use object bake: {statistics}",
-        )
-        _assert(
-            statistics.get("bake_mode") == BakeMode.COMBINED.value,
-            f"coin export did not use COMBINED bake: {statistics}",
-        )
-        strategy_ids = str(statistics.get("bake_strategy_ids", ""))
-        _assert(
-            "CAMERA_COMBINED" in strategy_ids,
-            f"coin export lost CAMERA_COMBINED strategy: {statistics}",
-        )
-        _assert(
-            statistics.get("shader_capability") == "CAMERA_RENDER_REQUIRED",
-            f"coin capability changed unexpectedly: {statistics}",
-        )
-        _assert(
-            "projection_crop_width" not in statistics,
-            f"Normal UV export silently became Camera Projection: {statistics}",
+            not residual_paths,
+            f"failed real-coin Normal export left filesystem artifacts: {residual_paths}",
         )
 
         print(
-            "[COIN-REAL-NORMAL-EXPORT] PASS "
-            f"blend={loaded} object={source.name_full!r} outputs={len(outputs)} "
-            f"texture={width}x{height} visible_pixels={visible_pixels} "
-            f"signal_range={signal_range:.6f} uv_streams={uv_streams} "
-            f"elapsed={elapsed:.3f}s mode=NORMAL_UV_SEGMENTS geometry=ORIGINAL "
-            "pipeline=OBJECT_BAKE bake=COMBINED strategy=CAMERA_COMBINED",
+            "[COIN-REAL-NORMAL-FAIL-CLOSED] PASS "
+            f"blend={loaded} object={source.name_full!r} "
+            f"issues={len(result.issues)} matching={len(matching)} "
+            f"elapsed={elapsed:.3f}s stage={_EXPECTED_STAGE} code={_EXPECTED_CODE} "
+            f"blocker={_EXPECTED_BLOCKER} outputs=0",
             flush=True,
         )
 
-    _assert(_scene_fingerprint() == scene_before, "coin export changed Blender context")
-    _assert(_capture_scene_bake_state() == bake_before, "coin export changed bake state")
-    _assert(_object_fingerprint(source) == object_before, "coin export changed source data")
+    _assert(_scene_fingerprint() == scene_before, "coin rejection changed Blender context")
+    _assert(_capture_scene_bake_state() == bake_before, "coin rejection changed bake state")
+    _assert(_object_fingerprint(source) == object_before, "coin rejection changed source data")
     _assert(
         _datablock_fingerprint() == datablocks_before,
-        "coin export created or removed persistent Blender datablocks",
+        "coin rejection created or removed persistent Blender datablocks",
     )
     _assert(
         _temporary_datablock_names() == temporary_before,
-        "coin export leaked temporary Blender datablocks",
+        "coin rejection leaked temporary Blender datablocks",
     )
 
 

@@ -1,10 +1,11 @@
-"""Real Blender 4.4 export fixture for loop-level UV seam duplication.
+"""Real Blender 5.2 export fixture for loop-level UV seam duplication.
 
 Two triangles form one manifold disk with a 90-degree fold. A1 segmentation keeps
 them in one export region, while Smart Project unwrap deliberately splits the fold.
 The final Spine attachment must therefore contain six UV-specific vertices for four
-geometric vertices and remain fully exportable through Cycles and atomic JSON/PNG
-commit.
+geometric vertices, while its physical XY convex hull remains the three projected
+outer points. Final publication may canonicalize coincident generated vertex bones,
+but every weighted attachment vertex must remain present and correctly remapped.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from run_bake_integration import (  # noqa: E402
     _capture_context,
     _capture_scene_bake_state,
     _clear_scene,
+    _configure_cycles_scene,
     _create_emission_material,
     _create_mesh_object,
     _create_sentinel,
@@ -73,6 +75,8 @@ def _create_folded_disk():
 
 
 def _build_settings(output_directory: Path) -> A1SingleObjectExportSettings:
+    if not isinstance(output_directory, Path):
+        raise TypeError("output_directory must be pathlib.Path")
     return A1SingleObjectExportSettings(
         export=ExportSettings(
             texture_width=32,
@@ -95,8 +99,36 @@ def _build_settings(output_directory: Path) -> A1SingleObjectExportSettings:
     )
 
 
+def _decode_single_influence_indices(stream: list[float | int]) -> tuple[int, ...]:
+    if not isinstance(stream, list):
+        raise TypeError("weighted vertex stream must be a list")
+
+    indices: list[int] = []
+    cursor = 0
+    while cursor < len(stream):
+        influence_count = int(stream[cursor])
+        _assert(
+            influence_count == 1,
+            f"expected one influence per UV-specific vertex, got {influence_count}",
+        )
+        cursor += 1
+        _assert(cursor + 3 < len(stream), "weighted vertex stream is truncated")
+        bone_index = int(stream[cursor])
+        x = float(stream[cursor + 1])
+        y = float(stream[cursor + 2])
+        weight = float(stream[cursor + 3])
+        _assert(
+            (x, y, weight) == (0.0, 0.0, 1.0),
+            f"UV seam local weight data changed: {(x, y, weight)}",
+        )
+        indices.append(bone_index)
+        cursor += 4
+    return tuple(indices)
+
+
 def test_complete_service_exports_uv_split_region() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-uv-seam-") as directory:
         output_directory = Path(directory)
         source = _create_folded_disk()
@@ -130,7 +162,14 @@ def test_complete_service_exports_uv_split_region() -> None:
         attachment = document["skins"][0]["attachments"][slot_name][slot_name]
         vertex_count = len(attachment["uvs"]) // 2
         _assert(vertex_count == 6, f"expected six UV vertices, got {vertex_count}")
-        _assert(attachment["hull"] == 6, f"unexpected hull: {attachment['hull']}")
+        _assert(
+            int(attachment["hull"]) == 3,
+            f"physical XY hull should contain three outer points: {attachment['hull']}",
+        )
+        _assert(
+            int(attachment["hull"]) < vertex_count,
+            "UV seam duplication was incorrectly promoted into the physical hull",
+        )
         _assert(
             len(attachment["triangles"]) == 6,
             "two source triangles were not preserved",
@@ -144,19 +183,48 @@ def test_complete_service_exports_uv_split_region() -> None:
             "UV-split attachment edge topology is incomplete",
         )
 
-        vertex_bones = tuple(
-            bone
-            for bone in document["bones"]
-            if bone["name"].startswith("UVSeam_Segment_0_vertex_")
-        )
-        _assert(len(vertex_bones) == 6, "one bone per UV-specific vertex is required")
-        positions = tuple(
-            (float(bone.get("x", 0.0)), float(bone.get("y", 0.0)))
-            for bone in vertex_bones
+        # Publication runs the generated vertex-bone optimizer after the attachment
+        # builder. The builder still creates one bone per attachment vertex, but the
+        # optimizer deterministically merges bones with identical final setup semantics
+        # and remaps the weighted stream. This folded fixture has six UV-specific mesh
+        # vertices but only four unique physical setup positions.
+        vertex_bone_prefix = f"{slot_name}_vertex_"
+        vertex_bone_indices = tuple(
+            index
+            for index, bone in enumerate(document["bones"])
+            if str(bone.get("name", "")).startswith(vertex_bone_prefix)
         )
         _assert(
-            len(set(positions)) == 4,
-            f"UV duplication changed geometric positions: {positions}",
+            len(vertex_bone_indices) == 4,
+            "UV seam canonicalization should retain exactly four physical vertex bones; "
+            f"indices={vertex_bone_indices}",
+        )
+        vertex_bone_keys = tuple(
+            (
+                document["bones"][index].get("parent"),
+                float(document["bones"][index].get("x", 0.0)),
+                float(document["bones"][index].get("y", 0.0)),
+            )
+            for index in vertex_bone_indices
+        )
+        _assert(
+            len(set(vertex_bone_keys)) == 4,
+            f"canonical UV seam bones still contain duplicate setup keys: {vertex_bone_keys}",
+        )
+
+        weighted_indices = _decode_single_influence_indices(attachment["vertices"])
+        _assert(
+            len(weighted_indices) == vertex_count == 6,
+            f"UV-specific weighted vertices were removed: {weighted_indices}",
+        )
+        _assert(
+            set(weighted_indices) == set(vertex_bone_indices),
+            "weighted UV seam vertices do not reference exactly the canonical bones; "
+            f"weighted={weighted_indices}, canonical={vertex_bone_indices}",
+        )
+        _assert(
+            len(set(weighted_indices)) < len(weighted_indices),
+            "UV seam duplicate positions were not shared through canonical vertex bones",
         )
 
         _assert(_capture_context() == context_before, "UV seam export changed context")

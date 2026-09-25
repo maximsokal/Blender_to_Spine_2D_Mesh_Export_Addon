@@ -50,6 +50,7 @@ from run_bake_integration import (  # noqa: E402
     _capture_context,
     _capture_scene_bake_state,
     _clear_scene,
+    _configure_cycles_scene,
     _create_mesh_object,
     _create_sentinel,
     _material_fingerprint,
@@ -390,6 +391,7 @@ def _connected_settings(output_directory: Path, stem: str):
 
 
 def _prepare_state(sources, materials, frame_number: int):
+    _configure_cycles_scene()
     sentinel = _create_sentinel()
     _activate_only(sentinel)
     for source in sources:

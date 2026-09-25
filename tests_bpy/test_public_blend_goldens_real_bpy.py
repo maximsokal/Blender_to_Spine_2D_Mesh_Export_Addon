@@ -33,29 +33,6 @@ def generated_public_blend_fixtures(tmp_path_factory):
     return fixture_root
 
 
-def _register_steps():
-    completed = []
-    try:
-        for step in addon.REGISTRATION_STEPS:
-            step[1]()
-            completed.append(step)
-        return completed
-    except Exception:
-        for step in reversed(completed):
-            step[2]()
-        raise
-
-
-def _unregister_steps(completed):
-    failures = []
-    for label, _register, unregister in reversed(completed):
-        try:
-            unregister()
-        except Exception as exc:
-            failures.append(f"{label}: {exc}")
-    assert not failures, failures
-
-
 def _source_fingerprint(obj):
     mesh = obj.data
     return (
@@ -404,7 +381,7 @@ def test_public_blend_fixtures_match_reviewed_goldens(
             load_ui=False,
         )
 
-        completed = _register_steps()
+        addon.register()
         try:
             output_root = tmp_path / case_id
             obj = _configure(output_root)
@@ -412,11 +389,8 @@ def test_public_blend_fixtures_match_reviewed_goldens(
             expected = GOLDEN[case_id]
 
             if expected["status"] == "failed":
-                with pytest.raises(
-                    RuntimeError,
-                    match="A1_PREPARE_GEOMETRY_FAILED",
-                ):
-                    bpy.ops.object.save_uv_as_json()
+                result = set(bpy.ops.object.save_uv_as_json())
+                assert "CANCELLED" in result
                 assert not tuple(output_root.rglob("*.json"))
                 assert not tuple(output_root.rglob("*.png"))
                 actual = dict(expected)
@@ -429,7 +403,7 @@ def test_public_blend_fixtures_match_reviewed_goldens(
             assert not tuple(output_root.glob("*.spine2d.lock"))
             assert not tuple(output_root.glob(".spine2d-journal-*.json"))
         finally:
-            _unregister_steps(completed)
+            addon.unregister()
 
         actual_cases[case_id] = actual
         mismatches.extend(_compare_case(case_id, expected, actual))

@@ -1,5 +1,5 @@
 # pylint: disable=import-error
-"""Rig-profile and projection controls shared by the ordered Rewrite UI."""
+"""Rig-only controls for the Spine2D exporter child panel."""
 
 from __future__ import annotations
 
@@ -8,28 +8,31 @@ from typing import Set
 
 import bpy
 
-from . import ui
 from .application.a1_shared_pivot import supports_a1_shared_pivot
 from .domain.baking import A1TextureExportMode
-from .domain.projection import (
-    A1ProjectionDirection,
-    resolve_a1_projection_direction,
-)
+from .domain.projection import A1ProjectionDirection, resolve_a1_projection_direction
 from .domain.spine.rig_profiles import A1RigProfile
-from .infrastructure.blender_registration import (
-    class_cleanup_actions,
-    register_classes_transactionally,
-    unregister_all_best_effort,
-)
 
 
 logger = logging.getLogger(__name__)
-_ORIGINAL_RESET_REMOVED = False
-_REGISTERED_CLASSES: tuple[type, ...] = ()
+
+
+def _texture_mode(scene: bpy.types.Scene) -> A1TextureExportMode:
+    raw = str(
+        getattr(
+            scene,
+            "spine2d_texture_export_mode",
+            A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
+        )
+    ).strip().upper()
+    try:
+        return A1TextureExportMode(raw)
+    except ValueError:
+        return A1TextureExportMode.NORMAL_UV_SEGMENTS
 
 
 def _selected_mesh_count(context: bpy.types.Context) -> int:
-    """Count the Mesh objects that the public selected-export route can consume."""
+    """Count Mesh objects accepted by the selected-object export route."""
 
     return sum(
         1
@@ -42,6 +45,8 @@ def _selected_mesh_count(context: bpy.types.Context) -> int:
 def _resolved_projection_direction(
     scene: bpy.types.Scene,
 ) -> A1ProjectionDirection | None:
+    """Resolve the persisted projection identifier without hiding invalid state."""
+
     try:
         return resolve_a1_projection_direction(
             getattr(
@@ -56,9 +61,9 @@ def _resolved_projection_direction(
 
 def _shared_pivot_available(
     context: bpy.types.Context,
-    texture_mode: A1TextureExportMode,
+    texture_mode: A1TextureExportMode = A1TextureExportMode.NORMAL_UV_SEGMENTS,
 ) -> bool:
-    """Mirror the pure exporter capability contract for conditional UI visibility."""
+    """Mirror the exporter capability contract for conditional pivot UI visibility."""
 
     direction = _resolved_projection_direction(context.scene)
     if direction is None:
@@ -74,7 +79,7 @@ def _draw_shared_selection_pivot(
     layout: bpy.types.UILayout,
     context: bpy.types.Context,
 ) -> None:
-    """Draw the default-on toggle only for multi-object signed-axis Normal export."""
+    """Draw the default-on shared pivot only when the export route supports it."""
 
     if not _shared_pivot_available(
         context,
@@ -95,199 +100,97 @@ def _draw_shared_selection_pivot(
         )
 
 
-def _draw_projection_direction(
-    layout: bpy.types.UILayout,
-    scene: bpy.types.Scene,
-) -> None:
-    """Draw the public Normal/UV projection selector and route explanation."""
-
-    layout.prop(
-        scene,
-        "spine2d_projection_direction",
-        text="Projection direction",
-    )
-    direction = _resolved_projection_direction(scene)
-    if direction is None:
-        layout.label(
-            text="Invalid projection direction; Reset restores +Z",
-            icon="ERROR",
-        )
-        return
-
-    if direction.active_camera:
-        layout.label(
-            text="Projects UV-segment geometry through the active camera",
-            icon="CAMERA_DATA",
-        )
-        layout.label(
-            text="Perspective and Orthographic cameras are supported",
-            icon="INFO",
-        )
-        if direction.camera_root:
-            layout.label(
-                text="Main bone pivot: active camera / camera-space zero",
-                icon="CON_PIVOT",
-            )
-            layout.label(
-                text="Projected Object Origin is stored inside one rigid depth layer",
-                icon="BONE_DATA",
-            )
-        else:
-            layout.label(
-                text="Main bone pivot: each object's Blender Object Origin",
-                icon="OBJECT_ORIGIN",
-            )
-            layout.label(
-                text="Per-vertex camera depth remains available to the rig",
-                icon="BONE_DATA",
-            )
-        return
-
-    layout.label(
-        text=f"World-axis object-bake projection: {direction.label}",
-        icon="ORIENTATION_GLOBAL",
-    )
-
-
-def _draw_forced_active_camera_projection(
-    layout: bpy.types.UILayout,
-) -> None:
-    """Show the camera-only projection contract without exposing an invalid selector."""
-
-    row = layout.row(align=True)
-    row.label(text="Projection")
-    row.label(text="Active Camera", icon="CAMERA_DATA")
-    layout.label(
-        text="Perspective and Orthographic cameras are supported",
-        icon="INFO",
-    )
-
-
 def draw_rig_settings(
     layout: bpy.types.UILayout,
     context: bpy.types.Context,
 ) -> None:
-    """Draw the single public rig and the approved projection controls."""
+    """Draw rig and export-mode/projection controls.
+
+    Export mode and projection choose how the rig is built (camera-space vs. world-axis
+    bake, shared vs. per-object pivot, depth-generated bones), so they live here rather
+    than in the Paths and Spine 2D version foldout.
+
+    Per-object Connect settings are intentionally not drawn: the public Export Selected
+    Objects route always builds standalone rigs and ignores persisted Connect values,
+    so exposing the checkbox would present a control that has no effect.
+    """
 
     scene = context.scene
-    layout.label(text="Texture export", icon="TEXTURE")
     layout.prop(scene, "spine2d_texture_export_mode", text="Export mode")
-    texture_mode = str(
-        getattr(
-            scene,
-            "spine2d_texture_export_mode",
-            A1TextureExportMode.NORMAL_UV_SEGMENTS.value,
-        )
-    ).upper()
-    if texture_mode == A1TextureExportMode.CAMERA_PROJECTION.value:
+    texture_mode = _texture_mode(scene)
+    if texture_mode is A1TextureExportMode.CAMERA_PROJECTION:
         layout.label(
-            text="Active camera render -> one screen-space mesh",
+            text="Active camera render → flat screen-space mesh",
             icon="CAMERA_DATA",
         )
-        _draw_forced_active_camera_projection(layout)
         layout.prop(
             scene,
             "spine2d_projection_alpha_threshold",
             text="Projection alpha threshold",
         )
-    elif texture_mode == A1TextureExportMode.DEPTH_CAMERA_PROJECTION.value:
+    elif texture_mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
         layout.label(
-            text="Active camera render -> optimized depth-relief mesh",
+            text="Active camera render → optimized depth-relief mesh",
             icon="CAMERA_DATA",
         )
-        _draw_forced_active_camera_projection(layout)
+        layout.label(text="Depth base: Farthest visible point", icon="INFO")
+        layout.prop(
+            scene,
+            "spine2d_projection_alpha_threshold",
+            text="Projection alpha threshold",
+        )
+        layout.separator()
+        layout.prop(scene, "spine2d_depth_smoothing", text="Depth smoothing")
+        layout.prop(scene, "spine2d_depth_edge_threshold", text="Depth edge threshold")
+        layout.prop(
+            scene,
+            "spine2d_depth_mesh_error_pixels",
+            text="Depth mesh error (px)",
+        )
+        layout.prop(scene, "spine2d_depth_max_points", text="Max depth points")
+        layout.label(
+            text="One generated vertex bone per retained depth point",
+            icon="BONE_DATA",
+        )
     else:
         layout.label(
             text="Preserves cut regions and generated UV meshes",
             icon="UV",
         )
-        _draw_projection_direction(layout, scene)
+        layout.prop(scene, "spine2d_projection_direction", text="Projection direction")
+    layout.separator()
+
+    header = layout.row(align=True)
+    header.label(text="2-Axis Rotation + Scale", icon="CON_ROTLIKE")
+    header.operator("spine2d.reset_rig_profile", text="Reset")
+
+    layout.label(text="Controls: Rotation X / Y + Scale")
+
+    if texture_mode is A1TextureExportMode.NORMAL_UV_SEGMENTS:
         _draw_shared_selection_pivot(layout, context)
 
-    # Keep the historical RNA value loadable, but do not expose a profile selector
-    # until Three Axis receives the same Object Origin implementation and validation.
-    row = layout.row(align=True)
-    row.label(text="Rig profile")
-    row.label(text="2-Axis Rotation + Scale", icon="CON_ROTLIKE")
-
-    description = layout.box()
-    description.label(
-        text="Controls: Rotation X / Y + Scale",
-        icon="FULLSCREEN_ENTER",
-    )
-    if texture_mode == A1TextureExportMode.CAMERA_PROJECTION.value:
-        description.label(text="Camera Projection keeps compatibility placement")
-    elif texture_mode == A1TextureExportMode.DEPTH_CAMERA_PROJECTION.value:
-        description.label(text="Depth geometry and rig depth use the active camera")
-        description.label(text="Main bone matches projected Blender Object Origin")
-    else:
-        direction = _resolved_projection_direction(scene)
-        if direction is None:
-            direction = A1ProjectionDirection.POSITIVE_Z
-        if direction.camera_root:
-            description.label(text="Main bone uses active-camera space as its pivot")
-            description.label(text="Object placement is stored below one rigid layer")
-        elif (
-            _shared_pivot_available(
-                context,
-                A1TextureExportMode.NORMAL_UV_SEGMENTS,
-            )
-            and bool(getattr(scene, "spine2d_shared_selection_pivot", True))
-        ):
-            description.label(text="All selected parts share one geometry-center pivot")
-            description.label(text="Blender Object origins remain unchanged")
-        else:
-            description.label(text="Main bone matches projected Blender Object Origin")
-            description.label(text="Depth uses the selected axis or active camera")
-
-    layout.separator()
     row = layout.row(align=True)
     row.label(text="Control icons")
     row.prop(scene, "spine2d_control_icons", text="")
+
     row = layout.row(align=True)
     row.label(text="Preview animation")
     row.prop(scene, "spine2d_export_preview_animation", text="")
 
 
-class SPINE2D_OT_ResetSettingsWithProjection(bpy.types.Operator):
-    """Extend the main Reset operator with current projection and parallax defaults."""
-
-    bl_idname = ui.SPINE2D_OT_ResetSettings.bl_idname
-    bl_label = ui.SPINE2D_OT_ResetSettings.bl_label
-    bl_description = ui.SPINE2D_OT_ResetSettings.__doc__ or "Reset export settings"
-    bl_options = ui.SPINE2D_OT_ResetSettings.bl_options
-
-    def execute(self, context: bpy.types.Context) -> Set[str]:
-        result = ui.SPINE2D_OT_ResetSettings.execute(self, context)
-        if result != {"FINISHED"}:
-            return result
-        try:
-            context.scene.spine2d_projection_direction = (
-                A1ProjectionDirection.POSITIVE_Z.value
-            )
-            context.scene.spine2d_shared_selection_pivot = True
-            context.scene.spine2d_depth_parallax_horizon_angle = 0.0
-            return result
-        except Exception as exc:
-            logger.exception(
-                "Unable to reset Spine2D projection, shared pivot, and parallax settings"
-            )
-            self.report({"ERROR"}, f"Projection/shared-pivot reset error: {exc}")
-            return {"CANCELLED"}
-
-
 class SPINE2D_OT_ResetRigProfile(bpy.types.Operator):
-    """Restore the production two-axis profile without changing other settings."""
+    """Restore only the persisted production rig profile default."""
 
     bl_idname = "spine2d.reset_rig_profile"
-    bl_label = "Reset Rig Profile"
+    bl_label = "Reset Rig Settings"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
         try:
-            context.scene.spine2d_rig_profile = (
-                A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
-            )
+            scene = getattr(context, "scene", None)
+            if scene is None:
+                raise ValueError("context.scene is unavailable")
+            scene.spine2d_rig_profile = A1RigProfile.TWO_AXIS_ROTATION_SCALE.value
             self.report({"INFO"}, "Rig profile reset to 2-Axis Rotation + Scale")
             return {"FINISHED"}
         except Exception as exc:
@@ -296,85 +199,26 @@ class SPINE2D_OT_ResetRigProfile(bpy.types.Operator):
             return {"CANCELLED"}
 
 
-CLASSES = (
-    SPINE2D_OT_ResetSettingsWithProjection,
-    SPINE2D_OT_ResetRigProfile,
-)
-
-
-def _restore_original_reset_operator() -> None:
-    """Restore the base Reset class after removing our replacement."""
-
-    global _ORIGINAL_RESET_REMOVED
-    if not _ORIGINAL_RESET_REMOVED:
-        return
-    bpy.utils.register_class(ui.SPINE2D_OT_ResetSettings)
-    _ORIGINAL_RESET_REMOVED = False
+CLASSES = (SPINE2D_OT_ResetRigProfile,)
 
 
 def register() -> None:
-    """Replace Reset transactionally and register the Rig UI operators."""
+    """Register the rig reset operator."""
 
-    global _ORIGINAL_RESET_REMOVED, _REGISTERED_CLASSES
-    if _REGISTERED_CLASSES:
-        return
-
-    original_registered = hasattr(ui.SPINE2D_OT_ResetSettings, "bl_rna")
-    if original_registered:
-        bpy.utils.unregister_class(ui.SPINE2D_OT_ResetSettings)
-        _ORIGINAL_RESET_REMOVED = True
-
-    try:
-        _REGISTERED_CLASSES = register_classes_transactionally(
-            CLASSES,
-            register_class=bpy.utils.register_class,
-            unregister_class=bpy.utils.unregister_class,
-        )
-    except Exception as exc:
-        logger.exception("Spine2D Rig UI registration failed")
-        try:
-            _restore_original_reset_operator()
-        except Exception:
-            logger.exception("Unable to restore base Reset operator during rollback")
-        raise RuntimeError("Spine2D Rig UI registration failed") from exc
-    logger.debug("Spine2D Rig UI registered")
+    for cls in CLASSES:
+        bpy.utils.register_class(cls)
 
 
 def unregister() -> None:
-    """Unregister Rig UI classes and restore the base Reset operator."""
+    """Unregister the rig reset operator."""
 
-    global _REGISTERED_CLASSES
-    errors: list[BaseException] = []
-    if _REGISTERED_CLASSES:
-        try:
-            unregister_all_best_effort(
-                class_cleanup_actions(
-                    _REGISTERED_CLASSES,
-                    unregister_class=bpy.utils.unregister_class,
-                ),
-                operation="Spine2D Rig UI unregistration",
-            )
-        except Exception as exc:
-            logger.exception("Unable to unregister Spine2D Rig UI classes")
-            errors.append(exc)
-        finally:
-            _REGISTERED_CLASSES = ()
-
-    try:
-        _restore_original_reset_operator()
-    except Exception as exc:
-        logger.exception("Unable to restore the base Spine2D Reset operator")
-        errors.append(exc)
-
-    if errors:
-        raise RuntimeError("Spine2D Rig UI unregistration failed") from errors[0]
-    logger.debug("Spine2D Rig UI unregistered")
+    for cls in reversed(CLASSES):
+        bpy.utils.unregister_class(cls)
 
 
 __all__ = [
     "CLASSES",
     "SPINE2D_OT_ResetRigProfile",
-    "SPINE2D_OT_ResetSettingsWithProjection",
     "draw_rig_settings",
     "register",
     "unregister",

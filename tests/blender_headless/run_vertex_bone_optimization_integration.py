@@ -56,7 +56,7 @@ def test_pyramid_exports_four_shared_vertex_bones_for_twelve_mesh_vertices() -> 
         result = export_active_object_a1(bpy.context)
         _assert(result.success, f"Pyramid export failed: {result.issues}")
 
-        document, _texture_path = _load_exported_outputs(output_directory)
+        document, _texture_path = _load_exported_outputs(result)
         bones = document["bones"]
         vertex_bone_indices = tuple(
             index

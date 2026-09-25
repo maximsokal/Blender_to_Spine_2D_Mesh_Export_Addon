@@ -1,4 +1,4 @@
-"""Static contract for the real coin Normal UV full-export runner."""
+"""Static contract for the real coin artist-material Normal/UV rejection runner."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ RUNNER = (
 )
 
 
-def test_runner_exports_real_coin_in_normal_uv_mode() -> None:
+def test_runner_rejects_real_coin_displacement_in_normal_uv_mode() -> None:
     source = RUNNER.read_text(encoding="utf-8")
 
     assert "_require_source_object()" in source
@@ -23,24 +23,17 @@ def test_runner_exports_real_coin_in_normal_uv_mode() -> None:
     assert "export_a1_single_object(" in source
     assert "A1TextureExportMode.NORMAL_UV_SEGMENTS" in source
     assert "source_geometry_mode=A1SourceGeometryMode.ORIGINAL" in source
-    assert 'statistics.get("source_geometry_mode")' in source
-    assert "== A1SourceGeometryMode.ORIGINAL.value" in source
-    assert 'statistics.get("modifier_count") == 0' in source
     assert 'render_engine="CYCLES"' in source
     assert "BakeMode.COMBINED" in source
-    assert 'statistics.get("texture_pipeline") == "OBJECT_BAKE"' in source
-    assert 'statistics.get("bake_mode") == BakeMode.COMBINED.value' in source
-    assert '"CAMERA_COMBINED" in strategy_ids' in source
-    assert 'statistics.get("shader_capability") == "CAMERA_RENDER_REQUIRED"' in source
-    assert '"projection_crop_width" not in statistics' in source
-    assert "_read_visible_image_signal(" in source
-    assert "_mesh_uv_stream_count(document)" in source
-    assert "[COIN-REAL-NORMAL-EXPORT] PASS" in source
-    assert "mode=NORMAL_UV_SEGMENTS" in source
-    assert "geometry=ORIGINAL" in source
-    assert "pipeline=OBJECT_BAKE" in source
-    assert "bake=COMBINED" in source
-    assert "strategy=CAMERA_COMBINED" in source
+    assert "not result.success" in source
+    assert '_EXPECTED_STAGE = "PLAN_BAKE"' in source
+    assert '_EXPECTED_CODE = "A1_PLAN_BAKE_FAILED"' in source
+    assert '_EXPECTED_BLOCKER = "DISPLACEMENT_RENDER_REQUIRED"' in source
+    assert '"Camera Projection" in combined' in source
+    assert '"Depth Camera Projection" in combined' in source
+    assert "not tuple(result.output_files)" in source
+    assert "[COIN-REAL-NORMAL-FAIL-CLOSED] PASS" in source
+    assert "outputs=0" in source
 
 
 def test_runner_uses_real_asset_without_synthesizing_or_mutating_it() -> None:

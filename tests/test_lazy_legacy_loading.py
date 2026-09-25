@@ -42,7 +42,6 @@ def test_root_startup_imports_only_rewrite_registration_boundaries():
         "auto_readiness",
         "generated_material_ui",
         "ui_layout",
-        "repolish_ui",
         "single_object_operator",
     ]
 
@@ -70,6 +69,7 @@ def test_retained_pre_rewrite_sources_are_excluded_from_extension_package():
         assert f'"{path}"' in manifest
 
 
-def test_root_contains_no_automatic_legacy_fallback():
+def test_root_contains_no_automatic_legacy_or_advertisement_fallback():
     source = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
     assert "install_legacy_multi_facade" not in source
+    assert "repolish_ui" not in source

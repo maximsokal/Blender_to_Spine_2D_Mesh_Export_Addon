@@ -1,16 +1,21 @@
-"""Real grenade.blend regression for repaired-edge texturing seam correspondence.
+"""Real grenade regression for repaired-edge texturing seam correspondence.
 
-The artist-authored ``Plane.007`` fixture exposed a stale local-EdgeId bug after
-non-manifold repair. Geometry preparation operates on an immutable repaired snapshot,
-while UV texturing intentionally unwraps the unrepaired full-object snapshot. This gate
-proves that the two topologies are reconciled through stable ``SourceEdgeId`` lineage and
-that no repair-generated local edge leaks into the unwrap seam plan.
+The original artist fixture that exposed this bug was named ``Plane.007``. Object display
+names are not the contract: the regression requires a real mesh containing at least one
+source edge shared by more than two faces. Geometry preparation repairs that incidence in
+an immutable working snapshot while UV texturing unwraps source topology. Stable
+``SourceEdgeId`` lineage must reconcile the two without leaking repair-local edge IDs into
+the unwrap seam plan.
+
+The resolver prefers the historical fixture when it still exists, then the current
+non-manifold regression fixture, and finally accepts a unique structurally equivalent mesh.
+It fails closed instead of silently choosing between ambiguous candidates.
 """
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 import sys
 import tempfile
@@ -43,15 +48,32 @@ from run_grenade_bump_displacement_normal_uv_integration import (  # noqa: E402
     _require_loaded_blend,
     _settings as _base_settings,
 )
+from run_grenade_non_manifold_repair_integration import (  # noqa: E402
+    _EXPECTED_OBJECT_NAME as _CURRENT_NON_MANIFOLD_FIXTURE_NAME,
+)
 
 
-_EXPECTED_OBJECT_NAME = "Plane.007"
+_LEGACY_FIXTURE_NAME = "Plane.007"
+
+
+@dataclass(frozen=True, slots=True)
+class _LineageFixtureCandidate:
+    source_object: bpy.types.Object
+    non_manifold_edge_indices: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source_object, bpy.types.Object):
+            raise TypeError("source_object must be bpy.types.Object")
+        if self.source_object.type != "MESH" or self.source_object.data is None:
+            raise TypeError("source_object must be a mesh object with data")
+        if not self.non_manifold_edge_indices:
+            raise ValueError("candidate must contain at least one >2-face source edge")
 
 
 def _parse_arguments() -> argparse.Namespace:
     arguments = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     parser = argparse.ArgumentParser(
-        description="Run real grenade Plane.007 repaired-edge texturing regression."
+        description="Run real grenade repaired-edge texturing lineage regression."
     )
     parser.add_argument(
         "--expected-blend",
@@ -61,19 +83,11 @@ def _parse_arguments() -> argparse.Namespace:
     return parser.parse_args(arguments)
 
 
-def _require_source():
-    source = bpy.data.objects.get(_EXPECTED_OBJECT_NAME)
-    _assert(source is not None, f"missing grenade object: {_EXPECTED_OBJECT_NAME!r}")
-    _assert(source.type == "MESH", f"{_EXPECTED_OBJECT_NAME} must be MESH")
-    _assert(source.data is not None, f"{_EXPECTED_OBJECT_NAME} has no Mesh datablock")
-    return source
-
-
 def _matrix_fingerprint(matrix) -> tuple[tuple[float, ...], ...]:
     return tuple(tuple(float(value) for value in row) for row in matrix)
 
 
-def _source_fingerprint(source, scene) -> tuple:
+def _source_fingerprint(source: bpy.types.Object, scene: bpy.types.Scene) -> tuple:
     uv_layers = source.data.uv_layers
     return (
         source.name_full,
@@ -103,6 +117,63 @@ def _datablock_fingerprint() -> tuple:
     )
 
 
+def _candidate_for_object(source_object: bpy.types.Object) -> _LineageFixtureCandidate | None:
+    if not isinstance(source_object, bpy.types.Object):
+        raise TypeError("source_object must be bpy.types.Object")
+    if source_object.type != "MESH" or source_object.data is None:
+        return None
+    if len(source_object.data.polygons) == 0:
+        return None
+
+    snapshot = read_source_mesh_snapshot(
+        source_object,
+        source_object_id=source_object.name_full,
+        snapshot_id=f"{source_object.name_full}:lineage-candidate-scan",
+    )
+    incidence = build_edge_to_faces(snapshot)
+    problem_edges = tuple(
+        sorted(
+            edge_id.index
+            for edge_id, face_ids in incidence.items()
+            if len(face_ids) > 2
+        )
+    )
+    if not problem_edges:
+        return None
+    return _LineageFixtureCandidate(source_object, problem_edges)
+
+
+def _resolve_source() -> tuple[_LineageFixtureCandidate, tuple[str, ...]]:
+    candidates: list[_LineageFixtureCandidate] = []
+    for source_object in sorted(bpy.data.objects, key=lambda item: item.name_full):
+        candidate = _candidate_for_object(source_object)
+        if candidate is not None:
+            candidates.append(candidate)
+
+    _assert(candidates, "grenade fixture contains no mesh with a >2-face source edge")
+    candidate_names = tuple(candidate.source_object.name_full for candidate in candidates)
+
+    for preferred_name in (_LEGACY_FIXTURE_NAME, _CURRENT_NON_MANIFOLD_FIXTURE_NAME):
+        preferred = tuple(
+            candidate
+            for candidate in candidates
+            if candidate.source_object.name_full == preferred_name
+        )
+        if preferred:
+            _assert(
+                len(preferred) == 1,
+                f"duplicate preferred lineage fixture name {preferred_name!r}: {candidate_names}",
+            )
+            return preferred[0], candidate_names
+
+    _assert(
+        len(candidates) == 1,
+        "grenade lineage fixture is ambiguous; no known preferred object is present: "
+        f"candidates={candidate_names}",
+    )
+    return candidates[0], candidate_names
+
+
 def _internal_geometry_cut_ids(geometry) -> tuple[int, ...]:
     segmentation = tuple(
         boundary.edge_id.index
@@ -123,15 +194,16 @@ def _run(expected_blend: str) -> None:
     loaded = _require_loaded_blend(expected_blend)
     scene = bpy.context.scene
     _assert(scene.camera is not None, "grenade fixture must provide an active camera")
-    source_object = _require_source()
 
+    candidate, candidate_names = _resolve_source()
+    source_object = candidate.source_object
     before = _source_fingerprint(source_object, scene)
     datablocks_before = _datablock_fingerprint()
 
     raw_snapshot = read_source_mesh_snapshot(
         source_object,
         source_object_id=source_object.name_full,
-        snapshot_id=f"{source_object.name_full}:plane007-lineage-fixture",
+        snapshot_id=f"{source_object.name_full}:texturing-lineage-fixture",
     )
     raw_incidence = build_edge_to_faces(raw_snapshot)
     raw_non_manifold = tuple(
@@ -142,36 +214,37 @@ def _run(expected_blend: str) -> None:
         )
     )
     _assert(
-        raw_non_manifold,
-        "Plane.007 no longer exercises non-manifold edge repair",
+        raw_non_manifold == candidate.non_manifold_edge_indices,
+        "lineage fixture changed between structural scan and regression read: "
+        f"scan={candidate.non_manifold_edge_indices}, read={raw_non_manifold}",
     )
 
     repaired, report = split_non_manifold_edges(
         raw_snapshot,
         snapshot_id=raw_snapshot.snapshot_id,
     )
-    _assert(report.changed, "Plane.007 repair report unexpectedly reports no change")
+    _assert(report.changed, "lineage fixture repair report unexpectedly reports no change")
     _assert(
         report.created_edge_count > 0,
-        "Plane.007 repair did not append any per-face edge copies",
+        "lineage fixture repair did not append per-face edge copies",
     )
     _assert(
         tuple(edge.id for edge in repaired.edges[: len(raw_snapshot.edges)])
         == tuple(edge.id for edge in raw_snapshot.edges),
-        "Plane.007 repair shifted original EdgeId values",
+        "lineage fixture repair shifted original EdgeId values",
     )
     _assert(
         all(len(face_ids) <= 2 for face_ids in build_edge_to_faces(repaired).values()),
-        "Plane.007 repair left a >2-face edge",
+        "lineage fixture repair left a >2-face edge",
     )
 
-    with tempfile.TemporaryDirectory(prefix="spine2d_grenade_plane007_") as temp_root:
+    with tempfile.TemporaryDirectory(prefix="spine2d_grenade_lineage_") as temp_root:
         output_directory = Path(temp_root).resolve(strict=False)
         settings = replace(
             _base_settings(output_directory),
-            prefix="Grenade_Plane_007",
-            output_stem="Grenade_Plane_007",
-            json_output_stem="Grenade_Plane_007",
+            prefix=f"Grenade_{source_object.name_full}",
+            output_stem=f"Grenade_{source_object.name_full}_Lineage",
+            json_output_stem=f"Grenade_{source_object.name_full}_Lineage",
         )
 
         source = prepare_a1_source_geometry(
@@ -190,34 +263,39 @@ def _run(expected_blend: str) -> None:
         source_edge_ids = set(source.source_snapshot.edge_by_id())
         _assert(
             set(topology.all_seam_edge_ids).issubset(source_edge_ids),
-            "Plane.007 texturing topology still contains edges absent from source "
-            f"snapshot: seams={tuple(edge.id.index for edge in topology.snapshot.edges if edge.seam)!r}",
+            "texturing topology contains seam edges absent from the source snapshot: "
+            f"object={source_object.name_full!r}, "
+            f"seams={tuple(edge.id.index for edge in topology.snapshot.edges if edge.seam)!r}",
         )
         _assert(
-            all(topology.snapshot.edge_by_id()[edge_id].seam for edge_id in topology.all_seam_edge_ids),
-            "Plane.007 resolved seam IDs are not marked on the unwrap snapshot",
+            all(
+                topology.snapshot.edge_by_id()[edge_id].seam
+                for edge_id in topology.all_seam_edge_ids
+            ),
+            "resolved seam IDs are not marked on the unwrap snapshot",
         )
         _assert(
             uv.unwrap_result.snapshot.active_uv_layer == settings.uv.layer_name,
-            "Plane.007 unwrap did not activate the generated UV layer",
+            "lineage fixture unwrap did not activate the generated UV layer",
         )
         _assert(
             len(uv.uv_regions.regions) == len(source.geometry.regions),
-            "Plane.007 UV propagation region count differs from geometry",
+            "lineage fixture UV propagation region count differs from geometry",
         )
 
     _assert(
         _source_fingerprint(source_object, scene) == before,
-        "Plane.007 preparation changed source object or scene state",
+        "lineage preparation changed source object or scene state",
     )
     _assert(
         _datablock_fingerprint() == datablocks_before,
-        "Plane.007 preparation leaked or removed Blender datablocks",
+        "lineage preparation leaked or removed Blender datablocks",
     )
 
     print(
-        "[GRENADE-PLANE-007-TEXTURING] PASS "
+        "[GRENADE-TEXTURING-LINEAGE] PASS "
         f"blend={loaded} object={source_object.name_full!r} "
+        f"candidates={candidate_names!r} "
         f"source_edges={len(raw_snapshot.edges)} "
         f"non_manifold_edges={len(raw_non_manifold)} "
         f"created_repair_edges={report.created_edge_count} "

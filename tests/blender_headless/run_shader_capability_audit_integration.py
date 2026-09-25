@@ -1,4 +1,4 @@
-"""Blender 4.4 integration checks for diagnostic shader capability auditing."""
+"""Blender 5.2 integration checks for diagnostic shader capability auditing."""
 
 from __future__ import annotations
 
@@ -57,6 +57,30 @@ def _material_from_value_output(
     return material
 
 
+def _texture_coordinate_material(
+    name: str,
+    *,
+    output_name: str,
+    from_instancer: bool = False,
+):
+    if not isinstance(from_instancer, bool):
+        raise TypeError("from_instancer must be bool")
+
+    material = _material_from_value_output(
+        name,
+        node_type="ShaderNodeTexCoord",
+        output_name=output_name,
+    )
+    source = material.node_tree.nodes.get(f"{name} Source")
+    _assert(source is not None, f"Texture Coordinate source node is missing for {name!r}")
+    _assert(
+        hasattr(source, "from_instancer"),
+        "Blender Texture Coordinate node has no from_instancer RNA property",
+    )
+    source.from_instancer = from_instancer
+    return material
+
+
 def _shader_to_rgb_material(name: str):
     material = bpy.data.materials.new(name=name)
     material.use_nodes = True
@@ -77,28 +101,34 @@ def _audit(material, render_target: str):
     return audit_material_graph_capabilities(graph, render_target=render_target)
 
 
-def test_texture_coordinate_outputs_are_socket_specific() -> None:
+def test_texture_coordinate_outputs_and_instancer_property_are_specific() -> None:
     uv = _audit(
-        _material_from_value_output(
+        _texture_coordinate_material(
             "TextureCoordUV",
-            node_type="ShaderNodeTexCoord",
             output_name="UV",
         ),
         "CYCLES",
     )
     window = _audit(
-        _material_from_value_output(
+        _texture_coordinate_material(
             "TextureCoordWindow",
-            node_type="ShaderNodeTexCoord",
             output_name="Window",
         ),
         "CYCLES",
     )
-    instancer = _audit(
-        _material_from_value_output(
-            "TextureCoordInstancer",
-            node_type="ShaderNodeTexCoord",
-            output_name="From Instancer",
+    instancer_uv = _audit(
+        _texture_coordinate_material(
+            "TextureCoordInstancerUV",
+            output_name="UV",
+            from_instancer=True,
+        ),
+        "CYCLES",
+    )
+    instancer_generated = _audit(
+        _texture_coordinate_material(
+            "TextureCoordInstancerGenerated",
+            output_name="Generated",
+            from_instancer=True,
         ),
         "CYCLES",
     )
@@ -111,10 +141,11 @@ def test_texture_coordinate_outputs_are_socket_specific() -> None:
         window.required_capability is ShaderBakeCapability.CAMERA_RENDER_REQUIRED,
         f"Window output did not require camera render: {window}",
     )
-    _assert(
-        instancer.required_capability is ShaderBakeCapability.GROUP_RENDER_REQUIRED,
-        f"From Instancer did not require group render: {instancer}",
-    )
+    for audit in (instancer_uv, instancer_generated):
+        _assert(
+            audit.required_capability is ShaderBakeCapability.GROUP_RENDER_REQUIRED,
+            f"From Instancer coordinate did not require group render: {audit}",
+        )
 
 
 def test_source_context_nodes_are_not_local_uv_safe() -> None:
@@ -171,7 +202,7 @@ def test_shader_to_rgb_is_eevee_only() -> None:
 def main() -> None:
     _reset()
     tests = (
-        test_texture_coordinate_outputs_are_socket_specific,
+        test_texture_coordinate_outputs_and_instancer_property_are_specific,
         test_source_context_nodes_are_not_local_uv_safe,
         test_particle_info_requires_group_context,
         test_shader_to_rgb_is_eevee_only,

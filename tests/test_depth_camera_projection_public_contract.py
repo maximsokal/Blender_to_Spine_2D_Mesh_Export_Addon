@@ -53,7 +53,7 @@ CAMERA_EXECUTION = PACKAGE / "blender_adapter" / "camera_projection_execution.py
 DEPTH_FINALIZATION = PACKAGE / "blender_adapter" / "a1_depth_projection_finalization.py"
 OUTPUT_DISPATCH = PACKAGE / "blender_adapter" / "a1_rendered_projection_finalization.py"
 SCENE_MIGRATION = PACKAGE / "blender_adapter" / "scene_settings_migration.py"
-UI = PACKAGE / "ui.py"
+RIG_UI = PACKAGE / "rig_ui.py"
 
 
 def _read(path: Path) -> str:
@@ -160,12 +160,12 @@ def test_depth_base_supports_both_policies_but_ui_uses_farthest_visible() -> Non
         "OBJECT_ORIGIN",
     )
     properties = _read(SCENE_PROPERTIES)
-    ui = _read(UI)
+    rig_ui = _read(RIG_UI)
     assert 'options={"HIDDEN"}' in properties
     assert "DepthProjectionBaseMode.FARTHEST_VISIBLE.value" in properties
     assert "DepthProjectionBaseMode.OBJECT_ORIGIN.value" in properties
-    assert "Depth base: Farthest visible point" in ui
-    assert 'column.prop(scene, "spine2d_depth_base_mode"' not in ui
+    assert "Depth base: Farthest visible point" in rig_ui
+    assert '.prop(scene, "spine2d_depth_base_mode"' not in rig_ui
 
 
 def test_both_relief_base_policies_keep_camera_as_global_rig_zero() -> None:
@@ -179,7 +179,7 @@ def test_both_relief_base_policies_keep_camera_as_global_rig_zero() -> None:
 
 def test_depth_ui_contains_depth_quality_and_parallax_controls() -> None:
     properties = _read(SCENE_PROPERTIES)
-    ui = _read(UI)
+    rig_ui = _read(RIG_UI)
     for property_name in (
         "spine2d_depth_smoothing",
         "spine2d_depth_edge_threshold",
@@ -188,7 +188,7 @@ def test_depth_ui_contains_depth_quality_and_parallax_controls() -> None:
         "spine2d_depth_parallax_horizon_angle",
     ):
         assert property_name in properties
-    assert "One generated vertex bone per retained depth point" in ui
+    assert "One generated vertex bone per retained depth point" in rig_ui
 
 
 def test_depth_route_uses_shared_camera_distance_and_compensated_view_attachments() -> None:
@@ -256,7 +256,7 @@ def test_scene_schema_and_manifest_are_current_release() -> None:
     manifest = tomllib.loads(_read(MANIFEST))
     migration = _read(SCENE_MIGRATION)
 
-    assert manifest["version"] == "0.154.0"
+    assert manifest["version"] == "0.155.0"
     assert manifest["blender_version_min"] == "5.2.0"
     assert "CURRENT_SETTINGS_SCHEMA_VERSION = 8" in migration
     assert "_initialize_depth_defaults(" in migration

@@ -19,6 +19,7 @@ for path in (SCRIPT_DIRECTORY, REPOSITORY_ROOT):
 from Blender_to_Spine2D_Mesh_Exporter.application import (  # noqa: E402
     A1MultiObjectExportSettings,
     A1MultiObjectMode,
+    ConnectedCameraRenderPolicy,
 )
 from Blender_to_Spine2D_Mesh_Exporter.blender_adapter import (  # noqa: E402
     A1MultiObjectSource,
@@ -160,11 +161,17 @@ def test_grouped_connected_projection_exports_one_visible_depth_layer() -> None:
                 output_stem="GroupedDepth",
                 mode=A1MultiObjectMode.CONNECTED,
                 anchor_component_id="back",
+                connected_camera_render_policy=(
+                    ConnectedCameraRenderPolicy.AUTO_GROUPED_CAMERA
+                ),
             ),
         )
 
         _assert(result.success, f"grouped connected B4 failed: {result.issues}")
-        _assert(result.statistics["grouped_b4_enabled"] == 1, "AUTO did not group B4")
+        _assert(
+            result.statistics["grouped_b4_enabled"] == 1,
+            "explicit grouped B4 policy did not produce grouped output",
+        )
         _assert(result.statistics["grouped_b4_source_count"] == 2, "wrong grouped count")
 
         json_path = output_directory / "GroupedDepth.json"

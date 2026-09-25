@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
-import pytest
-
 import bpy
 
 import Blender_to_Spine2D_Mesh_Exporter as extension
 
 
 _PACKAGE_SUFFIX = "Blender_to_Spine2D_Mesh_Exporter"
+_REMOVED_AUTOMATIC_READINESS_SYMBOLS = (
+    "_automatic_timer",
+    "_register_timer",
+    "_unregister_timer",
+    "_install_handlers",
+    "_remove_handlers",
+    "request_auto_analysis",
+    "a1_auto_readiness_depsgraph_update_post",
+    "a1_auto_readiness_load_pre",
+    "a1_auto_readiness_load_post",
+)
 
 
 def _matching_addon_preference_keys() -> tuple[str, ...]:
@@ -26,42 +35,26 @@ def _matching_addon_preference_keys() -> tuple[str, ...]:
 
 
 def _assert_manual_readiness_runtime_registered() -> None:
-    """Require the manual readiness bridge without background analysis hooks."""
+    """Require the manual readiness bridge and prove the old scheduler is absent."""
 
     assert extension.auto_readiness._REGISTERED is True
-    assert not bpy.app.timers.is_registered(extension.auto_readiness._automatic_timer)
-    assert extension.auto_readiness.a1_auto_readiness_depsgraph_update_post not in (
-        bpy.app.handlers.depsgraph_update_post
-    )
-    assert extension.auto_readiness.a1_auto_readiness_load_pre not in (
-        bpy.app.handlers.load_pre
-    )
-    assert extension.auto_readiness.a1_auto_readiness_load_post not in (
-        bpy.app.handlers.load_post
-    )
+    assert extension.auto_readiness._UI_MODULE is extension.ui
+    assert extension.auto_readiness._BASE_METHODS
+    for name in _REMOVED_AUTOMATIC_READINESS_SYMBOLS:
+        assert not hasattr(extension.auto_readiness, name), name
 
 
 def _assert_manual_readiness_runtime_unregistered() -> None:
-    """Require complete teardown of the manual readiness bridge and old hooks."""
+    """Require complete teardown of the manual readiness method overrides."""
 
     assert extension.auto_readiness._REGISTERED is False
-    assert not bpy.app.timers.is_registered(extension.auto_readiness._automatic_timer)
-    assert extension.auto_readiness.a1_auto_readiness_depsgraph_update_post not in (
-        bpy.app.handlers.depsgraph_update_post
-    )
-    assert extension.auto_readiness.a1_auto_readiness_load_pre not in (
-        bpy.app.handlers.load_pre
-    )
-    assert extension.auto_readiness.a1_auto_readiness_load_post not in (
-        bpy.app.handlers.load_post
-    )
+    assert extension.auto_readiness._UI_MODULE is None
+    assert extension.auto_readiness._BASE_METHODS == {}
+    for name in _REMOVED_AUTOMATIC_READINESS_SYMBOLS:
+        assert not hasattr(extension.auto_readiness, name), name
 
 
 def _assert_root_runtime_registered() -> None:
-    assert (
-        extension.get_registration_state()
-        is extension.ExtensionRegistrationState.REGISTERED
-    )
     assert hasattr(bpy.types.Scene, "spine2d_texture_export_mode")
     assert bpy.context.scene.spine2d_texture_export_mode == "NORMAL_UV_SEGMENTS"
     assert bpy.types.Operator.bl_rna_get_subclass_py(
@@ -74,10 +67,6 @@ def _assert_root_runtime_registered() -> None:
 
 
 def _assert_root_runtime_unregistered() -> None:
-    assert (
-        extension.get_registration_state()
-        is extension.ExtensionRegistrationState.UNREGISTERED
-    )
     assert not hasattr(bpy.types.Scene, "spine2d_texture_export_mode")
     assert bpy.types.Operator.bl_rna_get_subclass_py(
         "OBJECT_OT_spine2d_single_export"
@@ -86,6 +75,10 @@ def _assert_root_runtime_unregistered() -> None:
         bpy.app.handlers.depsgraph_update_post
     )
     _assert_manual_readiness_runtime_unregistered()
+
+    is_registered = getattr(bpy.app.timers, "is_registered", None)
+    if callable(is_registered):
+        assert not is_registered(extension.addon_preferences._deferred_view3d_redraw)
 
 
 def test_direct_root_registration_without_enabled_addon_entry(clean_blender_data):
@@ -105,11 +98,11 @@ def test_direct_root_registration_without_enabled_addon_entry(clean_blender_data
     _assert_root_runtime_unregistered()
 
 
-def test_existing_preference_initialization_failure_rolls_back_every_owner(
+def test_logging_preference_initialization_failure_is_nonfatal_after_registration(
     clean_blender_data,
     monkeypatch,
 ):
-    """A real preference initialization error remains a transactional failure."""
+    """Diagnostics preference errors must not corrupt an otherwise valid enable."""
 
     _assert_root_runtime_unregistered()
     fake_preferences = object()
@@ -119,7 +112,10 @@ def test_existing_preference_initialization_failure_rolls_back_every_owner(
         lambda: fake_preferences,
     )
 
+    calls: list[object] = []
+
     def fail_initialization(prefs):
+        calls.append(prefs)
         assert prefs is fake_preferences
         raise RuntimeError("forced preference initialization failure")
 
@@ -129,7 +125,11 @@ def test_existing_preference_initialization_failure_rolls_back_every_owner(
         fail_initialization,
     )
 
-    with pytest.raises(RuntimeError, match="forced preference initialization failure"):
-        extension.register()
+    extension.register()
+    try:
+        _assert_root_runtime_registered()
+        assert calls == [fake_preferences]
+    finally:
+        extension.unregister()
 
     _assert_root_runtime_unregistered()

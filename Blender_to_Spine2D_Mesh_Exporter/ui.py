@@ -10,7 +10,9 @@ from typing import Callable, Set
 
 import bpy
 
+from . import rig_ui, ui_layout
 from .application import A1ReadinessState, IssueSeverity
+from .blender_adapter import generated_material_ui
 from .blender_adapter.a1_export_readiness import (
     a1_readiness_depsgraph_update_post,
     analyse_a1_export_readiness,
@@ -29,6 +31,7 @@ from .blender_adapter.spine_version_preferences import (
 from .config import get_default_output_dir
 from .domain.baking import A1TextureExportMode, TextureSequenceTiming
 from .domain.geometry import DepthProjectionBaseMode
+from .domain.projection import A1ProjectionDirection
 from .domain.spine.version_target import (
     DEFAULT_SPINE_JSON_TARGET,
     resolve_spine_json_target,
@@ -79,6 +82,8 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene.spine2d_texture_export_mode = (
                 A1TextureExportMode.NORMAL_UV_SEGMENTS.value
             )
+            scene.spine2d_projection_direction = A1ProjectionDirection.POSITIVE_Z.value
+            scene.spine2d_shared_selection_pivot = True
             scene.spine2d_target_spine_version = DEFAULT_SPINE_JSON_TARGET.value
             scene.spine2d_texture_size = 1024
             scene.spine2d_json_path = get_default_output_dir()
@@ -103,6 +108,7 @@ class SPINE2D_OT_ResetSettings(bpy.types.Operator):
             scene.spine2d_depth_base_mode = (
                 DepthProjectionBaseMode.FARTHEST_VISIBLE.value
             )
+            scene.spine2d_depth_parallax_horizon_angle = 0.0
             clear_a1_export_readiness(scene)
             _tag_redraw(context)
             self.report({"INFO"}, "Spine2D Rewrite settings have been reset.")
@@ -188,11 +194,11 @@ class Spine2DBakeSettings(bpy.types.PropertyGroup):
 class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
     """Main Blender 5.2+ Rewrite exporter panel."""
 
-    bl_label = "Blender to Spine2D Mesh Exporter"
+    bl_label = "Mesh Exporter"
     bl_idname = "OBJECT_PT_spine2d_mesh"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Blender to Spine2D Mesh Exporter"
+    bl_category = "Mesh Exporter"
 
     @staticmethod
     def _scale_applied(obj: bpy.types.Object, tolerance: float = 1e-4) -> bool:
@@ -319,70 +325,14 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         column: bpy.types.UILayout,
         context: bpy.types.Context,
     ) -> None:
-        scene = context.scene
-        column.prop(scene, "spine2d_texture_export_mode", text="Export mode")
-        texture_mode = self._texture_mode(scene)
-        if texture_mode is A1TextureExportMode.CAMERA_PROJECTION:
-            column.label(
-                text="Active camera render → flat screen-space mesh",
-                icon="CAMERA_DATA",
-            )
-            column.prop(
-                scene,
-                "spine2d_projection_alpha_threshold",
-                text="Projection alpha threshold",
-            )
-        elif texture_mode is A1TextureExportMode.DEPTH_CAMERA_PROJECTION:
-            column.label(
-                text="Active camera render → optimized depth-relief mesh",
-                icon="CAMERA_DATA",
-            )
-            column.label(
-                text="Depth base: Farthest visible point",
-                icon="INFO",
-            )
-            column.prop(
-                scene,
-                "spine2d_projection_alpha_threshold",
-                text="Projection alpha threshold",
-            )
-            column.separator()
-            column.prop(
-                scene,
-                "spine2d_depth_smoothing",
-                text="Depth smoothing",
-            )
-            column.prop(
-                scene,
-                "spine2d_depth_edge_threshold",
-                text="Depth edge threshold",
-            )
-            column.prop(
-                scene,
-                "spine2d_depth_mesh_error_pixels",
-                text="Depth mesh error (px)",
-            )
-            column.prop(
-                scene,
-                "spine2d_depth_max_points",
-                text="Max depth points",
-            )
-            column.label(
-                text="One generated vertex bone per retained depth point",
-                icon="BONE_DATA",
-            )
-        else:
-            column.label(
-                text="Preserves cut regions and generated UV meshes",
-                icon="UV",
-            )
-            column.prop(
-                scene,
-                "spine2d_projection_direction",
-                text="Projection direction",
-            )
-        column.separator()
+        """Draw the target Spine schema and output paths.
 
+        Export mode, projection, control icons, and connected-object controls are owned
+        by the Rig foldout (see :func:`rig_ui.draw_rig_settings`). The target schema and
+        output locations remain output-format settings and therefore belong here.
+        """
+
+        scene = context.scene
         column.prop(
             scene,
             "spine2d_target_spine_version",
@@ -406,7 +356,7 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             )
             if not target.descriptor.serializer_ready:
                 column.label(
-                    text="Codec implementation in progress; Analyze blocks export",
+                    text="Codec implementation unavailable for this target",
                     icon="ERROR",
                 )
         except (TypeError, ValueError, RuntimeError) as exc:
@@ -416,8 +366,6 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             )
         column.separator()
 
-        column.prop(scene, "spine2d_texture_size", text="Texture size")
-        column.separator()
         column.prop(scene, "spine2d_json_path", text="JSON")
         json_full_path = bpy.path.abspath(scene.spine2d_json_path)
         if not json_full_path or json_full_path == bpy.path.abspath("//"):
@@ -428,24 +376,6 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         column.prop(scene, "spine2d_images_path", text="Images Subfolder")
         images_full_path = os.path.join(json_full_path, scene.spine2d_images_path)
         column.label(text=os.path.normpath(images_full_path))
-        column.separator()
-
-        row = column.row(align=True)
-        row.label(text="Control icons")
-        row.prop(scene, "spine2d_control_icons", text="")
-
-        selected_meshes = tuple(
-            candidate
-            for candidate in context.selected_objects
-            if candidate.type == "MESH"
-        )
-        if len(selected_meshes) > 1:
-            column.separator()
-            column.label(text="Connect objects:")
-            for selected_object in selected_meshes:
-                row = column.row(align=True)
-                row.label(text=selected_object.name, icon="MESH_DATA")
-                row.prop(selected_object.spine2d_connect_settings, "enabled", text="")
 
     @staticmethod
     def _draw_cut_settings(
@@ -461,6 +391,26 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             column.label(
                 text="Depth edge threshold controls relief discontinuities",
             )
+            column.separator()
+            column.prop(
+                scene,
+                "spine2d_depth_parallax_horizon_angle",
+                text="Parallax Horizon Angle",
+            )
+            angle = float(
+                getattr(scene, "spine2d_depth_parallax_horizon_angle", 0.0) or 0.0
+            )
+            if angle <= 1.0e-12:
+                column.label(text="0°: front surface only", icon="INFO")
+            else:
+                column.label(
+                    text="Retains connected surfaces beyond the camera horizon",
+                    icon="MESH_DATA",
+                )
+                column.label(
+                    text="Max Depth Points limits front + reserve geometry",
+                    icon="BONE_DATA",
+                )
             return
         if texture_mode is A1TextureExportMode.CAMERA_PROJECTION:
             column.label(
@@ -519,6 +469,9 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
         context: bpy.types.Context,
     ) -> None:
         scene = context.scene
+        column.prop(scene, "spine2d_texture_size", text="Texture size")
+        column.separator()
+
         selected_meshes = tuple(
             candidate
             for candidate in context.selected_objects
@@ -726,6 +679,16 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             self._draw_object_readiness(box, item)
         return report.can_export
 
+    def _draw_analysis_content(
+        self,
+        column: bpy.types.UILayout,
+        context: bpy.types.Context,
+    ) -> None:
+        """Draw every analysis-only section: modifier warning, then readiness."""
+
+        ui_layout._draw_modifier_analysis_warning(column, context)
+        self._draw_readiness(column, context)
+
     def draw(self, context: bpy.types.Context) -> None:
         layout = self.layout
         scene = context.scene
@@ -751,6 +714,25 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
             self._draw_foldout(
                 layout,
                 scene,
+                property_name="spine2d_show_rig_settings",
+                title="Rig",
+                draw_content=lambda column: rig_ui.draw_rig_settings(column, context),
+            )
+            self._draw_foldout(
+                layout,
+                scene,
+                property_name="spine2d_show_generated_material_settings",
+                title="Generated Materials",
+                draw_content=lambda column: (
+                    generated_material_ui.draw_generated_material_settings(
+                        column,
+                        context,
+                    )
+                ),
+            )
+            self._draw_foldout(
+                layout,
+                scene,
                 property_name="spine2d_show_cut_settings",
                 title="Cut",
                 draw_content=lambda column: self._draw_cut_settings(column, scene),
@@ -762,11 +744,19 @@ class OBJECT_PT_Spine2DMeshPanel(bpy.types.Panel):
                 title="Bake",
                 draw_content=lambda column: self._draw_bake_settings(column, context),
             )
+            self._draw_foldout(
+                layout,
+                scene,
+                property_name="spine2d_show_analysis",
+                title="Analysis",
+                draw_content=lambda column: self._draw_analysis_content(
+                    column,
+                    context,
+                ),
+            )
 
             layout.separator()
-            export_allowed = self._draw_readiness(layout, context)
             row = layout.row()
-            row.enabled = export_allowed
             selected_meshes = tuple(
                 candidate
                 for candidate in context.selected_objects
@@ -878,6 +868,22 @@ SCENE_PROPERTIES = (
         ),
     ),
     (
+        "spine2d_show_rig_settings",
+        bpy.props.BoolProperty(
+            name="Show Rig Settings",
+            default=False,
+            description="Show or hide rig-profile controls",
+        ),
+    ),
+    (
+        "spine2d_show_generated_material_settings",
+        bpy.props.BoolProperty(
+            name="Show Generated Material Settings",
+            default=False,
+            description="Show or hide generated-material controls",
+        ),
+    ),
+    (
         "spine2d_show_cut_settings",
         bpy.props.BoolProperty(
             name="Show Cut Settings",
@@ -891,6 +897,14 @@ SCENE_PROPERTIES = (
             name="Show Bake Settings",
             default=False,
             description="Show or hide baking parameters",
+        ),
+    ),
+    (
+        "spine2d_show_analysis",
+        bpy.props.BoolProperty(
+            name="Show Analysis",
+            default=False,
+            description="Show or hide the modifier mismatch advisory",
         ),
     ),
     (

@@ -1,4 +1,4 @@
-"""Reusable Blender 4.4 fixtures for supported B3 scene object baking."""
+"""Reusable Blender 5.2 fixtures for supported B3 scene object baking."""
 
 from __future__ import annotations
 
@@ -111,7 +111,7 @@ def _create_subsurface_material(name: str, color):
         "Subsurface"
     )
     if subsurface is None:
-        raise AssertionError("Blender 4.4 Principled has no Subsurface input")
+        raise AssertionError("Blender 5.2 Principled has no Subsurface input")
     subsurface.default_value = 0.35
     material.node_tree.links.new(principled.outputs["BSDF"], output.inputs["Surface"])
     return material
@@ -171,6 +171,7 @@ def _prepare_plan(obj, output_directory: Path, output_stem: str):
     snapshot = read_source_mesh_snapshot(obj)
     analysis = analyse_object_materials(
         obj,
+        render_target="CYCLES",
         source_object_id=snapshot.source_object_id,
     )
     object_context, scene_context = analyse_bake_contexts(
@@ -338,6 +339,7 @@ def test_camera_graph_stops_at_projection_boundary() -> None:
         snapshot = read_source_mesh_snapshot(source)
         analysis = analyse_object_materials(
             source,
+            render_target="CYCLES",
             source_object_id=snapshot.source_object_id,
         )
         object_context, scene_context = analyse_bake_contexts(

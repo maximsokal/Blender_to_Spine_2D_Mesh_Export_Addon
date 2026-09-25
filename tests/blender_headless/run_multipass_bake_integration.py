@@ -1,4 +1,4 @@
-"""Real Blender 4.4 tests for semantic surface/emission multi-pass baking."""
+"""Real Blender 5.2 tests for semantic surface/emission multi-pass baking."""
 
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ from run_bake_integration import (  # noqa: E402
     _capture_context,
     _capture_scene_bake_state,
     _clear_scene,
+    _configure_cycles_scene,
     _create_sentinel,
     _material_fingerprint,
     _temporary_datablock_names,
@@ -123,6 +124,7 @@ def _prepare_plan(obj, output_directory: Path, stem: str):
     ).snapshot
     analysis = analyse_object_materials(
         obj,
+        render_target="CYCLES",
         source_object_id=source_snapshot.source_object_id,
     )
     plan = build_bake_plan(
@@ -166,6 +168,7 @@ def _dominant_pixel_count(pixels, channel: int) -> int:
 
 def test_surface_and_emission_material_slots_are_composed() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-multipass-slots-") as directory:
         output_directory = Path(directory)
         obj = _create_two_quad_object("SurfaceEmissionSlots")
@@ -229,6 +232,7 @@ def test_surface_and_emission_material_slots_are_composed() -> None:
 
 def test_one_principled_material_combines_surface_and_emission_channels() -> None:
     _clear_scene()
+    _configure_cycles_scene()
     with tempfile.TemporaryDirectory(prefix="spine2d-multipass-principled-") as directory:
         output_directory = Path(directory)
         obj = _create_two_quad_object("PrincipledSurfaceEmission")

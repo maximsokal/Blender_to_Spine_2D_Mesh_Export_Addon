@@ -92,30 +92,17 @@ def _parse_arguments() -> argparse.Namespace:
     return parser.parse_args(arguments)
 
 
-def _register_steps() -> list[tuple]:
-    completed: list[tuple] = []
-    try:
-        for step in addon.REGISTRATION_STEPS:
-            step[1]()
-            completed.append(step)
-        return completed
-    except Exception:
-        for step in reversed(completed):
-            try:
-                step[2]()
-            except Exception:
-                traceback.print_exc()
-        raise
+def _register_steps() -> None:
+    """Register through the public extension lifecycle kept for runner compatibility."""
+
+    addon.register()
+    return None
 
 
-def _unregister_steps(completed: list[tuple]) -> None:
-    failures: list[str] = []
-    for label, _register, unregister in reversed(completed):
-        try:
-            unregister()
-        except Exception as exc:
-            failures.append(f"{label}: {exc}")
-    _assert(not failures, f"Rewrite unregister failures: {failures!r}")
+def _unregister_steps(_completed: None) -> None:
+    """Unregister through the public extension lifecycle."""
+
+    addon.unregister()
 
 
 def _require_mesh_object(name: str):

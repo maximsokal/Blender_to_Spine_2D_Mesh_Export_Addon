@@ -393,8 +393,8 @@ def test_real_mesh_hybrid_dihedral_and_ui_registration() -> None:
         )
         scene = bpy.context.scene
         _assert(
-            scene.spine2d_angular_mode == "LEGACY_SEED_CONE",
-            "RNA default no longer preserves legacy segmentation",
+            scene.spine2d_angular_mode == "SEED_CONE",
+            "RNA default no longer matches the public Seed Cone segmentation mode",
         )
         scene.spine2d_angular_mode = "SEED_CONE_AND_LOCAL_DIHEDRAL"
         scene.spine2d_local_angle_limit = 17.5

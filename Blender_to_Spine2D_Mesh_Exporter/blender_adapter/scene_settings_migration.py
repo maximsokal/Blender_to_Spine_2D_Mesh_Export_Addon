@@ -25,7 +25,6 @@ except Exception:  # pragma: no cover - real Blender always provides this decora
 
 logger = logging.getLogger(__name__)
 CURRENT_SETTINGS_SCHEMA_VERSION = 8
-_REGISTERED = False
 _FILE_LOADING = False
 _SCHEMA_PROPERTY = "spine2d_settings_schema_version"
 _RIG_PROPERTY = "spine2d_rig_profile"
@@ -82,6 +81,19 @@ def _scene_identity(scene: Any) -> tuple[str, int]:
         if pointer > 0:
             return ("BLENDER_POINTER", pointer)
     return ("PYTHON_OBJECT", id(scene))
+
+
+def migration_registration_pending(scene: Any) -> bool:
+    """Return whether ``scene`` has a pre-RNA snapshot awaiting migration.
+
+    This is the narrow lifecycle signal needed by Scene RNA update callbacks while
+    properties are first bound. It deliberately replaces the old dependency on the
+    extension-wide registration state machine.
+    """
+
+    if scene is None:
+        return False
+    return _scene_identity(scene) in _PRE_REGISTRATION_SCENE_STATES
 
 
 def _coerce_schema_version(raw: object) -> int:
@@ -431,30 +443,34 @@ def spine2d_scene_settings_load_post(_dummy: Any) -> None:
 def register() -> None:
     """Register persistent load handlers and migrate already-open Scenes."""
 
-    global _REGISTERED
-    if _REGISTERED:
-        return
     load_pre_handlers = bpy.app.handlers.load_pre
     load_post_handlers = bpy.app.handlers.load_post
+    added_pre = False
+    added_post = False
+
     if spine2d_scene_settings_load_pre not in load_pre_handlers:
         load_pre_handlers.append(spine2d_scene_settings_load_pre)
+        added_pre = True
     if spine2d_scene_settings_load_post not in load_post_handlers:
         load_post_handlers.append(spine2d_scene_settings_load_post)
+        added_post = True
+
     try:
         migrate_all_scenes()
     except Exception:
-        while spine2d_scene_settings_load_pre in load_pre_handlers:
-            load_pre_handlers.remove(spine2d_scene_settings_load_pre)
-        while spine2d_scene_settings_load_post in load_post_handlers:
-            load_post_handlers.remove(spine2d_scene_settings_load_post)
+        if added_post:
+            while spine2d_scene_settings_load_post in load_post_handlers:
+                load_post_handlers.remove(spine2d_scene_settings_load_post)
+        if added_pre:
+            while spine2d_scene_settings_load_pre in load_pre_handlers:
+                load_pre_handlers.remove(spine2d_scene_settings_load_pre)
         raise
-    _REGISTERED = True
 
 
 def unregister() -> None:
-    """Remove every copy of the persistent migration handlers."""
+    """Remove every owned persistent migration handler and transient migration state."""
 
-    global _REGISTERED, _FILE_LOADING
+    global _FILE_LOADING
     load_pre_handlers = bpy.app.handlers.load_pre
     load_post_handlers = bpy.app.handlers.load_post
     while spine2d_scene_settings_load_pre in load_pre_handlers:
@@ -463,7 +479,6 @@ def unregister() -> None:
         load_post_handlers.remove(spine2d_scene_settings_load_post)
     clear_pre_registration_scene_state()
     _FILE_LOADING = False
-    _REGISTERED = False
 
 
 __all__ = [
@@ -473,6 +488,7 @@ __all__ = [
     "migrate_all_scenes",
     "migrate_scene_settings",
     "migration_file_loading",
+    "migration_registration_pending",
     "register",
     "spine2d_scene_settings_load_post",
     "spine2d_scene_settings_load_pre",

@@ -1,10 +1,14 @@
-"""Process-local exclusive-operation leases for user-triggered Rewrite actions."""
+"""Process-local exclusive-operation leases for user-triggered Rewrite actions.
+
+Blender executes the public operators that use this registry on its main Python thread.
+The registry therefore deliberately contains no Python thread primitives: persistent
+``threading``/``queue`` based coordination is not supported by the extension runtime.
+"""
 
 from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-from threading import RLock, get_ident
 from typing import Iterator
 from uuid import uuid4
 
@@ -32,7 +36,6 @@ class ExclusiveOperationLease:
     key: str
     label: str
     token: str
-    thread_id: int
 
     def __post_init__(self) -> None:
         for field_name in ("key", "label", "token"):
@@ -41,17 +44,12 @@ class ExclusiveOperationLease:
                 raise ValueError(f"{field_name} must be a non-empty string")
             if value != value.strip():
                 raise ValueError(f"{field_name} must not contain boundary whitespace")
-        if isinstance(self.thread_id, bool) or not isinstance(self.thread_id, int):
-            raise TypeError("thread_id must be int")
-        if self.thread_id <= 0:
-            raise ValueError("thread_id must be positive")
 
 
 class _ExclusiveOperationRegistry:
-    """Thread-safe ownership registry shared by all Rewrite export entrypoints."""
+    """Main-thread ownership registry shared by Rewrite export entrypoints."""
 
     def __init__(self) -> None:
-        self._lock = RLock()
         self._active: dict[str, ExclusiveOperationLease] = {}
 
     @staticmethod
@@ -64,41 +62,45 @@ class _ExclusiveOperationRegistry:
         return resolved
 
     def acquire(self, key: str, *, label: str) -> ExclusiveOperationLease:
+        """Acquire ``key`` for the current Blender operator invocation."""
+
         resolved_key = self._canonical(key, "key")
         resolved_label = self._canonical(label, "label")
-        with self._lock:
-            active = self._active.get(resolved_key)
-            if active is not None:
-                raise OperationAlreadyRunningError(
-                    key=resolved_key,
-                    active_label=active.label,
-                    requested_label=resolved_label,
-                )
-            lease = ExclusiveOperationLease(
+        active = self._active.get(resolved_key)
+        if active is not None:
+            raise OperationAlreadyRunningError(
                 key=resolved_key,
-                label=resolved_label,
-                token=uuid4().hex,
-                thread_id=get_ident(),
+                active_label=active.label,
+                requested_label=resolved_label,
             )
-            self._active[resolved_key] = lease
-            return lease
+
+        lease = ExclusiveOperationLease(
+            key=resolved_key,
+            label=resolved_label,
+            token=uuid4().hex,
+        )
+        self._active[resolved_key] = lease
+        return lease
 
     def release(self, lease: ExclusiveOperationLease) -> None:
+        """Release a lease only when the caller still owns the active token."""
+
         if not isinstance(lease, ExclusiveOperationLease):
             raise TypeError("lease must be ExclusiveOperationLease")
-        with self._lock:
-            active = self._active.get(lease.key)
-            if active is None:
-                return
-            if active.token != lease.token:
-                raise RuntimeError(
-                    f"Operation lease for '{lease.key}' is no longer owned by this caller"
-                )
-            self._active.pop(lease.key, None)
+
+        active = self._active.get(lease.key)
+        if active is None:
+            return
+        if active.token != lease.token:
+            raise RuntimeError(
+                f"Operation lease for '{lease.key}' is no longer owned by this caller"
+            )
+        self._active.pop(lease.key, None)
 
     def active_leases(self) -> tuple[ExclusiveOperationLease, ...]:
-        with self._lock:
-            return tuple(sorted(self._active.values(), key=lambda item: item.key))
+        """Return a deterministic immutable snapshot for diagnostics."""
+
+        return tuple(sorted(self._active.values(), key=lambda item: item.key))
 
 
 _REGISTRY = _ExclusiveOperationRegistry()

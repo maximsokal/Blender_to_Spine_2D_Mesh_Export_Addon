@@ -348,6 +348,7 @@ def _depth_statistics(
             "depth_projection_source_triangle_count": result.source_triangle_count,
             "depth_projection_point_count": result.sampled_point_count,
             "active_camera_projection_applied": 1,
+            "shared_pivot_applied": 0,
             "active_camera_preprojection_triangulation": 1,
             "active_camera_name": result.frame.camera_id,
             "active_camera_type": result.frame.kind.value,

@@ -20,12 +20,8 @@ assert 'bpy' not in sys.modules
 from Blender_to_Spine2D_Mesh_Exporter.domain.spine import A1ParitySettings
 import Blender_to_Spine2D_Mesh_Exporter as addon
 assert A1ParitySettings().absolute_tolerance == 1e-4
-try:
-    addon.register()
-except RuntimeError as exc:
-    assert 'bpy' in str(exc)
-else:
-    raise AssertionError('register() unexpectedly worked without bpy')
+assert addon.register() is None
+assert addon.unregister() is None
 print('domain-import-ok')
 """
     result = subprocess.run(

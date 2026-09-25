@@ -1,128 +1,145 @@
-from types import SimpleNamespace
+"""Regression contracts proving the rejected root registration state machine stays gone."""
+
+from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
 import Blender_to_Spine2D_Mesh_Exporter as extension
 
 
-def _prepare_root(monkeypatch, steps):
-    extension._REGISTRATION_STATE = extension.ExtensionRegistrationState.UNREGISTERED
-    monkeypatch.setattr(extension, "REGISTRATION_STEPS", tuple(steps))
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGE = ROOT / "Blender_to_Spine2D_Mesh_Exporter"
+
+
+def _owners() -> tuple[tuple[str, object], ...]:
+    return (
+        ("addon_preferences", extension.addon_preferences),
+        ("scene_settings_migration", extension.scene_settings_migration),
+        ("ui", extension.ui),
+        ("rig_ui", extension.rig_ui),
+        ("a1_readiness_invalidation", extension.a1_readiness_invalidation),
+        ("auto_readiness", extension.auto_readiness),
+        ("generated_material_ui", extension.generated_material_ui),
+        ("ui_layout", extension.ui_layout),
+        ("single_object_operator", extension.single_object_operator),
+    )
+
+
+def _prepare_register(monkeypatch, calls: list[str]) -> None:
     monkeypatch.setattr(extension, "require_supported_blender_runtime", lambda _bpy: None)
     monkeypatch.setattr(extension.config, "_setup_default_logging", lambda: None)
+    monkeypatch.setattr(extension.config, "_addon_preferences", lambda: None)
     monkeypatch.setattr(extension.config, "setup_logging", lambda: None)
-    monkeypatch.setattr(extension, "initialize_logging_preferences", lambda _prefs: ())
     monkeypatch.setattr(
-        extension.bpy.context,
-        "preferences",
-        SimpleNamespace(
-            addons={
-                extension.__name__: SimpleNamespace(preferences=object()),
-            }
-        ),
-        raising=False,
+        extension,
+        "_register_config_rna",
+        lambda: calls.append("register:config-rna"),
     )
 
 
-def test_root_register_and_unregister_are_idempotent(monkeypatch):
-    calls = []
-    steps = (
-        ("first", lambda: calls.append("register:first"), lambda: calls.append("unregister:first")),
-        ("second", lambda: calls.append("register:second"), lambda: calls.append("unregister:second")),
-    )
-    _prepare_root(monkeypatch, steps)
+def test_root_registration_state_machine_symbols_are_absent() -> None:
+    source = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
 
-    extension.register()
-    extension.register()
-    assert extension.get_registration_state() is extension.ExtensionRegistrationState.REGISTERED
-    assert calls == ["register:first", "register:second"]
-
-    extension.unregister()
-    extension.unregister()
-    assert extension.get_registration_state() is extension.ExtensionRegistrationState.UNREGISTERED
-    assert calls == [
-        "register:first",
-        "register:second",
-        "unregister:second",
-        "unregister:first",
-    ]
+    for forbidden in (
+        "ExtensionRegistrationState",
+        "_REGISTRATION_STATE",
+        "get_registration_state",
+        "REGISTRATION_STEPS",
+        "RegistrationCleanupAction",
+        "unregister_all_best_effort",
+    ):
+        assert forbidden not in source
 
 
-@pytest.mark.parametrize("failure_index", range(4))
-def test_root_registration_failure_rolls_back_completed_steps_in_reverse_order(
+def test_root_registration_stops_at_first_owner_failure_without_hidden_recovery(
     monkeypatch,
-    failure_index,
-):
-    calls = []
-    steps = []
-    for index in range(4):
-        def register(index=index):
-            calls.append(f"register:{index}")
-            if index == failure_index:
-                raise RuntimeError(f"forced registration failure {index}")
+) -> None:
+    calls: list[str] = []
+    _prepare_register(monkeypatch, calls)
 
-        def unregister(index=index):
-            calls.append(f"unregister:{index}")
+    failure = RuntimeError("forced UI owner failure")
+    for label, owner in _owners():
+        if label == "ui":
+            monkeypatch.setattr(
+                owner,
+                "register",
+                lambda: (_ for _ in ()).throw(failure),
+            )
+        else:
+            monkeypatch.setattr(
+                owner,
+                "register",
+                lambda label=label: calls.append(f"register:{label}"),
+            )
 
-        steps.append((f"step-{index}", register, unregister))
-
-    _prepare_root(monkeypatch, steps)
-    with pytest.raises(RuntimeError, match=f"forced registration failure {failure_index}"):
+    with pytest.raises(RuntimeError, match="forced UI owner failure") as raised:
         extension.register()
 
-    assert extension.get_registration_state() is extension.ExtensionRegistrationState.UNREGISTERED
+    assert raised.value is failure
     assert calls == [
-        *(f"register:{index}" for index in range(failure_index + 1)),
-        *(f"unregister:{index}" for index in reversed(range(failure_index))),
+        "register:addon_preferences",
+        "register:config-rna",
+        "register:scene_settings_migration",
     ]
 
 
-def test_preflight_failure_does_not_leave_registering_state(monkeypatch):
-    _prepare_root(monkeypatch, ())
+def test_preflight_failure_occurs_before_logging_or_owner_mutation(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        extension,
+        "require_supported_blender_runtime",
+        lambda _bpy: (_ for _ in ()).throw(RuntimeError("unsupported runtime")),
+    )
+    monkeypatch.setattr(
+        extension.config,
+        "_setup_default_logging",
+        lambda: calls.append("default-logging"),
+    )
+    monkeypatch.setattr(
+        extension,
+        "_register_config_rna",
+        lambda: calls.append("register:config-rna"),
+    )
+    for label, owner in _owners():
+        monkeypatch.setattr(
+            owner,
+            "register",
+            lambda label=label: calls.append(f"register:{label}"),
+        )
 
-    def fail_runtime(_bpy):
-        raise RuntimeError("unsupported runtime")
-
-    monkeypatch.setattr(extension, "require_supported_blender_runtime", fail_runtime)
     with pytest.raises(RuntimeError, match="unsupported runtime"):
         extension.register()
-    assert extension.get_registration_state() is extension.ExtensionRegistrationState.UNREGISTERED
+
+    assert calls == []
 
 
-def test_cleanup_failure_marks_degraded_and_later_unregister_can_recover(monkeypatch):
-    calls = []
-    fail_cleanup = True
-
-    def register_first():
-        calls.append("register:first")
-
-    def unregister_first():
-        nonlocal fail_cleanup
-        calls.append("unregister:first")
-        if fail_cleanup:
-            raise RuntimeError("forced cleanup failure")
-
-    def register_second():
-        calls.append("register:second")
-        raise RuntimeError("forced primary failure")
-
-    def unregister_second():
-        calls.append("unregister:second")
-
-    steps = (
-        ("first", register_first, unregister_first),
-        ("second", register_second, unregister_second),
+def test_root_unregister_is_plain_reverse_owner_sequence(monkeypatch) -> None:
+    calls: list[str] = []
+    for label, owner in _owners():
+        monkeypatch.setattr(
+            owner,
+            "unregister",
+            lambda label=label: calls.append(f"unregister:{label}"),
+        )
+    monkeypatch.setattr(
+        extension,
+        "_unregister_config_rna",
+        lambda: calls.append("unregister:config-rna"),
     )
-    _prepare_root(monkeypatch, steps)
 
-    with pytest.raises(Exception, match="forced cleanup failure"):
-        extension.register()
-    assert extension.get_registration_state() is extension.ExtensionRegistrationState.DEGRADED
-
-    with pytest.raises(RuntimeError, match="degraded registration state"):
-        extension.register()
-
-    fail_cleanup = False
     extension.unregister()
-    assert extension.get_registration_state() is extension.ExtensionRegistrationState.UNREGISTERED
-    assert calls[-2:] == ["unregister:second", "unregister:first"]
+
+    assert calls == [
+        "unregister:single_object_operator",
+        "unregister:ui_layout",
+        "unregister:generated_material_ui",
+        "unregister:auto_readiness",
+        "unregister:a1_readiness_invalidation",
+        "unregister:rig_ui",
+        "unregister:ui",
+        "unregister:scene_settings_migration",
+        "unregister:config-rna",
+        "unregister:addon_preferences",
+    ]

@@ -26,9 +26,15 @@ def test_lifecycle_suite_keeps_import_reload_and_twenty_cycle_stress():
         "importlib.reload",
         "subprocess.run",
         "depsgraph_update_post",
-        "REGISTRATION_STEPS",
+        "extension.register()",
+        "extension.unregister()",
+        "OBJECT_PT_spine2d_mesh",
+        "_deferred_view3d_redraw",
     ):
         assert required in source
+    assert "REGISTRATION_STEPS" not in source
+    assert "repolish_ui" not in source
+    assert "OBJECT_PT_Spine2DOrderedMeshPanel" not in source
 
 
 def test_resource_suite_keeps_fault_user_map_growth_and_blend_roundtrip():

@@ -196,11 +196,29 @@ def _assert_source_state(source: bpy.types.Object, expected) -> None:
     )
 
 
-def _load_outputs(output_directory: Path) -> tuple[dict, Path]:
-    json_path = output_directory / f"{SOURCE_NAME}_merged.json"
-    texture_path = output_directory / "images" / f"{SOURCE_NAME}_Baked.png"
-    _assert(json_path.is_file(), f"JSON was not created: {json_path}")
-    _assert(texture_path.is_file(), f"Texture was not created: {texture_path}")
+def _published_file(result, suffix: str) -> Path:
+    if result is None:
+        raise ValueError("result cannot be None")
+    if not isinstance(suffix, str) or not suffix.startswith("."):
+        raise ValueError("suffix must be an extension such as '.json' or '.png'")
+
+    matches = tuple(
+        Path(path)
+        for path in result.output_files
+        if Path(path).suffix.lower() == suffix.lower()
+    )
+    _assert(
+        len(matches) == 1,
+        f"expected exactly one published {suffix} output, got {matches}",
+    )
+    path = matches[0]
+    _assert(path.is_file(), f"published output does not exist: {path}")
+    return path
+
+
+def _load_outputs(result) -> tuple[dict, Path]:
+    json_path = _published_file(result, ".json")
+    texture_path = _published_file(result, ".png")
     return json.loads(json_path.read_text(encoding="utf-8")), texture_path
 
 
@@ -279,7 +297,7 @@ def test_directional_png_matches_spine_attachment_vertices() -> None:
 
         _assert(result.success, f"Directional export failed: {result.issues}")
         _assert_source_state(source, expected_source_state)
-        document, texture_path = _load_outputs(output_directory)
+        document, texture_path = _load_outputs(result)
         image_data = _load_rgba(texture_path)
 
         attachments = document["skins"][0]["attachments"]

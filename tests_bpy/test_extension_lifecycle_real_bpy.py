@@ -13,7 +13,6 @@ import Blender_to_Spine2D_Mesh_Exporter as extension
 
 
 RNA_REGISTRATIONS = (
-    *extension.CONFIG_RNA_PROPERTIES,
     *extension.ui.RNA_PROPERTIES,
     *extension.generated_material_ui.RNA_PROPERTIES,
     *extension.ui_layout.RNA_PROPERTIES,
@@ -28,39 +27,28 @@ def _operator_class(bl_idname: str):
     )
 
 
-def _register_steps() -> tuple[tuple[str, object, object], ...]:
-    completed: list[tuple[str, object, object]] = []
-    try:
-        for step in extension.REGISTRATION_STEPS:
-            _label, register_callback, _unregister_callback = step
-            register_callback()
-            completed.append(step)
-    except Exception:
-        for _label, _register_callback, unregister_callback in reversed(completed):
-            unregister_callback()
-        raise
-    return tuple(completed)
-
-
-def _unregister_steps(completed: tuple[tuple[str, object, object], ...]) -> None:
-    failures: list[str] = []
-    for label, _register_callback, unregister_callback in reversed(completed):
-        try:
-            unregister_callback()
-        except Exception as exc:
-            failures.append(f"{label}: {type(exc).__name__}: {exc}")
-    if failures:
-        raise AssertionError("registration cleanup failed: " + "; ".join(failures))
+def _panel_class(bl_idname: str):
+    return bpy.types.Panel.bl_rna_get_subclass_py(bl_idname)
 
 
 def _assert_registered() -> None:
+    for name, _value in extension.CONFIG_RNA_PROPERTIES:
+        assert hasattr(bpy.types.Scene, name), name
     for registration in RNA_REGISTRATIONS:
         assert hasattr(registration.owner, registration.name), registration.name
+
     handler = extension.ui.a1_readiness_depsgraph_update_post
     assert tuple(bpy.app.handlers.depsgraph_update_post).count(handler) == 1
-    assert bpy.types.Panel.bl_rna_get_subclass_py("OBJECT_PT_spine2d_mesh") is (
-        extension.ui_layout.OBJECT_PT_Spine2DOrderedMeshPanel
+
+    assert _panel_class("OBJECT_PT_spine2d_mesh") is extension.ui.OBJECT_PT_Spine2DMeshPanel
+    assert _panel_class("OBJECT_PT_spine2d_rig") is extension.ui_layout.OBJECT_PT_Spine2DRigPanel
+    assert _panel_class("OBJECT_PT_spine2d_generated_materials") is (
+        extension.ui_layout.OBJECT_PT_Spine2DGeneratedMaterialsPanel
     )
+    assert _panel_class("OBJECT_PT_spine2d_depth_parallax") is (
+        extension.ui_layout.OBJECT_PT_Spine2DDepthParallaxPanel
+    )
+
     assert _operator_class("spine2d.reset_rig_profile") is not None
     assert _operator_class("object.spine2d_single_export") is not None
     assert _operator_class("object.spine2d_multi_export") is not None
@@ -68,29 +56,44 @@ def _assert_registered() -> None:
 
 
 def _assert_unregistered() -> None:
+    for name, _value in extension.CONFIG_RNA_PROPERTIES:
+        assert not hasattr(bpy.types.Scene, name), name
     for registration in RNA_REGISTRATIONS:
         assert not hasattr(registration.owner, registration.name), registration.name
+
     handler = extension.ui.a1_readiness_depsgraph_update_post
     assert handler not in bpy.app.handlers.depsgraph_update_post
-    assert bpy.types.Panel.bl_rna_get_subclass_py("OBJECT_PT_spine2d_mesh") is None
+
+    for panel_id in (
+        "OBJECT_PT_spine2d_mesh",
+        "OBJECT_PT_spine2d_rig",
+        "OBJECT_PT_spine2d_generated_materials",
+        "OBJECT_PT_spine2d_depth_parallax",
+    ):
+        assert _panel_class(panel_id) is None, panel_id
+
     assert _operator_class("spine2d.reset_rig_profile") is None
     assert _operator_class("object.spine2d_single_export") is None
     assert _operator_class("object.spine2d_multi_export") is None
     assert _operator_class("object.save_uv_as_json") is None
 
+    is_registered = getattr(bpy.app.timers, "is_registered", None)
+    if callable(is_registered):
+        assert not is_registered(extension.addon_preferences._deferred_view3d_redraw)
 
-def test_registration_survives_twenty_cycles_without_handler_or_rna_growth(
+
+def test_registration_survives_twenty_cycles_without_handler_rna_or_timer_growth(
     clean_blender_data,
 ):
     _assert_unregistered()
     baseline_handlers = tuple(bpy.app.handlers.depsgraph_update_post)
 
     for _cycle in range(20):
-        completed = _register_steps()
+        extension.register()
         try:
             _assert_registered()
         finally:
-            _unregister_steps(completed)
+            extension.unregister()
         _assert_unregistered()
         assert tuple(bpy.app.handlers.depsgraph_update_post) == baseline_handlers
 
@@ -110,8 +113,8 @@ PACKAGE = "Blender_to_Spine2D_Mesh_Exporter"
 ALLOWED_ROOTS = {"application", "blender_adapter", "domain", "infrastructure"}
 ALLOWED_TOP_LEVEL = {
     "addon_preferences",
+    "auto_readiness",
     "config",
-    "repolish_ui",
     "rig_ui",
     "single_object_operator",
     "ui",
@@ -134,39 +137,36 @@ def id_signature():
 def registration_absent(extension):
     handler = extension.ui.a1_readiness_depsgraph_update_post
     assert handler not in bpy.app.handlers.depsgraph_update_post
-    assert not hasattr(bpy.types.Object, "spine2d_bake_settings")
-    assert not hasattr(bpy.types.Object, "spine2d_connect_settings")
+    for name, _value in extension.CONFIG_RNA_PROPERTIES:
+        assert not hasattr(bpy.types.Scene, name), name
     for registration in (
-        *extension.CONFIG_RNA_PROPERTIES,
         *extension.ui.RNA_PROPERTIES,
         *extension.generated_material_ui.RNA_PROPERTIES,
         *extension.ui_layout.RNA_PROPERTIES,
         *extension.single_object_operator.RNA_PROPERTIES,
     ):
         assert not hasattr(registration.owner, registration.name), registration.name
+    for panel_id in (
+        "OBJECT_PT_spine2d_mesh",
+        "OBJECT_PT_spine2d_rig",
+        "OBJECT_PT_spine2d_generated_materials",
+        "OBJECT_PT_spine2d_depth_parallax",
+    ):
+        assert bpy.types.Panel.bl_rna_get_subclass_py(panel_id) is None, panel_id
+    is_registered = getattr(bpy.app.timers, "is_registered", None)
+    if callable(is_registered):
+        assert not is_registered(extension.addon_preferences._deferred_view3d_redraw)
 
 
-def register_steps(extension):
-    completed = []
-    try:
-        for step in extension.REGISTRATION_STEPS:
-            step[1]()
-            completed.append(step)
-        return completed
-    except Exception:
-        for step in reversed(completed):
-            step[2]()
-        raise
-
-
-def unregister_steps(completed):
-    failures = []
-    for label, _register, unregister in reversed(completed):
-        try:
-            unregister()
-        except Exception as exc:
-            failures.append(f"{label}: {exc}")
-    assert not failures, failures
+def registration_present(extension):
+    handler = extension.ui.a1_readiness_depsgraph_update_post
+    assert tuple(bpy.app.handlers.depsgraph_update_post).count(handler) == 1
+    assert bpy.types.Panel.bl_rna_get_subclass_py("OBJECT_PT_spine2d_mesh") is (
+        extension.ui.OBJECT_PT_Spine2DMeshPanel
+    )
+    assert bpy.types.Panel.bl_rna_get_subclass_py("OBJECT_PT_spine2d_rig") is (
+        extension.ui_layout.OBJECT_PT_Spine2DRigPanel
+    )
 
 
 before = id_signature()
@@ -190,15 +190,11 @@ for order in (owner_names, tuple(reversed(owner_names))):
         importlib.reload(sys.modules[name])
     extension = importlib.reload(sys.modules[PACKAGE])
     registration_absent(extension)
-    completed = register_steps(extension)
+    extension.register()
     try:
-        handler = extension.ui.a1_readiness_depsgraph_update_post
-        assert tuple(bpy.app.handlers.depsgraph_update_post).count(handler) == 1
-        assert bpy.types.Panel.bl_rna_get_subclass_py("OBJECT_PT_spine2d_mesh") is (
-            extension.ui_layout.OBJECT_PT_Spine2DOrderedMeshPanel
-        )
+        registration_present(extension)
     finally:
-        unregister_steps(completed)
+        extension.unregister()
     registration_absent(extension)
     assert id_signature() == before
     assert tuple(bpy.app.handlers.depsgraph_update_post) == baseline_handlers
