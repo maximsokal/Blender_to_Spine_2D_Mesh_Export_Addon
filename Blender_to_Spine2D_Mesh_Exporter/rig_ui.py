@@ -104,12 +104,15 @@ def draw_rig_settings(
     layout: bpy.types.UILayout,
     context: bpy.types.Context,
 ) -> None:
-    """Draw rig, export-mode/projection, and connected-object controls.
+    """Draw rig and export-mode/projection controls.
 
     Export mode and projection choose how the rig is built (camera-space vs. world-axis
-    bake, shared vs. per-object pivot, depth-generated bones), and Connect objects joins
-    multiple Mesh objects onto one shared rig — both are rig decisions, not output-path
-    settings, so they live here rather than in the Paths and Spine 2D version foldout.
+    bake, shared vs. per-object pivot, depth-generated bones), so they live here rather
+    than in the Paths and Spine 2D version foldout.
+
+    Per-object Connect settings are intentionally not drawn: the public Export Selected
+    Objects route always builds standalone rigs and ignores persisted Connect values,
+    so exposing the checkbox would present a control that has no effect.
     """
 
     scene = context.scene
@@ -173,19 +176,6 @@ def draw_rig_settings(
     row = layout.row(align=True)
     row.label(text="Preview animation")
     row.prop(scene, "spine2d_export_preview_animation", text="")
-
-    selected_meshes = tuple(
-        candidate
-        for candidate in getattr(context, "selected_objects", ())
-        if getattr(candidate, "type", None) == "MESH"
-    )
-    if len(selected_meshes) > 1:
-        layout.separator()
-        layout.label(text="Connect objects:")
-        for selected_object in selected_meshes:
-            row = layout.row(align=True)
-            row.label(text=selected_object.name, icon="MESH_DATA")
-            row.prop(selected_object.spine2d_connect_settings, "enabled", text="")
 
 
 class SPINE2D_OT_ResetRigProfile(bpy.types.Operator):

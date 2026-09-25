@@ -80,7 +80,7 @@ def test_child_panels_delegate_to_canonical_section_drawers():
 
 
 def test_paths_foldout_does_not_duplicate_export_mode_and_rig_controls():
-    """Export mode, projection, control icons, and Connect objects are rig decisions.
+    """Export mode, projection, and control icons are rig decisions.
 
     They live in the Rig foldout, not in Paths and Spine 2D version, which now only
     owns the output schema/paths.
@@ -103,7 +103,17 @@ def test_paths_foldout_does_not_duplicate_export_mode_and_rig_controls():
     assert "spine2d_control_icons" in rig_source
     assert "spine2d_export_preview_animation" in rig_source
     assert "spine2d_shared_selection_pivot" in rig_source
-    assert "spine2d_connect_settings" in rig_source
+
+
+def test_rig_foldout_does_not_expose_ignored_connect_objects_control():
+    """Export Selected Objects ignores Connect, so the UI must not offer it."""
+
+    rig_source = _source(rig_ui)
+    main_source = _source(ui)
+
+    assert "spine2d_connect_settings" not in rig_source
+    assert "Connect objects" not in rig_source
+    assert "spine2d_connect_settings, \"enabled\"" not in main_source
 
 
 def test_ui_layout_never_replaces_or_restores_the_main_panel():
